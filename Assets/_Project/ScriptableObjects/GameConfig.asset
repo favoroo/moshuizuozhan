@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 688d84733375f409c8517ac667df488d, type: 3}
+  m_Name: GameConfig
+  m_EditorClassIdentifier: P1.Game::P1.Core.GameConfigSO
+  inkGridConfig: {fileID: 11400000, guid: 97d35407a92b648898468683d0711808, type: 2}
+  playerConfig: {fileID: 11400000, guid: 4231e36d9e4df493c969b41ed5ed7952, type: 2}
+  weaponConfig: {fileID: 11400000, guid: 26c06a9b589584b409cd88da00b45c29, type: 2}
+  matchDurationSeconds: 120
+  finalWarningSeconds: 30
+  usePerspective: 1
+  cameraFov: 40
+  cameraOrthoSize: 4.4
+  cameraOffset: {x: 0, y: 9.2, z: -8.2}
+  cameraLookAheadMax: 1.5
+  cameraSmoothTime: 0.1
+  shakeMaxOffset: 0.42
+  shakeMaxRollDegrees: 1.3
+  shakeDecayPerSecond: 2.4
+  shakeFrequency: 38
+  shakeExplosionRadius: 14

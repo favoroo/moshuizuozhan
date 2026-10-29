@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0ef38c4722e5042cfafd6e80ce36bccf, type: 3}
+  m_Name: AudioMixConfig
+  m_EditorClassIdentifier: P1.Game::P1.Core.AudioMixConfigSO
+  bgmVolume: 0.34
+  bgmCrossfadeSeconds: 1.2
+  bgmFadeOutSeconds: 1.4
+  finalStageLeadSeconds: 60
+  voiceVolume: 0.95
+  announcementDuckAmount: 0.55
+  ultDuckAmount: 0.45
+  deathDuckAmount: 0.55
+  duckAttackSeconds: 0.08
+  duckReleaseSeconds: 0.55
+  duckTailSeconds: 0.25

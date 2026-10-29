@@ -1,0 +1,660 @@
+{
+  "ui_hover": {
+    "name": "ui_hover",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.14,
+    "reverb": 0.0
+  },
+  "ui_click": {
+    "name": "ui_click",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.26,
+    "reverb": 0.03
+  },
+  "ui_confirm": {
+    "name": "ui_confirm",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.2,
+    "reverb": 0.06
+  },
+  "ui_back": {
+    "name": "ui_back",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.19,
+    "reverb": 0.05
+  },
+  "ui_toggle": {
+    "name": "ui_toggle",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.32,
+    "reverb": 0.02
+  },
+  "ui_slider": {
+    "name": "ui_slider",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.22,
+    "reverb": 0.0
+  },
+  "ui_error": {
+    "name": "ui_error",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.13,
+    "reverb": 0.02
+  },
+  "shoot_shooter": {
+    "name": "shoot_shooter",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.72,
+    "reverb": 0.07
+  },
+  "shoot_blaster": {
+    "name": "shoot_blaster",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.55,
+    "reverb": 0.1
+  },
+  "blaster_pump": {
+    "name": "blaster_pump",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.62,
+    "reverb": 0.06
+  },
+  "blaster_boom": {
+    "name": "blaster_boom",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.55,
+    "reverb": 0.22
+  },
+  "charger_charge": {
+    "name": "charger_charge",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.28,
+    "reverb": 0.05
+  },
+  "charger_full": {
+    "name": "charger_full",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.24,
+    "reverb": 0.2
+  },
+  "shoot_charger": {
+    "name": "shoot_charger",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.55,
+    "reverb": 0.18
+  },
+  "roller_flick": {
+    "name": "roller_flick",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.6,
+    "reverb": 0.16
+  },
+  "roll": {
+    "name": "roll",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.24,
+    "reverb": 0.04
+  },
+  "shoot_dualies": {
+    "name": "shoot_dualies",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.8,
+    "reverb": 0.06
+  },
+  "dualies_roll": {
+    "name": "dualies_roll",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.55,
+    "reverb": 0.08
+  },
+  "slosh_throw": {
+    "name": "slosh_throw",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.6,
+    "reverb": 0.14
+  },
+  "slosh_land": {
+    "name": "slosh_land",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.58,
+    "reverb": 0.15
+  },
+  "splatling_spin": {
+    "name": "splatling_spin",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.21,
+    "reverb": 0.05
+  },
+  "splatling_ready": {
+    "name": "splatling_ready",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.3,
+    "reverb": 0.18
+  },
+  "shoot_splatling": {
+    "name": "shoot_splatling",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 1.0,
+    "reverb": 0.05
+  },
+  "splatling_wind": {
+    "name": "splatling_wind",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.34,
+    "reverb": 0.08
+  },
+  "splat_small": {
+    "name": "splat_small",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.42,
+    "reverb": 0.08
+  },
+  "splat_big": {
+    "name": "splat_big",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.55,
+    "reverb": 0.16
+  },
+  "ink_hit_wall": {
+    "name": "ink_hit_wall",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 1.0,
+    "reverb": 0.07
+  },
+  "bomb_throw": {
+    "name": "bomb_throw",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 1.0,
+    "reverb": 0.05
+  },
+  "bomb_beep": {
+    "name": "bomb_beep",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.2,
+    "reverb": 0.05
+  },
+  "bomb_explode": {
+    "name": "bomb_explode",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.6,
+    "reverb": 0.28
+  },
+  "squid_in": {
+    "name": "squid_in",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.4,
+    "reverb": 0.05
+  },
+  "squid_out": {
+    "name": "squid_out",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.48,
+    "reverb": 0.05
+  },
+  "swim": {
+    "name": "swim",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.18,
+    "reverb": 0.03
+  },
+  "climb": {
+    "name": "climb",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.16,
+    "reverb": 0.03
+  },
+  "swim_splash": {
+    "name": "swim_splash",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.8,
+    "reverb": 0.08
+  },
+  "jump": {
+    "name": "jump",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.48,
+    "reverb": 0.03
+  },
+  "land": {
+    "name": "land",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.4,
+    "reverb": 0.03
+  },
+  "hit_marker": {
+    "name": "hit_marker",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.48,
+    "reverb": 0.0
+  },
+  "ink_hit_body": {
+    "name": "ink_hit_body",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.5,
+    "reverb": 0.06
+  },
+  "hurt": {
+    "name": "hurt",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.5,
+    "reverb": 0.03
+  },
+  "splat_enemy": {
+    "name": "splat_enemy",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.45,
+    "reverb": 0.18
+  },
+  "splatted_self": {
+    "name": "splatted_self",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.55,
+    "reverb": 0.22
+  },
+  "ally_splatted": {
+    "name": "ally_splatted",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.34,
+    "reverb": 0.15
+  },
+  "enemy_ink_sizzle": {
+    "name": "enemy_ink_sizzle",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.26,
+    "reverb": 0.02
+  },
+  "low_ink": {
+    "name": "low_ink",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.38,
+    "reverb": 0.04
+  },
+  "empty_click": {
+    "name": "empty_click",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.6,
+    "reverb": 0.0
+  },
+  "refill_full": {
+    "name": "refill_full",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.26,
+    "reverb": 0.12
+  },
+  "special_ready": {
+    "name": "special_ready",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.35,
+    "reverb": 0.25
+  },
+  "special_activate": {
+    "name": "special_activate",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.45,
+    "reverb": 0.2
+  },
+  "special_slam": {
+    "name": "special_slam",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.48,
+    "reverb": 0.32
+  },
+  "storm_rain": {
+    "name": "storm_rain",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.22,
+    "reverb": 0.1
+  },
+  "storm_thunder": {
+    "name": "storm_thunder",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.6,
+    "reverb": 0.35
+  },
+  "respawn": {
+    "name": "respawn",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.35,
+    "reverb": 0.25
+  },
+  "super_jump": {
+    "name": "super_jump",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.42,
+    "reverb": 0.2
+  },
+  "ready": {
+    "name": "ready",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.4,
+    "reverb": 0.25
+  },
+  "go_horn": {
+    "name": "go_horn",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.5,
+    "reverb": 0.28
+  },
+  "countdown_tick": {
+    "name": "countdown_tick",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.3,
+    "reverb": 0.06
+  },
+  "final_count": {
+    "name": "final_count",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.38,
+    "reverb": 0.08
+  },
+  "one_minute": {
+    "name": "one_minute",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.36,
+    "reverb": 0.2
+  },
+  "times_up": {
+    "name": "times_up",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.27,
+    "reverb": 0.3
+  },
+  "judge_drumroll": {
+    "name": "judge_drumroll",
+    "is_loop": true,
+    "is_oneshot": true,
+    "gain": 0.42,
+    "reverb": 0.2
+  },
+  "judge_reveal": {
+    "name": "judge_reveal",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.5,
+    "reverb": 0.35
+  },
+  "victory_fanfare": {
+    "name": "victory_fanfare",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.28,
+    "reverb": 0.3
+  },
+  "defeat_jingle": {
+    "name": "defeat_jingle",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.3,
+    "reverb": 0.25
+  },
+  "xp_tick": {
+    "name": "xp_tick",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.4,
+    "reverb": 0.02
+  },
+  "level_up": {
+    "name": "level_up",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.4,
+    "reverb": 0.3
+  },
+  "step_dry": {
+    "name": "step_dry",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.16,
+    "reverb": 0.02
+  },
+  "step_ink": {
+    "name": "step_ink",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.2,
+    "reverb": 0.03
+  },
+  "step_enemy": {
+    "name": "step_enemy",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.2,
+    "reverb": 0.02
+  },
+  "ink_drip": {
+    "name": "ink_drip",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.18,
+    "reverb": 0.05
+  },
+  "gull": {
+    "name": "gull",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.2,
+    "reverb": 0.35
+  },
+  "ferry_horn": {
+    "name": "ferry_horn",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.3,
+    "reverb": 0.55
+  },
+  "halyard_clink": {
+    "name": "halyard_clink",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.07,
+    "reverb": 0.3
+  },
+  "harbor_ambience": {
+    "name": "harbor_ambience",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.12,
+    "reverb": 0.1
+  },
+  "boss_roar": {
+    "name": "boss_roar",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.37,
+    "reverb": 0.34
+  },
+  "boss_step": {
+    "name": "boss_step",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.62,
+    "reverb": 0.12
+  },
+  "boss_slam": {
+    "name": "boss_slam",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.4,
+    "reverb": 0.3
+  },
+  "boss_tele": {
+    "name": "boss_tele",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.34,
+    "reverb": 0.25
+  },
+  "boss_whistle": {
+    "name": "boss_whistle",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.21,
+    "reverb": 0.1
+  },
+  "boss_barrel": {
+    "name": "boss_barrel",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.6,
+    "reverb": 0.18
+  },
+  "boss_cannon_charge": {
+    "name": "boss_cannon_charge",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.23,
+    "reverb": 0.15
+  },
+  "boss_cannon_sweep": {
+    "name": "boss_cannon_sweep",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.27,
+    "reverb": 0.12
+  },
+  "boss_gallop": {
+    "name": "boss_gallop",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.42,
+    "reverb": 0.1
+  },
+  "boss_crash": {
+    "name": "boss_crash",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.49,
+    "reverb": 0.32
+  },
+  "boss_dizzy": {
+    "name": "boss_dizzy",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.1,
+    "reverb": 0.2
+  },
+  "boss_frenzy": {
+    "name": "boss_frenzy",
+    "is_loop": true,
+    "is_oneshot": false,
+    "gain": 0.26,
+    "reverb": 0.12
+  },
+  "crablet_chitter": {
+    "name": "crablet_chitter",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 1.0,
+    "reverb": 0.05
+  },
+  "crablet_pop": {
+    "name": "crablet_pop",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.45,
+    "reverb": 0.08
+  },
+  "boss_hit": {
+    "name": "boss_hit",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.56,
+    "reverb": 0.04
+  },
+  "boss_crit": {
+    "name": "boss_crit",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.46,
+    "reverb": 0.1
+  },
+  "boss_phase": {
+    "name": "boss_phase",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.42,
+    "reverb": 0.34
+  },
+  "boss_title": {
+    "name": "boss_title",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.31,
+    "reverb": 0.32
+  },
+  "boss_defeat": {
+    "name": "boss_defeat",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.36,
+    "reverb": 0.36
+  },
+  "boss_sunk": {
+    "name": "boss_sunk",
+    "is_loop": false,
+    "is_oneshot": true,
+    "gain": 0.3,
+    "reverb": 0.3
+  }
+}

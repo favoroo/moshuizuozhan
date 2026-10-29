@@ -1,0 +1,263 @@
+using System.Collections;
+using NUnit.Framework;
+using P1.Core;
+using P1.Ink;
+using P1.Player;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.TestTools;
+
+namespace P1.Tests
+{
+    /// <summary>
+    /// 第一阶段试玩场景的运行时冒烟测试：真实加载 PhaseA_Playbox，验证涂地、移动/潜行、
+    /// 主武器开火、延时手雷与大招砸地在运行时的实际行为（批处理可跑，用于替代人眼截图）。
+    /// </summary>
+    public class PhaseAPlayboxSmokeTests
+    {
+        const string SceneName = "PhaseA_Playbox";
+
+        private IEnumerator LoadPlaybox()
+        {
+            SceneManager.LoadScene(SceneName);
+            yield return null;
+            yield return null;
+
+            Assert.IsNotNull(PlayerController.LocalPlayer, "场景里应存在本地玩家 PlayerController");
+            Assert.IsNotNull(InkSurfaceController.Instance, "场景里应存在 InkSurfaceController");
+        }
+
+        [UnityTest]
+        public IEnumerator Scene_LoadsWithManagersPlayerAndInkGrid()
+        {
+            yield return LoadPlaybox();
+
+            var surface = InkSurfaceController.Instance;
+            Assert.AreEqual(400, surface.Grid.Width, "桌面端墨水网格应为 400x400");
+            Assert.Greater(surface.Grid.PaintableCount, 0);
+            Assert.Less(surface.Grid.PaintableCount, 400 * 400, "掩体与出生台应从可涂面积中排除");
+            Assert.IsNotNull(surface.InkTexture);
+
+            var player = PlayerController.LocalPlayer;
+            Assert.IsTrue(player.Health.IsAlive);
+            Assert.AreEqual(Team.TeamA, player.Health.Team);
+        }
+
+        [UnityTest]
+        public IEnumerator PaintingCircle_IncreasesCoverageAndMarksCells()
+        {
+            yield return LoadPlaybox();
+
+            var surface = InkSurfaceController.Instance;
+            float before = surface.GetCoveragePercent(Team.TeamA);
+
+            int changed = surface.PaintCircle(new Vector3(0f, 0f, 0f), 3.0f, Team.TeamA);
+            yield return null;
+
+            Assert.Greater(changed, 0, "在空地涂色应产生归属变化");
+            Assert.Greater(surface.GetCoveragePercent(Team.TeamA), before);
+            Assert.AreEqual(Team.TeamA, surface.InkAt(new Vector3(0f, 0f, 0f)));
+        }
+
+        [UnityTest]
+        public IEnumerator Player_FiresMainWeapon_ConsumesInkAndPaintsGround()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            player.enabled = false; // 关闭输入驱动，避免真实输入干扰
+            yield return null;
+
+            var motor = player.Motor;
+            float inkBefore = motor.CurrentInk;
+            float coverageBefore = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
+
+            bool fired = player.Weapon.TryFireMainWeapon(Vector3.forward);
+            Assert.IsTrue(fired, "墨水充足时应能开火");
+            Assert.Less(motor.CurrentInk, inkBefore, "开火应消耗墨水");
+
+            // 等待弹丸飞行并沿途滴落/落点爆斑
+            yield return new WaitForSeconds(0.8f);
+
+            Assert.Greater(InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA), coverageBefore,
+                "弹丸应在沿途与落点涂出墨水");
+        }
+
+        [UnityTest]
+        public IEnumerator Player_SwimsOnOwnInk_AndGetsSpeedAndRefill()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            player.enabled = false;
+            yield return null;
+
+            var motor = player.Motor;
+
+            // 出生台按设计不可涂，先把角色移到旁边可涂地面并铺一片己方墨水
+            var paintSpot = new Vector3(0f, 0.1f, -11f);
+            InkSurfaceController.Instance.PaintCircle(paintSpot, 2.5f, Team.TeamA);
+
+            var cc = player.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;
+            player.transform.position = paintSpot;
+            if (cc != null) cc.enabled = true;
+            yield return null;
+
+            Assert.AreEqual(Team.TeamA, motor.FootInkTeam, "应站在己方墨水上");
+            Assert.IsFalse(motor.IsSwimming);
+
+            motor.SetFrameIntent(Vector3.zero, Vector3.forward, true, false);
+            yield return null;
+
+            Assert.IsTrue(motor.IsSwimming, "踩在己方墨水并按住潜行键时应进入潜行形态");
+            Assert.AreEqual(11.8f, motor.CurrentMoveSpeed, 0.01f, "潜行移速应为 11.8 m/s（P2-A 对齐 Inkwave swimSpeed）");
+
+            // 松开潜行键应立即恢复人形
+            motor.SetFrameIntent(Vector3.zero, Vector3.forward, false, false);
+            yield return null;
+            Assert.IsFalse(motor.IsSwimming);
+        }
+
+        [UnityTest]
+        public IEnumerator Player_SwimAndFireSwapWhileHoldingBoth_WorksBothWays()
+        {
+            yield return LoadPlaybox();
+
+            var match = MatchManager.Instance;
+            match.StartMatch();
+            yield return new WaitForSeconds(3.6f);
+            Assert.IsTrue(MatchManager.InputAllowed, "比赛开始后应允许玩家输入");
+
+            var player = PlayerController.LocalPlayer;
+            player.Health.IsInvulnerable = true; // 避免测试期间被 Bot 击杀打断
+
+            // 把角色放到己方墨水可涂地面上
+            var motor = player.Motor;
+            var paintSpot = new Vector3(0f, 0.1f, -11f);
+            InkSurfaceController.Instance.PaintCircle(paintSpot, 2.5f, Team.TeamA);
+            var cc = player.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;
+            player.transform.position = paintSpot;
+            if (cc != null) cc.enabled = true;
+            yield return null;
+            yield return null;
+            Assert.AreEqual(Team.TeamA, motor.FootInkTeam, "应站在己方墨水上");
+
+            // 1. 按住射击 → 应处于人形开火状态
+            player.TouchFireHeld = true;
+            yield return null;
+            yield return null;
+            Assert.IsFalse(motor.IsSwimming, "只按射击时应保持人形");
+
+            // 2. 射击中按潜行 → 立即停火潜入
+            player.TouchSwimHeld = true;
+            yield return null;
+            yield return null;
+            Assert.IsTrue(motor.IsSwimming, "射击中按潜行键应立即进入潜行");
+
+            // 3. 松开潜行、仍按住射击 → 回到人形并继续开火
+            player.TouchSwimHeld = false;
+            yield return null;
+            Assert.IsFalse(motor.IsSwimming, "松开潜行键应立即恢复人形");
+
+            // 4. 重新按住潜行 → 再次潜入
+            player.TouchSwimHeld = true;
+            yield return null;
+            yield return null;
+            Assert.IsTrue(motor.IsSwimming, "按住潜行键应再次进入潜行");
+
+            // 5. 松开射击后仍按住潜行 → 保持潜行；再按射击 → 立即出枪并扣墨
+            player.TouchFireHeld = false;
+            yield return null;
+            yield return null;
+            Assert.IsTrue(motor.IsSwimming, "松开射击后按住潜行键应保持潜行");
+
+            // P2-A 丝滑进出水：按开火当帧立刻恢复人形；第一发经 0.07s 出水过渡后被缓冲补射（绝不吞键）
+            float inkBefore = motor.CurrentInk;
+            player.TouchFireHeld = true;
+            yield return null;
+            Assert.IsFalse(motor.IsSwimming, "潜行中按射击应立刻恢复人形");
+
+            yield return new WaitForSeconds(0.15f);
+            Assert.Less(motor.CurrentInk, inkBefore, "出水过渡结束后按键应被补射并消耗墨水（Fire Buffer 不吞键）");
+
+            player.TouchFireHeld = false;
+            player.TouchSwimHeld = false;
+        }
+
+        [UnityTest]
+        public IEnumerator Player_ThrowBomb_ConsumesInkAndLeavesBobmInFlight()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            player.enabled = false;
+            yield return null;
+
+            var motor = player.Motor;
+            motor.RefillInkFull();
+            float inkBefore = motor.CurrentInk;
+
+            bool thrown = player.Weapon.TryThrowSubBomb(player.transform.position + Vector3.forward * 5f);
+            Assert.IsTrue(thrown, "墨水充足时应能投掷手雷");
+            Assert.AreEqual(inkBefore - 70f, motor.CurrentInk, 0.5f, "P3-B：手雷应消耗 70 点墨水（70%）");
+
+            yield return new WaitForSeconds(0.4f);
+        }
+
+        [UnityTest]
+        public IEnumerator Player_Special_ChargesAndSplatsLargeArea()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            player.enabled = false;
+            yield return null;
+
+            var weapon = player.Weapon;
+            Assert.IsFalse(weapon.IsSpecialReady, "开局大招不应就绪");
+
+            weapon.AddSpecialPoints(500);
+            Assert.IsTrue(weapon.IsSpecialReady, "充能后大招应就绪");
+
+            float coverageBefore = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
+            bool activated = weapon.TryActivateSpecial();
+            Assert.IsTrue(activated, "大招就绪时应能释放");
+
+            // P3-B：升空 0.55s + 滞空 0.25s + 下砸 0.1s 后落地砸出大范围墨水
+            yield return new WaitForSeconds(1.3f);
+
+            Assert.Greater(InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA), coverageBefore + 0.5f,
+                "大招落地应在身边涂出大范围墨水");
+            Assert.IsFalse(weapon.IsPerformingSpecial, "落地后应结束大招状态");
+        }
+
+        [UnityTest]
+        public IEnumerator Player_Jump_LeavesGroundAndLandsSafely()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            player.enabled = false;
+            yield return null;
+
+            var motor = player.Motor;
+            float initialY = player.transform.position.y;
+            Assert.IsTrue(motor.IsGrounded, "起跳前应在地面上");
+
+            // 触发跳跃
+            motor.SetFrameIntent(Vector3.forward, Vector3.forward, false, true, false);
+            yield return null;
+
+            // 等待 0.15 秒，应跃升至空中较高位置
+            yield return new WaitForSeconds(0.15f);
+            Assert.Greater(player.transform.position.y, initialY + 0.35f, "起跳后角色应明显腾空上升");
+
+            // 等待下落着地（单次跳跃周期约 0.65s）
+            yield return new WaitForSeconds(0.65f);
+            Assert.Less(player.transform.position.y, initialY + 0.15f, "跳跃结束应在重力作用下重新平稳着地");
+            Assert.IsTrue(motor.IsGrounded, "着地后应恢复接地判定");
+        }
+    }
+}

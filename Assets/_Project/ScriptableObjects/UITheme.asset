@@ -1,0 +1,106 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6274cf0dc97b744068a7c8fcfaf7f3dd, type: 3}
+  m_Name: UITheme
+  m_EditorClassIdentifier: P1.Game::P1.UI.UIThemeSO
+  outlineColor: {r: 0.082, g: 0.071, b: 0.11, a: 1}
+  outlineSoftColor: {r: 0.122, g: 0.102, b: 0.173, a: 1}
+  deepShadowColor: {r: 0, g: 0, b: 0, a: 0.35}
+  panelColor: {r: 0.098, g: 0.082, b: 0.145, a: 0.92}
+  panelGlassColor: {r: 0.149, g: 0.122, b: 0.227, a: 0.9}
+  textPrimary: {r: 1, g: 1, b: 1, a: 1}
+  textMuted: {r: 0.765, g: 0.741, b: 0.839, a: 1}
+  highlightColor: {r: 1, g: 1, b: 1, a: 0.16}
+  readyGold: {r: 1, g: 0.835, b: 0.29, a: 1}
+  dangerRed: {r: 0.784, g: 0.09, b: 0.227, a: 1}
+  teamAColor: {r: 1, g: 0.44, b: 0.06, a: 1}
+  teamALight: {r: 1, g: 0.769, b: 0.541, a: 1}
+  teamADark: {r: 0.722, g: 0.384, b: 0.059, a: 1}
+  teamBColor: {r: 0.15, g: 0.42, b: 1, a: 1}
+  teamBLight: {r: 0.596, g: 0.69, b: 1, a: 1}
+  teamBDark: {r: 0.141, g: 0.259, b: 0.706, a: 1}
+  neutralColor: {r: 0.42, g: 0.42, b: 0.46, a: 1}
+  displayFont: {fileID: 11400000, guid: d1391858ac69144aaa3d5728591770e7, type: 2}
+  bodyFont: {fileID: 11400000, guid: a2ec570fab3b14aacadea13f6f1ebfc7, type: 2}
+  popSpring:
+    frequency: 3.8
+    damping: 0.55
+    maxSubSteps: 10
+  pressSpring:
+    frequency: 7.5
+    damping: 0.78
+    maxSubSteps: 8
+  followSpring:
+    frequency: 8.5
+    damping: 0.9
+    maxSubSteps: 8
+  settleSpring:
+    frequency: 5.5
+    damping: 1
+    maxSubSteps: 8
+  entranceEasing:
+    x1: 0.34
+    y1: 1.56
+    x2: 0.64
+    y2: 1
+  entranceFadeDuration: 0.26
+  chunkyOutlineWidth: 0.35
+  chunkyInnerOutlineWidth: 0.05
+  chunkyShadowOffsetY: 0.05
+  teamCard:
+    shape: 0
+    fillColor: {r: 1, g: 0.44, b: 0.06, a: 1}
+    fillUsesTeamColor: 1
+    borderColor: {r: 0.082, g: 0.071, b: 0.11, a: 1}
+    borderWidth: 8
+    cornerRadius: 40
+    wobble: 0.06
+    glossAlpha: 0.18
+    glossSlope: 0.3
+    glossCenter: 0.72
+    glossThickness: 0.16
+    innerRimAlpha: 0.12
+    titleColor: {r: 1, g: 1, b: 1, a: 1}
+    titleSize: 38
+    contentPadding: 26
+  darkCard:
+    shape: 1
+    fillColor: {r: 0.098, g: 0.082, b: 0.145, a: 0.92}
+    fillUsesTeamColor: 0
+    borderColor: {r: 0.122, g: 0.102, b: 0.173, a: 1}
+    borderWidth: 7
+    cornerRadius: 30
+    wobble: 0
+    glossAlpha: 0.1
+    glossSlope: 0.3
+    glossCenter: 0.74
+    glossThickness: 0.14
+    innerRimAlpha: 0.08
+    titleColor: {r: 1, g: 1, b: 1, a: 1}
+    titleSize: 36
+    contentPadding: 24
+  lightCard:
+    shape: 1
+    fillColor: {r: 0.945, g: 0.933, b: 0.98, a: 1}
+    fillUsesTeamColor: 0
+    borderColor: {r: 0.082, g: 0.071, b: 0.11, a: 1}
+    borderWidth: 7
+    cornerRadius: 30
+    wobble: 0
+    glossAlpha: 0.35
+    glossSlope: 0.3
+    glossCenter: 0.74
+    glossThickness: 0.16
+    innerRimAlpha: 0
+    titleColor: {r: 0.082, g: 0.071, b: 0.11, a: 1}
+    titleSize: 36
+    contentPadding: 24

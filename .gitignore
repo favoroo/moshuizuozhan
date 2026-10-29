@@ -1,0 +1,75 @@
+# Unity 项目 .gitignore
+# 参考 https://github.com/github/gitignore/blob/main/Unity.gitignore
+
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# 与资源同名的 .meta 必须提交，只有资源被忽略时才忽略 meta
+!/[Aa]ssets/**/*.meta
+
+# JetBrains Rider 自动生成
+/[Aa]ssets/Plugins/Editor/JetBrains*
+
+.vs/
+.gradle/
+
+# IDE 生成文件
+ExportedObj/
+.consulo/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# 崩溃日志
+sysinfo.txt
+
+# 构建产物
+*.apk
+*.aab
+*.unitypackage
+*.app
+crashlytics-build.properties
+
+# Addressables 打包数据
+/[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
+
+# 临时生成的 Android 资源
+/[Aa]ssets/[Ss]treamingAssets/aa.meta
+/[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# macOS
+.DS_Store
+
+# 迁移前的 Unity 7 工程备份（本地保留，不进版本库）
+/_backup_Unity7/
+
+# media-gen 技能：媒体网关密钥（勿提交、勿外传）
+/.agents/skills/media-gen/config/api.env
+
+# 本地烘焙音效（tools/bake_sfx.py 固定种子可确定性重烘，进去只是噪音）
+/MediaRaw/sfx/
+
+# ZCode 本地会话计划记录（工具本地状态，非工程配置）
+/.zcode/plans/

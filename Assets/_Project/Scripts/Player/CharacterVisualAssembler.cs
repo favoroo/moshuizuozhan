@@ -7,17 +7,19 @@ using UnityEngine;
 namespace P1.Player
 {
     /// <summary>
-    /// 精致多部件程序化角色（Squidkid）与 7 类主武器装配工厂。
-    /// 基于纯程序化几何体组装潮流涂鸦少年形象（头雕、高光大眼、潮流耳机、触须发辫、连帽卫衣、运动板鞋、墨水储罐背包），
-    /// 以及专属流线型乌贼网格，并为 7 种武器分别构建精细多部件模型。
+    /// Q 版无腿蛋形角色（Squidkid Egg Rig）与 7 类主武器装配工厂。
+    /// 遵循《P1 项目约定》与 CharacterMetrics 唯一尺寸真源：
+    /// 1. 人形态采用低重心、无腿蛋形圆润躯干，由 EggGaitSolver 驱动接触挤压与左右摇晃；
+    /// 2. 贴地枢轴（ChestPivotY = 0.05m）让倾斜与弹跳表现为整蛋摇摆而非上半身折叠；
+    /// 3. 蛋体网格采用解析法线分段光滑旋转体，原点置于脚底，保证着色连续与无接缝；
+    /// 4. 材质全面切换为 P1/CharacterToon 卡通着色器（蛋体唯一启用外描边），玻璃保持 URP Lit 透明；
+    /// 5. 7 套武器模型按 CharacterMetrics 缩放换算挂载并绑定动态构件与枪口。
     /// </summary>
     public static class CharacterVisualAssembler
     {
-        private static readonly int BaseColorProp = Shader.PropertyToID("_BaseColor");
-        private static readonly int ColorProp = Shader.PropertyToID("_Color");
-        private static readonly int SmoothnessProp = Shader.PropertyToID("_Smoothness");
-        private static readonly int MetallicProp = Shader.PropertyToID("_Metallic");
-        private static readonly int EmissionColorProp = Shader.PropertyToID("_EmissionColor");
+        private static Mesh _eggMesh;
+
+        #region Public Assembly Entry
 
         public static CharacterVisualController Assemble(
             Transform visualRoot,
@@ -26,13 +28,13 @@ namespace P1.Player
             Material darkVisorMat,
             WeaponConfigSO initialWeaponConfig)
         {
-            // 1. 清理已有子节点（防止重复生成重叠）
+            // 1. 清理已有子节点（防止重复生成导致层级重叠或泄漏）
             for (int i = visualRoot.childCount - 1; i >= 0; i--)
             {
                 Object.DestroyImmediate(visualRoot.GetChild(i).gameObject);
             }
 
-            // 2. 准备材质调色盘
+            // 2. 准备材质调色盘（队伍色卡通材质 + URP Lit 透明玻璃）
             Color teamColor = ResolveTeamColor(team);
             var palette = BuildMaterialPalette(team, teamColor, teamBodyMat, darkVisorMat);
 
@@ -41,8 +43,11 @@ namespace P1.Player
             kidGo.transform.SetParent(visualRoot, false);
 
             Transform hips, chest, head, leftHair, rightHair, leftArm, rightArm, tankFill;
-            BuildKidHierarchy(kidGo.transform, palette, out hips, out chest, out head,
-                out leftHair, out rightHair, out leftArm, out rightArm, out tankFill);
+            Transform bodySquash, leftEye, rightEye;
+            BuildKidHierarchy(kidGo.transform, palette,
+                out hips, out chest, out head,
+                out leftHair, out rightHair, out leftArm, out rightArm, out tankFill,
+                out bodySquash, out leftEye, out rightEye);
 
             // 4. 构建乌贼形态 (Squid Root)
             var squidGo = new GameObject("SquidRoot");
@@ -66,7 +71,8 @@ namespace P1.Player
                 out rollerDrum, out splatlingBarrels, out chargerCoils,
                 out mShooter, out mRoller, out mCharger, out mDualiesR, out mDualiesL, out mSlosher, out mBlaster, out mSplatling);
 
-            // 5.1 武器挂到胸部骨骼下（世界位置保持不变）：奔跑前倾/呼吸时武器与双手同步运动，不会脱手
+            // 5.1 武器挂到胸部贴地枢轴下（世界位置保持不变）：
+            // 保留原有 -chest.localPosition 偏移写法，抵消 Chest 局部高度，使武器在视觉上相对于根空间绝对位置正确
             weaponGo.transform.SetParent(chest, false);
             weaponGo.transform.localPosition = -chest.localPosition;
 
@@ -85,11 +91,16 @@ namespace P1.Player
                 rollerDrum, splatlingBarrels, chargerCoils,
                 mShooter, mRoller, mCharger, mDualiesR, mDualiesL, mSlosher, mBlaster, mSplatling);
 
+            // 6.1 注入蛋形角色步态与面部动效骨架绑定
+            controller.BindEggRig(bodySquash, head, leftEye, rightEye);
+
             WeaponKind startKind = initialWeaponConfig != null ? initialWeaponConfig.weaponKind : WeaponKind.Shooter;
             controller.EquipWeaponKind(startKind);
 
             return controller;
         }
+
+        #endregion
 
         #region Material Palette
 
@@ -104,6 +115,7 @@ namespace P1.Player
             public Material White;
             public Material Metal;
             public Material Glass;
+            public Material Blush;
         }
 
         private static Color ResolveTeamColor(Team team)
@@ -119,18 +131,118 @@ namespace P1.Player
         {
             Palette p = new Palette();
 
-            p.TeamCloth = fallbackBodyMat != null ? fallbackBodyMat : CreateLitMat("Mat_TeamCloth", teamCol, 0.45f, 0.0f);
-            p.TeamHair = CreateLitMat("Mat_TeamHair", teamCol, 0.88f, 0.08f);
-            p.TeamLiquid = CreateLitMat("Mat_TeamLiquid", teamCol, 0.95f, 0.0f, teamCol * 0.4f);
-            p.SquidBody = CreateLitMat("Mat_SquidBody", teamCol, 0.90f, 0.05f);
+            // 从可能传入的旧材质中读取基础颜色语义，不直接复用旧的 URP Lit 实例，确保角色全套材质卡通风格统一
+            Color clothColor = teamCol;
+            if (fallbackBodyMat != null)
+            {
+                if (fallbackBodyMat.HasProperty("_BaseColor"))
+                    clothColor = fallbackBodyMat.GetColor("_BaseColor");
+                else if (fallbackBodyMat.HasProperty("_Color"))
+                    clothColor = fallbackBodyMat.GetColor("_Color");
+            }
 
-            p.Skin = CreateLitMat("Mat_KidSkin", new Color(0.97f, 0.80f, 0.68f), 0.20f, 0.0f);
-            p.Dark = fallbackDarkMat != null ? fallbackDarkMat : CreateLitMat("Mat_DarkPlastic", new Color(0.12f, 0.14f, 0.18f), 0.40f, 0.1f);
-            p.White = CreateLitMat("Mat_AccentsWhite", new Color(0.94f, 0.95f, 0.98f), 0.50f, 0.0f);
-            p.Metal = CreateLitMat("Mat_Gunmetal", new Color(0.55f, 0.58f, 0.65f), 0.65f, 0.85f);
+            Color darkColor = new Color(0.12f, 0.14f, 0.18f);
+            if (fallbackDarkMat != null)
+            {
+                if (fallbackDarkMat.HasProperty("_BaseColor"))
+                    darkColor = fallbackDarkMat.GetColor("_BaseColor");
+                else if (fallbackDarkMat.HasProperty("_Color"))
+                    darkColor = fallbackDarkMat.GetColor("_Color");
+            }
+
+            // 蛋体作为视觉核心且轮廓最大，唯一启用黑色外描边；其他微小部件不启用描边，避免密集杂线
+            p.TeamCloth = CreateCharacterMat("Mat_TeamCloth", clothColor, 0.55f, 0.55f, outlined: true);
+            p.TeamHair = CreateCharacterMat("Mat_TeamHair", teamCol, 0.90f, 0.70f);
+            p.TeamLiquid = CreateCharacterMat("Mat_TeamLiquid", teamCol, 0.95f, 0.60f, emission: teamCol * 0.35f);
+            p.SquidBody = CreateCharacterMat("Mat_SquidBody", teamCol, 0.90f, 0.70f);
+
+            p.Skin = CreateCharacterMat("Mat_KidSkin", new Color(0.97f, 0.80f, 0.68f), 0.30f, 0.20f);
+            p.Dark = CreateCharacterMat("Mat_DarkPlastic", darkColor, 0.35f, 0.25f);
+            p.White = CreateCharacterMat("Mat_AccentsWhite", new Color(0.95f, 0.96f, 0.98f), 0.40f, 0.30f);
+            p.Metal = CreateCharacterMat("Mat_Gunmetal", new Color(0.55f, 0.58f, 0.65f), 0.65f, 0.40f);
+            p.Blush = CreateCharacterMat("Mat_Blush", new Color(0.98f, 0.62f, 0.60f), 0.20f, 0.15f);
+
+            // 墨罐玻璃必须保留 URP Lit 透明表面材质：卡通 Shader 不支持透明通道，否则墨罐外壳会变为不透明阻挡内部液面
             p.Glass = CreateLitMat("Mat_TankGlass", new Color(0.85f, 0.92f, 1.0f, 0.45f), 0.95f, 0.1f);
 
             return p;
+        }
+
+        private static Material CreateCharacterMat(
+            string name,
+            Color baseCol,
+            float smoothness,
+            float rimStrength,
+            bool outlined = false,
+            Color? emission = null)
+        {
+            string targetShaderName = outlined ? "P1/CharacterToonOutlined" : "P1/CharacterToon";
+            Shader sh = Shader.Find(targetShaderName);
+            if (sh == null) sh = Shader.Find("Universal Render Pipeline/Lit");
+            if (sh == null) sh = Shader.Find("Standard");
+            if (sh == null) sh = Shader.Find("Diffuse");
+
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                const string folder = "Assets/_Project/Materials/Characters";
+                if (!UnityEditor.AssetDatabase.IsValidFolder(folder))
+                {
+                    if (!UnityEditor.AssetDatabase.IsValidFolder("Assets/_Project/Materials"))
+                        UnityEditor.AssetDatabase.CreateFolder("Assets/_Project", "Materials");
+                    UnityEditor.AssetDatabase.CreateFolder("Assets/_Project/Materials", "Characters");
+                }
+
+                string fileName = name + "_" + ColorUtility.ToHtmlStringRGBA(baseCol);
+                string path = folder + "/" + fileName + ".mat";
+                var asset = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (asset != null)
+                {
+                    if (asset.shader != sh)
+                    {
+                        asset.shader = sh;
+                    }
+                    ApplyCharacterMatSettings(asset, baseCol, smoothness, rimStrength, emission);
+                    UnityEditor.EditorUtility.SetDirty(asset);
+                    return asset;
+                }
+
+                var created = new Material(sh) { name = fileName };
+                ApplyCharacterMatSettings(created, baseCol, smoothness, rimStrength, emission);
+                UnityEditor.AssetDatabase.CreateAsset(created, path);
+                return created;
+            }
+#endif
+            var mat = new Material(sh) { name = name };
+            ApplyCharacterMatSettings(mat, baseCol, smoothness, rimStrength, emission);
+            return mat;
+        }
+
+        private static void ApplyCharacterMatSettings(
+            Material mat,
+            Color baseCol,
+            float smoothness,
+            float rimStrength,
+            Color? emission)
+        {
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", baseCol);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", baseCol);
+            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", smoothness);
+            if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0f);
+
+            if (mat.HasProperty("_RimStrength")) mat.SetFloat("_RimStrength", rimStrength);
+            if (mat.HasProperty("_RimColor")) mat.SetColor("_RimColor", Color.white);
+
+            if (emission.HasValue && emission.Value != Color.black)
+            {
+                if (mat.HasProperty("_EmissionColor")) mat.SetColor("_EmissionColor", emission.Value);
+                if (mat.HasProperty("_EmissionStrength")) mat.SetFloat("_EmissionStrength", 1f);
+                mat.EnableKeyword("_EMISSION");
+            }
+            else
+            {
+                if (mat.HasProperty("_EmissionStrength")) mat.SetFloat("_EmissionStrength", 0f);
+            }
         }
 
         private static Material CreateLitMat(string name, Color baseCol, float smoothness, float metallic, Color? emission = null)
@@ -140,8 +252,6 @@ namespace P1.Player
             if (sh == null) sh = Shader.Find("Diffuse");
 
 #if UNITY_EDITOR
-            // 场景装配发生在编辑器内：材质必须落成资产，否则保存场景后引用会丢失（渲染成洋红/空材质）。
-            // 路径按「名称 + 颜色哈希」确定，多个角色/同队武器共享同一份资产。
             if (!Application.isPlaying)
             {
                 const string folder = "Assets/_Project/Materials/Characters";
@@ -175,14 +285,13 @@ namespace P1.Player
 
         private static void ApplyLitMatSettings(Material mat, Color baseCol, float smoothness, float metallic, Color? emission)
         {
-            mat.SetColor(BaseColorProp, baseCol);
-            mat.SetColor(ColorProp, baseCol);
-            mat.SetFloat(SmoothnessProp, smoothness);
-            mat.SetFloat(MetallicProp, metallic);
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", baseCol);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", baseCol);
+            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", smoothness);
+            if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", metallic);
 
             if (baseCol.a < 0.999f)
             {
-                // URP Lit 透明表面（墨罐玻璃）：否则不透明外壳会挡住内部液面
                 mat.SetFloat("_Surface", 1f);
                 mat.SetFloat("_Blend", 0f);
                 mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
@@ -195,7 +304,7 @@ namespace P1.Player
             if (emission.HasValue && emission.Value != Color.black)
             {
                 mat.EnableKeyword("_EMISSION");
-                mat.SetColor(EmissionColorProp, emission.Value);
+                if (mat.HasProperty("_EmissionColor")) mat.SetColor("_EmissionColor", emission.Value);
             }
         }
 
@@ -245,6 +354,190 @@ namespace P1.Player
 
         #endregion
 
+        #region Egg Body Procedural Mesh
+
+        private static readonly float[] ProfileT = new float[]
+        {
+            0.00f, 0.08f, 0.20f, 0.35f, 0.50f, 0.65f, 0.78f, 0.88f, 0.95f, 1.00f
+        };
+
+        private static readonly float[] ProfileR01 = new float[]
+        {
+            0.62f, 0.86f, 0.96f, 1.00f, 0.99f, 0.94f, 0.84f, 0.68f, 0.46f, 0.10f
+        };
+
+        /// <summary>
+        /// 采样蛋体归一化轮廓半径比例（0~1）。分段采用 SmoothStep 平滑插值，保证轮廓二阶光滑无折角。
+        /// </summary>
+        private static float SampleEggRadius01(float t)
+        {
+            t = Mathf.Clamp01(t);
+            for (int i = 0; i < ProfileT.Length - 1; i++)
+            {
+                if (t <= ProfileT[i + 1])
+                {
+                    float segLength = ProfileT[i + 1] - ProfileT[i];
+                    float u = (t - ProfileT[i]) / Mathf.Max(0.0001f, segLength);
+                    float smoothU = Mathf.SmoothStep(0f, 1f, u);
+                    return Mathf.Lerp(ProfileR01[i], ProfileR01[i + 1], smoothU);
+                }
+            }
+            return ProfileR01[ProfileR01.Length - 1];
+        }
+
+        /// <summary>蛋体在指定高度处的实际半径（米）。</summary>
+        private static float EggRadiusAt(float y)
+            => SampleEggRadius01(y / CharacterMetrics.BodyHeight) * CharacterMetrics.BodyMaxRadius;
+
+        /// <summary>
+        /// 求蛋体前半球表面（面向 +Z）上的一点，并沿表面法线向外推出 outOffset。
+        /// 贴面部件（眼睛/面具/腮红/嘴）必须用它定位：蛋体是曲面，直接写死 z 会让椭球要么埋进肚子要么浮在空中。
+        /// </summary>
+        private static Vector3 EggFrontPoint(float x, float y, float outOffset)
+        {
+            float r = EggRadiusAt(y);
+            float xx = Mathf.Clamp(x, -r * 0.92f, r * 0.92f);
+            float z = Mathf.Sqrt(Mathf.Max(0.0001f, r * r - xx * xx));
+            Vector3 normal = new Vector3(xx, 0f, z).normalized;
+            return new Vector3(xx, y, z) + normal * outOffset;
+        }
+
+        /// <summary>贴面部件的朝向：让局部 +Z 对准该处的水平表面法线。</summary>
+        private static float EggFaceYaw(float x, float y)
+        {
+            float r = EggRadiusAt(y);
+            float xx = Mathf.Clamp(x, -r * 0.92f, r * 0.92f);
+            float z = Mathf.Sqrt(Mathf.Max(0.0001f, r * r - xx * xx));
+            return Mathf.Atan2(xx, z) * Mathf.Rad2Deg;
+        }
+
+        /// <summary>
+        /// 创建并静态缓存 Q 版无腿蛋形角色网格。
+        /// 24 环 × 24 径向段旋转体，原点位于脚底（y=0），底部封口（半径 0.248m 做三角扇）。
+        /// 法线完全使用切空间解析法推导，确保顶点法线精确指向外侧且圆环处平滑无硬边。
+        /// </summary>
+        public static Mesh CreateEggBodyMesh()
+        {
+            if (_eggMesh != null) return _eggMesh;
+
+            var mesh = new Mesh { name = "EggBodyMesh" };
+
+            const int ringCount = 24;
+            const int radialSegs = 24;
+
+            List<Vector3> verts = new List<Vector3>();
+            List<Vector3> normals = new List<Vector3>();
+            List<Vector2> uvs = new List<Vector2>();
+            List<int> tris = new List<int>();
+
+            // 1. 生成旋转体侧面顶点与解析法线
+            // 为保证 UV 纹理在 0~1 闭合时无拉伸接缝，每环包含 (radialSegs + 1) 列顶点
+            for (int r = 0; r <= ringCount; r++)
+            {
+                float t = (float)r / ringCount;
+                float y = t * CharacterMetrics.BodyHeight;
+                float r01 = SampleEggRadius01(t);
+                float radius = r01 * CharacterMetrics.BodyMaxRadius;
+
+                // 差分计算轮廓沿高度切线斜率 dr/dy
+                const float dt = 0.0005f;
+                float tPrev = Mathf.Max(0f, t - dt);
+                float tNext = Mathf.Min(1f, t + dt);
+                float rPrev = SampleEggRadius01(tPrev) * CharacterMetrics.BodyMaxRadius;
+                float rNext = SampleEggRadius01(tNext) * CharacterMetrics.BodyMaxRadius;
+                float dr_dy = (rNext - rPrev) / Mathf.Max(0.00001f, (tNext - tPrev) * CharacterMetrics.BodyHeight);
+
+                for (int s = 0; s <= radialSegs; s++)
+                {
+                    float uCoord = (float)s / radialSegs;
+                    float theta = uCoord * Mathf.PI * 2f;
+                    float cos = Mathf.Cos(theta);
+                    float sin = Mathf.Sin(theta);
+
+                    verts.Add(new Vector3(cos * radius, y, sin * radius));
+
+                    // 解析法线推导：
+                    // aroundTangent = (-sin, 0, cos)，profileTangent = (dr_dy * cos, 1, dr_dy * sin)
+                    // cross(profileTangent, aroundTangent) = (cos, -dr_dy, sin)
+                    // 与 radialDir (cos, 0, sin) 点乘结果为 1 > 0，严格指向外部，杜绝法线反向导致的黑脸
+                    Vector3 radialDir = new Vector3(cos, 0f, sin);
+                    Vector3 normal = new Vector3(cos, -dr_dy, sin);
+                    if (Vector3.Dot(normal, radialDir) < 0f)
+                    {
+                        normal = -normal;
+                    }
+                    normals.Add(normal.normalized);
+
+                    uvs.Add(new Vector2(uCoord, t));
+                }
+            }
+
+            // 2. 缝合侧面圆环三角形（绕序朝外）
+            for (int r = 0; r < ringCount; r++)
+            {
+                int row0 = r * (radialSegs + 1);
+                int row1 = (r + 1) * (radialSegs + 1);
+
+                for (int s = 0; s < radialSegs; s++)
+                {
+                    int i0 = row0 + s;
+                    int i1 = row1 + s;
+                    int i0_next = row0 + s + 1;
+                    int i1_next = row1 + s + 1;
+
+                    tris.Add(i0);
+                    tris.Add(i1);
+                    tris.Add(i0_next);
+
+                    tris.Add(i0_next);
+                    tris.Add(i1);
+                    tris.Add(i1_next);
+                }
+            }
+
+            // 3. 底部平底封口（y=0 处半径 0.248m 做向下三角扇，保证站立触地接触面严密）
+            int bottomCenterIdx = verts.Count;
+            verts.Add(Vector3.zero);
+            normals.Add(Vector3.down);
+            uvs.Add(new Vector2(0.5f, 0f));
+
+            for (int s = 0; s < radialSegs; s++)
+            {
+                int p_s = s;
+                int p_next = s + 1;
+                tris.Add(bottomCenterIdx);
+                tris.Add(p_s);
+                tris.Add(p_next);
+            }
+
+            // 4. 顶部极点封顶三角扇（闭合水密网格）
+            int topCenterIdx = verts.Count;
+            verts.Add(new Vector3(0f, CharacterMetrics.BodyHeight, 0f));
+            normals.Add(Vector3.up);
+            uvs.Add(new Vector2(0.5f, 1f));
+
+            int topRow = ringCount * (radialSegs + 1);
+            for (int s = 0; s < radialSegs; s++)
+            {
+                int p_s = topRow + s;
+                int p_next = topRow + s + 1;
+                tris.Add(topCenterIdx);
+                tris.Add(p_next);
+                tris.Add(p_s);
+            }
+
+            mesh.SetVertices(verts);
+            mesh.SetNormals(normals);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateBounds();
+
+            _eggMesh = mesh;
+            return _eggMesh;
+        }
+
+        #endregion
+
         #region Kid Form Assembly
 
         private static void BuildKidHierarchy(
@@ -257,156 +550,162 @@ namespace P1.Player
             out Transform rightHair,
             out Transform leftArm,
             out Transform rightArm,
-            out Transform tankFill)
+            out Transform tankFill,
+            out Transform bodySquash,
+            out Transform leftEye,
+            out Transform rightEye)
         {
-            // 1. 臀部与双腿板鞋
-            var hipsGo = new GameObject("Hips");
-            hipsGo.transform.SetParent(kidRoot, false);
-            hipsGo.transform.localPosition = new Vector3(0f, 0.58f, 0f);
-            hips = hipsGo.transform;
+            // 蛋形角色取消腿部骨骼结构，hips 传 null 以保持旧接口兼容
+            hips = null;
 
-            CreateCapsule(hips, "Pelvis", Vector3.zero, new Vector3(0.32f, 0.16f, 0.22f), p.Dark);
-
-            // 左右腿与潮流板鞋
-            for (int s = -1; s <= 1; s += 2)
-            {
-                string side = s < 0 ? "Left" : "Right";
-                float x = s * 0.15f;
-
-                var legGo = new GameObject(side + "Leg");
-                legGo.transform.SetParent(hips, false);
-                legGo.transform.localPosition = new Vector3(x, 0f, 0f);
-
-                // 大腿与小腿
-                CreateCapsule(legGo.transform, "Thigh", new Vector3(0f, -0.16f, 0f), new Vector3(0.13f, 0.16f, 0.13f), p.Dark);
-                CreateCapsule(legGo.transform, "Calf", new Vector3(0f, -0.36f, 0.02f), new Vector3(0.11f, 0.18f, 0.11f), p.Skin);
-
-                // 运动滑板鞋（厚底、深色鞋帮、白色大鞋头）
-                var footGo = new GameObject(side + "Sneaker");
-                footGo.transform.SetParent(legGo.transform, false);
-                footGo.transform.localPosition = new Vector3(0f, -0.52f, 0.02f);
-
-                CreateBox(footGo.transform, "Sole", new Vector3(0f, 0.025f, 0f), new Vector3(0.13f, 0.05f, 0.26f), p.White);
-                CreateBox(footGo.transform, "Upper", new Vector3(0f, 0.075f, -0.01f), new Vector3(0.12f, 0.07f, 0.23f), p.Dark);
-                CreateSphere(footGo.transform, "ToeCap", new Vector3(0f, 0.05f, 0.09f), new Vector3(0.12f, 0.06f, 0.09f), p.White);
-            }
-
-            // 2. 脊柱与连帽卫衣躯干 (Spine / Chest)
+            // 1. 躯干枢轴 (Chest)：位于贴地低位 (y = ChestPivotY = 0.05m)。
+            // 使得奔跑前倾与左右摇摆像"蛋在地面晃荡"，而非传统人形的上半身在腰部折断
             var chestGo = new GameObject("Chest");
             chestGo.transform.SetParent(kidRoot, false);
-            chestGo.transform.localPosition = new Vector3(0f, 0.92f, 0f);
+            chestGo.transform.localPosition = new Vector3(0f, CharacterMetrics.ChestPivotY, 0f);
             chest = chestGo.transform;
 
-            // 卫衣主躯干
-            CreateBox(chest, "HoodieTorso", Vector3.zero, new Vector3(0.36f, 0.36f, 0.26f), p.TeamCloth);
-            CreateBox(chest, "HoodiePocket", new Vector3(0f, -0.07f, 0.135f), new Vector3(0.24f, 0.11f, 0.04f), p.Dark);
-            CreateCylinder(chest, "Collar", new Vector3(0f, 0.18f, 0f), new Vector3(0.16f, 0.04f, 0.16f), p.Dark);
+            // 2. 弹性形变容器 (BodySquash)：挂在 Chest 下，抵消枢轴高度置于世界 y=0。
+            // 步态弹跳（BobY）与触地挤压拉伸（SquashY / SquashXZ）全部作用在它身上
+            var squashGo = new GameObject("BodySquash");
+            squashGo.transform.SetParent(chest, false);
+            squashGo.transform.localPosition = new Vector3(0f, -CharacterMetrics.ChestPivotY, 0f);
+            bodySquash = squashGo.transform;
 
-            // 3. 后背墨水储罐背包 (Ink Tank Backpack)
-            var backpackGo = new GameObject("InkTankBackpack");
-            backpackGo.transform.SetParent(chest, false);
-            backpackGo.transform.localPosition = new Vector3(0f, 0.02f, -0.22f);
+            // 2.1 蛋形主躯干网格（唯一使用带外描边 Cartoon Shader 的部件）
+            var eggGo = new GameObject("EggBody");
+            eggGo.transform.SetParent(bodySquash, false);
+            eggGo.transform.localPosition = Vector3.zero;
+            var mf = eggGo.AddComponent<MeshFilter>();
+            var mr = eggGo.AddComponent<MeshRenderer>();
+            mf.sharedMesh = CreateEggBodyMesh();
+            mr.sharedMaterial = p.TeamCloth;
 
-            CreateBox(backpackGo.transform, "MountPlate", new Vector3(0f, 0f, 0.04f), new Vector3(0.18f, 0.32f, 0.04f), p.Dark);
-            CreateCylinder(backpackGo.transform, "GlassChamber", Vector3.zero, new Vector3(0.18f, 0.17f, 0.18f), p.Glass);
+            // 2.2 面部分区靠大眼与墨焰承担，蛋体本身保持整块干净曲面：
+            // 早期试过在腰部加一圈深色墨环，但圆柱与蛋形曲面的相交处会切出锯齿状碎边，观感很差，故不做。
 
-            var fillGo = CreateCylinder(backpackGo.transform, "LiquidFill", Vector3.zero, new Vector3(0.15f, 0.155f, 0.15f), p.TeamLiquid);
-            tankFill = fillGo.transform;
+            // 2.3 面部容器 (Face)：容器本身放在原点，所有部件直接用「蛋体身体空间」坐标贴面
+            var faceGo = new GameObject("Face");
+            faceGo.transform.SetParent(bodySquash, false);
+            faceGo.transform.localPosition = Vector3.zero;
+            var face = faceGo.transform;
 
-            CreateCylinder(backpackGo.transform, "TopCap", new Vector3(0f, 0.18f, 0f), new Vector3(0.20f, 0.025f, 0.20f), p.Metal);
-            CreateCylinder(backpackGo.transform, "ValveKnob", new Vector3(0f, 0.22f, 0f), new Vector3(0.06f, 0.03f, 0.06f), p.Dark);
-            CreateCylinder(backpackGo.transform, "BottomCap", new Vector3(0f, -0.18f, 0f), new Vector3(0.20f, 0.025f, 0.20f), p.Metal);
-
-            // 4. 头部、脸部面罩、大眼、耳机与触须发辫
-            var headGo = new GameObject("Head");
-            headGo.transform.SetParent(chest, false);
-            headGo.transform.localPosition = new Vector3(0f, 0.36f, 0f);
-            head = headGo.transform;
-
-            CreateSphere(head, "HeadMesh", Vector3.zero, new Vector3(0.36f, 0.36f, 0.36f), p.Skin);
-            CreateBox(head, "EyeMask", new Vector3(0f, 0.02f, 0.165f), new Vector3(0.28f, 0.09f, 0.04f), p.Dark);
-
-            // 高光大眼 (Left & Right)
+            // 大眼与深色眼罩：眼睛贴在上半前脸（y≈0.72），由曲面采样保证既不陷入也不悬浮
+            const float eyeY = 0.72f;
+            leftEye = null;
+            rightEye = null;
             for (int s = -1; s <= 1; s += 2)
             {
-                float ex = s * 0.075f;
-                var eyeGo = CreateSphere(head, s < 0 ? "Eye_L" : "Eye_R", new Vector3(ex, 0.025f, 0.18f), new Vector3(0.075f, 0.075f, 0.025f), p.White);
-                CreateSphere(eyeGo.transform, "Pupil", new Vector3(0f, 0f, 0.45f), new Vector3(0.6f, 0.6f, 0.5f), p.TeamHair);
-                CreateSphere(eyeGo.transform, "Glint", new Vector3(0.2f, 0.25f, 0.7f), new Vector3(0.2f, 0.2f, 0.2f), p.White);
+                float eyeX = s * 0.135f;
+                string side = s < 0 ? "L" : "R";
+                Quaternion faceRot = Quaternion.Euler(0f, EggFaceYaw(eyeX, eyeY), 0f);
 
-                // 精灵尖耳
-                CreatePart(head, s < 0 ? "Ear_L" : "Ear_R", PrimitiveType.Cube,
-                    new Vector3(s * 0.20f, -0.01f, -0.02f),
-                    new Vector3(0.06f, 0.04f, 0.10f),
-                    Quaternion.Euler(15f, s * -30f, s * -20f),
-                    p.Skin);
+                // 深色底托略大于白眼球，合成连体面罩的视觉轮廓
+                var mask = CreateSphere(face, "EyeMask_" + side, EggFrontPoint(eyeX, eyeY, 0.004f), new Vector3(0.225f, 0.245f, 0.055f), p.Dark);
+                mask.transform.localRotation = faceRot;
+
+                var eye = CreateSphere(face, "Eye_" + side, EggFrontPoint(eyeX, eyeY, 0.012f), new Vector3(0.17f, 0.19f, 0.09f), p.White);
+                eye.transform.localRotation = faceRot;
+                // 瞳孔必须是「贴在眼球表面的一枚凸片」：眼球的局部空间半径是 0.5（Unity 球体直径为 1），
+                // 放在 z=0.5 的极点处、厚度 0.35，才能从白眼球表面凸出来被看见；埋进眼球内部会完全不可见。
+                CreateSphere(eye.transform, "Pupil", new Vector3(0f, -0.01f, 0.50f), new Vector3(0.55f, 0.55f, 0.35f), p.TeamHair);
+                CreateSphere(eye.transform, "Glint", new Vector3(-0.16f, 0.16f, 0.62f), new Vector3(0.18f, 0.18f, 0.18f), p.White);
+                CreateSphere(eye.transform, "Glint2", new Vector3(0.13f, -0.13f, 0.60f), new Vector3(0.10f, 0.10f, 0.10f), p.White);
+
+                if (s < 0) leftEye = eye.transform;
+                else rightEye = eye.transform;
+
+                // 腮红贴在眼睛外下方
+                float blushX = s * 0.255f;
+                var blush = CreateSphere(face, "Blush_" + side, EggFrontPoint(blushX, 0.585f, 0.004f), new Vector3(0.10f, 0.055f, 0.035f), p.Blush);
+                blush.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(blushX, 0.585f), 0f);
             }
 
-            // 潮流 DJ 耳机 (Headphones)
-            var hpLeft = CreateCylinder(head, "EarCup_L", new Vector3(-0.20f, 0.02f, 0f), new Vector3(0.13f, 0.035f, 0.13f), p.Dark);
-            hpLeft.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
-            CreateCylinder(hpLeft.transform, "Ring", new Vector3(0f, 0.9f, 0f), new Vector3(0.85f, 0.2f, 0.85f), p.Metal);
+            // 小 ω 嘴：极扁的深色椭圆，贴在两眼下方的中线上
+            var mouth = CreateSphere(face, "Mouth", EggFrontPoint(0f, 0.60f, 0.004f), new Vector3(0.09f, 0.032f, 0.03f), p.Dark);
+            mouth.transform.localRotation = Quaternion.identity;
 
-            var hpRight = CreateCylinder(head, "EarCup_R", new Vector3(0.20f, 0.02f, 0f), new Vector3(0.13f, 0.035f, 0.13f), p.Dark);
-            hpRight.transform.localRotation = Quaternion.Euler(0f, 0f, -90f);
-            CreateCylinder(hpRight.transform, "Ring", new Vector3(0f, 0.9f, 0f), new Vector3(0.85f, 0.2f, 0.85f), p.Metal);
+            // 2.4 头顶墨焰触须束 (InkCrest)：根部 y = 0.98m，复用发辫惯性物理摆荡
+            var crestGo = new GameObject("InkCrest");
+            crestGo.transform.SetParent(bodySquash, false);
+            crestGo.transform.localPosition = new Vector3(0f, 0.98f, 0f);
 
-            var headband = CreateBox(head, "Headband", new Vector3(0f, 0.19f, 0f), new Vector3(0.38f, 0.03f, 0.06f), p.Dark);
-
-            // 触须发辫 (Tentacle Hair Braids)
             var lHairGo = new GameObject("LeftHairPivot");
-            lHairGo.transform.SetParent(head, false);
-            lHairGo.transform.localPosition = new Vector3(-0.16f, 0.10f, 0.06f);
+            lHairGo.transform.SetParent(crestGo.transform, false);
+            lHairGo.transform.localPosition = new Vector3(-0.10f, 0f, 0f);
             leftHair = lHairGo.transform;
-            BuildTentacleHairBraid(leftHair, p, -1);
+            BuildInkFlameCrest(leftHair, p, -1);
 
             var rHairGo = new GameObject("RightHairPivot");
-            rHairGo.transform.SetParent(head, false);
-            rHairGo.transform.localPosition = new Vector3(0.16f, 0.10f, 0.06f);
+            rHairGo.transform.SetParent(crestGo.transform, false);
+            rHairGo.transform.localPosition = new Vector3(0.10f, 0f, 0f);
             rightHair = rHairGo.transform;
-            BuildTentacleHairBraid(rightHair, p, 1);
+            BuildInkFlameCrest(rightHair, p, 1);
 
-            // 5. 双臂与手部 (Arms)
-            var rArmGo = new GameObject("RightArm");
-            rArmGo.transform.SetParent(chest, false);
-            rArmGo.transform.localPosition = new Vector3(0.24f, 0.08f, 0.06f);
-            rightArm = rArmGo.transform;
+            // 2.5 后背紧凑型墨罐背包 (InkTankBackpack)：外推到 z=-0.40，让壳体真正凸出蛋体背面成为可见背包
+            var backpackGo = new GameObject("InkTankBackpack");
+            backpackGo.transform.SetParent(bodySquash, false);
+            backpackGo.transform.localPosition = new Vector3(0f, 0.50f, -0.40f);
 
-            CreateCapsule(rightArm, "UpperArm", new Vector3(0f, -0.10f, 0.04f), new Vector3(0.10f, 0.14f, 0.10f), p.TeamCloth);
-            CreateCapsule(rightArm, "Forearm", new Vector3(0f, -0.22f, 0.14f), new Vector3(0.09f, 0.14f, 0.09f), p.Skin);
-            CreateSphere(rightArm, "HandR", new Vector3(0f, -0.25f, 0.24f), new Vector3(0.11f, 0.10f, 0.12f), p.Dark);
+            CreateBox(backpackGo.transform, "MountPlate", new Vector3(0f, 0f, 0.04f), new Vector3(0.16f, 0.26f, 0.035f), p.Dark);
+            CreateCylinder(backpackGo.transform, "GlassChamber", Vector3.zero, new Vector3(0.26f, 0.15f, 0.26f), p.Glass);
 
+            var fillGo = CreateCylinder(backpackGo.transform, "LiquidFill", Vector3.zero, new Vector3(0.22f, 0.135f, 0.22f), p.TeamLiquid);
+            tankFill = fillGo.transform;
+
+            CreateCylinder(backpackGo.transform, "TopCap", new Vector3(0f, 0.15f, 0f), new Vector3(0.28f, 0.02f, 0.28f), p.Metal);
+            CreateCylinder(backpackGo.transform, "ValveKnob", new Vector3(0f, 0.18f, 0f), new Vector3(0.06f, 0.025f, 0.06f), p.Dark);
+            CreateCylinder(backpackGo.transform, "BottomCap", new Vector3(0f, -0.15f, 0f), new Vector3(0.28f, 0.02f, 0.28f), p.Metal);
+
+            // 2.6 头顶空锚点 (Head)：供待机微表现进行微妙呼吸浮动
+            var headGo = new GameObject("Head");
+            headGo.transform.SetParent(bodySquash, false);
+            headGo.transform.localPosition = new Vector3(0f, 0.74f, 0f);
+            head = headGo.transform;
+
+            // 3. 左右手臂 (LeftArm / RightArm)：必须是 Chest 的直接子节点
+            //    （测试用例强依赖 KidRoot.transform.Find("Chest/LeftArm") 路径）。
+            //    蛋体很胖，枢轴只能埋进侧面、让前臂从体表前方伸出，圆手才落在武器握把附近。
             var lArmGo = new GameObject("LeftArm");
             lArmGo.transform.SetParent(chest, false);
-            lArmGo.transform.localPosition = new Vector3(-0.24f, 0.08f, 0.06f);
+            lArmGo.transform.localPosition = new Vector3(-0.34f, 0.41f, 0.04f);
             leftArm = lArmGo.transform;
+            BuildMittenArm(leftArm, p, 1);
 
-            CreateCapsule(leftArm, "UpperArm", new Vector3(0f, -0.08f, 0.06f), new Vector3(0.10f, 0.14f, 0.10f), p.TeamCloth);
-            CreateCapsule(leftArm, "Forearm", new Vector3(0.06f, -0.18f, 0.18f), new Vector3(0.09f, 0.14f, 0.09f), p.Skin);
-            CreateSphere(leftArm, "HandL", new Vector3(0.12f, -0.20f, 0.28f), new Vector3(0.11f, 0.10f, 0.12f), p.Dark);
+            var rArmGo = new GameObject("RightArm");
+            rArmGo.transform.SetParent(chest, false);
+            rArmGo.transform.localPosition = new Vector3(0.34f, 0.41f, 0.04f);
+            rightArm = rArmGo.transform;
+            BuildMittenArm(rightArm, p, -1);
         }
 
-        private static void BuildTentacleHairBraid(Transform root, Palette p, int side)
+        /// <summary>
+        /// 短圆手：袖管从肩部沿「肩 → 握把」方向伸到身前，末端是白色圆手套。
+        /// inward 为横向收拢方向（左臂 +1 向身体中线，右臂 -1 同理）。
+        /// </summary>
+        private static void BuildMittenArm(Transform root, Palette p, int inward)
         {
-            // 3 段顺滑下垂并微向前弯曲的触须发辫
-            Vector3 seg1Pos = new Vector3(0f, -0.12f, 0.02f);
-            var s1 = CreateCapsule(root, "HairSeg1", seg1Pos, new Vector3(0.11f, 0.15f, 0.11f), p.TeamHair);
+            Vector3 toHand = new Vector3(inward * 0.16f, 0.06f, 0.30f);
+            Vector3 mid = toHand * 0.5f;
 
-            Vector3 seg2Pos = new Vector3(0f, -0.26f, 0.05f);
-            var s2 = CreateCapsule(root, "HairSeg2", seg2Pos, new Vector3(0.10f, 0.14f, 0.10f), p.TeamHair);
+            var sleeve = CreateCapsule(root, "Sleeve", mid,
+                new Vector3(0.085f, toHand.magnitude * 0.5f, 0.085f), p.TeamCloth);
+            sleeve.transform.localRotation = Quaternion.FromToRotation(Vector3.up, toHand.normalized);
 
-            Vector3 seg3Pos = new Vector3(0f, -0.38f, 0.10f);
-            var s3 = CreateCapsule(root, "HairTip", seg3Pos, new Vector3(0.08f, 0.12f, 0.08f), p.TeamHair);
+            CreateSphere(root, "Hand", toHand, new Vector3(0.12f, 0.12f, 0.12f), p.White);
+        }
 
-            // 触须内侧白/浅色吸盘小点
-            for (int i = 0; i < 3; i++)
-            {
-                float y = -0.10f - i * 0.12f;
-                CreatePart(root, "SuctionCup" + i, PrimitiveType.Sphere,
-                    new Vector3(side * -0.035f, y, 0.05f + i * 0.025f),
-                    new Vector3(0.04f, 0.04f, 0.015f),
-                    Quaternion.identity, p.White);
-            }
+        private static void BuildInkFlameCrest(Transform root, Palette p, int side)
+        {
+            // 3 段由粗到细、向后上方微弯的队伍色墨焰束
+            var s1 = CreateCapsule(root, "FlameSeg1", new Vector3(0f, 0.05f, -0.015f), new Vector3(0.09f, 0.09f, 0.09f), p.TeamHair);
+            s1.transform.localRotation = Quaternion.Euler(-12f, side * 10f, side * -5f);
+
+            var s2 = CreateCapsule(root, "FlameSeg2", new Vector3(0f, 0.12f, -0.045f), new Vector3(0.075f, 0.08f, 0.075f), p.TeamHair);
+            s2.transform.localRotation = Quaternion.Euler(-24f, side * 15f, side * -8f);
+
+            var s3 = CreateCapsule(root, "FlameTip", new Vector3(0f, 0.18f, -0.085f), new Vector3(0.055f, 0.07f, 0.055f), p.TeamHair);
+            s3.transform.localRotation = Quaternion.Euler(-36f, side * 20f, side * -12f);
         }
 
         #endregion
@@ -424,41 +723,42 @@ namespace P1.Player
             bodyGo.transform.localPosition = new Vector3(0f, 0.08f, 0f);
             squidBody = bodyGo.transform;
 
-            // 1. 程序化流线型扁平乌贼网格 (Mantle & Wings)
+            // 1. 更饱满圆润的乌贼流线型墨团网格
             var mf = bodyGo.AddComponent<MeshFilter>();
             var mr = bodyGo.AddComponent<MeshRenderer>();
             mf.sharedMesh = CreateSquidMesh();
             mr.sharedMaterial = p.SquidBody;
 
-            // 2. 乌贼大眼 (两侧突出的前向大眼)
+            // 2. 乌贼大眼（白眼球 + 深色瞳孔，和人形态的大眼保持同一套读法）
             for (int s = -1; s <= 1; s += 2)
             {
                 float x = s * 0.14f;
                 var eyeBase = CreateSphere(bodyGo.transform, s < 0 ? "Eye_L" : "Eye_R",
                     new Vector3(x, 0.05f, 0.06f),
-                    new Vector3(0.09f, 0.07f, 0.09f),
-                    p.Dark);
+                    new Vector3(0.115f, 0.095f, 0.115f),
+                    p.White);
 
                 CreateSphere(eyeBase.transform, "Pupil",
-                    new Vector3(0f, 0.2f, 0.4f),
-                    new Vector3(0.6f, 0.6f, 0.5f),
-                    p.White);
+                    new Vector3(0f, 0.15f, 0.42f),
+                    new Vector3(0.55f, 0.55f, 0.45f),
+                    p.Dark);
             }
 
-            // 3. 拖尾游动触须 (4 条流线游动触须)
+            // 3. 拖尾游动触须（保留节点名称与位置，略微加粗）
             var tentRootGo = new GameObject("TrailingTentacles");
             tentRootGo.transform.SetParent(bodyGo.transform, false);
             tentRootGo.transform.localPosition = new Vector3(0f, 0f, -0.22f);
             squidTentacles = tentRootGo.transform;
 
-            CreateCapsule(squidTentacles, "Tentacle_OutL", new Vector3(-0.14f, 0.01f, -0.16f), new Vector3(0.05f, 0.18f, 0.05f), p.SquidBody).transform.localRotation = Quaternion.Euler(85f, 0f, 0f);
-            CreateCapsule(squidTentacles, "Tentacle_MidL", new Vector3(-0.05f, 0.01f, -0.20f), new Vector3(0.045f, 0.22f, 0.045f), p.SquidBody).transform.localRotation = Quaternion.Euler(88f, 0f, 0f);
-            CreateCapsule(squidTentacles, "Tentacle_MidR", new Vector3(0.05f, 0.01f, -0.20f), new Vector3(0.045f, 0.22f, 0.045f), p.SquidBody).transform.localRotation = Quaternion.Euler(88f, 0f, 0f);
-            CreateCapsule(squidTentacles, "Tentacle_OutR", new Vector3(0.14f, 0.01f, -0.16f), new Vector3(0.05f, 0.18f, 0.05f), p.SquidBody).transform.localRotation = Quaternion.Euler(85f, 0f, 0f);
+            CreateCapsule(squidTentacles, "Tentacle_OutL", new Vector3(-0.14f, 0.01f, -0.16f), new Vector3(0.06f, 0.18f, 0.06f), p.SquidBody).transform.localRotation = Quaternion.Euler(85f, 0f, 0f);
+            CreateCapsule(squidTentacles, "Tentacle_MidL", new Vector3(-0.05f, 0.01f, -0.20f), new Vector3(0.055f, 0.22f, 0.055f), p.SquidBody).transform.localRotation = Quaternion.Euler(88f, 0f, 0f);
+            CreateCapsule(squidTentacles, "Tentacle_MidR", new Vector3(0.05f, 0.01f, -0.20f), new Vector3(0.055f, 0.22f, 0.055f), p.SquidBody).transform.localRotation = Quaternion.Euler(88f, 0f, 0f);
+            CreateCapsule(squidTentacles, "Tentacle_OutR", new Vector3(0.14f, 0.01f, -0.16f), new Vector3(0.06f, 0.18f, 0.06f), p.SquidBody).transform.localRotation = Quaternion.Euler(85f, 0f, 0f);
         }
 
         /// <summary>
-        /// 生成平滑流线型三角箭囊与水平三角游翼专属网格
+        /// 生成更胖更圆润的程序化流线型乌贼墨团网格。
+        /// 长度由 0.62m 缩减至约 0.52m，横向 rx 拓宽至约 0.23m，竖向 ry 提升至 0.50*baseR。
         /// </summary>
         public static Mesh CreateSquidMesh()
         {
@@ -469,19 +769,18 @@ namespace P1.Player
             List<Vector2> uvs = new List<Vector2>();
             List<int> tris = new List<int>();
 
-            const int ringCount = 14;
+            const int ringCount = 15;
             const int radialSegs = 16;
 
             for (int r = 0; r <= ringCount; r++)
             {
                 float u = (float)r / ringCount; // 0 (前鼻尖) ~ 1 (尾部根)
-                float z = Mathf.Lerp(0.38f, -0.24f, u);
+                float z = Mathf.Lerp(0.30f, -0.22f, u); // 长度约 0.52m
 
-                // 宽度轮廓：鼻尖尖锐 -> 中段横向扩张成三角游水翼 -> 尾部收束
-                float baseR = Mathf.Sin(u * Mathf.PI * 0.85f) * 0.20f + 0.01f;
-                float finFlare = Mathf.Clamp01(Mathf.Sin((u - 0.2f) * Mathf.PI * 1.5f)) * 0.16f;
+                float baseR = Mathf.Sin(u * Mathf.PI * 0.85f) * 0.22f + 0.02f;
+                float finFlare = Mathf.Clamp01(Mathf.Sin((u - 0.18f) * Mathf.PI * 1.4f)) * 0.08f;
                 float rx = baseR + finFlare;
-                float ry = baseR * 0.38f; // 扁平压低以紧贴水面滑行
+                float ry = baseR * 0.50f;
 
                 for (int s = 0; s < radialSegs; s++)
                 {
@@ -491,16 +790,14 @@ namespace P1.Player
 
                     float vx = cos * rx;
                     float vy = sin * ry;
-                    // 底面更加平滑压平
-                    if (vy < 0f) vy *= 0.7f;
+                    if (vy < 0f) vy *= 0.75f;
 
                     verts.Add(new Vector3(vx, vy, z));
-                    normals.Add(new Vector3(cos, sin * 1.8f, 0f).normalized);
+                    normals.Add(new Vector3(cos, sin * 1.6f, 0f).normalized);
                     uvs.Add(new Vector2((float)s / radialSegs, u));
                 }
             }
 
-            // 缝合圆环面三角形
             for (int r = 0; r < ringCount; r++)
             {
                 int r0 = r * radialSegs;
@@ -557,53 +854,56 @@ namespace P1.Player
             // 1. Spritzer (Shooter 喷漆步枪)
             shooter = new GameObject("Spritzer_Shooter");
             shooter.transform.SetParent(weaponRoot, false);
+            shooter.transform.localScale = Vector3.one * CharacterMetrics.WeaponModelScale;
             BuildShooterModel(shooter.transform, p, out mShooter);
 
             // 2. Swell (Roller 宽屏滚筒架)
             roller = new GameObject("Swell_Roller");
             roller.transform.SetParent(weaponRoot, false);
+            roller.transform.localScale = Vector3.one * CharacterMetrics.WeaponModelScale;
             BuildRollerModel(roller.transform, p, out rollerDrum, out mRoller);
 
             // 3. Glint (Charger 长导轨蓄力狙)
             charger = new GameObject("Glint_Charger");
             charger.transform.SetParent(weaponRoot, false);
+            charger.transform.localScale = Vector3.one * CharacterMetrics.WeaponModelScale;
             BuildChargerModel(charger.transform, p, out chargerCoils, out mCharger);
 
             // 4. Twinfin (Dualies 双枪)
             dualies = new GameObject("Twinfin_Dualies");
             dualies.transform.SetParent(weaponRoot, false);
+            dualies.transform.localScale = Vector3.one * CharacterMetrics.WeaponModelScale;
             BuildDualiesModel(dualies.transform, p, out mDualiesR, out mDualiesL);
 
             // 5. Tidebucket (Slosher 泼桶)
             slosher = new GameObject("Tidebucket_Slosher");
             slosher.transform.SetParent(weaponRoot, false);
+            slosher.transform.localScale = Vector3.one * CharacterMetrics.WeaponModelScale;
             BuildSlosherModel(slosher.transform, p, out mSlosher);
 
             // 6. Popper (Blaster 爆破枪)
             blaster = new GameObject("Popper_Blaster");
             blaster.transform.SetParent(weaponRoot, false);
+            blaster.transform.localScale = Vector3.one * CharacterMetrics.WeaponModelScale;
             BuildBlasterModel(blaster.transform, p, out mBlaster);
 
             // 7. Gyre (Splatling 加特林)
             splatling = new GameObject("Gyre_Splatling");
             splatling.transform.SetParent(weaponRoot, false);
+            splatling.transform.localScale = Vector3.one * CharacterMetrics.WeaponModelScale;
             BuildSplatlingModel(splatling.transform, p, out splatlingBarrels, out mSplatling);
         }
 
         // 1. Spritzer 喷漆步枪
         private static void BuildShooterModel(Transform root, Palette p, out Transform muzzle)
         {
-            Vector3 offset = new Vector3(0.24f, 0.80f, 0.32f);
-            root.localPosition = offset;
+            root.localPosition = CharacterMetrics.WeaponMountOffset(0.24f, 0.80f, 0.32f);
 
             CreateBox(root, "Receiver", new Vector3(0f, 0.04f, 0.02f), new Vector3(0.08f, 0.10f, 0.28f), p.White);
             CreateBox(root, "Grip", new Vector3(0f, -0.06f, -0.06f), new Vector3(0.06f, 0.14f, 0.08f), p.Dark).transform.localRotation = Quaternion.Euler(15f, 0f, 0f);
             CreateBox(root, "InkSpine", new Vector3(0f, 0.095f, 0.02f), new Vector3(0.04f, 0.02f, 0.24f), p.TeamHair);
 
-            // 顶部加压墨水罐
             CreateCylinder(root, "InkCanister", new Vector3(0f, 0.14f, -0.02f), new Vector3(0.09f, 0.12f, 0.09f), p.TeamLiquid).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-
-            // 散热套筒与喷嘴
             CreateCylinder(root, "Barrel", new Vector3(0f, 0.04f, 0.22f), new Vector3(0.055f, 0.14f, 0.055f), p.Metal).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "NozzleTip", new Vector3(0f, 0.04f, 0.34f), new Vector3(0.075f, 0.035f, 0.075f), p.TeamHair).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
@@ -616,19 +916,15 @@ namespace P1.Player
         // 2. Swell 滚筒
         private static void BuildRollerModel(Transform root, Palette p, out Transform drum, out Transform muzzle)
         {
-            Vector3 offset = new Vector3(0f, 0.72f, 0.30f);
-            root.localPosition = offset;
+            root.localPosition = CharacterMetrics.WeaponMountOffset(0f, 0.72f, 0.30f);
 
-            // 居中操作长杆
             CreateCylinder(root, "Shaft", new Vector3(0f, 0f, 0.20f), new Vector3(0.045f, 0.40f, 0.045f), p.Metal).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "GripRubberRear", new Vector3(0f, 0f, -0.10f), new Vector3(0.06f, 0.12f, 0.06f), p.Dark).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "GripRubberFront", new Vector3(0f, 0f, 0.18f), new Vector3(0.06f, 0.12f, 0.06f), p.Dark).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
-            // 叉架主体与墨水槽
             CreateBox(root, "YokeHub", new Vector3(0f, 0f, 0.52f), new Vector3(0.14f, 0.10f, 0.10f), p.Dark);
             CreateBox(root, "InkReservoir", new Vector3(0f, 0.08f, 0.52f), new Vector3(0.18f, 0.07f, 0.12f), p.TeamLiquid);
 
-            // 两侧外伸钢臂
             for (int s = -1; s <= 1; s += 2)
             {
                 CreateBox(root, s < 0 ? "Arm_L" : "Arm_R",
@@ -642,7 +938,6 @@ namespace P1.Player
                     p.Dark).transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
             }
 
-            // 旋转滚筒
             var drumGo = new GameObject("RollerDrum");
             drumGo.transform.SetParent(root, false);
             drumGo.transform.localPosition = new Vector3(0f, 0f, 0.52f);
@@ -651,7 +946,6 @@ namespace P1.Player
             var drumCyl = CreateCylinder(drum, "DrumMesh", Vector3.zero, new Vector3(0.24f, 0.60f, 0.24f), p.TeamLiquid);
             drumCyl.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
 
-            // 滚筒表面防滑凸起墨道纹理
             for (int k = -2; k <= 2; k++)
             {
                 var rib = CreateCylinder(drum, "TreadRib" + k, new Vector3(k * 0.22f, 0f, 0f), new Vector3(0.25f, 0.025f, 0.25f), p.Dark);
@@ -667,26 +961,20 @@ namespace P1.Player
         // 3. Glint 狙击枪
         private static void BuildChargerModel(Transform root, Palette p, out Renderer[] coils, out Transform muzzle)
         {
-            Vector3 offset = new Vector3(0.24f, 0.80f, 0.30f);
-            root.localPosition = offset;
+            root.localPosition = CharacterMetrics.WeaponMountOffset(0.24f, 0.80f, 0.30f);
 
-            // 枪托与镂空后托
             CreateBox(root, "Stock", new Vector3(0f, 0.02f, -0.22f), new Vector3(0.06f, 0.10f, 0.22f), p.Dark);
             CreateBox(root, "ButtPad", new Vector3(0f, 0.02f, -0.34f), new Vector3(0.07f, 0.14f, 0.03f), p.Dark);
 
-            // 机匣与握把
             CreateBox(root, "Receiver", new Vector3(0f, 0.04f, 0.04f), new Vector3(0.075f, 0.10f, 0.32f), p.White);
             CreateBox(root, "Grip", new Vector3(0f, -0.06f, -0.04f), new Vector3(0.055f, 0.14f, 0.07f), p.Dark).transform.localRotation = Quaternion.Euler(15f, 0f, 0f);
 
-            // 光学瞄准镜
             CreateCylinder(root, "Scope", new Vector3(0f, 0.13f, 0.04f), new Vector3(0.055f, 0.18f, 0.055f), p.Dark).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "ScopeLens", new Vector3(0f, 0.13f, 0.20f), new Vector3(0.065f, 0.02f, 0.065f), p.Metal).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
-            // 超长精密导轨管
             CreateCylinder(root, "LongBarrel", new Vector3(0f, 0.04f, 0.45f), new Vector3(0.038f, 0.42f, 0.038f), p.Metal).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "MuzzleBrake", new Vector3(0f, 0.04f, 0.86f), new Vector3(0.052f, 0.05f, 0.052f), p.Metal).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
-            // 4 组环形蓄力发光线圈 (Charge Coils)
             List<Renderer> coilRends = new List<Renderer>();
             for (int i = 0; i < 4; i++)
             {
@@ -708,16 +996,14 @@ namespace P1.Player
         {
             root.localPosition = Vector3.zero;
 
-            // 右手手枪
             var rightPistol = new GameObject("RightPistol");
             rightPistol.transform.SetParent(root, false);
-            rightPistol.transform.localPosition = new Vector3(0.24f, 0.82f, 0.30f);
+            rightPistol.transform.localPosition = CharacterMetrics.WeaponMountOffset(0.24f, 0.82f, 0.30f);
             BuildSinglePistol(rightPistol.transform, p, out muzzleR);
 
-            // 左手手枪
             var leftPistol = new GameObject("LeftPistol");
             leftPistol.transform.SetParent(root, false);
-            leftPistol.transform.localPosition = new Vector3(-0.24f, 0.82f, 0.30f);
+            leftPistol.transform.localPosition = CharacterMetrics.WeaponMountOffset(-0.24f, 0.82f, 0.30f);
             BuildSinglePistol(leftPistol.transform, p, out muzzleL);
         }
 
@@ -728,7 +1014,6 @@ namespace P1.Player
             CreateBox(pistolRoot, "Slide", new Vector3(0f, 0.07f, 0.02f), new Vector3(0.065f, 0.045f, 0.23f), p.White);
             CreateBox(pistolRoot, "DorsalFin", new Vector3(0f, 0.10f, 0.04f), new Vector3(0.025f, 0.02f, 0.10f), p.TeamHair);
 
-            // 下挂圆柱墨囊
             CreateCylinder(pistolRoot, "InkCapsule", new Vector3(0f, -0.02f, 0.07f), new Vector3(0.05f, 0.07f, 0.05f), p.TeamLiquid).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(pistolRoot, "Nozzle", new Vector3(0f, 0.04f, 0.14f), new Vector3(0.045f, 0.04f, 0.045f), p.Metal).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
@@ -741,25 +1026,17 @@ namespace P1.Player
         // 5. Tidebucket 泼桶
         private static void BuildSlosherModel(Transform root, Palette p, out Transform muzzle)
         {
-            Vector3 offset = new Vector3(0.12f, 0.76f, 0.32f);
-            root.localPosition = offset;
+            root.localPosition = CharacterMetrics.WeaponMountOffset(0.12f, 0.76f, 0.32f);
 
-            // 梯形水桶桶身
             CreateCylinder(root, "BucketPail", new Vector3(0f, 0.05f, 0.10f), new Vector3(0.34f, 0.15f, 0.34f), p.White);
             CreateCylinder(root, "ReinforceHoopTop", new Vector3(0f, 0.16f, 0.10f), new Vector3(0.36f, 0.025f, 0.36f), p.Dark);
             CreateCylinder(root, "ReinforceHoopBottom", new Vector3(0f, -0.06f, 0.10f), new Vector3(0.30f, 0.025f, 0.30f), p.Dark);
 
-            // 桶内墨水液面
             CreateCylinder(root, "InkLiquidSurface", new Vector3(0f, 0.12f, 0.10f), new Vector3(0.31f, 0.03f, 0.31f), p.TeamLiquid);
-
-            // 突出倾倒嘴 (Pouring Lip)
             CreateBox(root, "PourLip", new Vector3(0f, 0.16f, 0.28f), new Vector3(0.18f, 0.04f, 0.10f), p.White).transform.localRotation = Quaternion.Euler(15f, 0f, 0f);
 
-            // 后置水罐提手 (Pitcher Handle)
             CreateBox(root, "HandleRear", new Vector3(0f, 0.08f, -0.10f), new Vector3(0.06f, 0.22f, 0.06f), p.Dark);
             CreateBox(root, "HandleLever", new Vector3(0f, 0.20f, -0.06f), new Vector3(0.05f, 0.03f, 0.08f), p.Metal);
-
-            // 底部横向副把手
             CreateBox(root, "CarryBar", new Vector3(0f, -0.12f, 0.08f), new Vector3(0.26f, 0.045f, 0.045f), p.Dark);
 
             var muz = new GameObject("Muzzle");
@@ -771,13 +1048,11 @@ namespace P1.Player
         // 6. Popper 爆破枪
         private static void BuildBlasterModel(Transform root, Palette p, out Transform muzzle)
         {
-            Vector3 offset = new Vector3(0.24f, 0.80f, 0.32f);
-            root.localPosition = offset;
+            root.localPosition = CharacterMetrics.WeaponMountOffset(0.24f, 0.80f, 0.32f);
 
             CreateBox(root, "Receiver", new Vector3(0f, 0.04f, 0.02f), new Vector3(0.12f, 0.12f, 0.28f), p.White);
             CreateBox(root, "Grip", new Vector3(0f, -0.07f, -0.06f), new Vector3(0.06f, 0.15f, 0.07f), p.Dark).transform.localRotation = Quaternion.Euler(15f, 0f, 0f);
 
-            // 球形高压墨水球置于外置保护笼内
             CreateSphere(root, "PressureBulb", new Vector3(0f, 0.06f, 0.08f), new Vector3(0.18f, 0.18f, 0.18f), p.TeamLiquid);
             for (int k = 0; k < 4; k++)
             {
@@ -786,17 +1061,14 @@ namespace P1.Player
                 rib.transform.localRotation = Quaternion.Euler(0f, 0f, a);
             }
 
-            // 后置圆形高压气压表盘 (Pressure Gauge)
             CreateCylinder(root, "PressureGauge", new Vector3(0f, 0.08f, -0.12f), new Vector3(0.08f, 0.02f, 0.08f), p.Metal).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "GaugeDial", new Vector3(0f, 0.08f, -0.13f), new Vector3(0.065f, 0.015f, 0.065f), p.White).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateBox(root, "GaugeNeedle", new Vector3(0f, 0.09f, -0.14f), new Vector3(0.01f, 0.04f, 0.005f), p.Dark);
 
-            // 巨大喇叭口散弹枪管 (Flared Bell Muzzle)
             CreateCylinder(root, "HornBase", new Vector3(0f, 0.06f, 0.24f), new Vector3(0.11f, 0.10f, 0.11f), p.White).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "BellMuzzle", new Vector3(0f, 0.06f, 0.36f), new Vector3(0.22f, 0.08f, 0.22f), p.White).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "BellRim", new Vector3(0f, 0.06f, 0.42f), new Vector3(0.24f, 0.025f, 0.24f), p.TeamHair).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
-            // 下挂泵动滑块 (Pump Foregrip)
             CreateCylinder(root, "PumpSlide", new Vector3(0f, -0.04f, 0.18f), new Vector3(0.07f, 0.12f, 0.07f), p.Dark).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
             var muz = new GameObject("Muzzle");
@@ -808,20 +1080,16 @@ namespace P1.Player
         // 7. Gyre 加特林机枪
         private static void BuildSplatlingModel(Transform root, Palette p, out Transform barrelsCluster, out Transform muzzle)
         {
-            Vector3 offset = new Vector3(0.24f, 0.78f, 0.28f);
-            root.localPosition = offset;
+            root.localPosition = CharacterMetrics.WeaponMountOffset(0.24f, 0.78f, 0.28f);
 
-            // 机电外壳与握把
             CreateBox(root, "MotorHousing", new Vector3(0f, 0.04f, 0.06f), new Vector3(0.16f, 0.16f, 0.28f), p.White);
             CreateBox(root, "RearGrip", new Vector3(0f, -0.06f, -0.06f), new Vector3(0.06f, 0.14f, 0.07f), p.Dark).transform.localRotation = Quaternion.Euler(15f, 0f, 0f);
             CreateBox(root, "ForwardVerticalGrip", new Vector3(0f, -0.10f, 0.16f), new Vector3(0.05f, 0.14f, 0.05f), p.Dark);
 
-            // 顶部加特林转鼓墨盒
             CreateCylinder(root, "TopInkDrum", new Vector3(0f, 0.16f, 0.04f), new Vector3(0.14f, 0.14f, 0.14f), p.TeamLiquid).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "DrumCapFront", new Vector3(0f, 0.16f, 0.17f), new Vector3(0.15f, 0.02f, 0.15f), p.Dark).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             CreateCylinder(root, "DrumCapRear", new Vector3(0f, 0.16f, -0.09f), new Vector3(0.15f, 0.02f, 0.15f), p.Dark).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
-            // 6 联装旋转枪管簇 (Spinning Barrels Cluster)
             var clusterGo = new GameObject("RotatingBarrelsCluster");
             clusterGo.transform.SetParent(root, false);
             clusterGo.transform.localPosition = new Vector3(0f, 0.04f, 0.20f);
@@ -829,7 +1097,6 @@ namespace P1.Player
 
             CreateCylinder(barrelsCluster, "CenterSpindle", new Vector3(0f, 0f, 0.20f), new Vector3(0.035f, 0.38f, 0.035f), p.Dark).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
-            // 6 根圆形排列枪管
             for (int i = 0; i < 6; i++)
             {
                 float angle = i * 60f * Mathf.Deg2Rad;
@@ -843,7 +1110,6 @@ namespace P1.Player
                 b.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             }
 
-            // 3 圈固定卡盘
             for (int k = 0; k < 3; k++)
             {
                 float z = 0.08f + k * 0.16f;

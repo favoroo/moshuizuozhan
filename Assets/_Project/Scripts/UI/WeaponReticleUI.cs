@@ -10,6 +10,7 @@ namespace P1.UI
 {
     /// <summary>
     /// 武器专属屏幕准星控制器（Screen-space Reticle UI）：
+    /// P9 第三人称起准星固定在屏幕正中心（相机中心射线即瞄准方向），不再随世界落点漂移。
     /// 借鉴 Inkwave hud.css (.iw-ret & .iw-subaim) 潮流设计：
     /// 1. 小枪：中心点 + 扩散圆环 + 4个随 Bloom 散布角度动态扩张/收缩的刻度角；
     /// 2. 滚筒：宽屏扇面横向指示条；
@@ -138,6 +139,13 @@ namespace P1.UI
         {
             if (_shooterContainer != null) return;
             _rectTransform = GetComponent<RectTransform>();
+
+            // P9：准星固定屏幕中心。显式锁定中心锚点，避免运行时被父级布局拉伸。
+            _rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            _rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            _rectTransform.anchoredPosition = Vector2.zero;
+
             _canvasGroup = gameObject.GetComponent<CanvasGroup>();
             if (_canvasGroup == null) _canvasGroup = gameObject.AddComponent<CanvasGroup>();
 
@@ -809,25 +817,8 @@ namespace P1.UI
             Camera cam = TopDownCameraFollow.Instance != null ? TopDownCameraFollow.Instance.CameraComponent : Camera.main;
             if (cam == null) return;
 
-            // 1. 将世界地面瞄准点投影到屏幕空间
-            Vector3 aimPos = player.AimGroundPoint;
-            Vector3 screenPt = cam.WorldToScreenPoint(aimPos);
-            if (screenPt.z < 0f)
-            {
-                _canvasGroup.alpha = 0f;
-                return;
-            }
-
-            if (_parentCanvas != null && _parentCanvas.renderMode == RenderMode.ScreenSpaceOverlay)
-            {
-                _rectTransform.position = screenPt;
-            }
-            else if (_canvasRect != null)
-            {
-                RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                    _canvasRect, screenPt, _parentCanvas.worldCamera, out Vector2 localPoint);
-                _rectTransform.anchoredPosition = localPoint;
-            }
+            // 1. P9：准星固定在屏幕中心。根节点 anchor/pivot 已在 EnsureInitialized 锁为 (0.5, 0.5)，
+            //    不再把世界地面瞄准点 WorldToScreenPoint 投影过来。
 
             // 2. 潜墨隐匿透明度
             bool isSwimming = player.Motor != null && player.Motor.IsSwimming;

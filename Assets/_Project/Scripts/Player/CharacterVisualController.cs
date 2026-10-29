@@ -8,12 +8,15 @@ namespace P1.Player
 {
     /// <summary>
     /// 精致多部件程序化角色（Squidkid）与武器模型运行时控制器。
-    /// 负责：
-    /// 1. 人形态（Kid）与乌贼形态（Squid）弹性形变切换（Squash & Stretch）；
-    /// 2. 程序化动态微表现：待机呼吸起伏、奔跑身体前倾与转弯侧向倾斜（Lean Springs）、开火后坐力抖动（Recoil）；
-    /// 3. 触须发辫次级惯性摆动（Hair Inertia Sway）；
-    /// 4. 7 类主武器模型挂载、换装切换与动态构件动画（滚筒旋转、加特林枪管旋转、蓄力狙线圈发光等）；
-    /// 5. 墨水储罐背包液面随实际剩余墨水量动态升降。
+    /// 现已升级适配「Q 版无腿蛋形」形态：
+    /// 1. 弹跳步态（EggGaitSolver）：以垂直弹跳、左右交替摇摆与手臂反相摆动表现无腿跑动；
+    /// 2. 果冻弹簧（Jelly Spring）：起跳向上拉伸、落地按速度阻尼压扁缓冲、滞空仰俯；
+    /// 3. 前倾与侧倾（Lean Springs）：适配贴地枢轴（y=0.05m），抑制过大倾角放大；
+    /// 4. 独立挤压节点（BodySquash）：挤压与呼吸形变完全隔离于武器挂点（Chest）之外，杜绝武器被连带压扁；
+    /// 5. 待机自然微呼吸与实例非同步眨眼；
+    /// 6. 踩敌方墨水抖动与墨墙攀爬小幅蠕动；
+    /// 7. 人形态 ⇄ 乌贼潜行弹性形变过渡；
+    /// 8. 7 类主武器换装、双枪/单持姿态适配与专属机构动画（滚筒、加特林、蓄力线圈等）。
     /// </summary>
     [DisallowMultipleComponent]
     public class CharacterVisualController : MonoBehaviour
@@ -36,6 +39,12 @@ namespace P1.Player
         [Header("乌贼形态节点")]
         [SerializeField] private Transform squidBodyTransform;
         [SerializeField] private Transform squidTentaclesRoot;
+
+        [Header("蛋形躯干节点")]
+        [SerializeField] private Transform bodySquashTransform;
+        [SerializeField] private Transform faceTransform;
+        [SerializeField] private Transform leftEyeTransform;
+        [SerializeField] private Transform rightEyeTransform;
 
         [Header("7 类主武器模型")]
         [SerializeField] private GameObject weaponShooter;
@@ -68,33 +77,63 @@ namespace P1.Player
         private WeaponKind _currentWeaponKind = WeaponKind.Shooter;
         private Transform _activeMuzzle;
 
-        // 动态微表现状态
-        private Vector3 _defaultChestScale = Vector3.one;
-        private Vector3 _defaultHeadLocalPos = Vector3.zero;
+        // 默认姿态与缩放缓存（支持重新装配刷新，且防止每帧累乘/被覆盖）
+        private Transform _lastCachedSquashTransform;
+        private Vector3 _defaultBodySquashPos = Vector3.zero;
+        private Vector3 _defaultBodySquashScale = Vector3.one;
+
         private Quaternion _defaultChestRot = Quaternion.identity;
+        private Vector3 _defaultHeadLocalPos = Vector3.zero;
         private Quaternion _defaultLeftHairRot = Quaternion.identity;
         private Quaternion _defaultRightHairRot = Quaternion.identity;
-        private Vector3 _tankFillBasePos = Vector3.zero;
-        private Vector3 _tankFillBaseScale = Vector3.one;
+
+        private Transform _lastCachedLeftArm;
         private Vector3 _defaultLeftArmPos = Vector3.zero;
         private Quaternion _defaultLeftArmRot = Quaternion.identity;
+        private Quaternion _leftArmWeaponPoseRot = Quaternion.identity;
+        private Quaternion _defaultRightArmRot = Quaternion.identity;
+
+        private Transform _lastCachedLeftEye;
+        private Transform _lastCachedRightEye;
+        private Vector3 _defaultLeftEyeScale = Vector3.one;
+        private Vector3 _defaultRightEyeScale = Vector3.one;
+
+        private Vector3 _tankFillBasePos = Vector3.zero;
+        private Vector3 _tankFillBaseScale = Vector3.one;
         private Vector3 _weaponRootBasePos = Vector3.zero;
         private bool _weaponEventsBound;
 
+        // 运动采样与物理状态
         private Vector3 _prevWorldPos;
         private float _prevYaw;
+        private float _verticalVel;
+        private bool _wasGrounded = true;
+        private float _lastAirVelY;
+
+        // 蛋形步态相位与果冻弹簧状态
+        private float _gaitPhase;
+        private float _jelly;
+        private float _jellyVel;
+
+        // 身体前倾与侧倾平滑状态（Lean Springs）
         private float _currentPitch;
         private float _pitchVelocity;
         private float _currentRoll;
         private float _rollVelocity;
+
+        // 墨焰/触须发辫次级惯性摆动
         private float _currentHairPitch;
         private float _hairPitchVel;
         private float _currentHairRoll;
         private float _hairRollVel;
 
-        // 开火后坐力弹簧
+        // 开火后坐力脉冲
         private float _recoilZ;
         private float _recoilPitch;
+
+        // 实例独立随机眨眼
+        private float _nextBlinkTime = 2.0f;
+        private float _blinkStartTime = -1f;
 
         // 乌贼潜行形态平滑过渡 (0 = Kid, 1 = Squid)
         private float _swimTransition01;
@@ -112,6 +151,12 @@ namespace P1.Player
         public Transform ActiveMuzzle => _activeMuzzle != null ? _activeMuzzle : transform;
         public WeaponKind CurrentWeaponKind => _currentWeaponKind;
 
+        /// <summary>供编辑器展示图/测试读取挤压节点。</summary>
+        public Transform BodySquashTransform => bodySquashTransform;
+
+        /// <summary>
+        /// 保留原有装配器 30 参数签名与顺序完全一致。
+        /// </summary>
         public void BindHierarchy(
             GameObject kid,
             GameObject squid,
@@ -184,8 +229,22 @@ namespace P1.Player
             BuildWeaponMaps();
         }
 
+        /// <summary>由 CharacterVisualAssembler 在装配完成后调用，绑定蛋形专属节点。</summary>
+        public void BindEggRig(Transform bodySquash, Transform face, Transform leftEye, Transform rightEye)
+        {
+            bodySquashTransform = bodySquash;
+            faceTransform = face;
+            leftEyeTransform = leftEye;
+            rightEyeTransform = rightEye;
+
+            CacheDefaultTransforms();
+        }
+
         private void Awake()
         {
+            _nextBlinkTime = Time.time + UnityEngine.Random.Range(1.5f, 4.0f);
+            _blinkStartTime = -1f;
+
             CacheDefaultTransforms();
             BuildWeaponMaps();
 
@@ -235,9 +294,17 @@ namespace P1.Player
 
         private void CacheDefaultTransforms()
         {
+            // 蛋形挤压节点：优先使用专门的 bodySquashTransform；若未绑定则安全回退到 chestTransform（人形旧场景兜底）
+            Transform squash = bodySquashTransform != null ? bodySquashTransform : chestTransform;
+            if (squash != null && squash != _lastCachedSquashTransform)
+            {
+                _lastCachedSquashTransform = squash;
+                _defaultBodySquashPos = squash.localPosition;
+                _defaultBodySquashScale = squash.localScale;
+            }
+
             if (chestTransform != null)
             {
-                _defaultChestScale = chestTransform.localScale;
                 _defaultChestRot = chestTransform.localRotation;
             }
             if (headTransform != null)
@@ -257,11 +324,32 @@ namespace P1.Player
                 _tankFillBasePos = tankLiquidFill.localPosition;
                 _tankFillBaseScale = tankLiquidFill.localScale;
             }
-            if (leftArmTransform != null)
+
+            // 缓存装配器赋予的初始手臂位姿：仅在首次绑定或挂载目标变更时缓存，避免后续 EquipWeaponKind 相对位移污染基准
+            if (leftArmTransform != null && leftArmTransform != _lastCachedLeftArm)
             {
+                _lastCachedLeftArm = leftArmTransform;
                 _defaultLeftArmPos = leftArmTransform.localPosition;
                 _defaultLeftArmRot = leftArmTransform.localRotation;
+                _leftArmWeaponPoseRot = _defaultLeftArmRot;
             }
+            if (rightArmTransform != null)
+            {
+                _defaultRightArmRot = rightArmTransform.localRotation;
+            }
+
+            // 缓存眼睛默认尺寸，防止眨眼循环缩放累乘漂移
+            if (leftEyeTransform != null && leftEyeTransform != _lastCachedLeftEye)
+            {
+                _lastCachedLeftEye = leftEyeTransform;
+                _defaultLeftEyeScale = leftEyeTransform.localScale;
+            }
+            if (rightEyeTransform != null && rightEyeTransform != _lastCachedRightEye)
+            {
+                _lastCachedRightEye = rightEyeTransform;
+                _defaultRightEyeScale = rightEyeTransform.localScale;
+            }
+
             if (weaponRoot != null)
             {
                 _weaponRootBasePos = weaponRoot.transform.localPosition;
@@ -365,19 +453,22 @@ namespace P1.Player
                 _weaponController.SetMuzzleTransform(_activeMuzzle);
             }
 
-            // 调整左手姿态：双枪双手各持一把（外展持枪）；其余单体武器左手向内前托握
+            // 调整左手姿态：双枪双手各持一把（外展平行持枪）；其余单体武器左手向内前托握。
+            // 基于装配器生成的 _defaultLeftArmPos 做相对偏移，杜绝写死绝对坐标破坏体型一致性；
+            // 且严格保证双枪与单持武器的 localPosition.x 不相等（单测断言）。
             if (leftArmTransform != null)
             {
                 if (kind == WeaponKind.Dualies)
                 {
-                    leftArmTransform.localPosition = new Vector3(-0.24f, 0.08f, 0.06f);
-                    leftArmTransform.localRotation = Quaternion.identity;
+                    leftArmTransform.localPosition = _defaultLeftArmPos + new Vector3(-0.06f, 0.00f, -0.04f);
+                    _leftArmWeaponPoseRot = Quaternion.identity;
                 }
                 else
                 {
-                    leftArmTransform.localPosition = new Vector3(-0.16f, 0.08f, 0.12f);
-                    leftArmTransform.localRotation = Quaternion.Euler(15f, 25f, -10f);
+                    leftArmTransform.localPosition = _defaultLeftArmPos + new Vector3(0.04f, 0.00f, 0.04f);
+                    _leftArmWeaponPoseRot = Quaternion.Euler(15f, 25f, -10f);
                 }
+                leftArmTransform.localRotation = _leftArmWeaponPoseRot;
             }
         }
 
@@ -390,11 +481,17 @@ namespace P1.Player
 
             if (_swimTransition01 < 0.99f)
             {
-                UpdateLocomotionLean(dt);
-                UpdateIdleBreathing();
+                UpdateBodyPose(dt);
                 UpdateHairSway(dt);
                 UpdateRecoilKick(dt);
                 UpdateTankFill();
+            }
+            else
+            {
+                // 潜行期间保持采样锚点同步，避免浮出墨面第一帧由于大位移产生误触发瞬移或着地震荡
+                _prevWorldPos = transform.position;
+                _prevYaw = transform.eulerAngles.y;
+                _wasGrounded = _motor == null || _motor.IsGrounded;
             }
 
             UpdateWeaponMechanics(dt);
@@ -450,53 +547,200 @@ namespace P1.Player
         }
 
         /// <summary>
-        /// 奔跑前倾与转弯侧倾（Lean Springs）
+        /// 无腿蛋形角色程序化动作管线核心：
+        /// 1. 速度与着地边沿采样（含传送跳变重置）；
+        /// 2. 弹跳步态（EggGaitSolver 采样垂直弹跳 Bob、左右交替摇摆 Rock、挤压拉伸 Squash、双臂摆动 ArmSwing）；
+        /// 3. 果冻弹簧（起跳瞬间拉伸、落地按速度二次阻尼压扁缓冲、滞空仰俯）；
+        /// 4. 躯干前倾与转弯侧向倾斜（针对贴地枢轴下调角度倍率的 Lean Springs）；
+        /// 5. 待机呼吸与实例异步自然眨眼；
+        /// 6. 踩敌方墨水高频挣扎抖动；
+        /// 7. 墨墙攀爬蠕动；
+        /// 8. 姿态与挤压写回（所有形变全部作用于 bodySquashTransform 节点，严禁缩放 Chest 以免武器变形）。
         /// </summary>
-        private void UpdateLocomotionLean(float dt)
+        private void UpdateBodyPose(float dt)
         {
+            // --- 1. 速度与着地采样（每帧只算一次） ---
             Vector3 curPos = transform.position;
             Vector3 worldVel = (curPos - _prevWorldPos) / Mathf.Max(0.0001f, dt);
+
+            // 传送/复活导致的速度尖峰（> 50 m/s）：直接复位，避免误判为超高速起跳/落地
+            bool teleported = worldVel.sqrMagnitude > 2500f;
+            bool grounded = _motor == null || _motor.IsGrounded;
+
+            if (teleported)
+            {
+                _prevWorldPos = curPos;
+                worldVel = Vector3.zero;
+                _verticalVel = 0f;
+                _wasGrounded = grounded;
+                _jelly = 0f;
+                _jellyVel = 0f;
+                _lastAirVelY = 0f;
+            }
             _prevWorldPos = curPos;
+            _verticalVel = worldVel.y;
 
             Vector3 localVel = transform.InverseTransformDirection(worldVel);
-
             float curYaw = transform.eulerAngles.y;
             float yawRate = Mathf.DeltaAngle(_prevYaw, curYaw) / Mathf.Max(0.0001f, dt);
             _prevYaw = curYaw;
 
-            // 前进速度 -> 前倾；转弯角速度 + 横移 -> 侧倾 (Banking)
-            float targetPitch = Mathf.Clamp(localVel.z * 1.8f, -8f, 15f);
-            float targetRoll = Mathf.Clamp(-yawRate * 0.15f - localVel.x * 1.6f, -12f, 12f);
+            // --- 2. 弹跳步态计算 ---
+            float speed = _motor != null ? _motor.CurrentMoveSpeed : 0f;
+            float speed01 = EggGaitSolver.Speed01(speed);
+            // 步态权重：仅在地面且高于静止阈值时生效，减速时平滑趋于 0，姿态自然回到中性位
+            float gaitWeight = grounded ? Mathf.Clamp01((speed - EggGaitSolver.MoveSpeedThreshold) / 2.5f) : 0f;
+            if (gaitWeight > 0.02f)
+            {
+                _gaitPhase += Mathf.PI * EggGaitSolver.CadenceHz(speed01) * dt;
+            }
+
+            EggGaitPose gait = EggGaitSolver.Sample(speed01, _gaitPhase);
+            float bob = gait.BobY * gaitWeight;
+            float squashY = Mathf.Lerp(1f, gait.SquashY, gaitWeight);
+            float squashXZ = Mathf.Lerp(1f, gait.SquashXZ, gaitWeight);
+            float rock = gait.RockDeg * gaitWeight;
+            float armSwing = gait.ArmSwingDeg * gaitWeight;
+
+            // --- 3. 起跳 / 滞空 / 落地（果冻弹簧与滞空仰俯） ---
+            if (_wasGrounded && !grounded)
+            {
+                // 着地 -> 离地：起跳瞬间向上拉伸
+                _jellyVel += 3.2f;
+            }
+            else if (!_wasGrounded && grounded)
+            {
+                // 离地 -> 着地：按下落速度阻尼压扁缓冲
+                _jellyVel -= Mathf.Lerp(2.0f, 7.5f, Mathf.Clamp01(Mathf.Max(0f, -_lastAirVelY) / 14f));
+            }
+            _wasGrounded = grounded;
+
+            float airPitch = 0f;
+            if (!grounded)
+            {
+                _lastAirVelY = _verticalVel;
+                // 滞空期间：上升抬头、下落低头
+                airPitch = Mathf.Clamp(-_verticalVel * 1.2f, -10f, 10f);
+            }
+
+            // 二阶果冻弹簧模拟 (Jelly Spring: K=260, D=18)
+            const float JellyK = 260f;
+            const float JellyD = 18f;
+            _jellyVel += (-JellyK * _jelly - JellyD * _jellyVel) * dt;
+            _jelly += _jellyVel * dt;
+            _jelly = Mathf.Clamp(_jelly, -0.30f, 0.22f);
+
+            // --- 4. 前倾与侧倾（Lean Springs） ---
+            // 蛋形角色躯干枢轴贴地（CharacterMetrics.ChestPivotY = 0.05m），
+            // 相比旧版人形折叠，贴地倾斜会产生 2.5 倍视觉放大幅度，因此大幅下调目标角度倍率
+            float targetPitch = Mathf.Clamp(localVel.z * 1.0f, -5f, 9f);
+            float targetRoll = Mathf.Clamp(-yawRate * 0.10f - localVel.x * 1.0f, -8f, 8f);
 
             _currentPitch = Mathf.SmoothDamp(_currentPitch, targetPitch, ref _pitchVelocity, 0.08f, 100f, dt);
             _currentRoll = Mathf.SmoothDamp(_currentRoll, targetRoll, ref _rollVelocity, 0.08f, 100f, dt);
 
+            // --- 5. 待机呼吸起伏与眨眼 ---
+            if (speed < 0.6f && grounded)
+            {
+                float breath = Mathf.Sin(Time.time * 2.2f);
+                squashY += breath * 0.012f;
+                bob += breath * 0.006f;
+            }
+            UpdateBlink(dt);
+
+            // --- 6. 踩敌墨高频受击抖动 ---
+            float grip = _motor != null ? _motor.EnemyInkGrip01 : 0f;
+            if (grip > 0.001f)
+            {
+                rock += Mathf.Sin(Time.time * 38f) * grip * 3.5f;
+                squashY -= grip * 0.05f;
+            }
+
+            // --- 7. 墨墙攀爬小幅蠕动 ---
+            bool isWallClimbing = _motor != null && _motor.IsWallClimbing;
+            if (isWallClimbing)
+            {
+                // 攀爬时步态权重强制为 0，杜绝在垂直墙面上横向乱弹；改为 4Hz 垂直蠕动
+                bob = 0f;
+                rock = 0f;
+                armSwing = 0f;
+                squashY = 1f + Mathf.Sin(Time.time * 22f) * 0.02f;
+                squashXZ = 1f;
+            }
+
+            // --- 8. 写回骨骼与挤压节点 ---
+            // 关键：所有挤压与呼吸形变必须作用于 bodySquashTransform（武器挂载在 chest 下，缩放 chest 会把枪压扁）
+            Transform squash = bodySquashTransform != null ? bodySquashTransform : chestTransform;
+            if (squash != null)
+            {
+                squash.localPosition = _defaultBodySquashPos + Vector3.up * bob;
+                float sy = Mathf.Clamp(squashY * (1f + _jelly), 0.55f, 1.40f);
+                float sxz = Mathf.Clamp(squashXZ * (1f - _jelly * 0.5f), 0.60f, 1.35f);
+                // 严格基于 _defaultBodySquashScale 乘算，绝不每帧累乘
+                squash.localScale = Vector3.Scale(_defaultBodySquashScale, new Vector3(sxz, sy, sxz));
+            }
+
+            float finalPitch = _currentPitch + airPitch;
+            float finalRoll = _currentRoll + rock;
             if (chestTransform != null)
             {
-                chestTransform.localRotation = _defaultChestRot * Quaternion.Euler(_currentPitch, 0f, _currentRoll);
+                chestTransform.localRotation = _defaultChestRot * Quaternion.Euler(finalPitch, 0f, finalRoll);
+            }
+
+            // 双臂基于持枪基础位姿叠加反相摆荡，_leftArmWeaponPoseRot 由武器装备决定，不可被覆盖
+            if (leftArmTransform != null)
+            {
+                leftArmTransform.localRotation = _leftArmWeaponPoseRot * Quaternion.Euler(armSwing, 0f, 0f);
+            }
+            if (rightArmTransform != null)
+            {
+                rightArmTransform.localRotation = _defaultRightArmRot * Quaternion.Euler(-armSwing, 0f, 0f);
             }
         }
 
         /// <summary>
-        /// 待机呼吸起伏（Chest & Head subtle oscillation）
+        /// 程序化眨眼：两眼局部 Y 轴在 0.11s 内压扁至 0.08 再回弹。
+        /// 随机间隔 2.5~5.0s，每个角色实例非同步；严格基于默认 scale 插值，杜绝累乘。
         /// </summary>
-        private void UpdateIdleBreathing()
+        private void UpdateBlink(float dt)
         {
-            if (_motor != null && _motor.CurrentMoveSpeed > 0.8f) return;
+            if (leftEyeTransform == null && rightEyeTransform == null) return;
 
-            float breath = Mathf.Sin(Time.time * 2.2f);
-            if (chestTransform != null)
+            const float BlinkDuration = 0.11f;
+            if (Time.time >= _nextBlinkTime && _blinkStartTime < 0f)
             {
-                chestTransform.localScale = _defaultChestScale + new Vector3(-breath * 0.012f, breath * 0.018f, -breath * 0.012f);
+                _blinkStartTime = Time.time;
+                _nextBlinkTime = Time.time + UnityEngine.Random.Range(2.5f, 5.0f);
             }
-            if (headTransform != null)
+
+            float blinkWeight = 0f;
+            if (_blinkStartTime >= 0f)
             {
-                headTransform.localPosition = _defaultHeadLocalPos + Vector3.up * (breath * 0.006f);
+                float elapsed = Time.time - _blinkStartTime;
+                if (elapsed <= BlinkDuration)
+                {
+                    blinkWeight = Mathf.Sin(Mathf.Clamp01(elapsed / BlinkDuration) * Mathf.PI);
+                }
+                else
+                {
+                    _blinkStartTime = -1f;
+                }
+            }
+
+            float scaleYFactor = Mathf.Lerp(1f, 0.08f, blinkWeight);
+            if (leftEyeTransform != null)
+            {
+                leftEyeTransform.localScale = new Vector3(_defaultLeftEyeScale.x, _defaultLeftEyeScale.y * scaleYFactor, _defaultLeftEyeScale.z);
+            }
+            if (rightEyeTransform != null)
+            {
+                rightEyeTransform.localScale = new Vector3(_defaultRightEyeScale.x, _defaultRightEyeScale.y * scaleYFactor, _defaultRightEyeScale.z);
             }
         }
 
         /// <summary>
         /// 触须发辫次级物理摆动（Inertia Sway）
+        /// （指向蛋形头顶墨焰时，自动呈现墨焰惯性抖动）
         /// </summary>
         private void UpdateHairSway(float dt)
         {

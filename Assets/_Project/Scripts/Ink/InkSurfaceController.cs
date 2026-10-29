@@ -27,7 +27,9 @@ namespace P1.Ink
 
         private InkGrid _grid;
         private Texture2D _inkTexture;
+        private InkSplatAtlas _atlas;
         private MaterialPropertyBlock _surfaceBlock;
+        private float _nextMinimapFlushTime;
 
         // 8组动态波纹环形缓冲区
         private readonly Vector4[] _ripplePositions = new Vector4[MaxRipples];
@@ -35,6 +37,7 @@ namespace P1.Ink
         private int _rippleHead;
 
         private static readonly int InkTexProp = Shader.PropertyToID("_InkTex");
+        private static readonly int InkTexelSizeProp = Shader.PropertyToID("_InkTexelSize");
         private static readonly int InkMapOriginProp = Shader.PropertyToID("_InkMapOriginXZ");
         private static readonly int TeamAColorProp = Shader.PropertyToID("_TeamAColor");
         private static readonly int TeamBColorProp = Shader.PropertyToID("_TeamBColor");
@@ -44,8 +47,18 @@ namespace P1.Ink
         private static readonly int InkTimeProp = Shader.PropertyToID("_InkTime");
 
         public InkGrid Grid => _grid;
+
+        /// <summary>CPU 粗网格贴图：小地图与编辑器工具使用，保持原有类型与语义。</summary>
         public Texture2D InkTexture => _inkTexture;
+
+        /// <summary>GPU 墨迹图集（纯视觉层）：地面材质实际采样的贴图。</summary>
+        public Texture VisualInkTexture => _atlas != null ? (Texture)_atlas.Atlas : _inkTexture;
+
+        public InkSplatAtlas SplatAtlas => _atlas;
+
         public InkGridConfigSO Config => config;
+
+        public double LastAtlasCommandMs => _atlas != null ? _atlas.LastCommandMs : 0.0;
 
         public float LastUploadDurationMs { get; private set; }
         public float PeakUploadDurationMs { get; private set; }
@@ -69,6 +82,12 @@ namespace P1.Ink
             if (Instance == this)
             {
                 Instance = null;
+            }
+
+            if (_atlas != null)
+            {
+                _atlas.Dispose();
+                _atlas = null;
             }
 
             if (_inkTexture != null)
@@ -132,9 +151,31 @@ namespace P1.Ink
                 filterMode = FilterMode.Bilinear
             };
 
+            RebuildInkAtlas(mapSize);
+
             BakeBlockedColliders();
             BindSurfaceMaterials();
             FlushTexture();
+        }
+
+        private void RebuildInkAtlas(Vector2 mapSize)
+        {
+            if (_atlas != null)
+            {
+                _atlas.Dispose();
+                _atlas = null;
+            }
+
+            int atlasRes = config != null ? config.GetPlatformAtlasResolution() : 4096;
+            bool mipmaps = config == null || config.atlasMipmaps;
+            float growSeconds = config != null ? config.splatGrowSeconds : 0.12f;
+            float dryingSeconds = config != null ? config.inkDryingSeconds : 6f;
+
+            _atlas = new InkSplatAtlas(mapSize, _grid.OriginXZ, atlasRes, mipmaps, growSeconds, dryingSeconds);
+
+            // 图集内容不进序列化：重建后立刻清空一次，避免首帧读到未初始化显存
+            _atlas.Clear();
+            _atlas.FlushImmediate();
         }
 
         public void BakeBlockedColliders()
@@ -165,6 +206,8 @@ namespace P1.Ink
         {
             InitializeIfNeeded();
             _grid.ResetPaintOnly();
+            _atlas?.Clear();
+            _atlas?.FlushImmediate();
             InitializeRipples();
             _totalUploadDurationMs = 0;
             _uploadCount = 0;
@@ -197,6 +240,18 @@ namespace P1.Ink
         {
             InitializeIfNeeded();
             int changed = _grid.PaintCircle(worldPos, radius, team);
+
+            // 视觉层：把同一次落墨作为一枚有机墨斑画进高分辨率图集（玩法判定仍由 _grid 负责）
+            if (_atlas != null && team != Team.Neutral && radius > 0f)
+            {
+                _atlas.AddSplat(new Vector2(worldPos.x, worldPos.z), radius, team);
+                if (!Application.isPlaying)
+                {
+                    // 编辑模式（Scaffolder 预览图）没有 LateUpdate，立刻出图
+                    _atlas.FlushImmediate();
+                }
+            }
+
             if (changed > 0)
             {
                 // 新落墨处自动激活动态表面波纹
@@ -252,10 +307,16 @@ namespace P1.Ink
 
         private void LateUpdate()
         {
-            if (_grid != null && _grid.IsDirty)
+            if (_grid != null && _grid.IsDirty && Time.unscaledTime >= _nextMinimapFlushTime)
             {
+                // CPU 贴图只服务小地图，没必要每帧全量上传
                 FlushTexture();
+                float hz = config != null ? config.minimapRefreshHz : 12f;
+                _nextMinimapFlushTime = hz > 0.01f ? Time.unscaledTime + 1f / hz : 0f;
             }
+
+            // 墨迹图集：推进生长动画 + 烘干 + 本帧所有落墨一次性提交
+            _atlas?.Advance();
 
             // 每帧同步动态波纹与时间给材质属性块
             UpdateDynamicMaterialProperties();
@@ -328,13 +389,19 @@ namespace P1.Ink
             Color colorA = config != null ? config.teamAColor : new Color(1.00f, 0.44f, 0.06f, 1f);
             Color colorB = config != null ? config.teamBColor : new Color(0.15f, 0.42f, 1.00f, 1f);
 
+            Texture inkTexture = _atlas != null ? (Texture)_atlas.Atlas : _inkTexture;
+            int texWidth = inkTexture != null ? inkTexture.width : 1;
+            int texHeight = inkTexture != null ? inkTexture.height : 1;
+            Vector4 texelSize = new Vector4(1f / texWidth, 1f / texHeight, texWidth, texHeight);
+
             for (int i = 0; i < inkableSurfaceRenderers.Count; i++)
             {
                 Renderer r = inkableSurfaceRenderers[i];
                 if (r == null) continue;
 
                 r.GetPropertyBlock(_surfaceBlock);
-                _surfaceBlock.SetTexture(InkTexProp, _inkTexture);
+                _surfaceBlock.SetTexture(InkTexProp, inkTexture);
+                _surfaceBlock.SetVector(InkTexelSizeProp, texelSize);
                 _surfaceBlock.SetVector(InkMapOriginProp, originAndSize);
                 _surfaceBlock.SetColor(TeamAColorProp, colorA);
                 _surfaceBlock.SetColor(TeamBColorProp, colorB);

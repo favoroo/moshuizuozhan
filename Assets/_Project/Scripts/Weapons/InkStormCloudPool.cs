@@ -121,6 +121,11 @@ namespace P1.Weapons
 
         private void OnDestroy()
         {
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.StopLoop(LoopSfxKind.StormRain);
+            }
+
             if (Instance == this)
                 Instance = null;
         }
@@ -225,6 +230,11 @@ namespace P1.Weapons
                 _pool.Enqueue(node);
             }
             _active.Clear();
+
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.StopLoop(LoopSfxKind.StormRain);
+            }
         }
 
         private void Update()
@@ -253,6 +263,21 @@ namespace P1.Weapons
                     Recycle(node);
                     _pool.Enqueue(node);
                     _active.RemoveAt(i);
+
+                    // 检查场上是否仍有展开降雨中的风暴云
+                    bool hasActiveCloud = false;
+                    for (int k = 0; k < _active.Count; k++)
+                    {
+                        if (_active[k].CloudSpawned)
+                        {
+                            hasActiveCloud = true;
+                            break;
+                        }
+                    }
+                    if (!hasActiveCloud && AudioManager.Instance != null)
+                    {
+                        AudioManager.Instance.StopLoop(LoopSfxKind.StormRain);
+                    }
                 }
             }
         }
@@ -295,6 +320,11 @@ namespace P1.Weapons
             if (VfxPool.Instance != null)
             {
                 VfxPool.Instance.SpawnInkSplat(node.Target, node.PuffColor, 0.9f, 12);
+            }
+
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayLoop(LoopSfxKind.StormRain);
             }
         }
 

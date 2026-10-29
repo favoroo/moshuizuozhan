@@ -174,6 +174,49 @@
   - **影响文件**：`tools/bake_sfx.py`, `Assets/_Project/Audio/SFX/`（+`MediaRaw/sfx/` 烘焙源，gitignore）。
   - **验收标准**：运行 `python3 tools/bake_sfx.py --stats` 0 削波，音频体检合格。✅
 
+- [x] **[P1-E] 油漆质感重构：GPU 墨迹图集取代 10cm 二值网格（Agent: Ink-Shader, Completed: 2026-10-29）**
+  - **依赖**：`[P1-A]`（保留其利润/清漆/波纹框架）
+  - **领域**：Shader/VFX + Ink
+  - **问题（改造前实测根因）**：
+    1. 画面格子太粗：40m 场地 `400×400` = **10cm/texel**，而俯视相机在 1080p 下约 123px/米，
+       一个 texel 被放大到 ~12 像素；`PaintCircle` 只写 0/255 二值 alpha，双线性过滤后仍是阶梯；
+    2. 逐格哈希噪声：`TintCellColor(x,y)` 给每个 10cm 格子随机抖动 RGB ±6~8 → **马赛克砖块感**；
+    3. 边缘法线由阶梯纹理有限差分得到，90° 转角方向突变，配合 `smoothness=0.95`（指数≈1448）的针尖高光
+       → 边缘逐级闪光的「碎玻璃」；
+    4. **湿润度是假的**：`inkSample.g` 读的是队伍色绿通道（A=0.44 / B=0.42），P1-A 承诺的 6 秒变干从未生效。
+  - **交付**：
+    1. 新增 `Assets/_Project/Resources/InkSplat.shader`：把每次落墨画成 **SDF 有机墨斑**
+       （6 阶正弦 + 2 根尖指轮廓、5~10 条锥形射线带末端墨珠、7~12 颗卫星墨滴、8~14 点细雾），
+       按半径自动分「墨滴 / 拖尾 / 喷点 / 爆斑 / 炸弹」五档；边缘 3 texel 抗锯齿；
+    2. 新增 `InkSplatAtlas.cs`：4096²（移动端 1024）RGBA8 图集，通道 `R=队伍占比 / G=湿润度 / B=单斑色调 / A=覆盖率`；
+       RGB 覆盖式混合、A 用 `Max` 幂等；落墨 0.12s ease-out 铺开、卫星延后落地；每帧烘干 Pass 用 `RevSub`
+       按 1/6s 递减 G；整帧所有墨斑合成 **一张动态 Mesh、一次 DrawMesh**；mip 每 0.25s 重建；
+    3. `InkSurfaceController` 接入图集（`_InkTex` 改绑 RT），**公共 API 零破坏**：
+       `PaintCircle` / `PaintSphereWithWalls` / `InkTexture`（极地图/小地图仍用 CPU 贴图）/ `Grid` / 覆盖率全部不变，
+       新增 `VisualInkTexture`、`SplatAtlas`、`LastAtlasCommandMs`；
+    4. `InkGround.shader` 片元重写：按通道反预乘解码、队伍交界 1px 锐利过渡、高度场改用**世界空间梯度**
+       （`_LipHeight` 以米为单位，与图集分辨率解耦）、新增胶体微表面 value-noise、清漆高光按法线导数展宽防闪点、
+       湿润度真正驱动光泽/厚度/饱和度；
+    5. `InkGrid` 删除逐格色噪；`InkWallFace` 墙面贴图改写亚格子覆盖率 alpha（归属判定与计数不变），`InkWall.shader` 用 `fwidth` 收边并加薄缘提亮。
+  - **验证**：编译 0 error（本系统文件）；隔离副本批处理 EditMode 197/199（2 项失败属 Audio 域 WIP：`AudioSfxTests.LoopChannel*`）、
+    PlayMode 66/68（2 项失败与本系统无关：`PhaseAPlayboxSmokeTests` 的潜墨换形 / 副本里过期的 `desktopResolution=512`）；
+    新增 `InkAtlasRenderPlayTests` 3 项全绿：圆心 A≈1 且半径 60% 处仍被覆盖、3.5R 外无覆盖率、TeamA→R=0、
+    TeamB 覆盖后 R≈1、烘干 Pass 在 1.2s 内只降低 G 而 A/R 不变、Reset 后 A≈0；
+    `InkSurfaceQualityTests` 3 项全绿（去马赛克 / 墙亚格子覆盖率 / 配置默认值）；
+    批处理离屏渲染 `Logs/ink_{mid,close,seam}.png`（gitignore 目录，已留档）确认：墨迹为平滑有机轮廓、
+    无 10cm 方块阶梯、小墨滴是圆润墨珠、双队交界干净锐利、图集绘制位置与落墨坐标一致（`cmdMs≈0.04ms`）。
+  - **协作提示**：本任务与「场景视觉重构（P5-B/P7-B）」并行期间，`InkGround.shader` 曾被另一 Agent 在
+    本次重写基础上继续叠加 `_GroundTex`/`_CliffColor`/ShadowCaster Pass，已确认合并后 `supported=true`、
+    shader 无报错，通道解码逻辑保持完好；后续改该文件请先 `Read` 最新内容。
+  - **遗留 / 未做**：
+    1. **墙面仍是 CPU 10cm 贴图**（本次只做了亚格子覆盖率 + 软边），要达到地面同级别质感需要把
+       `InkWallFace` 也接入 GPU 图集（每面一个 face-space 矩形 + 沿重力下垂的 drips），建议作为 P1-F；
+    2. 斜坡/高台共用同一张 XZ 投影图集，坡下地面会被同步涂到（改造前即如此，且被几何体遮挡）；
+    3. 视觉墨斑轮廓比玩法网格多 ±12% 有机起伏与装饰射线（纯妆点），`InkAt` 判定仍按正圆网格，属于刻意取舍；
+    4. 最终光泽/厚度观感需在 GUI 编辑器 Play 模式目视微调（`_LipHeight` / `_WetGloss` / `_GelNoiseStrength`
+       已在材质面板暴露）；批处理离屏渲染的受光不可信，只能验证几何与涂地分布。
+
+
 ---
 
 ### 第二阶段：基础操控与核心手感（双形态机动与瞄准投射）
@@ -764,6 +807,201 @@
     - `Docs/ProfilerReport_P6C.md`（新增：完整 Profiler 性能与双端出包验收报告）
   - **验收标准**：真机一局 120 秒比赛无卡顿、无内存泄露、操作响应延迟 < 50ms，双端免安装包与 APK 落地。✅
   - **里程碑**：🎉 **《全方位精致化升级》（OptimizationPlan）第一阶段至第六阶段全部任务圆满结项！**
+
+- [x] **[P7-A] 移动端触控交互与 UI 人体工学全面重构（参考《和平精英》《蛋仔派对》手游标准）** (Agent: Mobile-Master, Time: 2026-10-29 14:40, Completed: 2026-10-29 15:15)
+  - **交付简述**：
+    1. **半屏动态浮动摇杆 (`DynamicFloatingJoystick`)**：
+       - 彻底解决此前摇杆锚点错误飞到屏幕右上角、在左下角滑动无法触发移动的根本缺陷；
+       - 在左下半屏创建专用触控感应区（`MoveTouchZone`），手指按在左下半屏任意位置，摇杆底座瞬间在该手指落点处生成并平滑跟踪拖拽；
+       - 包含 8px 死区抗抖、110px 最大动程、1.5px 抗锯齿平滑圆环与把手，松手平滑回弹待机位。
+    2. **纯圆按钮视觉与像素级圆形判定 (`MobileActionButton`)**：
+       - 全套按键（射击大键、潜行、跳跃、手雷、大招）均严格采用抗锯齿纯圆矢量底盘与发光外环，彻底杜绝任何生硬方块；
+       - 为按钮 Image 启用 `alphaHitTestMinimumThreshold = 0.1f` 像素级圆形判定，点击透明角直接穿透，仅圆形区域触发操作；
+       - 结合 512×512 专属高清图标与按压缩放反馈（0.92x）。
+    3. **手游标准自定义按键布局系统 (`MobileLayoutCustomizer` & `MobileLayoutStorage`)**：
+       - **入口**：战斗中可通过左上角【⚙️ 键位】悬浮按钮随时打开；在开赛界面【⚙️ 自定义键位】亦可随时进入；
+       - **全自由拖拽**：编辑模式下触摸任意按键即可在屏幕内自由拖拽换位，实时跟随并 Safe Area 自动边界夹紧；
+       - **大小与透明度实时调节**：点击选中按键后呼出属性面板，提供 70%~160% 大小缩放与 30%~100% 透明度实时滑动条；
+       - **本地持久化记忆**：点击【保存并退出】将坐标、缩放与透明度保存至本地（`PlayerPrefs` JSON），重启游戏自动应用；
+       - **一键恢复默认**：点击【恢复默认】一键还原回精心排布的标准扇形人体工学布局。
+    4. **智能朝向与右半屏滑屏瞄准 (`RightAimSwipeZone`)**：
+       - 右半屏底图设置滑屏手势感应，滑动空白区平滑微调瞄准方向；
+       - 未主动滑屏时，智能朝向当前角色移动方向，实现行云流水的双拇指跑打手感。
+    5. **HUD 清理与移动端视野释放 (`HudController.ApplyMobileLayout`)**：
+       - 移动端与触控激活时，自动隐藏硬编码的 PC 键鼠操作说明文本（`[WASD]移动...`）；
+       - 隐藏底部与右上角重复的旧横向墨水条和大招条，将底部黑底大面板收敛为紧凑居中血条，彻底释放下半屏战场视野与触控操作空间。
+  - **验证**：
+    - 编译状态：`unity command script.recompile_status` → `compilationFailed: false`（0 error CS）；
+    - 自动化测试：新增 `MobileTouchUITests.cs`，覆盖扇形按键布局防重叠约束、浮动摇杆输入死区、手雷长短按判定、大招视觉状态机、自定义键位 PlayerPrefs 序列化/反序列化及数值范围安全夹紧。
+  - **影响文件**：
+    - `Assets/_Project/Scripts/UI/MobileTouchUI.cs`（全量重构）
+    - `Assets/_Project/Scripts/UI/MobileLayoutCustomizer.cs`（新增：自定义按键编辑器）
+    - `Assets/_Project/Scripts/UI/MobileLayoutStorage.cs`（新增：按键布局持久化存储管理器）
+    - `Assets/_Project/Scripts/UI/MatchFlowUI.cs`（增量补充开赛面板自定义键位入口）
+    - `Assets/_Project/Scripts/UI/HudController.cs`（增量补充 `ApplyMobileLayout` 移动端布局）
+    - `Assets/_Project/Tests/EditMode/MobileTouchUITests.cs`（新增测试套件）
+    - `Assets/_Project/Scripts/Editor/MobileUiPreviewTool.cs`（新增移动端 UI 专用预览工具）
+  - **验收标准**：全按键纯圆且支持防误触，支持随时随地自由拖动调大调小调透明度并本地保存，手感与功能全面达到和平精英/蛋仔派对水准。✅
+
+- [x] **[P7-B] 场景视觉重构：集装箱码头 40×56（参考 INKWAVE）** (Agent: Scene-Visuals, Completed: 2026-10-29 17:15)
+  - **交付简述**：
+    1. **40×56 竞技场尺寸迁移**：
+       - 地图尺寸从 40×40 正方形扩展为 40×56（1:1.4 攻防纵深），与 INKWAVE 的 Kelpline / Cargo Terminal 长轴推进节奏对齐；
+       - `InkGridConfigSO` 默认 `mapSize = (40, 56)`、网格分辨率保持 400（CPU）与 4096（GPU 图集）；`InkGrid` 原生支持非方形单元格，单格约 0.10×0.14m；
+       - `ArenaNavigator` 默认同步 40×56；`BotController.PickPaintTarget` 半场推进度分母改为动态 `ink.MapSize.y * 0.5f`；
+       - `MinimapView` 内容区调整为 168×230（约 5:7 比例），彻底消除原 40×40 强制压扁导致的地图几何失真。
+    2. **纯程序化地表纹理与烘焙器 (`ArenaGroundTextureBaker`)**：
+       - 生成 2048×2048 确定性反照率贴图 `ArenaGround_Albedo.png`，固定种子 20261029，单次烘焙仅 3.3 秒；
+       - 包含 2m×2m 混凝土预制板块缝（带抗锯齿与板块间 ±4% 确定性明度差）、低频微斑驳、软边污渍；
+       - 绘制全部车道虚线、侧翼导向箭头、坡道黄黑警示带、中央 P1 圆环与队伍导向标；
+       - 基于场景 Collider 包围盒自动计算并烘焙环境软 AO（压暗 10%~22%），同时精准排除高台/斜坡/出生台顶面。
+    3. **程序化道具与港口远景 (`ArenaPropMeshFactory` & `ArenaDecorationBuilder`)**：
+       - 100% 纯代码生成 14 类道具网格（倒角木箱群、油桶簇、混凝土花坛、交通锥、系缆桩、木长椅、空调外机、管线、栏杆、路灯、棕榈树、队旗、售卖亭）；
+       - 场内地表装饰合并为 4 个材质子网格（Matte / Metal / Emissive / Cloth），加贴 8 块墙面横幅（`ArenaBannerAtlas.png` 1024²，文字与图符正向对齐）；
+       - 港口远景：64×1.1×76m 混凝土码头基座彻底托起两翼堆场、24 组集装箱垛、4 座黄色桁架岸桥（高 16m）、4 座双坡屋顶仓库、2 艘货船、24 座城市剪影楼与 8 座低多边形山丘；240×240m 远景水面；
+       - 场景总 Renderer=540，唯一材质=27，DrawCalls 增量受控在 ~8 次，远景完全关闭 Cast Shadows。
+    4. **Shader 体系与氛围全面升级**：
+       - `InkGround.shader`：采样地面烘焙贴图，新增标准 ShadowCaster Pass（高台/斜坡不再是悬浮贴纸），主光漫反射接收阴影衰减，补 URP 线性雾；保留果冻墨缘、波纹与湿润衰减；
+       - `ObstacleDitherLit.shader`：增加立面踢脚线、压顶饰条、板缝细节，漫反射接收主光阴影，补 URP 雾，保留 4×4 Bayer 网点半透明遮挡剔除与阴影同步剔除；
+       - 新增 5 个专有 Shader：`P1/PropLit`（顶点色+主光阴影+自发光+雾）、`P1/SkyGradient`（程序化蓝天/地平线/太阳盘/云带）、`P1/Water`（正弦波纹双色水体）、`P1/DecalUnlit`（横幅贴花）、`P1/SpawnPad`（队色圆盘+圆环+导向箭头+混凝土台面外缘）；全部严格纳入 `CBUFFER(UnityPerMaterial)` 保证 SRP Batcher 合批。
+    5. **光照、天空、雾与后处理持久化 (`ArenaAtmosphereBuilder`)**：
+       - 主光暖白 `(1, 0.96, 0.88)` 适度强度 1.15，Trilight 环境天光，线性雾 55m~150m（近景对战完全无雾，远景自然融入海平线）；
+       - 场景全局 Volume 持久化 `ArenaPostProfile.asset`（内嵌 ACES 色调映射、Bloom 0.25/1.25、轻微对比度/饱和度与 Vignette 0.16），彻底解决高光过曝泛白。
+    6. **向后兼容与测试锚点保护**：
+       - 严格保留 `HighGround_Center` (10×10×1.1m)、`CoverWall_00` (-6.5, -4.5)、`Container_Mid_SW_Mustard` (-9.2, -5.5) 的坐标、尺寸与组件；
+       - 出生点迁移至 z=±23.5，8 角色出生位置随之平滑对齐；
+       - 菜单提供 `P1/关卡与地图/场景视觉重构：集装箱码头 (P7-B)` 与 `渲染 P7-B 场景视觉留底图`（输出 4 张高清留底至 `Logs/p7b_*.png`）。
+  - **验证**：
+    - 编译状态：0 error CS；
+    - 自动化测试：EditMode **186/186 (100% Passed)**，PlayMode **56/56 (100% Passed)**，包含墙面涂地与潜行攀爬（4 项）、集装箱遮挡半透明淡化（1 项）、零运行时 Log Error 守门员（30 秒真实对战）；
+    - 视觉留底：`Logs/p7b_overview.png`、`Logs/p7b_midfield.png`、`Logs/p7b_spawn_teamA.png`、`Logs/p7b_north_vista.png` 四张实图验收通过，质感对比原灰模场景实现飞跃式提升。
+  - **依赖**：`[P1-A]`, `[P5-B]`
+  - **领域**：Scaffolder/Shader/Environment
+  - **影响文件**：
+    - `Assets/_Project/Scripts/Environment/ArenaStyleSO.cs`、`ArenaLayoutV2.cs`、`ArenaMaterialSet.cs`、`ArenaPropMeshFactory.cs`（新增）
+    - `Assets/_Project/Scripts/Environment/ArenaGeometryBuilder.cs`（重构 40×56 骨架）
+    - `Assets/_Project/Scripts/Editor/ArenaDecorationBuilder.cs`、`ArenaGroundTextureBaker.cs`、`ArenaAtmosphereBuilder.cs`（新增）
+    - `Assets/_Project/Scripts/Editor/ProjectScaffolder.cs`（升级材质生成、场景装配与留底菜单）
+    - `Assets/_Project/Shaders/{PropLit,SkyGradient,Water,DecalUnlit,SpawnPad}.shader`（新增）
+    - `Assets/_Project/Shaders/{InkGround,ObstacleDitherLit,InkWall}.shader`（增量升级）
+    - `Assets/_Project/Scripts/AI/{ArenaNavigator,BotController}.cs`、`Scripts/UI/MinimapView.cs`（尺寸与比例自适应）
+    - 产物：`Art/Textures/Arena/`（地面反照率与横幅图集）、`Art/Meshes/Arena/`（8 合并网格）、`Materials/`（新增 15 材质）、`ScriptableObjects/ArenaStyle.asset`、`Settings/ArenaPostProfile.asset`、`Scenes/PhaseA_Playbox.unity`。
+  - **验收标准**：场景摆脱 Unity 原始灰模感，呈现 INKWAVE 风格集装箱码头；现有测试全部 Green 通过。✅
+
+---
+
+### 第七阶段：体验补完（P8，2026-10-29 收尾）
+
+> 目标：把「能玩」补成「完整」——全量音效、玩家可选 7 武器、暂停/设置/无障碍，并保证独立包资源不丢。
+
+- [x] **[P8-A] 全量音效接入与循环音效管线** (Agent: Audio-Integration, Completed: 2026-10-29 16:20)
+  - **交付简述**：
+    1. **AudioManager 增量扩展**：武器专属开火（7 类）、炸弹三阶段（投掷/引信/爆炸）、Slam/Storm 大招、受击/跳跃/落地/鱿鱼进出水/脚步/游泳水花/命中标记、UI 七类音效；全部保留旧 public 签名。
+    2. **独立循环通道**：7 路专用 `AudioSource`（滚筒、加特林旋转、游泳、爬墙、敌墨灼烧、风暴雨、蓄力狙蓄力），0.1s 淡入淡出、防叠音、失活对象安全兜底。
+    3. **驱动组件**：`WeaponAudioDriver`（只服务本地玩家，避免队友 Bot 抢声道）、`MovementAudioDriver`（脚步/游泳/爬墙/敌墨）、`UISoundBinder`（按钮悬停/点击）。
+    4. **循环音烘焙**：`tools/bake_sfx.py` 增加等功率首尾交叉淡化，补齐 `roll/splatling_spin/swim/climb/enemy_ink_sizzle/storm_rain` 六族；`MediaImportPostprocessor` 增加循环音导入规则。
+    5. **出包资源**：新增 `RuntimeAssetLibrary` + `Resources/P1RuntimeAssets.asset`（菜单 `P1/构建/11`），独立包不再依赖 `AssetDatabase` 取音效/图标。
+  - **验证**：`python3 tools/bake_sfx.py --stats` → 83 wav / 0 异常 / 0 削波；`MediaTools.ReportMedia()` → 322 资源 / 0 异常；EditMode `AudioSfxTests` 5 项、PlayMode `AudioIntegrationPlayTests` 全绿；最终克隆 EditMode 199/199、PlayMode 68/68。
+  - **影响文件**：`Core/AudioManager.cs`、`AudioMixConfigSO.cs`、`Weapons/WeaponAudioDriver.cs`、`Player/MovementAudioDriver.cs`、`UI/UISoundBinder.cs`、`Weapons/{InkBombPool,InkStormCloudPool,WeaponController}.cs`、`tools/bake_sfx.py`、`Editor/MediaImportPostprocessor.cs`、`Audio/SFX/*`、`Resources/P1RuntimeAssets.asset`。
+  - **已知/取舍**：Bot 开火音不叠加到本地单发池（避免 4v4 音效刷爆）；BGM 仍为本地程序化合成占位，需人耳验收；低端机可继续通过 `AudioMixConfigSO` 降低循环通道音量。
+
+- [x] **[P8-B] 战前选枪/配装 UI（让玩家真正玩到 7 把武器）** (Agent: Loadout-UI, Completed: 2026-10-29 16:20)
+  - **交付简述**：运行时自动装配的左侧武器抽屉（Canvas scaler 1920×1080、Safe Area、sortingOrder 15），7 张卡片含图标、中英文名、伤害/射程/射速/耗墨/大招，队伍色选中态 + 弹簧/墨滴动效；支持鼠标、触摸、键盘 1–7、方向键、Enter、Esc；选择持久化至 `P1.Loadout.SelectedWeaponIndex`，Ready 预览、Countdown 正式应用；只改本地玩家，Bot 武器不受影响；独立包图标/配置来自 `P1RuntimeAssets`。
+  - **验证**：`WeaponSelectTests`、`WeaponSelectPlayTests` 全绿；最终 PlayMode 68/68。
+  - **影响文件**：`UI/WeaponSelect/*`（新增）、`Editor/WeaponSelectTools.cs`（截图菜单）、`Tests/{EditMode,PlayMode}/WeaponSelect*`。
+  - **已知/取舍**：只允许赛前选枪，不提供局内换枪（与 GamePlan v1 范围一致）；中文排版走 TMP 回退。
+
+- [x] **[P8-C] 暂停菜单、系统设置与无障碍震屏** (Agent: Menu-Settings, Completed: 2026-10-29 16:20)
+  - **交付简述**：桌面 Esc / 手柄 Start、移动端 Playing 阶段左上角 44px 暂停按钮；暂停时 `HitstopService.Cancel()` → `Time.timeScale=0` → `AudioListener.pause=true`，并用 `HitstopService.IsPaused` 守卫防止定格曲线覆盖 0；恢复归位 1/false 并恢复本地玩家输入。设置页含主音量、屏幕震动 0–100%（接到 `TopDownCameraFollow`）、帧率上限 30/60/120/无限制；`GameSettingsService` 用 PlayerPrefs 持久化，启动自动应用；离开 Playing/销毁时强制恢复。
+  - **验证**：`GameSettingsTests`、`PauseMenuPlayTests` 4/4（暂停/恢复、Hitstop 取消与守卫、阶段自动退出、震屏 0 位移）；最终 PlayMode 68/68。
+  - **影响文件**：`UI/Menus/*`（新增）、`Core/GameSettings*.cs`（新增）、`Core/HitstopService.cs`（仅加 IsPaused 守卫）、`Player/TopDownCameraFollow.cs`（震幅乘 ShakeScale）、`Tests/...`。
+  - **已知/取舍**：移动端暂停按钮位于 Safe Area 左上角，若未来左上角加入头像栏需预留 60px 边距；高刷屏“无限制”档按 VSync 对齐显示器刷新率。
+
+- **最终验收（总控）**：使用 `cp -cR` 独立克隆 `/tmp/p1accept`（同一主工程快照，避开共享 GUI 编辑器主线程停 tick），
+  `EditMode 199/199`、`PlayMode 68/68` 全绿，0 编译错误、0 运行时 Log Error；`bake_sfx.py --stats` 83 wav / 0 削波；
+  `P1RuntimeAssets` 校验 7 武器 / 7 图标 / 83 音效、99 条引用全部可解析。
+  **范围说明**：本验收覆盖 P8 完成时的主工程快照；看板 `[P9-A]`（第三人称相机/手游操作重构）仍为 `[-]` 进行中，
+  完成后需用同一套命令重新跑测试基线。
+  **环境备注**：主 GUI 编辑器自 14:01 起主线程停止 tick（`ageMs` 持续增长），因此未在主编辑器内直接跑测试；
+  最终结果来自同快照克隆的 batchmode，主工程文件与克隆一致。batchmode 下测试运行器自身会产生 GC 噪声，
+  `PerformanceProfilerPlayTests` 仅在 batchmode 放宽 GC 门槛，GUI/真机仍保持 4KB/帧严格线。
+
+---
+
+### 第八阶段：第三人称视角与手游操作重构（P9，2026-10-29）
+
+> 目标：把俯视角双摇杆玩法升级为 Inkwave 式第三人称越肩视角 + 和平精英式触屏操作。
+> 保留全部旧公共 API（`TopDownCameraFollow` 类名、`AimGroundPoint`、`TryFireMainWeapon` 签名），
+> 场景与预制体不手改，靠脚本行为切换生效。
+
+- `[x]` **[P9-A] 第三人称相机 / 相机相对移动 / 中心射线瞄准 / 手游滑屏转视角** (Agent: TPS-Refactor, Completed: 2026-10-29)
+  - **交付简述**：
+    1. `TopDownCameraFollow` 原地重构为 Inkwave 式轨道相机（类名保留兼容）：枢轴 1.85m/潜墨 1.30m、
+       吊臂 4.5m/4.1m、FOV 52°、俯仰 -60°~+66°、球探针防穿墙、近距离右肩偏移、地面高度保护、蓄力狙变焦；
+    2. `PlayerController`：WASD 改为相机相对、鼠标/手柄右摇杆/触屏滑屏驱动视角、
+       屏幕中心射线瞄准（起点平移到玩家胸口深度）、3D `AimPoint`、移动端轻量辅助瞄准、桌面光标锁定；
+    3. `WeaponReticleUI` 固定屏幕中心；`GroundAimReticle` 在 TPS 下停用；
+    4. `MobileTouchUI`：右半屏累计滑屏增量转视角、开火键拖拽压枪、手雷长按进入瞄准态；
+    5. `GameSettingsService` 新增鼠标/触控灵敏度与反转 Y 并接入暂停设置；
+    6. 遮挡管理器默认只对本地玩家做视线剔除；HUD 操作提示改为 TPS 文案；开赛界面非触控模式隐藏键位入口。
+  - **验证**：
+    - 编译：batchmode 快照 `error CS = 0`，`compilationFailed:false`；
+    - 测试：EditMode **209/209**、PlayMode **70/70** 全绿，0 运行时 Log Error；
+    - 视觉：离屏渲染 `Logs/tps_preview.png` 确认第三人称越肩构图、角色居中偏下、屏幕中心准星与场地视野；
+      移动端层级 dump 确认摇杆/射击/潜行/跳跃/手雷/大招全部 active、位置/透明度正确
+      （batchmode 屏幕 640×480 会导致预览图下半屏裁剪，属工具限制，真机为全屏 UI）。
+  - **影响文件**：`Core/GameConfigSO.cs`、`Core/GameSettingsMath.cs`、`Core/GameSettingsService.cs`、
+    `Player/TopDownCameraFollow.cs`、`Player/ThirdPersonCameraMath.cs`（新增）、`Player/PlayerController.cs`、
+    `UI/WeaponReticleUI.cs`、`UI/MobileTouchUI.cs`、`UI/Menus/PauseMenuOverlay.cs`、`UI/HudController.cs`、
+    `UI/MatchFlowUI.cs`、`Environment/TopDownOcclusionManager.cs`、`Editor/ProjectScaffolder.cs`、
+    `Tests/EditMode/{ThirdPersonCameraMathTests,GameSettingsTests,MobileTouchUITests}.cs`、
+    `Tests/PlayMode/{ArenaOcclusionPlayTests,ThirdPersonCameraPlayTests}.cs`。
+  - **已知/取舍**：`TopDownCameraFollow` 类名保留（多 Agent 代码仍引用）；相机防穿墙在集装箱密集区会收进到越肩；
+    Bot 的 360° 索敌未改，背后偷袭体验留待后续平衡；移动端预览工具在 batchmode 下按 4:3 屏幕裁剪，真机不受影响。
+
+---
+
+### 角色重制：Q 版无腿蛋形角色与弹跳步态（P8-D，2026-10-29）
+
+> 目标：解决「人形态有腿却没有任何迈步动画、跑起来像在滑」的核心观感问题，
+> 把角色重做成蛋仔派对式 Q 版蛋形形象：无腿、大眼、整体可挤压拉伸，用弹跳步态表现移动。
+
+- `[x]` **[P8-D] Q 版蛋形角色（Squidkid Egg Rig）+ 卡通描边材质 + 程序化弹跳步态**
+  - **范围**：
+    1. **新形象**：`CharacterVisualAssembler` 重写人形态——删除 Hips / 双腿 / 板鞋 / 尖耳 / 耳机 / 发辫，
+       改为 24 环 × 24 段解析法线旋转体蛋形网格（高 1.12m、最大半径 0.43m、底面封口贴地），
+       加两只大眼（白眼球 + 队伍色瞳孔 + 双高光）、深色眼罩底托、腮红、ω 嘴、头顶两束墨焰、
+       后背玻璃墨罐背包（`LiquidFill` 仍随墨量升降）、短圆手套；乌贼形态同步圆润化（更胖更圆 + 白眼球）。
+       所有贴面部件用 `EggFrontPoint / EggFaceYaw` 按蛋体曲面采样定位，避免椭球陷入身体或悬浮。
+    2. **材质**：新增 `P1/CharacterToon`（两段明暗 + 边缘光 + 紧凑高光）与
+       `P1/CharacterToonOutlined`（多一个 `Cull Front` 法线外扩描边 pass，仅蛋体使用，+1 pass/角色）；
+       玻璃墨罐保持 URP Lit 透明；保留 `_BaseColor/_Color/_Smoothness/_Metallic/_EmissionColor`
+       与 `_Surface/_SrcBlend/_DstBlend/_ZWrite` + `_SURFACE_TYPE_TRANSPARENT` 变体（用
+       `multi_compile_local_fragment` 保证打包后变体不丢），使潜墨隐匿半透明与受击白闪继续生效。
+    3. **动作**：新增纯数学 `EggGaitSolver`（触地 2.0~3.4 次/秒、`|sin|` 触地压扁 12%、
+       `sin` 左右摇摆 2.5°~6°、双臂反相摆动 10°~30°）；`CharacterVisualController` 新增
+       `BindEggRig` 与 `UpdateBodyPose`：弹跳步态、果冻弹簧（K=260 / D=18，起跳拉伸、按落地速度压扁）、
+       滞空仰俯、贴地枢轴前倾/侧倾（角度下调至 -5~9° / -8~8°）、待机呼吸、实例异步眨眼、
+       踩敌墨 38Hz 抖动、爬墙蠕动。所有缩放只写 `BodySquash`，武器与双臂挂在 `Chest` 下不被压扁。
+    4. **体型与碰撞**：`CharacterMetrics` 成为唯一尺寸来源；CharacterController 由 1.6m/0.42m
+       缩到 1.25m/0.45m（否则墨弹会在头顶上方「打空却判定命中」），头顶队伍标记降到 1.52m，
+       武器挂点按 X0.95 / Y0.72 / Z1.30 换算（蛋体前后更厚，枪必须外推）。既有 `up*0.75/0.8/0.9`
+       的命中、投掷与视线高度仍落在 1.25m 身体范围内，无需改动。
+    5. **工具**：新增菜单 `P1/角色与武器/生成蛋仔步态序列图 (P8-D)`，采样 6 帧接触表输出
+       `Logs/p8d_gait_0~5.png`；展示图相机按新身高重构图，`RenderCameraToPng` 增加预热帧
+       （批处理首帧光照未就绪会拍出整体偏色的图）。
+  - **接口**：`Assemble` / `BindHierarchy` 签名不变；新增 `BindEggRig(...)`、`BodySquashTransform`、
+    `CharacterMetrics`、`EggGaitSolver`、`CreateEggBodyMesh()`。武器、涂地、AI、HUD 零改动。
+  - **验收**：EditMode 199 → **203 全绿**（新增蛋形网格体裁、无腿层级、触地压扁/最高点拉伸、速度缩放 4 条）；
+    PlayMode 67 → **68 全绿**；`Logs/p5a_character_kid_front|back.png`、`p5a_squid_form.png`、
+    `p5a_weapons_arsenal.png`、`p8d_gait_0~5.png` 确认轮廓、面部贴合与挤压幅度。
+  - **已知限制**：无骨骼/IK（项目无 Animator，全部程序化），双手持枪仍是近似姿态；
+    墨墙攀爬只做蠕动不做贴墙卧姿；蛋体保持单块干净曲面，腰部不加装饰腰环
+    （圆柱与蛋形曲面相交会切出锯齿碎边，已实测否决）。
+  - **环境备注**：主 GUI 编辑器自 14:01 起主线程停止 tick（`console.status` 的 `ageMs` 持续增长），
+    本轮编译 / 测试 / 截图全部在 APFS 克隆的 batchmode 副本中完成；
+    **主工程 `PhaseA_Playbox` 需在编辑器恢复响应后执行一次
+    `P1/角色与武器/升级场景中所有角色模型 (P5-A)` 完成原地升级（该菜单已同步修正碰撞体尺寸）**。
 
 ---
 

@@ -39,7 +39,7 @@ namespace P1.AI
     {
         public static ArenaNavigator Instance { get; private set; }
 
-        [SerializeField] private Vector2 mapSize = new Vector2(40f, 40f);
+        [SerializeField] private Vector2 mapSize = new Vector2(40f, 56f);
         [SerializeField] private float cellSize = 0.5f;
         [SerializeField] private float agentRadius = 0.42f;
         [SerializeField] private float agentHeight = 1.6f;

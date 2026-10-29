@@ -256,6 +256,82 @@ namespace P1.UI
         private void Start()
         {
             EnsureWeaponReticle();
+            ApplyThirdPersonControlsHint();
+            AdaptLayoutForInputMode();
+        }
+
+        /// <summary>
+        /// P9：把场景里烘焙的旧俯视/双摇杆操作提示更新为第三人称键鼠说明。
+        /// 移动端会在 <see cref="ApplyMobileLayout"/> 中直接隐藏该文本。
+        /// </summary>
+        private void ApplyThirdPersonControlsHint()
+        {
+            Transform hint = transform.Find("BottomStatusPanel/ControlsHintText");
+            if (hint == null)
+                return;
+
+            var text = hint.GetComponent<Text>();
+            if (text != null)
+            {
+                text.text = "操作：[WASD]移动  [鼠标]转视角  [左键]开火  [右键/Shift]己墨潜行  [空格]跳跃  [E/中键]手雷  [Q]大招  [Esc]暂停";
+            }
+        }
+
+        /// <summary>
+        /// 移动端布局适配：隐藏 PC 键鼠操作说明（[WASD]移动...）及与右上角重复的旧墨水/大招表，
+        /// 将底部面板精简为居中紧凑血条，彻底释放下半屏视野与触控操作空间。
+        /// </summary>
+        public void ApplyMobileLayout()
+        {
+            // 1. 隐藏底部硬编码的 PC 键鼠操作提示
+            Transform hint = transform.Find("BottomStatusPanel/ControlsHintText");
+            if (hint != null) hint.gameObject.SetActive(false);
+
+            // 2. 隐藏与右上角 InkTankView / LiquidOrbView 重复的旧仪表
+            Transform inkBg = transform.Find("BottomStatusPanel/InkBarBg");
+            if (inkBg != null) inkBg.gameObject.SetActive(false);
+            Transform specBg = transform.Find("BottomStatusPanel/SpecialBarBg");
+            if (specBg != null) specBg.gameObject.SetActive(false);
+            Transform inkText = transform.Find("BottomStatusPanel/InkStateText");
+            if (inkText != null) inkText.gameObject.SetActive(false);
+
+            // 3. 将底部黑底大面板重构为紧凑居中血条，避免遮挡脚下墨水与角色
+            Transform bottomPanel = transform.Find("BottomStatusPanel");
+            if (bottomPanel != null)
+            {
+                var panelRt = bottomPanel.GetComponent<RectTransform>();
+                panelRt.sizeDelta = new Vector2(360f, 28f);
+                panelRt.anchoredPosition = new Vector2(0f, 22f);
+
+                var panelImg = bottomPanel.GetComponent<Image>();
+                if (panelImg != null)
+                {
+                    panelImg.color = new Color(0.04f, 0.06f, 0.10f, 0.65f);
+                }
+
+                Transform hpBg = bottomPanel.Find("HealthBarBg");
+                if (hpBg != null)
+                {
+                    var hpRt = hpBg.GetComponent<RectTransform>();
+                    hpRt.anchoredPosition = Vector2.zero;
+                    hpRt.sizeDelta = new Vector2(340f, 14f);
+                }
+            }
+        }
+
+        private void AdaptLayoutForInputMode()
+        {
+            bool isMobile = Application.isMobilePlatform;
+            var touchUI = FindAnyObjectByType<MobileTouchUI>();
+            if (touchUI != null && touchUI.IsShown)
+            {
+                isMobile = true;
+            }
+
+            if (isMobile)
+            {
+                ApplyMobileLayout();
+            }
         }
 
         private void EnsureWeaponReticle()
@@ -405,7 +481,10 @@ namespace P1.UI
                 }
                 else
                 {
-                    string bombHint = motor.CurrentInk >= 55f ? "手雷[E]就绪" : "墨水不足手雷(需55)";
+                    float bombCost = weapon.Config != null ? weapon.Config.bombInkCost : 70f;
+                    string bombHint = motor.CurrentInk >= bombCost
+                        ? "手雷[E]就绪"
+                        : $"墨水不足手雷(需{bombCost:F0})";
                     inkStateText.text = $"墨水 {motor.CurrentInk:F0}/100 ({bombHint})  |  HP {health.CurrentHealth:F0}";
                 }
             }
@@ -426,13 +505,17 @@ namespace P1.UI
 
             if (specialStateText != null)
             {
+                string specialName = weapon.ActiveSpecialKind == SpecialKind.Storm
+                    ? "墨水风暴云"
+                    : "超级墨水砸地";
+
                 if (weapon.IsPerformingSpecial)
                 {
-                    specialStateText.text = ">>> 超级墨水冲击波释放中! <<<";
+                    specialStateText.text = $">>> {specialName}释放中! <<<";
                 }
                 else if (weapon.IsSpecialReady)
                 {
-                    specialStateText.text = "★ 大招已满！按 [Q] 超级墨水砸地 ★";
+                    specialStateText.text = $"★ 大招已满！按 [Q] {specialName} ★";
                 }
                 else
                 {

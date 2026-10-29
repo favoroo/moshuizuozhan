@@ -31,7 +31,21 @@ namespace P1.Editor
             Ignore,
             Music,
             Sfx,
+            LoopSfx,
             Voice,
+        }
+
+        public static bool IsLoopAudioFileName(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName)) return false;
+            if (fileName.Contains("_loop")) return true;
+            if (fileName.StartsWith("storm_rain", System.StringComparison.OrdinalIgnoreCase)) return true;
+            if (fileName.StartsWith("splatling_spin", System.StringComparison.OrdinalIgnoreCase)) return true;
+            if (fileName.StartsWith("climb_", System.StringComparison.OrdinalIgnoreCase)) return true;
+            if (fileName.StartsWith("enemy_ink_sizzle", System.StringComparison.OrdinalIgnoreCase)) return true;
+            if (fileName.StartsWith("roll_", System.StringComparison.OrdinalIgnoreCase) && !fileName.StartsWith("roller_flick", System.StringComparison.OrdinalIgnoreCase)) return true;
+            if (fileName.StartsWith("swim_", System.StringComparison.OrdinalIgnoreCase) && !fileName.StartsWith("swim_splash", System.StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
         }
 
         public static TextureKind ClassifyTexture(string assetPath)
@@ -59,7 +73,13 @@ namespace P1.Editor
                 return AudioKind.Ignore;
 
             if (assetPath.StartsWith(MusicFolder, System.StringComparison.Ordinal)) return AudioKind.Music;
-            if (assetPath.StartsWith(SfxFolder, System.StringComparison.Ordinal)) return AudioKind.Sfx;
+            if (assetPath.StartsWith(SfxFolder, System.StringComparison.Ordinal))
+            {
+                string fileName = System.IO.Path.GetFileNameWithoutExtension(assetPath);
+                if (IsLoopAudioFileName(fileName))
+                    return AudioKind.LoopSfx;
+                return AudioKind.Sfx;
+            }
             if (assetPath.StartsWith(VoiceFolder, System.StringComparison.Ordinal)) return AudioKind.Voice;
             return AudioKind.Ignore;
         }
@@ -142,6 +162,16 @@ namespace P1.Editor
                     s.quality = 1f;
                     s.preloadAudioData = true;
                     importer.forceToMono = true;         // 音效多是单声道源，省一半内存
+                    importer.loadInBackground = false;
+                    break;
+
+                case AudioKind.LoopSfx:
+                    // 循环音效：采用 CompressedInMemory 且保证 PCM 格式，确保首尾无缝循环（避免 Vorbis 填充空隙）
+                    s.loadType = AudioClipLoadType.CompressedInMemory;
+                    s.compressionFormat = AudioCompressionFormat.PCM;
+                    s.quality = 1f;
+                    s.preloadAudioData = true;
+                    importer.forceToMono = true;
                     importer.loadInBackground = false;
                     break;
 

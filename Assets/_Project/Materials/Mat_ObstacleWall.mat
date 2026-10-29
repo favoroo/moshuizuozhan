@@ -109,10 +109,12 @@ Material:
     - _Cull: 2
     - _Cutoff: 0.5
     - _DetailAlbedoMapScale: 1
+    - _DetailNoiseStrength: 0.12
     - _DetailNormalMapScale: 1
     - _DitherAlpha: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
+    - _EdgeHighlight: 0.25
     - _EnableCorrugation: 0
     - _EnvironmentReflections: 1
     - _FocusMinAlpha: 0.25
@@ -123,6 +125,7 @@ Material:
     - _GlossyReflections: 0
     - _Metallic: 0.12
     - _OcclusionStrength: 1
+    - _PanelLineStrength: 0.35
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
@@ -139,11 +142,11 @@ Material:
     - _XRMotionVectorsPass: 1
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.7, g: 0.73, b: 0.78, a: 1}
-    - _Color: {r: 0.7, g: 0.73, b: 0.78, a: 1}
+    - _BaseColor: {r: 0.5704816, g: 0.5382356, b: 0.44798842, a: 1}
+    - _Color: {r: 0.5704816, g: 0.5382356, b: 0.44798842, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
-    - _TrimColor: {r: 0.48, g: 0.52, b: 0.58, a: 1}
+    - _TrimColor: {r: 0.13286833, g: 0.1259674, b: 0.10653924, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

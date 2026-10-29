@@ -48,6 +48,10 @@ RAW_DIR = os.path.join(ROOT, "MediaRaw", "sfx")
 OUT_DIR = os.path.join(ROOT, "Assets", "_Project", "Audio", "SFX")
 # 统一渲染窗：够长以容纳最长的尾音，尾部静音会被裁掉
 RENDER_WINDOW = 1.6
+# 循环音效渲染窗与无缝参数
+RENDER_WINDOW_LOOP = 2.15
+LOOP_DUR = 1.8
+XFADE_DUR = 0.25
 # 低于此幅度视为静音，用于裁尾（避免留下长尾静音浪费体积）
 SILENCE_FLOOR = 0.0015
 
@@ -259,6 +263,23 @@ def _trim_tail(buf):
     fade = min(int(0.006 * SR), len(out))
     for i in range(fade):
         out[len(out) - 1 - i] *= i / fade
+    return out
+
+
+def _make_seamless_loop(buf, loop_len_s=LOOP_DUR, xfade_s=XFADE_DUR):
+    """首尾等功率交叉淡化，输出无爆音的完美循环缓冲区。"""
+    L = int(loop_len_s * SR)
+    X = int(xfade_s * SR)
+    if len(buf) < L + X:
+        buf = buf + [0.0] * (L + X - len(buf))
+    out = [0.0] * L
+    for i in range(X):
+        t = i / float(X)
+        w_head = math.sin(0.5 * math.pi * t)
+        w_tail = math.cos(0.5 * math.pi * t)
+        out[i] = buf[i] * w_head + buf[L + i] * w_tail
+    for i in range(X, L):
+        out[i] = buf[i]
     return out
 
 
@@ -648,6 +669,62 @@ def _f_special_slam(buf, v, n):
     space(buf, delay=0.12, fb=0.30, mix=0.18)
 
 
+# ---------------- 循环音效（P1-Loop：无缝循环通道） ----------------
+
+def _f_roll(buf, v, n):
+    """滚筒推地滚动：地面低频碾压 + 墨水挤压湿润感 + 滚筒旋转的 5Hz 节律。"""
+    noise(buf, dur=2.15, peak=0.18, ftype="lowpass", f0=260, q=1.1, a0=1.0, a1=1.0)
+    tone(buf, wtype="sine", f0=75, dur=2.15, peak=0.16, a0=1.0, a1=1.0)
+    noise(buf, dur=2.15, peak=0.12, ftype="bandpass", f0=950, q=1.3, a0=1.0, a1=1.0)
+    for k in range(11):
+        noise(buf, t0=k * 0.20, dur=0.08, peak=0.09, ftype="bandpass", f0=720, q=1.8)
+
+
+def _f_splatling_spin(buf, v, n):
+    """加特林按住蓄力旋转：马达持续嗡鸣 (180Hz) + 齿轮卡嗒抖动 + 高频风噪。"""
+    tone(buf, wtype="sawtooth", f0=180, dur=2.15, peak=0.15, a0=1.0, a1=1.0, lp=(1400,))
+    tone(buf, wtype="square", f0=360, dur=2.15, peak=0.06, a0=1.0, a1=1.0, lp=(1800,))
+    tone(buf, wtype="sine", f0=90, dur=2.15, peak=0.10, a0=1.0, a1=1.0)
+    noise(buf, dur=2.15, peak=0.08, ftype="bandpass", f0=2400, q=2.0, a0=1.0, a1=1.0)
+    noise(buf, dur=2.15, peak=0.05, ftype="highpass", f0=3400, a0=1.0, a1=1.0)
+
+
+def _f_swim(buf, v, n):
+    """潜水游泳持续：水下低频位移闷响 + 连续咕嘟气泡与水波流转。"""
+    noise(buf, dur=2.15, peak=0.15, ftype="lowpass", f0=280, q=0.9, a0=1.0, a1=1.0)
+    tone(buf, wtype="sine", f0=85, dur=2.15, peak=0.12, a0=1.0, a1=1.0)
+    noise(buf, dur=2.15, peak=0.10, ftype="bandpass", f0=850, q=1.2, a0=1.0, a1=1.0)
+    for k in range(8):
+        bubble(buf, t0=0.04 + k * 0.26, count=3, f_start=320, f_end=640, spread=0.04, dur=0.035, peak=0.06)
+
+
+def _f_climb(buf, v, n):
+    """攀爬墨墙持续：垂直贴墙湿润摩擦 + 上爬水泡抖动。"""
+    noise(buf, dur=2.15, peak=0.16, ftype="bandpass", f0=1600, q=1.2, a0=1.0, a1=1.0)
+    tone(buf, wtype="triangle", f0=260, dur=2.15, peak=0.08, a0=1.0, a1=1.0)
+    for k in range(10):
+        bubble(buf, t0=0.03 + k * 0.21, count=2, f_start=450, f_end=850, spread=0.03, dur=0.03, peak=0.05)
+    noise(buf, dur=2.15, peak=0.06, ftype="highpass", f0=3200, a0=1.0, a1=1.0)
+
+
+def _f_enemy_ink_sizzle(buf, v, n):
+    """敌方墨水灼烧持续：高频腐蚀滋滋声 + 灼烧气泡破裂。"""
+    noise(buf, dur=2.15, peak=0.22, ftype="highpass", f0=2800, a0=1.0, a1=1.0)
+    noise(buf, dur=2.15, peak=0.14, ftype="bandpass", f0=4800, q=1.5, a0=1.0, a1=1.0)
+    for k in range(13):
+        t_pop = 0.02 + k * 0.16
+        tone(buf, wtype="sine", f0=600 + (k % 4) * 150, f1=180 + (k % 3) * 50, t0=t_pop, dur=0.03, peak=0.08, a1=0.01)
+    tone(buf, wtype="triangle", f0=110, dur=2.15, peak=0.08, a0=1.0, a1=1.0)
+
+
+def _f_storm_rain(buf, v, n):
+    """风暴墨雨持续：滂沱墨雨倾盆声 + 低频狂风呼啸 + 密集雨点击地。"""
+    noise(buf, dur=2.15, peak=0.20, ftype="bandpass", f0=2200, f1=1800, q=0.6, a0=1.0, a1=1.0)
+    noise(buf, dur=2.15, peak=0.12, ftype="highpass", f0=3200, a0=1.0, a1=1.0)
+    noise(buf, dur=2.15, peak=0.14, ftype="lowpass", f0=200, q=1.0, a0=1.0, a1=1.0)
+    tone(buf, wtype="sine", f0=65, dur=2.15, peak=0.08, a0=1.0, a1=1.0)
+
+
 # ---------------- 比赛流程补充（P4-D / P5-C 横幅音） ----------------
 
 def _f_ready(buf, v, n):
@@ -775,7 +852,17 @@ SFX = {
     "ui_back":        (1, _f_ui_back,        0.24),
     "ui_slider":      (1, _f_ui_slider,      0.22),
     "ui_error":       (1, _f_ui_error,       0.26),
+    # 循环音效（P1-Loop：无缝循环通道）
+    "roll":             (1, _f_roll,             0.24),
+    "splatling_spin":   (1, _f_splatling_spin,   0.21),
+    "swim":             (1, _f_swim,             0.18),
+    "climb":            (1, _f_climb,            0.16),
+    "enemy_ink_sizzle": (1, _f_enemy_ink_sizzle, 0.26),
+    "storm_rain":       (1, _f_storm_rain,       0.22),
 }
+
+# 循环音效键集合（使用无缝循环交叉淡化，同时输出 *_1.wav 与 *_loop_1.wav）
+LOOP_KEYS = {"roll", "splatling_spin", "swim", "climb", "enemy_ink_sizzle", "storm_rain"}
 
 # 保留 key 清单（供 M5/M6 建 SfxLibrary SO 时对照；改这里要同步文档）
 GROUPS = {
@@ -792,12 +879,15 @@ GROUPS = {
                      "match_end", "times_up", "result_win", "result_lose"],
     "UI":           ["ui_hover", "ui_click", "ui_confirm", "ui_toggle", "ui_back",
                      "ui_slider", "ui_error"],
+    "循环音效":     ["roll", "splatling_spin", "swim", "climb", "enemy_ink_sizzle", "storm_rain"],
 }
 
 # 允许超过 0.9s 的长音（流程/胜负提示天然带尾音，不按「过长」告警）
 LONG_OK = {
     "match_end", "result_win", "result_lose", "times_up", "one_minute",
     "bomb_explode", "special_slam", "go_horn",
+    "roll", "splatling_spin", "swim", "climb", "enemy_ink_sizzle", "storm_rain",
+    "roll_loop", "splatling_spin_loop", "swim_loop", "climb_loop", "enemy_ink_sizzle_loop", "storm_rain_loop",
 }
 
 
@@ -816,14 +906,18 @@ def _key_hash(key: str) -> int:
     return h
 
 
-def bake_one(key, idx, total, fn, target_peak):
+def bake_one(key, idx, total, fn, target_peak, is_loop=False):
     """渲染单个变体，返回 (浮点缓冲, 客观指标)。"""
     # 每个变体独立固定种子：加变体或改顺序不会影响已有变体的波形
     _reset_seed(0x2F6E2B1 ^ (_key_hash(key) & 0xFFFF) ^ (idx * 0x9E3779B1))
-    buf = [0.0] * int(RENDER_WINDOW * SR)
+    dur_win = RENDER_WINDOW_LOOP if is_loop else RENDER_WINDOW
+    buf = [0.0] * int(dur_win * SR)
     fn(buf, idx, total)
     _dc_remove(buf)
-    buf = _trim_tail(buf)
+    if is_loop:
+        buf = _make_seamless_loop(buf, loop_len_s=LOOP_DUR, xfade_s=XFADE_DUR)
+    else:
+        buf = _trim_tail(buf)
     _normalize(buf, target_peak)
     return buf, _stats_of(buf)
 
@@ -843,29 +937,33 @@ def bake(only=None, write_assets=True):
     print("烘焙音效 → %s" % RAW_DIR)
     for key in keys:
         total, fn, target = SFX[key]
+        is_loop = key in LOOP_KEYS
         for idx in range(total):
-            buf, st = bake_one(key, idx, total, fn, target)
-            name = "%s_%d.wav" % (key, idx + 1)
-            raw_path = os.path.join(RAW_DIR, name)
-            _write_wav(raw_path, buf)
-            rel = os.path.relpath(raw_path, ROOT)
-            if write_assets:
-                _write_wav(os.path.join(OUT_DIR, name), buf)
-            total_files += 1
-            warn = ""
-            if st["clipped"] > 0:
-                warn += " ⚠削波%d" % st["clipped"]
-            if st["dur_s"] < 0.01:
-                warn += " ⚠过短"
-            if st["dur_s"] > 0.9 and key not in LONG_OK:
-                warn += " ⚠过长"
-            if st["peak"] < 0.15:
-                warn += " ⚠偏轻"
-            print("  %-22s %5.3fs peak=%.3f rms=%.3f%s" %
-                  (name, st["dur_s"], st["peak"], st["rms"], warn))
-            manifest.append({"key": key, "variant": idx + 1, "file": rel,
-                             "out": os.path.relpath(os.path.join(OUT_DIR, name), ROOT) if write_assets else "",
-                             **st})
+            buf, st = bake_one(key, idx, total, fn, target, is_loop=is_loop)
+            names_to_write = ["%s_%d.wav" % (key, idx + 1)]
+            if is_loop:
+                names_to_write.append("%s_loop_%d.wav" % (key, idx + 1))
+            for name in names_to_write:
+                raw_path = os.path.join(RAW_DIR, name)
+                _write_wav(raw_path, buf)
+                rel = os.path.relpath(raw_path, ROOT)
+                if write_assets:
+                    _write_wav(os.path.join(OUT_DIR, name), buf)
+                total_files += 1
+                warn = ""
+                if st["clipped"] > 0:
+                    warn += " ⚠削波%d" % st["clipped"]
+                if st["dur_s"] < 0.01:
+                    warn += " ⚠过短"
+                if st["dur_s"] > 0.9 and key not in LONG_OK:
+                    warn += " ⚠过长"
+                if st["peak"] < 0.15:
+                    warn += " ⚠偏轻"
+                print("  %-22s %5.3fs peak=%.3f rms=%.3f%s" %
+                      (name, st["dur_s"], st["peak"], st["rms"], warn))
+                manifest.append({"key": key, "variant": idx + 1, "file": rel,
+                                 "out": os.path.relpath(os.path.join(OUT_DIR, name), ROOT) if write_assets else "",
+                                 **st})
 
     with open(os.path.join(RAW_DIR, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump({"sr": SR, "files": manifest}, fh, ensure_ascii=False, indent=1)
@@ -923,6 +1021,7 @@ def stats_only():
 def main():
     ap = argparse.ArgumentParser(description="P1 涂地对战音效离线烘焙（纯标准库）")
     ap.add_argument("--only", default=None, help="只烘指定族，逗号分隔，如 shot,ui_click")
+    ap.add_argument("--loop", "--loops", dest="loops", action="store_true", help="只烘焙循环音效族")
     ap.add_argument("--list", action="store_true", help="列出音色族与变体数后退出")
     ap.add_argument("--stats", action="store_true", help="不烘焙，只对已有产物做客观体检")
     ap.add_argument("--no-assets", action="store_true", help="只烘到 MediaRaw，不拷进 Assets")
@@ -935,9 +1034,12 @@ def main():
         return stats_only()
 
     only = None
+    if a.loops:
+        only = set(LOOP_KEYS)
     if a.only:
-        only = {s.strip() for s in a.only.split(",") if s.strip()}
-        unknown = only - set(SFX)
+        spec_only = {s.strip() for s in a.only.split(",") if s.strip()}
+        only = spec_only if only is None else (only & spec_only)
+        unknown = spec_only - set(SFX)
         if unknown:
             print("未知音效族: %s\n可用: %s" % (", ".join(sorted(unknown)), ", ".join(sorted(SFX))), file=sys.stderr)
             return 2

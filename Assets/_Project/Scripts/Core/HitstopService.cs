@@ -125,6 +125,9 @@ namespace P1.Core
         private static readonly HitstopTimeline Timeline = new HitstopTimeline();
         private static HitstopRunner _runner;
 
+        /// <summary>是否处于暂停状态。暂停期间跳过对 Time.timeScale 的赋值，防止覆盖暂停时的 0 尺度。</summary>
+        public static bool IsPaused { get; set; }
+
         /// <summary>是否正在定格/恢复。调试与测试可读。</summary>
         public static bool IsActive => Timeline.IsActive;
 
@@ -166,7 +169,7 @@ namespace P1.Core
 
         private static void Apply()
         {
-            if (Application.isPlaying)
+            if (Application.isPlaying && !IsPaused)
                 Time.timeScale = Timeline.CurrentScale;
         }
 
@@ -183,6 +186,7 @@ namespace P1.Core
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+            IsPaused = false;
             Cancel();
             EnsureRunner();
         }

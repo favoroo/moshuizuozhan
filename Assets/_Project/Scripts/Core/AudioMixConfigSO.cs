@@ -32,5 +32,24 @@ namespace P1.Core
         [Min(0.01f)] public float duckReleaseSeconds = 0.55f;
         [Tooltip("事件结束后额外保持下压的时间（秒），避免尾音被抬起")]
         [Min(0f)] public float duckTailSeconds = 0.25f;
+
+        [Header("循环音效（P1-Loop）")]
+        [Range(0f, 1f)] public float loopMasterVolume = 0.85f;
+        [Tooltip("循环音效淡入淡出时长（秒，0.08~0.15s）")]
+        [Range(0.05f, 0.30f)] public float loopFadeSeconds = 0.10f;
+        [Range(0f, 1f)] public float rollerLoopVolume = 0.65f;
+        [Range(0f, 1f)] public float splatlingSpinLoopVolume = 0.60f;
+        [Range(0f, 1f)] public float swimLoopVolume = 0.55f;
+        [Range(0f, 1f)] public float climbLoopVolume = 0.50f;
+        [Range(0f, 1f)] public float enemyInkSizzleLoopVolume = 0.70f;
+        [Range(0f, 1f)] public float stormRainLoopVolume = 0.65f;
+        [Range(0f, 1f)] public float chargerChargeLoopVolume = 0.60f;
+
+        [Header("音效节流窗口（秒）")]
+        [Min(0.01f)] public float footstepThrottleSeconds = 0.16f;
+        [Min(0.01f)] public float swimSplashThrottleSeconds = 0.12f;
+        [Min(0.01f)] public float hurtThrottleSeconds = 0.10f;
+        [Min(0.01f)] public float hitMarkerThrottleSeconds = 0.035f;
+        [Min(0.01f)] public float uiThrottleSeconds = 0.03f;
     }
 }

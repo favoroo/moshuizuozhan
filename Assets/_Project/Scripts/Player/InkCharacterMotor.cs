@@ -661,7 +661,7 @@ namespace P1.Player
             var marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             marker.name = "HeadMarker";
             marker.transform.SetParent(transform, false);
-            marker.transform.localPosition = new Vector3(0f, 1.95f, 0f);
+            marker.transform.localPosition = new Vector3(0f, CharacterMetrics.HeadMarkerHeight, 0f);
             marker.transform.localScale = new Vector3(0.18f, 0.07f, 0.18f);
             Destroy(marker.GetComponent<Collider>());
 

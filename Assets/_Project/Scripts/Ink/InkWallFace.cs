@@ -153,15 +153,21 @@ namespace P1.Ink
                 return 0;
             }
 
-            int minX = Mathf.Max(0, Mathf.FloorToInt((centerFacePoint.x - radiusMeters) / CellWidth));
-            int maxX = Mathf.Min(Width - 1, Mathf.FloorToInt((centerFacePoint.x + radiusMeters) / CellWidth));
-            int minY = Mathf.Max(0, Mathf.FloorToInt((centerFacePoint.y - radiusMeters) / CellHeight));
-            int maxY = Mathf.Min(Height - 1, Mathf.FloorToInt((centerFacePoint.y + radiusMeters) / CellHeight));
+            int minX = Mathf.Max(0, Mathf.FloorToInt((centerFacePoint.x - radiusMeters) / CellWidth) - 1);
+            int maxX = Mathf.Min(Width - 1, Mathf.FloorToInt((centerFacePoint.x + radiusMeters) / CellWidth) + 1);
+            int minY = Mathf.Max(0, Mathf.FloorToInt((centerFacePoint.y - radiusMeters) / CellHeight) - 1);
+            int maxY = Mathf.Min(Height - 1, Mathf.FloorToInt((centerFacePoint.y + radiusMeters) / CellHeight) + 1);
 
             float rSq = radiusMeters * radiusMeters;
             byte targetByte = (byte)team;
+            byte enemyByte = (byte)(team == Team.TeamA ? Team.TeamB : Team.TeamA);
             Color32 baseColor = team == Team.TeamA ? _teamAColor : _teamBColor;
             int changed = 0;
+
+            // 亚格子覆盖率：贴图 alpha 写平滑过渡值，墙面墨迹边缘就不再是一个个方块阶梯；
+            // 归属判定仍是「格心是否落在圆内」，计数与 InkAt 语义完全不变。
+            float halfDiag = 0.5f * Mathf.Sqrt(CellWidth * CellWidth + CellHeight * CellHeight);
+            float invFade = 1f / Mathf.Max(0.0001f, 2f * halfDiag);
 
             for (int y = minY; y <= maxY; y++)
             {
@@ -173,16 +179,33 @@ namespace P1.Ink
                 for (int x = minX; x <= maxX; x++)
                 {
                     int idx = rowOffset + x;
-                    if (_owners[idx] == targetByte)
-                        continue;
 
                     float cx = (x + 0.5f) * CellWidth;
                     float dx = cx - centerFacePoint.x;
-                    if (dx * dx + dySq > rSq)
+                    float distSq = dx * dx + dySq;
+                    float dist = Mathf.Sqrt(distSq);
+
+                    if (distSq > rSq)
+                    {
+                        // 圆外一圈只补视觉过渡，不改归属、也不覆盖敌方墨色
+                        if (_owners[idx] == enemyByte)
+                            continue;
+
+                        float coverage = Mathf.Clamp01((radiusMeters - dist) * invFade + 0.5f);
+                        if (coverage <= 0.02f)
+                            continue;
+
+                        _pixels[idx] = WithAlpha(baseColor, coverage);
+                        IsDirty = true;
+                        continue;
+                    }
+
+                    if (_owners[idx] == targetByte)
                         continue;
 
                     _owners[idx] = targetByte;
-                    _pixels[idx] = TintCellColor(baseColor, x, y);
+                    float edgeCoverage = Mathf.Clamp01((radiusMeters - dist) * invFade + 0.5f);
+                    _pixels[idx] = WithAlpha(baseColor, Mathf.Max(edgeCoverage, 0.62f));
                     changed++;
                 }
             }
@@ -251,15 +274,13 @@ namespace P1.Ink
                 UnityEngine.Object.DestroyImmediate(Texture);
         }
 
-        private static Color32 TintCellColor(Color32 c, int x, int y)
+        private static Color32 WithAlpha(Color32 c, float coverage)
         {
-            int hash = ((x * 73856093) ^ (y * 19349663)) & 7;
-            int delta = hash - 3;
             return new Color32(
-                (byte)Mathf.Clamp(c.r + delta * 2, 0, 255),
-                (byte)Mathf.Clamp(c.g + delta * 2, 0, 255),
-                (byte)Mathf.Clamp(c.b + delta * 2, 0, 255),
-                255);
+                c.r,
+                c.g,
+                c.b,
+                (byte)Mathf.Clamp(Mathf.RoundToInt(coverage * 255f), 0, 255));
         }
     }
 }

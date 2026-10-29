@@ -237,7 +237,7 @@ namespace P1.UI
                 versionText.text = $"{GameVersion.APP_NAME} {GameVersion.APP_VERSION_NAME}";
             }
 
-            // 动态创建 CheckUpdateButton
+            // 动态创建 CheckUpdateButton 与 CustomLayoutButton
             if (checkUpdateButton == null)
             {
                 var btnGo = new GameObject("CheckUpdateButton", typeof(RectTransform), typeof(Image), typeof(Button));
@@ -245,8 +245,8 @@ namespace P1.UI
                 var btnRt = btnGo.GetComponent<RectTransform>();
                 btnRt.anchorMin = new Vector2(0.5f, 0f);
                 btnRt.anchorMax = new Vector2(0.5f, 0f);
-                btnRt.anchoredPosition = new Vector2(0f, 48f);
-                btnRt.sizeDelta = new Vector2(200f, 44f);
+                btnRt.anchoredPosition = new Vector2(-115f, 48f);
+                btnRt.sizeDelta = new Vector2(190f, 44f);
 
                 var img = btnGo.GetComponent<Image>();
                 img.color = new Color(0.18f, 0.22f, 0.30f, 0.92f);
@@ -264,11 +264,56 @@ namespace P1.UI
 
                 var labelText = labelGo.GetComponent<Text>();
                 labelText.font = font;
-                labelText.fontSize = 20;
+                labelText.fontSize = 18;
                 labelText.fontStyle = FontStyle.Bold;
                 labelText.alignment = TextAnchor.MiddleCenter;
                 labelText.color = new Color(0.85f, 0.92f, 1f, 1f);
                 labelText.text = "检 查 更 新";
+            }
+
+            Transform layoutBtnTrans = readyPanel.transform.Find("CustomLayoutButton");
+            if (layoutBtnTrans == null)
+            {
+                var lbtnGo = new GameObject("CustomLayoutButton", typeof(RectTransform), typeof(Image), typeof(Button));
+                lbtnGo.transform.SetParent(readyPanel.transform, false);
+                var lbtnRt = lbtnGo.GetComponent<RectTransform>();
+                lbtnRt.anchorMin = new Vector2(0.5f, 0f);
+                lbtnRt.anchorMax = new Vector2(0.5f, 0f);
+                lbtnRt.anchoredPosition = new Vector2(115f, 48f);
+                lbtnRt.sizeDelta = new Vector2(190f, 44f);
+
+                var limg = lbtnGo.GetComponent<Image>();
+                limg.color = new Color(0.24f, 0.28f, 0.38f, 0.92f);
+
+                var lbtn = lbtnGo.GetComponent<Button>();
+                lbtn.targetGraphic = limg;
+                lbtn.onClick.AddListener(() =>
+                {
+                    var touchUI = FindAnyObjectByType<MobileTouchUI>();
+                    if (touchUI != null) touchUI.OpenLayoutCustomizer();
+                });
+
+                var llabelGo = new GameObject("Label", typeof(RectTransform), typeof(Text));
+                llabelGo.transform.SetParent(lbtnGo.transform, false);
+                var llabelRt = llabelGo.GetComponent<RectTransform>();
+                llabelRt.anchorMin = Vector2.zero;
+                llabelRt.anchorMax = Vector2.one;
+                llabelRt.offsetMin = Vector2.zero;
+                llabelRt.offsetMax = Vector2.zero;
+
+                var llabelText = llabelGo.GetComponent<Text>();
+                llabelText.font = font;
+                llabelText.fontSize = 18;
+                llabelText.fontStyle = FontStyle.Bold;
+                llabelText.alignment = TextAnchor.MiddleCenter;
+                llabelText.color = new Color(1f, 0.85f, 0.28f, 1f);
+                llabelText.text = "⚙️ 自定义键位";
+
+                // P9：桌面/非触控模式下隐藏自定义键位入口，避免出现点击无响应的死按钮
+                if (!Application.isMobilePlatform && !MobileTouchUI.IsTouchSimulationActive)
+                {
+                    lbtnGo.SetActive(false);
+                }
             }
 
             if (checkUpdateButton != null)

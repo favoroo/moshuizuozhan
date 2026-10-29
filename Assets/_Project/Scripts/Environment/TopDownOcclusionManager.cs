@@ -6,9 +6,11 @@ using UnityEngine;
 namespace P1.Environment
 {
     /// <summary>
-    /// 俯视角遮挡剔除管理器：
-    /// 每帧在 LateUpdate 从俯视相机向所有存活战斗角色（玩家、敌人、队友）投射视线球体检测，
-    /// 精准识别遮挡视线的掩体、集装箱与高台，驱动 OcclusionFader 执行 Screen-Door Dither 半透明淡化。
+    /// 第三人称遮挡剔除管理器（P9）：
+    /// 每帧从相机向角色投射视线球体检测，精准识别阻挡视线的掩体、集装箱与高台，
+    /// 驱动 OcclusionFader 执行 Screen-Door Dither 半透明淡化。
+    /// 默认只检测本地玩家：第三人称下相机低、掩体多，若对所有 Bot 检测会导致远处墙体全图闪烁；
+    /// 相机自身已有球探针防穿墙，二者配合使用。无本地玩家（编辑模式）时回退为全员检测。
     /// </summary>
     [ExecuteAlways]
     [DefaultExecutionOrder(-10)]
@@ -22,6 +24,9 @@ namespace P1.Environment
 
         [Tooltip("球体投射检测半径")]
         [SerializeField] private float sphereCastRadius = 0.32f;
+
+        [Tooltip("第三人称下只检测本地玩家，避免远处 Bot 背后的掩体全图闪烁；无本地玩家时自动回退全员检测")]
+        [SerializeField] private bool localPlayerOnly = true;
 
         [Tooltip("是否在场景中自动为所有掩体添加/刷新 OcclusionFader")]
         [SerializeField] private bool autoBindFaders = true;
@@ -88,40 +93,32 @@ namespace P1.Environment
             if (_cachedCamera == null) return;
 
             Vector3 camPos = _cachedCamera.transform.position;
-            IReadOnlyList<CombatantHealth> allCombatants = CombatantHealthRegistry.All;
 
-            if (allCombatants != null && allCombatants.Count > 0)
+            PlayerController localPlayer = localPlayerOnly ? PlayerController.LocalPlayer : null;
+            if (localPlayer != null && localPlayer.Health != null && localPlayer.Health.IsAlive)
             {
-                for (int i = 0; i < allCombatants.Count; i++)
-                {
-                    var combatant = allCombatants[i];
-                    if (combatant == null || !combatant.gameObject.activeInHierarchy || !combatant.IsAlive)
-                    {
-                        continue;
-                    }
-
-                    Vector3 charRoot = combatant.transform.position;
-
-                    // 检测头部与胸腹两点，确保从全身任意高度被挡均能触发透明
-                    CheckLineOfSight(camPos, charRoot + Vector3.up * 1.35f, charRoot);
-                    CheckLineOfSight(camPos, charRoot + Vector3.up * 0.45f, charRoot);
-                }
+                // 第三人称：只保证镜头能看见本地玩家
+                CheckCombatant(camPos, localPlayer.Health);
             }
             else
             {
-                // 编辑模式 / 初始阶段兜底
-                var sceneCombatants = FindObjectsByType<CombatantHealth>(FindObjectsSortMode.None);
-                for (int i = 0; i < sceneCombatants.Length; i++)
-                {
-                    var combatant = sceneCombatants[i];
-                    if (combatant == null || !combatant.gameObject.activeInHierarchy || !combatant.IsAlive)
-                    {
-                        continue;
-                    }
+                IReadOnlyList<CombatantHealth> allCombatants = CombatantHealthRegistry.All;
 
-                    Vector3 charRoot = combatant.transform.position;
-                    CheckLineOfSight(camPos, charRoot + Vector3.up * 1.35f, charRoot);
-                    CheckLineOfSight(camPos, charRoot + Vector3.up * 0.45f, charRoot);
+                if (allCombatants != null && allCombatants.Count > 0)
+                {
+                    for (int i = 0; i < allCombatants.Count; i++)
+                    {
+                        CheckCombatant(camPos, allCombatants[i]);
+                    }
+                }
+                else
+                {
+                    // 编辑模式 / 初始阶段兜底
+                    var sceneCombatants = FindObjectsByType<CombatantHealth>(FindObjectsSortMode.None);
+                    for (int i = 0; i < sceneCombatants.Length; i++)
+                    {
+                        CheckCombatant(camPos, sceneCombatants[i]);
+                    }
                 }
             }
 
@@ -136,6 +133,18 @@ namespace P1.Environment
             {
                 allFaders[i]?.EvaluateStep(dt);
             }
+        }
+
+        private void CheckCombatant(Vector3 camPos, CombatantHealth combatant)
+        {
+            if (combatant == null || !combatant.gameObject.activeInHierarchy || !combatant.IsAlive)
+                return;
+
+            Vector3 charRoot = combatant.transform.position;
+
+            // 检测头部与胸腹两点，确保从全身任意高度被挡均能触发透明
+            CheckLineOfSight(camPos, charRoot + Vector3.up * 1.35f, charRoot);
+            CheckLineOfSight(camPos, charRoot + Vector3.up * 0.45f, charRoot);
         }
 
         private void CheckLineOfSight(Vector3 camPos, Vector3 targetPos, Vector3 characterRoot)

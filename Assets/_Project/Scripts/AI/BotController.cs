@@ -891,8 +891,10 @@ namespace P1.AI
                 float dist = FlatDistance(target);
                 if (dist < 4f || dist > 28f) continue;
 
-                // 越靠近敌方半场越值得压上；敌方墨水比中性地面更值得抢回
-                float progress = Mathf.Clamp01((target.z * enemySideSign) / 18f);
+                // 越靠近敌方半场越值得压上；敌方墨水比中性地面更值得抢回。
+                // 半场深度直接取当前涂地网格的 Z 尺寸，地图加长时不需要再改魔法数字。
+                float halfDepth = Mathf.Max(1f, ink.MapSize.y * 0.5f);
+                float progress = Mathf.Clamp01((target.z * enemySideSign) / halfDepth);
                 float value = cellTeam == Team.Neutral ? 1f : 1.6f;
                 float score = value * 10f - dist * 0.25f + progress * 3f + Random.Range(0f, 2.5f);
 

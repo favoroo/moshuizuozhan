@@ -213,7 +213,9 @@ namespace P1.Ink
                     if (team == Team.TeamA) _teamACount++;
                     else if (team == Team.TeamB) _teamBCount++;
 
-                    _pixels[idx] = TintCellColor(baseColor, x, y);
+                    // 纯色写入：视觉层的有机边缘与色调微差由 GPU 墨迹图集负责，
+                    // 这里若再做逐格噪声就会在 0.1m 单元格上显出明显的马赛克砖块。
+                    _pixels[idx] = baseColor;
                     changed++;
                 }
             }
@@ -336,25 +338,14 @@ namespace P1.Ink
                     Team t = (Team)_owners[idx];
                     _pixels[idx] = t switch
                     {
-                        Team.TeamA => TintCellColor(_teamAColor, x, y),
-                        Team.TeamB => TintCellColor(_teamBColor, x, y),
+                        Team.TeamA => _teamAColor,
+                        Team.TeamB => _teamBColor,
                         _ => _neutralColor
                     };
                 }
             }
 
             IsDirty = true;
-        }
-
-        private static Color32 TintCellColor(Color32 c, int x, int y)
-        {
-            int hash = ((x * 73856093) ^ (y * 19349663)) & 7;
-            int delta = hash - 3;
-            return new Color32(
-                (byte)Mathf.Clamp(c.r + delta * 2, 0, 255),
-                (byte)Mathf.Clamp(c.g + delta * 2, 0, 255),
-                (byte)Mathf.Clamp(c.b + delta * 2, 0, 255),
-                255);
         }
     }
 }

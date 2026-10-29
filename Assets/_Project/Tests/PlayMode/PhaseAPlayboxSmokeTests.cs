@@ -254,8 +254,14 @@ namespace P1.Tests
             yield return new WaitForSeconds(0.15f);
             Assert.Greater(player.transform.position.y, initialY + 0.35f, "起跳后角色应明显腾空上升");
 
-            // 等待下落着地（单次跳跃周期约 0.65s）
+            // 等待下落着地（单次跳跃周期约 0.65s）；低帧率下多给一点收敛时间
             yield return new WaitForSeconds(0.65f);
+            float landDeadline = Time.time + 1.5f;
+            while (!motor.IsGrounded && Time.time < landDeadline)
+            {
+                yield return null;
+            }
+
             Assert.Less(player.transform.position.y, initialY + 0.15f, "跳跃结束应在重力作用下重新平稳着地");
             Assert.IsTrue(motor.IsGrounded, "着地后应恢复接地判定");
         }

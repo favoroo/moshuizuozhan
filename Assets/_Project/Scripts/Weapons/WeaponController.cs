@@ -157,6 +157,7 @@ namespace P1.Weapons
             RebuildStrategy();
             _health.OnKilled += HandleKilled;
             BuildSpecialWarningRing();
+            WeaponAudioDriver.EnsureDriver(this);
         }
 
         private void OnDestroy()
@@ -385,7 +386,7 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayShot();
+                AudioManager.Instance.PlayBombThrow();
             }
 
             return true;
@@ -414,7 +415,7 @@ namespace P1.Weapons
             if (AudioManager.Instance != null)
             {
                 // 只有玩家自己的大招压 BGM；Bot 大招保留音效但不打断玩家音乐
-                AudioManager.Instance.PlayUltCast(_playerController != null);
+                AudioManager.Instance.PlaySpecialCast(_activeSpecialKind, _playerController != null);
             }
 
             return _activeSpecialKind == SpecialKind.Storm
@@ -640,6 +641,10 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
+                if (AudioManager.Instance.specialSlamClip != null)
+                {
+                    AudioManager.Instance.PlayOne(AudioManager.Instance.specialSlamClip, 0.95f, 0.98f, 1.02f);
+                }
                 AudioManager.Instance.PlayInkHitGround(2f);
             }
 
@@ -924,9 +929,9 @@ namespace P1.Weapons
 
         void IWeaponRuntimeHost.ReportShotFeedback()
         {
-            if (TeamId == Team.TeamA && AudioManager.Instance != null)
+            if (GetComponent<WeaponAudioDriver>() == null && TeamId == Team.TeamA && AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayShot();
+                AudioManager.Instance.PlayWeaponShot(CurrentWeaponKind);
             }
         }
 

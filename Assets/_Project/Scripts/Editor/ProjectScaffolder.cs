@@ -25,6 +25,7 @@ namespace P1.Editor
         private const string SoFolder = "Assets/_Project/ScriptableObjects";
         private const string MatFolder = "Assets/_Project/Materials";
         private const string ScenePath = "Assets/_Project/Scenes/PhaseA_Playbox.unity";
+        private const string ArenaStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle.asset";
 
         [MenuItem("P1/构建/1. 生成默认配置与材质 (SO & Materials)", false, 10)]
         public static void GenerateConfigsAndMaterials()
@@ -36,6 +37,18 @@ namespace P1.Editor
             var weaponCfg = LoadOrCreateSO<WeaponConfigSO>($"{SoFolder}/WeaponConfig.asset");
             var gameCfg = LoadOrCreateSO<GameConfigSO>($"{SoFolder}/GameConfig.asset");
             var botCfg = LoadOrCreateSO<BotConfigSO>($"{SoFolder}/BotConfig.asset");
+            var arenaStyle = LoadOrCreateSO<ArenaStyleSO>(ArenaStylePath);
+
+            // 远景雾只在 55m 之后生效，避免俯视全景/远景被整片白雾糊住；近景战斗完全无雾。
+            arenaStyle.fogStartDistance = 55f;
+            arenaStyle.fogEndDistance = 150f;
+            EditorUtility.SetDirty(arenaStyle);
+
+            // P7-B：40×56 集装箱码头地图与涂地网格（保持原有 400/200 网格规格，兼容冒烟测试断言）
+            inkCfg.mapSize = ArenaLayoutV2.MapSize;
+            inkCfg.desktopResolution = 400;
+            inkCfg.mobileResolution = 200;
+            EditorUtility.SetDirty(inkCfg);
 
             // 同步最新紧凑参数到资产
             weaponCfg.maxRange = 7.2f;
@@ -61,25 +74,44 @@ namespace P1.Editor
             botCfg.specialSearchRange = 5.5f;
             EditorUtility.SetDirty(botCfg);
 
-            CreateOrUpdateGroundMaterial();
+            CreateOrUpdateGroundMaterial(arenaStyle);
             // 可涂墙面：透明墨水叠加层，未涂区域保持原水泥墙外观
             CreateOrUpdateInkWallMaterial($"{MatFolder}/Mat_InkWall.mat");
             // 掩体墙与集装箱：支持 Screen-Door Dither 遮挡剔除与工业瓦楞条纹
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_ObstacleWall.mat", new Color(0.70f, 0.73f, 0.78f, 1f), new Color(0.48f, 0.52f, 0.58f, 1f), 0.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Container_Teal.mat", new Color(0.37f, 0.62f, 0.63f, 1f), new Color(0.24f, 0.42f, 0.44f, 1f), 1.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Container_Rust.mat", new Color(0.77f, 0.48f, 0.37f, 1f), new Color(0.52f, 0.28f, 0.20f, 1f), 1.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Container_Slate.mat", new Color(0.56f, 0.60f, 0.63f, 1f), new Color(0.36f, 0.40f, 0.44f, 1f), 1.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Container_Mustard.mat", new Color(0.84f, 0.68f, 0.32f, 1f), new Color(0.58f, 0.44f, 0.18f, 1f), 1.0f);
-            CreateOrUpdateUnlitMaterial($"{MatFolder}/Mat_BoundaryWall.mat", new Color(0.38f, 0.40f, 0.46f, 1f));
-            CreateOrUpdateUnlitMaterial($"{MatFolder}/Mat_SpawnPad_TeamA.mat", new Color(0.42f, 0.32f, 0.22f, 1f));
-            CreateOrUpdateUnlitMaterial($"{MatFolder}/Mat_SpawnPad_TeamB.mat", new Color(0.20f, 0.28f, 0.42f, 1f));
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_ObstacleWall.mat", arenaStyle.concreteLight, arenaStyle.concreteDark, 0.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Container_Teal.mat", arenaStyle.containerTeal, Color.Lerp(arenaStyle.containerTeal, arenaStyle.steelDark, 0.55f), 1.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Container_Rust.mat", arenaStyle.containerRust, Color.Lerp(arenaStyle.containerRust, arenaStyle.steelDark, 0.55f), 1.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Container_Slate.mat", arenaStyle.containerSlate, Color.Lerp(arenaStyle.containerSlate, arenaStyle.steelDark, 0.55f), 1.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Container_Mustard.mat", arenaStyle.containerMustard, Color.Lerp(arenaStyle.containerMustard, arenaStyle.steelDark, 0.55f), 1.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_BoundaryWall.mat", arenaStyle.boundaryConcrete, arenaStyle.boundaryTrim, 0.0f);
+
+            // P7-B 新增：竞技场掩体用建材（支持 dither 遮挡剔除）
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Prop_Concrete.mat", arenaStyle.concreteLight, arenaStyle.concreteDark, 0.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Prop_ConcreteDark.mat", arenaStyle.concreteMid, arenaStyle.concreteDark, 0.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Prop_Steel.mat", arenaStyle.steel, arenaStyle.steelDark, 0.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Prop_SteelDark.mat", arenaStyle.steelDark, Color.Lerp(arenaStyle.steelDark, Color.black, 0.25f), 0.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Prop_Wood.mat", arenaStyle.wood, arenaStyle.woodDark, 0.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Prop_WoodDark.mat", arenaStyle.woodDark, Color.Lerp(arenaStyle.woodDark, Color.black, 0.2f), 0.0f);
+
+            // P7-B 新增：装饰道具 / 旗帜 / 水面 / 天空 / 横幅
+            CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Matte.mat", Color.white, 0.15f, 0f, Color.black, 0f, 2f);
+            CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Metal.mat", Color.white, 0.55f, 0.65f, Color.black, 0f, 2f);
+            CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Emissive.mat", Color.white, 0.2f, 0f, arenaStyle.lampGlass, 1.6f, 2f);
+            CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Cloth.mat", Color.white, 0.1f, 0f, Color.black, 0f, 0f);
+            CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Foliage.mat", Color.white, 0.08f, 0f, Color.black, 0f, 2f);
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_SpawnPad_TeamA.mat", arenaStyle.teamAPad);
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_SpawnPad_TeamB.mat", arenaStyle.teamBPad);
+            CreateOrUpdateWaterMaterial(arenaStyle);
+            CreateOrUpdateSkyboxMaterial(arenaStyle);
+            CreateOrUpdateBannerMaterial();
+
             CreateOrUpdateLitMaterial($"{MatFolder}/Mat_TeamA_Body.mat", new Color(1.00f, 0.45f, 0.08f, 1f));
             CreateOrUpdateLitMaterial($"{MatFolder}/Mat_TeamB_Body.mat", new Color(0.16f, 0.42f, 1.00f, 1f));
             CreateOrUpdateUnlitMaterial($"{MatFolder}/Mat_VisorDark.mat", new Color(0.08f, 0.09f, 0.12f, 1f));
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            Debug.Log("[ProjectScaffolder] 默认 ScriptableObjects 与材质已生成完毕。");
+            Debug.Log("[ProjectScaffolder] 默认 ScriptableObjects 与材质已生成完毕（P7-B 40×56 集装箱码头风格）。");
         }
 
         [MenuItem("P1/构建/2. 一键生成并打开第一阶段试玩场景 (Phase A Playbox)", false, 11)]
@@ -99,19 +131,11 @@ namespace P1.Editor
             var gameCfg = AssetDatabase.LoadAssetAtPath<GameConfigSO>($"{SoFolder}/GameConfig.asset");
             var botCfg = AssetDatabase.LoadAssetAtPath<BotConfigSO>($"{SoFolder}/BotConfig.asset");
 
-            var groundMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_InkGround.mat");
-            var wallMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_ObstacleWall.mat");
-            var inkWallMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_InkWall.mat");
-            var boundaryMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_BoundaryWall.mat");
-            var spawnMatA = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_SpawnPad_TeamA.mat");
-            var spawnMatB = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_SpawnPad_TeamB.mat");
-            var containerTealMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_Container_Teal.mat");
-            var containerRustMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_Container_Rust.mat");
-            var containerSlateMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_Container_Slate.mat");
-            var containerMustardMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_Container_Mustard.mat");
             var teamAMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamA_Body.mat");
             var teamBMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamB_Body.mat");
             var visorMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_VisorDark.mat");
+            var arenaStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
+            var arenaMats = BuildArenaMaterialSet(arenaStyle);
 
             // 1. 主光源与环境光
             var lightGo = new GameObject("Directional Light");
@@ -134,16 +158,14 @@ namespace P1.Editor
             var navigator = managersRoot.AddComponent<ArenaNavigator>();
             managersRoot.AddComponent<TopDownOcclusionManager>();
 
-            // 3. 搭建 40x40m 对称竞技场（含中立高台、四向斜坡、集装箱掩体群与侧翼走廊）
+            // 3. 搭建 40×56 集装箱码头竞技场（含中立高台、四向斜坡、集装箱掩体群、延长区与出生网关）
             var inkableRenderers = new List<Renderer>();
             var blockedColliders = new List<Collider>();
-            BuildArenaGeometry(
-                groundMat, wallMat, boundaryMat, spawnMatA, spawnMatB,
-                containerTealMat, containerRustMat, containerSlateMat, containerMustardMat,
-                inkCfg, inkWallMat, inkableRenderers, blockedColliders, out _);
+            ArenaGeometryBuilder.BuildArenaGeometry(
+                arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
 
             inkSurface.Configure(inkCfg, inkableRenderers, blockedColliders);
-            navigator.Configure(inkCfg != null ? inkCfg.mapSize : new Vector2(40f, 40f), 0.5f, ~0);
+            navigator.Configure(inkCfg != null ? inkCfg.mapSize : ArenaLayoutV2.MapSize, 0.5f, ~0);
 
             // 4. 双方各 4 个出生点（Team A = 玩家 + 3 Bot，Team B = 4 Bot）
             var spawnsRoot = new GameObject("_Spawns");
@@ -179,15 +201,18 @@ namespace P1.Editor
                     isLocalPlayer: false, botCfg: botCfg);
             }
 
-            // 7. 创建正交俯视跟随相机
+            // 7. 创建第三人称跟随相机（类名 TopDownCameraFollow 保留以兼容旧调用方）
             var camGo = new GameObject("Main Camera");
             camGo.tag = "MainCamera";
             var cam = camGo.AddComponent<Camera>();
-            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.clearFlags = CameraClearFlags.Skybox;
             cam.backgroundColor = new Color(0.08f, 0.09f, 0.12f, 1f);
             camGo.AddComponent<AudioListener>();
             var camFollow = camGo.AddComponent<TopDownCameraFollow>();
             camFollow.Configure(playerGo.transform, gameCfg);
+
+            // 7.1 P7-B：烘焙地面/横幅贴图、生成装饰与港口远景、应用日光/雾/天空/后处理
+            BakeArenaVisuals(arenaMats, arenaStyle);
 
             // 8. 创建战斗 HUD（含顶部覆盖率条、右上角实时涂地小地图、底部墨水/手雷/大招槽与操作说明）
             BuildHudCanvas();
@@ -212,7 +237,7 @@ namespace P1.Editor
             var group = new GameObject($"{team}_SpawnPoints");
             group.transform.SetParent(parent, false);
 
-            float z = team == Team.TeamA ? -15.5f : 15.5f;
+            float z = team == Team.TeamA ? -ArenaLayoutV2.SpawnZ : ArenaLayoutV2.SpawnZ;
             float facing = team == Team.TeamA ? 0f : 180f;
             var offsets = new[] { -2.4f, -0.8f, 0.8f, 2.4f };
             var result = new Transform[offsets.Length];
@@ -232,46 +257,45 @@ namespace P1.Editor
         [MenuItem("P1/关卡与地图/升级当前场景竞技场地貌与遮挡剔除 (P5-B)", false, 30)]
         public static void UpgradeSceneArenaAndOcclusion()
         {
+            // P5-B 旧入口保留（菜单路径不变），内部升级为 P7-B 的 40×56 集装箱码头。
+            UpgradeSceneVisualsP7B();
+        }
+
+        [MenuItem("P1/关卡与地图/场景视觉重构：集装箱码头 (P7-B)", false, 29)]
+        public static void UpgradeSceneVisualsP7B()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                Debug.LogError("[ProjectScaffolder] 请先退出 Play Mode 再执行场景视觉重构。");
+                return;
+            }
+
             GenerateConfigsAndMaterials();
 
             var inkCfg = AssetDatabase.LoadAssetAtPath<InkGridConfigSO>($"{SoFolder}/InkGridConfig.asset");
-            var groundMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_InkGround.mat");
-            var wallMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_ObstacleWall.mat");
-            var inkWallMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_InkWall.mat");
-            var boundaryMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_BoundaryWall.mat");
-            var spawnMatA = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_SpawnPad_TeamA.mat");
-            var spawnMatB = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_SpawnPad_TeamB.mat");
-            var containerTealMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_Container_Teal.mat");
-            var containerRustMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_Container_Rust.mat");
-            var containerSlateMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_Container_Slate.mat");
-            var containerMustardMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_Container_Mustard.mat");
+            var arenaStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
 
-            // 1. 确保 _Managers 挂载 TopDownOcclusionManager
-            var managersRoot = GameObject.Find("_Managers");
-            if (managersRoot != null)
+            // 确保主场景处于打开状态；若当前是 UIDemo 等其它场景则切回主场景。
+            Scene active = SceneManager.GetActiveScene();
+            if (!active.IsValid() || active.path != ScenePath)
             {
-                var occlusionMgr = managersRoot.GetComponent<TopDownOcclusionManager>();
-                if (occlusionMgr == null)
-                {
-                    managersRoot.AddComponent<TopDownOcclusionManager>();
-                }
+                EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
             }
 
-            // 2. 找到原 Arena_40x40 并在同层级幂等替换
-            var oldArena = GameObject.Find("Arena_40x40");
-            if (oldArena != null)
-            {
-                Object.DestroyImmediate(oldArena);
-            }
+            var arenaMats = BuildArenaMaterialSet(arenaStyle);
+
+            // 1. 幂等替换旧竞技场、装饰与远景
+            DestroyImmediateByName("Arena_40x40");
+            DestroyImmediateByName(ArenaGeometryBuilder.ArenaRootName);
+            DestroyImmediateByName("Arena_Decor");
+            DestroyImmediateByName("_ArenaBackdrop");
 
             var inkableRenderers = new List<Renderer>();
             var blockedColliders = new List<Collider>();
-            BuildArenaGeometry(
-                groundMat, wallMat, boundaryMat, spawnMatA, spawnMatB,
-                containerTealMat, containerRustMat, containerSlateMat, containerMustardMat,
-                inkCfg, inkWallMat, inkableRenderers, blockedColliders, out _);
+            ArenaGeometryBuilder.BuildArenaGeometry(
+                arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
 
-            // 3. 重新配置 InkSurfaceController 与 ArenaNavigator
+            // 2. 重新绑定涂地 / 导航 / 遮挡
             var inkSurface = Object.FindAnyObjectByType<InkSurfaceController>();
             if (inkSurface != null)
             {
@@ -281,19 +305,192 @@ namespace P1.Editor
             var navigator = Object.FindAnyObjectByType<ArenaNavigator>();
             if (navigator != null)
             {
-                navigator.Configure(inkCfg != null ? inkCfg.mapSize : new Vector2(40f, 40f), 0.5f, ~0);
+                navigator.Configure(inkCfg != null ? inkCfg.mapSize : ArenaLayoutV2.MapSize, 0.5f, ~0);
             }
 
-            // 4. 刷新 OcclusionManager
+            // 3. 烘焙贴图 + 生成装饰/远景 + 应用氛围（内部会重载材质并绑定贴图）
+            BakeArenaVisuals(arenaMats, arenaStyle);
+
             var occMgr = Object.FindAnyObjectByType<TopDownOcclusionManager>();
             if (occMgr != null)
             {
                 occMgr.AutoBindSceneFaders();
             }
 
+            // 4. 出生点与场景内 8 个角色移到新的 40×56 出生线
+            UpdateSpawnTransformsAndActors();
+
+            // 5. 小地图比例与 40×56 对齐
+            ResizeMinimapFrame();
+
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
             EditorSceneManager.SaveOpenScenes();
-            Debug.Log("[ProjectScaffolder] P5-B 竞技场地貌与俯视角半透明遮挡剔除升级完毕！");
+            Debug.Log("[ProjectScaffolder] P7-B 场景视觉重构完成：40×56 集装箱码头。");
+        }
+
+        /// <summary>
+        /// 加载 P7-B 所需的全部材质（缺失时退回现有掩体材质），供几何/装饰/氛围共用。
+        /// </summary>
+        private static ArenaMaterialSet BuildArenaMaterialSet(ArenaStyleSO style)
+        {
+            Material Load(string file) => AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/{file}");
+
+            var set = new ArenaMaterialSet
+            {
+                ground = Load("Mat_InkGround.mat"),
+                wall = Load("Mat_ObstacleWall.mat"),
+                inkWall = Load("Mat_InkWall.mat"),
+                boundary = Load("Mat_BoundaryWall.mat"),
+                spawnPadA = Load("Mat_SpawnPad_TeamA.mat"),
+                spawnPadB = Load("Mat_SpawnPad_TeamB.mat"),
+                containerTeal = Load("Mat_Container_Teal.mat"),
+                containerRust = Load("Mat_Container_Rust.mat"),
+                containerSlate = Load("Mat_Container_Slate.mat"),
+                containerMustard = Load("Mat_Container_Mustard.mat"),
+                propMatte = Load("Mat_Prop_Matte.mat"),
+                propMetal = Load("Mat_Prop_Metal.mat"),
+                propEmissive = Load("Mat_Prop_Emissive.mat"),
+                propCloth = Load("Mat_Prop_Cloth.mat"),
+                bannerAtlas = Load("Mat_BannerAtlas.mat"),
+                water = Load("Mat_Water.mat"),
+                skybox = Load("Mat_Skybox.mat"),
+            };
+
+            set.concrete = Load("Mat_Prop_Concrete.mat") ?? set.wall;
+            set.concreteDark = Load("Mat_Prop_ConcreteDark.mat") ?? set.concrete;
+            set.steel = Load("Mat_Prop_Steel.mat") ?? set.wall;
+            set.steelDark = Load("Mat_Prop_SteelDark.mat") ?? set.steel;
+            set.wood = Load("Mat_Prop_Wood.mat") ?? set.wall;
+            set.woodDark = Load("Mat_Prop_WoodDark.mat") ?? set.wood;
+            set.foliage = Load("Mat_Prop_Foliage.mat");
+            return set;
+        }
+
+        /// <summary>
+        /// P7-B 视觉总装：烘焙地面/横幅贴图 -> 绑定材质 -> 生成装饰与远景 -> 应用日光/雾/天空/后处理。
+        /// 在场景里已有 Arena 之后调用（AO 需要场景碰撞体）。
+        /// </summary>
+        private static void BakeArenaVisuals(ArenaMaterialSet mats, ArenaStyleSO style)
+        {
+            // 场景打开/资产刷新后，外部传入的 SO 引用可能变成 Unity 的「假 null」，这里重新解析一次。
+            if (style == null)
+            {
+                style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
+            }
+
+            if (style == null)
+            {
+                Debug.LogWarning("[ProjectScaffolder] ArenaStyle.asset 未找到，P7-B 将使用内置默认配色并跳过氛围。");
+            }
+
+            ArenaGroundTextureBaker.BakeAll(style);
+
+            // 贴图导入后重新取一次材质，避免资产重导入造成「假 null」。
+            var fresh = BuildArenaMaterialSet(style);
+            AssignGroundTexture(fresh.ground);
+            AssignBannerAtlas(fresh.bannerAtlas);
+
+            DestroyImmediateByName("Arena_Decor");
+            DestroyImmediateByName("_ArenaBackdrop");
+
+            ArenaDecorationBuilder.Build(null, style, fresh);
+            ArenaDecorationBuilder.BuildBackdrop(null, style, fresh);
+            ArenaAtmosphereBuilder.Apply(style);
+        }
+
+        private static void AssignGroundTexture(Material groundMat)
+        {
+            if (groundMat == null) return;
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(ArenaGroundTextureBaker.GroundTexturePath);
+            if (tex == null) return;
+            groundMat.SetTexture("_GroundTex", tex);
+            groundMat.SetFloat("_GroundTexStrength", 1f);
+            EditorUtility.SetDirty(groundMat);
+        }
+
+        private static void AssignBannerAtlas(Material bannerMat)
+        {
+            if (bannerMat == null) return;
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(ArenaGroundTextureBaker.BannerAtlasPath);
+            if (tex == null) return;
+            bannerMat.SetTexture("_BaseMap", tex);
+            EditorUtility.SetDirty(bannerMat);
+        }
+
+        private static void DestroyImmediateByName(string name)
+        {
+            var go = GameObject.Find(name);
+            if (go != null)
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        /// <summary>
+        /// 把 _Spawns 下的出生线与 8 个角色迁移到 40×56 的新出生区（z=±23.5）。
+        /// </summary>
+        private static void UpdateSpawnTransformsAndActors()
+        {
+            var spawnsRoot = GameObject.Find("_Spawns");
+            if (spawnsRoot == null) return;
+
+            Transform teamAGroup = spawnsRoot.transform.Find("TeamA_SpawnPoints");
+            Transform teamBGroup = spawnsRoot.transform.Find("TeamB_SpawnPoints");
+
+            UpdateSpawnGroup(teamAGroup, Team.TeamA);
+            UpdateSpawnGroup(teamBGroup, Team.TeamB);
+
+            MoveActorToSpawn("Player_TeamA", teamAGroup, 0);
+            for (int i = 1; i < 4; i++) MoveActorToSpawn($"BotA_{i:00}", teamAGroup, i);
+            for (int i = 0; i < 4; i++) MoveActorToSpawn($"BotB_{i:00}", teamBGroup, i);
+        }
+
+        private static void UpdateSpawnGroup(Transform group, Team team)
+        {
+            if (group == null) return;
+
+            float z = team == Team.TeamA ? -ArenaLayoutV2.SpawnZ : ArenaLayoutV2.SpawnZ;
+            float facing = team == Team.TeamA ? 0f : 180f;
+            float[] offsets = { -2.4f, -0.8f, 0.8f, 2.4f };
+
+            for (int i = 0; i < group.childCount && i < offsets.Length; i++)
+            {
+                Transform t = group.GetChild(i);
+                t.position = new Vector3(offsets[i], 0.22f, z);
+                t.rotation = Quaternion.Euler(0f, facing, 0f);
+            }
+        }
+
+        private static void MoveActorToSpawn(string actorName, Transform group, int index)
+        {
+            if (group == null || index < 0 || index >= group.childCount) return;
+
+            var actor = GameObject.Find(actorName);
+            if (actor == null) return;
+
+            Transform spawn = group.GetChild(index);
+            actor.transform.SetPositionAndRotation(spawn.position + Vector3.up * 0.1f, spawn.rotation);
+        }
+
+        /// <summary>把右上角小地图框改成 5:7 内容区，匹配 40×56 世界比例。</summary>
+        private static void ResizeMinimapFrame()
+        {
+            var canvas = GameObject.Find("HUD_Canvas");
+            if (canvas == null) return;
+
+            var frame = canvas.transform.Find("MinimapFrame") as RectTransform;
+            if (frame != null)
+            {
+                frame.sizeDelta = new Vector2(168f, 230f);
+                frame.anchoredPosition = new Vector2(-104f, -135f);
+            }
+
+            var raw = frame != null ? frame.Find("MinimapRawImage") as RectTransform : null;
+            if (raw != null)
+            {
+                raw.sizeDelta = new Vector2(156f, 218f);
+                raw.anchoredPosition = new Vector2(0f, -6f);
+            }
         }
 
         [MenuItem("P1/关卡与地图/渲染遮挡剔除视觉留底图 (P5-B)", false, 31)]
@@ -387,6 +584,94 @@ namespace P1.Editor
             cam.orthographic = origOrtho;
 
             Debug.Log("[ProjectScaffolder] P5-B 视觉留底截图已保存至 Logs/p5b_arena_symmetric_overview.png 与 Logs/p5b_occlusion_dither_fade.png！");
+        }
+
+        /// <summary>
+        /// P7-B 视觉留底：全景、出生区、中场、北端远景四张图，供人眼验收材质/光照/道具/远景。
+        /// </summary>
+        [MenuItem("P1/关卡与地图/渲染 P7-B 场景视觉留底图", false, 32)]
+        public static void CaptureP7BVerificationShots()
+        {
+            UpgradeSceneVisualsP7B();
+            System.IO.Directory.CreateDirectory("Logs");
+
+            Camera cam = Camera.main;
+            GameObject tempCam = null;
+            if (cam == null)
+            {
+                tempCam = new GameObject("TempP7BRenderCam", typeof(Camera));
+                cam = tempCam.GetComponent<Camera>();
+            }
+
+            Vector3 origPos = cam.transform.position;
+            Quaternion origRot = cam.transform.rotation;
+            float origFov = cam.fieldOfView;
+            bool origOrtho = cam.orthographic;
+
+            var surface = Object.FindAnyObjectByType<InkSurfaceController>();
+            if (surface != null)
+            {
+                surface.InitializeIfNeeded();
+                PaintP7BInk(surface);
+                surface.FlushTexture();
+            }
+
+            cam.orthographic = false;
+
+            cam.fieldOfView = 55f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 42f, -62f), Quaternion.Euler(48f, 0f, 0f));
+            RenderCameraToPng(cam, "Logs/p7b_overview.png", 1920, 1080);
+
+            cam.fieldOfView = 42f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 9.0f, -33.0f), Quaternion.Euler(48f, 0f, 0f));
+            RenderCameraToPng(cam, "Logs/p7b_spawn_teamA.png", 1920, 1080);
+
+            cam.fieldOfView = 46f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 14f, -14f), Quaternion.Euler(46f, 0f, 0f));
+            RenderCameraToPng(cam, "Logs/p7b_midfield.png", 1920, 1080);
+
+            cam.fieldOfView = 52f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 12f, 20f), Quaternion.Euler(42f, 0f, 0f));
+            RenderCameraToPng(cam, "Logs/p7b_north_vista.png", 1920, 1080);
+
+            cam.fieldOfView = origFov;
+            cam.orthographic = origOrtho;
+            cam.transform.SetPositionAndRotation(origPos, origRot);
+            if (tempCam != null) Object.DestroyImmediate(tempCam);
+
+            var renderers = Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude);
+            var uniqueMats = new HashSet<Material>();
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null && renderers[i].sharedMaterial != null)
+                    uniqueMats.Add(renderers[i].sharedMaterial);
+            }
+            Debug.Log($"[P7B] 场景统计：Renderer={renderers.Length}，唯一材质={uniqueMats.Count}。留底图已写入 Logs/p7b_*.png。");
+        }
+
+        private static void PaintP7BInk(InkSurfaceController surface)
+        {
+            // Team A：南侧出生区、中线推进、西侧绕后走廊
+            surface.PaintCircle(new Vector3(0f, 0f, -21f), 4.0f, Team.TeamA);
+            surface.PaintCircle(new Vector3(0f, 0f, -17f), 3.0f, Team.TeamA);
+            surface.PaintCircle(new Vector3(0f, 0f, -12f), 2.6f, Team.TeamA);
+            surface.PaintCircle(new Vector3(0f, 0.5f, -7.4f), 2.2f, Team.TeamA);
+            surface.PaintCircle(new Vector3(0f, 1.1f, -2.5f), 2.8f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-7.0f, 0f, -14f), 2.6f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-13.5f, 0f, -12f), 2.2f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-13.5f, 0.9f, 0f), 2.6f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-17.5f, 0f, -4f), 2.0f, Team.TeamA);
+
+            // Team B：北侧出生区、中线推进、东侧绕后走廊
+            surface.PaintCircle(new Vector3(0f, 0f, 21f), 4.0f, Team.TeamB);
+            surface.PaintCircle(new Vector3(0f, 0f, 17f), 3.0f, Team.TeamB);
+            surface.PaintCircle(new Vector3(0f, 0f, 12f), 2.6f, Team.TeamB);
+            surface.PaintCircle(new Vector3(0f, 0.5f, 7.4f), 2.2f, Team.TeamB);
+            surface.PaintCircle(new Vector3(0f, 1.1f, 2.5f), 2.8f, Team.TeamB);
+            surface.PaintCircle(new Vector3(7.0f, 0f, 14f), 2.6f, Team.TeamB);
+            surface.PaintCircle(new Vector3(13.5f, 0f, 12f), 2.2f, Team.TeamB);
+            surface.PaintCircle(new Vector3(13.5f, 0.9f, 0f), 2.6f, Team.TeamB);
+            surface.PaintCircle(new Vector3(17.5f, 0f, 4f), 2.0f, Team.TeamB);
         }
 
         [MenuItem("P1/构建/4. 渲染场景涂地自检预览图 (Logs/phaseA_preview.png)", false, 13)]
@@ -522,6 +807,17 @@ namespace P1.Editor
                     visorMat,
                     weaponCfg);
 
+                // 蛋形身体比旧人形矮：命中盒必须同步缩小，否则墨弹会在头顶上方"打空却判定命中"
+                var cc = motor.GetComponent<CharacterController>();
+                if (cc != null)
+                {
+                    cc.height = CharacterMetrics.ColliderHeight;
+                    cc.radius = CharacterMetrics.ColliderRadius;
+                    cc.center = new Vector3(0f, CharacterMetrics.ColliderCenterY, 0f);
+                    cc.stepOffset = CharacterMetrics.ColliderStepOffset;
+                    EditorUtility.SetDirty(cc);
+                }
+
                 motor.Configure(motor.Config, visualRoot, visualCtrl.WeaponRoot.gameObject);
                 if (weapon != null)
                 {
@@ -572,15 +868,15 @@ namespace P1.Editor
 
                 System.IO.Directory.CreateDirectory("Logs");
 
-                // Shot 1: 正面人形态特写
-                cam.transform.position = new Vector3(0.35f, 1.05f, -2.4f);
-                cam.transform.rotation = Quaternion.Euler(10f, -8f, 0f);
+                // Shot 1: 正面特写（蛋形身体连墨焰约 1.32m，相机拉到 2.45m 留出边距）
+                cam.transform.position = new Vector3(0.45f, 0.70f, -2.45f);
+                cam.transform.rotation = Quaternion.Euler(3f, -11f, 0f);
                 RenderCameraToPng(cam, "Logs/p5a_character_kid_front.png", 1600, 900);
 
-                // Shot 2: 后背背包与发辫特写
+                // Shot 2: 后背背包与墨焰特写
                 heroGo.transform.rotation = Quaternion.Euler(0f, 25f, 0f);
-                cam.transform.position = new Vector3(-0.4f, 1.15f, -2.4f);
-                cam.transform.rotation = Quaternion.Euler(14f, 10f, 0f);
+                cam.transform.position = new Vector3(-0.45f, 0.75f, -2.45f);
+                cam.transform.rotation = Quaternion.Euler(5f, 11f, 0f);
                 RenderCameraToPng(cam, "Logs/p5a_character_kid_back.png", 1600, 900);
 
                 // Shot 3: 乌贼形态特写
@@ -588,8 +884,8 @@ namespace P1.Editor
                 heroCtrl.KidRoot.SetActive(false);
                 heroCtrl.SquidRoot.SetActive(true);
                 heroCtrl.SquidRoot.transform.localScale = Vector3.one;
-                cam.transform.position = new Vector3(0f, 1.1f, -1.8f);
-                cam.transform.rotation = Quaternion.Euler(32f, 0f, 0f);
+                cam.transform.position = new Vector3(0f, 0.55f, -1.0f);
+                cam.transform.rotation = Quaternion.Euler(30f, 0f, 0f);
                 RenderCameraToPng(cam, "Logs/p5a_squid_form.png", 1600, 900);
 
                 // Shot 4: 7 种武器全家福队列 (Arsenal Showcase)
@@ -607,22 +903,100 @@ namespace P1.Editor
 
                 for (int i = 0; i < allKinds.Length; i++)
                 {
-                    float x = (i - 3) * 1.05f;
+                    float x = (i - 3) * 0.95f;
                     var cGo = new GameObject("Char_" + allKinds[i]);
                     cGo.transform.SetParent(showcaseGo.transform, false);
-                    cGo.transform.position = new Vector3(x, 1.25f, 0f);
+                    cGo.transform.position = new Vector3(x, 0f, 0f);
                     cGo.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
 
                     var ctrl = CharacterVisualAssembler.Assemble(cGo.transform, i % 2 == 0 ? Team.TeamA : Team.TeamB, i % 2 == 0 ? teamAMat : teamBMat, visorMat, null);
                     ctrl.EquipWeaponKind(allKinds[i]);
                 }
 
-                cam.fieldOfView = 68f;
-                cam.transform.position = new Vector3(0f, 2.5f, -6.2f);
-                cam.transform.rotation = Quaternion.Euler(12f, 0f, 0f);
+                cam.fieldOfView = 52f;
+                cam.transform.position = new Vector3(0f, 0.95f, -5.0f);
+                cam.transform.rotation = Quaternion.Euler(6f, 0f, 0f);
                 RenderCameraToPng(cam, "Logs/p5a_weapons_arsenal.png", 1920, 1080);
 
                 Debug.Log("[ProjectScaffolder] 已成功生成角色与武器多形态高清展示图：Logs/p5a_*.png");
+            }
+            finally
+            {
+                Object.DestroyImmediate(showcaseGo);
+            }
+        }
+
+        /// <summary>
+        /// 生成 6 帧蛋形步态接触表（触地→最高点），用于无人值守时用截图自查弹跳节奏与挤压量。
+        /// 直接采样 EggGaitSolver 并写回骨架，不依赖进入 PlayMode。
+        /// </summary>
+        [MenuItem("P1/角色与武器/生成蛋仔步态序列图 (P8-D)", false, 32)]
+        public static void CaptureEggGaitSheet()
+        {
+            var activeScene = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+            if (!activeScene.isLoaded || string.IsNullOrEmpty(activeScene.path))
+            {
+                UnityEditor.SceneManagement.EditorSceneManager.OpenScene(ScenePath);
+            }
+
+            var teamAMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamA_Body.mat");
+            var visorMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_VisorDark.mat");
+
+            var showcaseGo = new GameObject("__GaitSheet_P8D__");
+            try
+            {
+                var heroGo = new GameObject("GaitHero");
+                heroGo.transform.SetParent(showcaseGo.transform, false);
+                heroGo.transform.position = Vector3.zero;
+                heroGo.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+
+                var ctrl = CharacterVisualAssembler.Assemble(heroGo.transform, Team.TeamA, teamAMat, visorMat, null);
+                ctrl.EquipWeaponKind(WeaponKind.Shooter);
+
+                Transform bodySquash = ctrl.BodySquashTransform;
+                Transform chest = ctrl.KidRoot.transform.Find("Chest");
+                Transform leftArm = chest != null ? chest.Find("LeftArm") : null;
+                Transform rightArm = chest != null ? chest.Find("RightArm") : null;
+                if (bodySquash == null || chest == null)
+                {
+                    Debug.LogError("[ProjectScaffolder] 蛋形骨架节点缺失，无法生成步态序列图");
+                    return;
+                }
+
+                Vector3 squashBasePos = bodySquash.localPosition;
+                Vector3 squashBaseScale = bodySquash.localScale;
+                Quaternion chestBaseRot = chest.localRotation;
+                Quaternion leftBaseRot = leftArm != null ? leftArm.localRotation : Quaternion.identity;
+                Quaternion rightBaseRot = rightArm != null ? rightArm.localRotation : Quaternion.identity;
+
+                var camGo = new GameObject("GaitCam");
+                camGo.transform.SetParent(showcaseGo.transform, false);
+                var cam = camGo.AddComponent<Camera>();
+                cam.clearFlags = CameraClearFlags.Color;
+                cam.backgroundColor = new Color(0.12f, 0.14f, 0.18f, 1f);
+                cam.fieldOfView = 34f;
+                cam.transform.position = new Vector3(0.45f, 0.70f, -2.45f);
+                cam.transform.rotation = Quaternion.Euler(3f, -11f, 0f);
+
+                System.IO.Directory.CreateDirectory("Logs");
+
+                const float speed01 = 0.5f;   // 对应约 5.9 m/s 的正常跑速
+                const float leanPitch = 6f;
+                for (int frame = 0; frame < 6; frame++)
+                {
+                    float phase = frame * Mathf.PI * 0.25f;   // 0° / 45° / 90° / 135° / 180° / 225°
+                    EggGaitPose pose = EggGaitSolver.Sample(speed01, phase);
+
+                    bodySquash.localPosition = squashBasePos + Vector3.up * pose.BobY;
+                    bodySquash.localScale = Vector3.Scale(squashBaseScale, new Vector3(pose.SquashXZ, pose.SquashY, pose.SquashXZ));
+                    chest.localRotation = chestBaseRot * Quaternion.Euler(leanPitch, 0f, pose.RockDeg);
+                    if (leftArm != null) leftArm.localRotation = leftBaseRot * Quaternion.Euler(pose.ArmSwingDeg, 0f, 0f);
+                    if (rightArm != null) rightArm.localRotation = rightBaseRot * Quaternion.Euler(-pose.ArmSwingDeg, 0f, 0f);
+
+                    RenderCameraToPng(cam, $"Logs/p8d_gait_{frame}.png", 900, 900);
+                }
+
+                Debug.Log("[ProjectScaffolder] 已生成蛋仔步态序列图：Logs/p8d_gait_0~5.png");
             }
             finally
             {
@@ -634,7 +1008,12 @@ namespace P1.Editor
         {
             var rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
             cam.targetTexture = rt;
+
+            // 批处理下第一次 cam.Render() 的光照/环境探针尚未就绪，会拍出整体偏暗偏色的图；
+            // 先丢弃一帧做预热，再正式采样，自检图的配色才可信。
             cam.Render();
+            cam.Render();
+
             RenderTexture.active = rt;
 
             var tex = new Texture2D(width, height, TextureFormat.RGB24, false);
@@ -707,11 +1086,11 @@ namespace P1.Editor
             root.transform.SetPositionAndRotation(position, rotation);
 
             var cc = root.AddComponent<CharacterController>();
-            cc.height = 1.6f;
-            cc.radius = 0.42f;
-            cc.center = new Vector3(0f, 0.8f, 0f);
+            cc.height = CharacterMetrics.ColliderHeight;
+            cc.radius = CharacterMetrics.ColliderRadius;
+            cc.center = new Vector3(0f, CharacterMetrics.ColliderCenterY, 0f);
             cc.slopeLimit = 50f;
-            cc.stepOffset = 0.35f;
+            cc.stepOffset = CharacterMetrics.ColliderStepOffset;
 
             // 角色视觉节点（搭载多部件潮流涂鸦少年 Squidkid、乌贼潜行形态与 7 类主武器专属模型）
             var visualRoot = new GameObject("VisualRoot");
@@ -782,14 +1161,14 @@ namespace P1.Editor
             var centerText = CreateUiText(topPanel, "CenterStatus", font, "手感试玩场 00:00", 20, TextAnchor.MiddleCenter, new Vector2(0f, 10f), new Vector2(280f, 28f), Color.white);
 
             // 2. 右上角常驻实时涂地小地图
-            var minimapFrame = CreateUiPanel(canvasGo.transform, "MinimapFrame", new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-135f, -135f), new Vector2(230f, 230f), new Color(0.06f, 0.08f, 0.12f, 0.90f));
-            CreateUiText(minimapFrame, "MinimapTitle", font, "实时全图涂地小地图", 15, TextAnchor.UpperCenter, new Vector2(0f, 96f), new Vector2(210f, 24f), new Color(0.82f, 0.88f, 0.96f, 1f));
+            var minimapFrame = CreateUiPanel(canvasGo.transform, "MinimapFrame", new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-104f, -135f), new Vector2(168f, 230f), new Color(0.06f, 0.08f, 0.12f, 0.90f));
+            CreateUiText(minimapFrame, "MinimapTitle", font, "实时全图涂地小地图", 15, TextAnchor.UpperCenter, new Vector2(0f, 96f), new Vector2(150f, 24f), new Color(0.82f, 0.88f, 0.96f, 1f));
 
             var rawGo = new GameObject("MinimapRawImage", typeof(RectTransform), typeof(RawImage));
             rawGo.transform.SetParent(minimapFrame, false);
             var rawRect = rawGo.GetComponent<RectTransform>();
-            rawRect.sizeDelta = new Vector2(196f, 196f);
-            rawRect.anchoredPosition = new Vector2(0f, -8f);
+            rawRect.sizeDelta = new Vector2(156f, 218f);
+            rawRect.anchoredPosition = new Vector2(0f, -6f);
             var rawImg = rawGo.GetComponent<RawImage>();
             rawImg.color = Color.white;
 
@@ -817,7 +1196,7 @@ namespace P1.Editor
             var specText = CreateUiText(specBg, "SpecialStateText", font, "大招充能 0%", 16, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(260f, 34f), Color.white);
 
             var inkText = CreateUiText(bottomPanel, "InkStateText", font, "墨水 100/100", 16, TextAnchor.MiddleLeft, new Vector2(-150f, 36f), new Vector2(400f, 24f), Color.white);
-            CreateUiText(bottomPanel, "ControlsHintText", font, "操作：[WASD]移动  [空格]跳跃  [鼠标左键]连发涂地  [按住右键/Shift]己墨潜行回墨·贴着己方墨墙可潜上墙  [E/中键]抛延时手雷  [Q]超级砸地大招", 14, TextAnchor.MiddleCenter, new Vector2(0f, -38f), new Vector2(740f, 22f), new Color(0.80f, 0.86f, 0.95f, 1f));
+            CreateUiText(bottomPanel, "ControlsHintText", font, "操作：[WASD]移动  [鼠标]转视角  [左键]开火  [右键/Shift]己墨潜行回墨·贴着己方墨墙可潜上墙  [空格]跳跃  [E/中键]抛延时手雷  [Q]大招  [Esc]暂停", 14, TextAnchor.MiddleCenter, new Vector2(0f, -38f), new Vector2(740f, 22f), new Color(0.80f, 0.86f, 0.95f, 1f));
 
             var hud = canvasGo.AddComponent<HudController>();
             hud.BindReferences(teamAFill, teamBFill, teamAText, teamBText, centerText, inkFill, hpFill, specFill, inkText, specText, rawImg, rawRect, dotRect);
@@ -1116,11 +1495,28 @@ namespace P1.Editor
             return instance;
         }
 
-        private static Material CreateOrUpdateGroundMaterial()
+        /// <summary>
+        /// 按资产路径优先加载自定义 Shader：AssetDatabase 刷新/编译期间 Shader.Find 可能返回 null，
+        /// 导致材质静默回退到 URP/Lit（地面就会失去涂地能力）。
+        /// </summary>
+        /// <summary>把风格档案里的 sRGB 美术色转换成线性空间，避免线性工程里整体发白/过曝。</summary>
+        private static Color Linear(Color c)
+        {
+            return QualitySettings.activeColorSpace == ColorSpace.Linear ? c.linear : c;
+        }
+
+        private static Shader FindArenaShader(string fileName, string shaderName, string fallbackName)
+        {
+            Shader sh = AssetDatabase.LoadAssetAtPath<Shader>($"Assets/_Project/Shaders/{fileName}");
+            if (sh == null) sh = Shader.Find(shaderName);
+            if (sh == null) sh = Shader.Find(fallbackName);
+            return sh;
+        }
+
+        private static Material CreateOrUpdateGroundMaterial(ArenaStyleSO style)
         {
             string path = $"{MatFolder}/Mat_InkGround.mat";
-            Shader sh = Shader.Find("P1/InkGround");
-            if (sh == null) sh = Shader.Find("Universal Render Pipeline/Lit");
+            Shader sh = FindArenaShader("InkGround.shader", "P1/InkGround", "Universal Render Pipeline/Lit");
 
             var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (mat == null)
@@ -1133,16 +1529,170 @@ namespace P1.Editor
                 mat.shader = sh;
             }
 
-            mat.SetColor("_BaseColor", new Color(0.20f, 0.22f, 0.26f, 1f));
-            mat.SetColor("_GridLineColor", new Color(0.26f, 0.29f, 0.35f, 1f));
+            Color baseColor = style != null ? style.groundBase : new Color(0.72f, 0.69f, 0.62f, 1f);
+            Color seamColor = style != null ? style.groundSeam : new Color(0.52f, 0.50f, 0.45f, 1f);
+            Color cliffColor = style != null ? style.groundCliff : new Color(0.34f, 0.33f, 0.31f, 1f);
+
+            // 有烘焙贴图时 _BaseColor 只作为白色乘数，避免把 sRGB 地面再乘暗一次。
+            mat.SetColor("_BaseColor", Color.white);
+            mat.SetColor("_GridLineColor", Linear(seamColor));
+            mat.SetColor("_CliffColor", Linear(cliffColor));
+            mat.SetFloat("_GroundTexStrength", 1f);
+            mat.color = baseColor;
+
+            var groundTex = AssetDatabase.LoadAssetAtPath<Texture2D>(ArenaGroundTextureBaker.GroundTexturePath);
+            if (groundTex != null)
+            {
+                mat.SetTexture("_GroundTex", groundTex);
+            }
+
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        /// <summary>P7-B：装饰道具主材质（顶点色 × 基础色，可设置金属度/自发光/双面）。</summary>
+        private static Material CreateOrUpdatePropMaterial(string path, Color baseColor, float smoothness, float metallic,
+            Color emissionColor, float emissionStrength, float cull)
+        {
+            Shader sh = FindArenaShader("PropLit.shader", "P1/PropLit", "Universal Render Pipeline/Lit");
+
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                mat = new Material(sh);
+                AssetDatabase.CreateAsset(mat, path);
+            }
+            else
+            {
+                mat.shader = sh;
+            }
+
+            mat.SetColor("_BaseColor", Linear(baseColor));
+            mat.SetFloat("_Smoothness", smoothness);
+            mat.SetFloat("_Metallic", metallic);
+            mat.SetColor("_EmissionColor", Linear(emissionColor));
+            mat.SetFloat("_EmissionStrength", emissionStrength);
+            mat.SetFloat("_AmbientBoost", 1f);
+            mat.SetFloat("_Cull", cull);
+            mat.color = Linear(baseColor);
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        /// <summary>P7-B：出生台队色圆盘材质（队色 + 圆环 + 导向箭头 + 混凝土基台外缘）。</summary>
+        private static Material CreateOrUpdateSpawnPadMaterial(string path, Color teamColor)
+        {
+            Shader sh = FindArenaShader("SpawnPad.shader", "P1/SpawnPad", "Universal Render Pipeline/Unlit");
+
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                mat = new Material(sh);
+                AssetDatabase.CreateAsset(mat, path);
+            }
+            else
+            {
+                mat.shader = sh;
+            }
+
+            mat.SetColor("_BaseColor", Linear(new Color(0.14f, 0.16f, 0.19f, 1f)));
+            mat.SetColor("_PlatformColor", Linear(new Color(0.65f, 0.63f, 0.58f, 1f)));
+            mat.SetColor("_TeamColor", Linear(teamColor));
+            mat.SetColor("_RingColor", Linear(new Color(0.92f, 0.93f, 0.95f, 1f)));
+            mat.SetColor("_ChevronColor", Linear(new Color(1f, 0.92f, 0.72f, 1f)));
+            mat.SetFloat("_GlowStrength", 0.55f);
+            mat.color = Linear(teamColor);
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        private static Material CreateOrUpdateWaterMaterial(ArenaStyleSO style)
+        {
+            string path = $"{MatFolder}/Mat_Water.mat";
+            Shader sh = FindArenaShader("Water.shader", "P1/Water", "Universal Render Pipeline/Unlit");
+
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                mat = new Material(sh);
+                AssetDatabase.CreateAsset(mat, path);
+            }
+            else
+            {
+                mat.shader = sh;
+            }
+
+            mat.SetColor("_ShallowColor", Linear(style != null ? style.waterShallow : new Color(0.20f, 0.55f, 0.62f, 1f)));
+            mat.SetColor("_DeepColor", Linear(style != null ? style.waterDeep : new Color(0.05f, 0.24f, 0.36f, 1f)));
+            mat.SetColor("_HorizonColor", Linear(style != null ? style.waterHorizon : new Color(0.66f, 0.78f, 0.84f, 1f)));
+            mat.SetFloat("_WaveScale", 1f);
+            mat.SetFloat("_WaveSpeed", 0.15f);
+            mat.SetFloat("_WaveStrength", 0.25f);
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        private static Material CreateOrUpdateSkyboxMaterial(ArenaStyleSO style)
+        {
+            string path = $"{MatFolder}/Mat_Skybox.mat";
+            Shader sh = FindArenaShader("SkyGradient.shader", "P1/SkyGradient", "Skybox/Procedural");
+
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                mat = new Material(sh);
+                AssetDatabase.CreateAsset(mat, path);
+            }
+            else
+            {
+                mat.shader = sh;
+            }
+
+            if (style != null)
+            {
+                mat.SetColor("_TopColor", Linear(style.skyTop));
+                mat.SetColor("_HorizonColor", Linear(style.skyHorizon));
+                mat.SetColor("_GroundColor", Linear(style.skyGround));
+                mat.SetColor("_SunColor", Linear(style.sunDisc));
+                mat.SetColor("_CloudColor", Linear(style.cloudColor));
+                mat.SetFloat("_CloudStrength", style.cloudStrength);
+            }
+
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        private static Material CreateOrUpdateBannerMaterial()
+        {
+            string path = $"{MatFolder}/Mat_BannerAtlas.mat";
+            Shader sh = FindArenaShader("DecalUnlit.shader", "P1/DecalUnlit", "Universal Render Pipeline/Unlit");
+
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                mat = new Material(sh);
+                AssetDatabase.CreateAsset(mat, path);
+            }
+            else
+            {
+                mat.shader = sh;
+            }
+
+            mat.SetColor("_Color", Color.white);
+            mat.SetFloat("_AlphaCutoff", 0.35f);
+            var atlas = AssetDatabase.LoadAssetAtPath<Texture2D>(ArenaGroundTextureBaker.BannerAtlasPath);
+            if (atlas != null)
+            {
+                mat.SetTexture("_BaseMap", atlas);
+            }
+
             EditorUtility.SetDirty(mat);
             return mat;
         }
 
         private static Material CreateOrUpdateInkWallMaterial(string path)
         {
-            Shader sh = Shader.Find("P1/InkWall");
-            if (sh == null) sh = Shader.Find("Universal Render Pipeline/Unlit");
+            Shader sh = FindArenaShader("InkWall.shader", "P1/InkWall", "Universal Render Pipeline/Unlit");
 
             var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (mat == null)
@@ -1162,9 +1712,7 @@ namespace P1.Editor
 
         private static Material CreateOrUpdateObstacleDitherMaterial(string path, Color baseColor, Color trimColor, float corrugation = 1.0f)
         {
-            Shader sh = Shader.Find("P1/ObstacleDitherLit");
-            if (sh == null) sh = Shader.Find("Universal Render Pipeline/Lit");
-            if (sh == null) sh = Shader.Find("Standard");
+            Shader sh = FindArenaShader("ObstacleDitherLit.shader", "P1/ObstacleDitherLit", "Universal Render Pipeline/Lit");
 
             var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (mat == null)
@@ -1177,15 +1725,15 @@ namespace P1.Editor
                 mat.shader = sh;
             }
 
-            mat.SetColor("_BaseColor", baseColor);
-            mat.SetColor("_TrimColor", trimColor);
+            mat.SetColor("_BaseColor", Linear(baseColor));
+            mat.SetColor("_TrimColor", Linear(trimColor));
             mat.SetFloat("_Smoothness", 0.38f);
             mat.SetFloat("_Metallic", 0.12f);
             mat.SetFloat("_EnableCorrugation", corrugation);
             mat.SetFloat("_CorrugationScale", 2.5f);
             mat.SetFloat("_CorrugationDepth", 0.28f);
             mat.SetFloat("_DitherAlpha", 1.0f);
-            mat.color = baseColor;
+            mat.color = Linear(baseColor);
             EditorUtility.SetDirty(mat);
             return mat;
         }
@@ -1232,6 +1780,143 @@ namespace P1.Editor
             mat.color = color;
             EditorUtility.SetDirty(mat);
             return mat;
+        }
+
+        /// <summary>P7-B 诊断：打印全部自定义 Shader 的解析状态与关键属性，便于定位 ShaderLab 解析失败。</summary>
+        [MenuItem("P1/诊断/打印 P7-B Shader 解析状态", false, 91)]
+        public static void DiagnoseArenaShaders()
+        {
+            string[] names =
+            {
+                "P1/InkGround", "P1/ObstacleDitherLit", "P1/InkWall", "P1/PropLit",
+                "P1/SkyGradient", "P1/Water", "P1/DecalUnlit", "P1/SpawnPad"
+            };
+
+            foreach (string name in names)
+            {
+                Shader sh = Shader.Find(name);
+                int propCount = sh != null ? sh.GetPropertyCount() : -1;
+                Debug.Log($"[P7B-Diag] Shader.Find({name}) => {(sh != null ? sh.name : "NULL")}, properties={propCount}");
+
+                if (sh == null || propCount <= 0) continue;
+
+                for (int i = 0; i < propCount; i++)
+                {
+                    string p = sh.GetPropertyName(i);
+                    if (p.Contains("Ground") || p.Contains("Cliff") || p.Contains("Dither") ||
+                        p.Contains("Edge") || p.Contains("Panel") || p.Contains("Emissive") || p.Contains("Cull"))
+                    {
+                        Debug.Log($"[P7B-Diag]   {name}.{p}");
+                    }
+                }
+            }
+        }
+
+        /// <summary>P7-B 诊断：检查合并网格的顶点色与场景材质绑定是否生效。</summary>
+        [MenuItem("P1/诊断/打印 P7-B 网格与材质", false, 92)]
+        public static void DiagnoseArenaMeshes()
+        {
+            var style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
+            if (style != null)
+            {
+                Debug.Log($"[P7B-Diag] colorSpace={QualitySettings.activeColorSpace}, " +
+                          $"groundBase={style.groundBase}, gamma={style.groundBase.gamma}, linear={style.groundBase.linear}, wood={style.wood}");
+            }
+
+            Material LoadMat(string n) => AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/{n}");
+            Material groundMatForDiag = LoadMat("Mat_InkGround.mat");
+            Material cm = LoadMat("Mat_Container_Teal.mat");
+            Material pm = LoadMat("Mat_Prop_Matte.mat");
+            Debug.Log($"[P7B-Diag] Mat_InkGround shader={(groundMatForDiag != null ? groundMatForDiag.shader.name : "NULL")} " +
+                      $"base={(groundMatForDiag != null ? groundMatForDiag.GetColor("_BaseColor").ToString() : "-")} " +
+                      $"tex={(groundMatForDiag != null && groundMatForDiag.GetTexture("_GroundTex") != null ? groundMatForDiag.GetTexture("_GroundTex").name : "NULL")}");
+            Debug.Log($"[P7B-Diag] Mat_Container_Teal base={(cm != null ? cm.GetColor("_BaseColor").ToString() : "-")}, " +
+                      $"Mat_Prop_Matte base={(pm != null ? pm.GetColor("_BaseColor").ToString() : "-")}");
+
+            Mesh Decor(string file) => AssetDatabase.LoadAssetAtPath<Mesh>($"Assets/_Project/Art/Meshes/Arena/{file}");
+
+            foreach (string file in new[] { "arena_decor_matte.asset", "arena_backdrop_matte.asset" })
+            {
+                Mesh m = Decor(file);
+                int colorCount = m != null ? m.colors.Length : 0;
+                int vertCount = m != null ? m.vertexCount : 0;
+                Debug.Log($"[P7B-Diag] {file}: verts={vertCount}, colors={colorCount}");
+                if (m != null && colorCount > 0)
+                {
+                    Color[] c = m.colors;
+                    Debug.Log($"[P7B-Diag]   c[0]={c[0]}, c[mid]={c[c.Length / 2]}, c[last]={c[c.Length - 1]}");
+                }
+            }
+
+            var pier = GameObject.Find("Backdrop_Matte");
+            var pierMr = pier != null ? pier.GetComponent<MeshRenderer>() : null;
+            Debug.Log($"[P7B-Diag] Backdrop_Matte mat={(pierMr != null && pierMr.sharedMaterial != null ? pierMr.sharedMaterial.name : "NULL")} " +
+                      $"base={(pierMr != null && pierMr.sharedMaterial != null ? pierMr.sharedMaterial.GetColor("_BaseColor").ToString() : "-")}");
+
+            var decor = GameObject.Find("Decor_Matte");
+            var decorMr = decor != null ? decor.GetComponent<MeshRenderer>() : null;
+            Debug.Log($"[P7B-Diag] Decor_Matte mat={(decorMr != null && decorMr.sharedMaterial != null ? decorMr.sharedMaterial.name : "NULL")} " +
+                      $"base={(decorMr != null && decorMr.sharedMaterial != null ? decorMr.sharedMaterial.GetColor("_BaseColor").ToString() : "-")}");
+
+            var ground = GameObject.Find("Ground_Main_40x56");
+            var groundMr = ground != null ? ground.GetComponent<MeshRenderer>() : null;
+            Material gm = groundMr != null ? groundMr.sharedMaterial : null;
+            Debug.Log($"[P7B-Diag] Ground mat={(gm != null ? gm.shader.name : "NULL")} base={(gm != null ? gm.GetColor("_BaseColor").ToString() : "-")} " +
+                      $"tex={(gm != null && gm.GetTexture("_GroundTex") != null ? gm.GetTexture("_GroundTex").name : "NULL")}");
+        }
+
+        /// <summary>P7-B 诊断：逐层隐藏对象截屏，精准定位全景图中的发白区域来源。</summary>
+        [MenuItem("P1/诊断/逐层隔离排查发白区域", false, 93)]
+        public static void LocateGlowObject()
+        {
+            UpgradeSceneVisualsP7B();
+
+            Camera cam = Camera.main;
+            if (cam == null) return;
+
+            Vector3 origPos = cam.transform.position;
+            Quaternion origRot = cam.transform.rotation;
+            float origFov = cam.fieldOfView;
+            bool origOrtho = cam.orthographic;
+
+            cam.orthographic = false;
+            cam.fieldOfView = 55f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 42f, -62f), Quaternion.Euler(48f, 0f, 0f));
+
+            var backdrop = GameObject.Find("_ArenaBackdrop");
+            var decor = GameObject.Find("Arena_Decor");
+            var atmosphere = GameObject.Find("_Atmosphere");
+
+            // 1. 基准图（全开）
+            RenderCameraToPng(cam, "Logs/diag_0_all_on.png", 960, 540);
+
+            // 2. 隐藏 _ArenaBackdrop
+            if (backdrop != null) backdrop.SetActive(false);
+            RenderCameraToPng(cam, "Logs/diag_1_no_backdrop.png", 960, 540);
+            if (backdrop != null) backdrop.SetActive(true);
+
+            // 3. 隐藏 _Atmosphere (Volume 后处理)
+            if (atmosphere != null) atmosphere.SetActive(false);
+            RenderCameraToPng(cam, "Logs/diag_2_no_post.png", 960, 540);
+            if (atmosphere != null) atmosphere.SetActive(true);
+
+            // 4. 隐藏 Backdrop_Water
+            var water = GameObject.Find("Backdrop_Water");
+            if (water != null) water.SetActive(false);
+            RenderCameraToPng(cam, "Logs/diag_3_no_water.png", 960, 540);
+            if (water != null) water.SetActive(true);
+
+            // 5. 隐藏 Backdrop_Matte
+            var bMatte = GameObject.Find("Backdrop_Matte");
+            if (bMatte != null) bMatte.SetActive(false);
+            RenderCameraToPng(cam, "Logs/diag_4_no_bmatte.png", 960, 540);
+            if (bMatte != null) bMatte.SetActive(true);
+
+            cam.fieldOfView = origFov;
+            cam.orthographic = origOrtho;
+            cam.transform.SetPositionAndRotation(origPos, origRot);
+
+            Debug.Log("[P7B-Diag] 隔离排查截图已输出到 Logs/diag_*.png。");
         }
 
         private static void RegisterSceneInBuildSettings(string scenePath)

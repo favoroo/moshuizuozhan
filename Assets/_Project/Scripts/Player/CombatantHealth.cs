@@ -181,6 +181,12 @@ namespace P1.Player
 
             ApplyImpactFeedback(damage, attacker, killed);
 
+            // 本地玩家受击播放 hurt 音效（带节流）
+            if (IsLocalPlayer(this) && !killed && AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayHurt();
+            }
+
             // 无 HUD 订阅者时保底播放命中音；有 HUD 时由 HUD 播放带连击音高变化的版本
             if (attacker != null && IsLocalPlayer(attacker) && DamageApplied == null && AudioManager.Instance != null)
             {

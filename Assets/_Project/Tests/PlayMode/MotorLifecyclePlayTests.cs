@@ -75,15 +75,21 @@ namespace P1.Tests
             Assert.AreEqual(5f, motor.CurrentInk, 0.01f);
 
             // 静止潜墨即进入隐匿（进入发生在订阅之前，这里直接断言状态）
+            // InkCharacterMotor 会把单帧 dt 钳到 0.05s（防穿墙），所以按「实际模拟时间」折算预期，
+            // 避免 batchmode 低帧率下把正常的钳制误判成回墨速度错误。
             float startTime = Time.time;
+            float simulatedSeconds = 0f;
             while (Time.time - startTime < 1f)
             {
                 motor.SetFrameIntent(Vector3.zero, Vector3.forward, true, false);
                 yield return null;
+                simulatedSeconds += Mathf.Min(Time.deltaTime, 0.05f);
             }
 
             float oneSecondInk = motor.CurrentInk;
-            Assert.That(oneSecondInk, Is.InRange(44f, 50f), $"潜墨 1s 应回墨约 42（实际 {oneSecondInk:F1}）");
+            float expectedInk = Mathf.Min(100f, 5f + 42f * simulatedSeconds);
+            Assert.That(oneSecondInk, Is.InRange(expectedInk - 1.5f, expectedInk + 1.5f),
+                $"潜墨回墨应约 42/s（模拟 {simulatedSeconds:F2}s，预期 {expectedInk:F1}，实际 {oneSecondInk:F1}）");
             Assert.IsTrue(motor.IsStealthed, "静止潜墨应进入隐匿");
 
             // 订阅隐匿事件：先验证「移动退出」，再验证「静止重新进入」
@@ -110,15 +116,16 @@ namespace P1.Tests
             Assert.GreaterOrEqual(stealthEvents, 1, "解除隐匿应触发 OnStealthChanged");
             Assert.IsFalse(lastStealthValue, "解除隐匿的事件参数应为 false");
 
-            // 回到静止继续回墨到满罐（5 + 42×2.4 ≈ 100），并重新进入隐匿
+            // 回到静止继续回墨到满罐，并重新进入隐匿；轮询到满罐，避免低帧率下掐点
             motor.SetFrameIntent(Vector3.zero, Vector3.forward, true, false);
             float refillStart = Time.time;
-            while (Time.time - refillStart < 1.5f)
+            float refillDeadline = refillStart + 3f;
+            while (motor.CurrentInk < motor.MaxInk - 0.5f && Time.time < refillDeadline)
             {
                 motor.SetFrameIntent(Vector3.zero, Vector3.forward, true, false);
                 yield return null;
             }
-            Assert.AreEqual(100f, motor.CurrentInk, 0.5f, "潜墨约 2.4s 应回满 100 墨");
+            Assert.AreEqual(100f, motor.CurrentInk, 0.5f, "潜墨应回满 100 墨");
             Assert.IsTrue(motor.IsStealthed, "再次静止应重新进入隐匿");
             Assert.GreaterOrEqual(stealthEvents, 2, "重新进入隐匿应再次触发 OnStealthChanged");
             Assert.IsTrue(lastStealthValue, "重新进入的事件参数应为 true");

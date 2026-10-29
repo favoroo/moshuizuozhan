@@ -12,10 +12,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 454f6911a353e4d80ae218393fef7348, type: 3}
   m_Name: InkGridConfig
   m_EditorClassIdentifier: P1.Game::P1.Ink.InkGridConfigSO
-  mapSize: {x: 40, y: 40}
+  mapSize: {x: 40, y: 56}
   desktopResolution: 400
   mobileResolution: 200
+  inkAtlasResolutionDesktop: 4096
+  inkAtlasResolutionMobile: 1024
+  inkDryingSeconds: 6
+  splatGrowSeconds: 0.12
+  splatToneStrength: 1
+  maxSplatsPerFrame: 192
+  atlasMipmaps: 1
+  minimapRefreshHz: 12
   neutralGroundColor: {r: 0.22, g: 0.24, b: 0.28, a: 0}
   teamAColor: {r: 1, g: 0.44, b: 0.06, a: 1}
   teamBColor: {r: 0.15, g: 0.42, b: 1, a: 1}
   blockedMapColor: {r: 0.1, g: 0.11, b: 0.14, a: 1}
+  wallCellSize: 0.1
+  enableWallInk: 1
+  countWallInCoverage: 0

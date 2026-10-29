@@ -66,7 +66,7 @@ namespace P1.Editor
 
             sb.AppendLine(k_LogTag + " ===== 路径策略 =====");
             sb.AppendLine(k_LogTag + " Sprites → Sprite/alpha/mips off/Clamp | Pixel → 同前但 Point | Textures → mips on/Repeat");
-            sb.AppendLine(k_LogTag + " Music → Streaming+Vorbis | SFX → DecompressOnLoad+PCM | Voice → CompressedInMemory+Vorbis");
+            sb.AppendLine(k_LogTag + " Music → Streaming+Vorbis | SFX → DecompressOnLoad+PCM | LoopSFX → CompressedInMemory+PCM | Voice → CompressedInMemory+Vorbis");
 
             problems += ReportMissingMeta(sb, MediaImportPolicy.SpritesFolder, ref assets);
             problems += ReportMissingMeta(sb, MediaImportPolicy.TexturesFolder, ref assets);
@@ -194,6 +194,12 @@ namespace P1.Editor
                 else if (kind == MediaImportPolicy.AudioKind.Sfx)
                 {
                     wantLoad = AudioClipLoadType.DecompressOnLoad;
+                    wantFormat = AudioCompressionFormat.PCM;
+                }
+                else if (kind == MediaImportPolicy.AudioKind.LoopSfx)
+                {
+                    // 循环音效刻意用 CompressedInMemory + PCM：Vorbis 的首尾填充会破坏无缝循环。
+                    wantLoad = AudioClipLoadType.CompressedInMemory;
                     wantFormat = AudioCompressionFormat.PCM;
                 }
                 else

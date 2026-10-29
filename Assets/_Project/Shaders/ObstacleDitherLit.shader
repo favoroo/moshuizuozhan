@@ -13,6 +13,11 @@ Shader "P1/ObstacleDitherLit"
         _CorrugationDepth ("Corrugation Depth", Range(0.0, 1.0)) = 0.28
         [Toggle] _EnableCorrugation ("Enable Corrugation Ribs", Float) = 1.0
 
+        [Header(Surface Detail)]
+        _EdgeHighlight ("Edge Highlight", Range(0.0, 2.0)) = 0.25
+        _PanelLineStrength ("Panel Line Strength", Range(0.0, 1.0)) = 0.35
+        _DetailNoiseStrength ("Detail Noise Strength", Range(0.0, 1.0)) = 0.12
+
         [Header(Dither Occlusion Settings)]
         _DitherAlpha ("Dither Alpha", Range(0.0, 1.0)) = 1.0
         _FocusPos ("Focus World Pos", Vector) = (0, 0, 0, 0)
@@ -42,6 +47,9 @@ Shader "P1/ObstacleDitherLit"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT
+            #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -59,6 +67,7 @@ Shader "P1/ObstacleDitherLit"
                 float3 positionWS : TEXCOORD0;
                 float3 normalWS   : TEXCOORD1;
                 float2 uv         : TEXCOORD2;
+                half   fogFactor  : TEXCOORD3;
             };
 
             CBUFFER_START(UnityPerMaterial)
@@ -69,6 +78,9 @@ Shader "P1/ObstacleDitherLit"
                 float _CorrugationScale;
                 float _CorrugationDepth;
                 float _EnableCorrugation;
+                float _EdgeHighlight;
+                float _PanelLineStrength;
+                float _DetailNoiseStrength;
                 float _DitherAlpha;
                 float4 _FocusPos;
                 float _FocusRadius;
@@ -93,6 +105,7 @@ Shader "P1/ObstacleDitherLit"
                 output.positionWS = posInputs.positionWS;
                 output.normalWS = normInputs.normalWS;
                 output.uv = input.uv;
+                output.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
                 return output;
             }
 
@@ -122,6 +135,25 @@ Shader "P1/ObstacleDitherLit"
                 float3 geomN = normalize(input.normalWS);
                 half3 surfaceColor = _BaseColor.rgb;
 
+                // 2.1 混凝土/钢板结构细节：踢脚线、压顶、横向板缝与细噪点
+                float sideMask = 1.0 - saturate(abs(geomN.y) * 1.5);
+                if (sideMask > 0.02)
+                {
+                    float plinth = smoothstep(0.10, 0.055, input.uv.y);
+                    float coping = smoothstep(0.90, 0.945, input.uv.y);
+                    surfaceColor = lerp(surfaceColor, _TrimColor.rgb, (plinth * 0.55 + coping * 0.32) * sideMask);
+
+                    float seamCoord = abs(frac(input.uv.y * 4.0) - 0.5);
+                    float seam = smoothstep(0.035, 0.0, seamCoord);
+                    surfaceColor = lerp(surfaceColor, _TrimColor.rgb, seam * _PanelLineStrength * 0.22 * sideMask);
+
+                    surfaceColor += _BaseColor.rgb * coping * _EdgeHighlight * 0.08 * sideMask;
+
+                    float grain = frac(sin(dot(floor(input.positionWS.xz * 9.0 + input.uv.y * 31.0),
+                        float2(12.9898, 78.233))) * 43758.5453);
+                    surfaceColor *= 1.0 - (grain - 0.5) * _DetailNoiseStrength;
+                }
+
                 if (_EnableCorrugation > 0.5)
                 {
                     // 仅立面呈现竖直凹凸楞纹，顶面与底面保持平滑
@@ -146,8 +178,9 @@ Shader "P1/ObstacleDitherLit"
                     }
                 }
 
-                // 3. 基础光照与高光
+                // 3. 基础光照与高光（含主光阴影，道具/柜体才会真正落地）
                 Light mainLight = GetMainLight();
+                float shadowAtten = mainLight.shadowAttenuation;
                 float3 L = normalize(mainLight.direction);
                 float3 V = normalize(GetCameraPositionWS() - input.positionWS);
                 float3 H = normalize(L + V);
@@ -157,14 +190,15 @@ Shader "P1/ObstacleDitherLit"
 
                 // 漫反射与暗部环境补光
                 half3 ambient = SampleSH(geomN) * 0.45 + half3(0.18, 0.20, 0.24);
-                half3 diffuse = surfaceColor * (ambient + mainLight.color * (NdotL * 0.75 + 0.25));
+                half3 diffuse = surfaceColor * (ambient + mainLight.color * ((NdotL * 0.75 + 0.25) * shadowAtten));
 
                 // 粗糙度高光
                 float specPower = exp2(8.0 * _Smoothness + 1.0);
                 float spec = pow(NdotH, specPower) * (NdotL * 0.8 + 0.2) * _Metallic;
-                half3 specular = mainLight.color * spec;
+                half3 specular = mainLight.color * (spec * shadowAtten);
 
-                return half4(diffuse + specular, 1.0);
+                half3 finalColor = MixFog(diffuse + specular, input.fogFactor);
+                return half4(finalColor, 1.0);
             }
             ENDHLSL
         }
@@ -206,6 +240,9 @@ Shader "P1/ObstacleDitherLit"
                 float _CorrugationScale;
                 float _CorrugationDepth;
                 float _EnableCorrugation;
+                float _EdgeHighlight;
+                float _PanelLineStrength;
+                float _DetailNoiseStrength;
                 float _DitherAlpha;
                 float4 _FocusPos;
                 float _FocusRadius;

@@ -130,6 +130,11 @@ namespace P1.Weapons
             b.OuterRingTransform.gameObject.SetActive(false);
             b.InnerFillTransform.gameObject.SetActive(false);
 
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayBombThrow();
+            }
+
             _active.Add(b);
         }
 
@@ -167,10 +172,10 @@ namespace P1.Weapons
                         b.InnerFillTransform.gameObject.SetActive(true);
                         SetRendererColor(b.InnerFillRenderer, Color.Lerp(b.Color, Color.white, 0.45f));
 
-                        // 落地「咔哒」上膛声：引信开始的听觉提示（正式 bomb_beep 音效由 P5-C 接入）
+                        // 落地引信声：bomb_beep 音效
                         if (AudioManager.Instance != null)
                         {
-                            AudioManager.Instance.PlayInkHitGround(0.6f);
+                            AudioManager.Instance.PlayBombBeep();
                         }
                     }
 
@@ -229,6 +234,7 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
+                AudioManager.Instance.PlayBombExplode();
                 AudioManager.Instance.PlayInkHitGround(1.5f);
             }
 

@@ -18,6 +18,38 @@ namespace P1.Ink
         [Range(64, 512)]
         public int mobileResolution = 200;
 
+        [Header("墨迹图集（纯视觉层，决定油漆边缘精细度）")]
+        [Tooltip("桌面端墨迹图集分辨率：40m 场地下 4096 = 1cm/texel，边缘才能是平滑曲线而非 10cm 方格阶梯")]
+        [Range(512, 4096)]
+        public int inkAtlasResolutionDesktop = 4096;
+
+        [Tooltip("移动端墨迹图集分辨率：显存与填充率受限，1024 = 3.9cm/texel")]
+        [Range(512, 2048)]
+        public int inkAtlasResolutionMobile = 1024;
+
+        [Tooltip("墨水从湿润变干所需秒数（影响镜面高光与边缘厚度）")]
+        [Range(0.5f, 30f)]
+        public float inkDryingSeconds = 6f;
+
+        [Tooltip("单个墨斑铺开动画时长（秒）；0 = 立即出现")]
+        [Range(0f, 0.5f)]
+        public float splatGrowSeconds = 0.12f;
+
+        [Tooltip("每个墨斑的色调微差强度：0 = 完全纯色，1 = 参考实现默认")]
+        [Range(0f, 2f)]
+        public float splatToneStrength = 1f;
+
+        [Tooltip("每帧最多绘制（含重绘）的墨斑数，超出者直接以完成态补画")]
+        [Range(32, 384)]
+        public int maxSplatsPerFrame = 192;
+
+        [Tooltip("图集是否生成 mipmap（远景不闪烁，代价是每 0.25s 一次 mip 重建）")]
+        public bool atlasMipmaps = true;
+
+        [Tooltip("小地图贴图刷新频率（Hz）；0 = 每帧刷新")]
+        [Range(0f, 30f)]
+        public float minimapRefreshHz = 12f;
+
         [Header("队伍与地面配色")]
         public Color neutralGroundColor = new Color(0.22f, 0.24f, 0.28f, 0.0f);
         public Color teamAColor = new Color(1.00f, 0.44f, 0.06f, 1.0f);
@@ -38,6 +70,11 @@ namespace P1.Ink
         public int GetPlatformResolution()
         {
             return Application.isMobilePlatform ? mobileResolution : desktopResolution;
+        }
+
+        public int GetPlatformAtlasResolution()
+        {
+            return Application.isMobilePlatform ? inkAtlasResolutionMobile : inkAtlasResolutionDesktop;
         }
 
         public Color GetTeamColor(Team team)

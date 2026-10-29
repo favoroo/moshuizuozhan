@@ -25,7 +25,8 @@ namespace P1.UI
     {
         [Header("主题与配置")]
         [SerializeField] private UIThemeSO theme;
-        [SerializeField] private Vector2 mapPixelSize = new Vector2(210f, 210f);
+        // 40×56 地图的内容区约 5:7，避免把长轴世界压扁成正方形小地图。
+        [SerializeField] private Vector2 mapPixelSize = new Vector2(168f, 230f);
         [SerializeField] private float cornerRadius = 26f;
 
         [Header("外框与核心贴图")]

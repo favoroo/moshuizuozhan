@@ -1,10 +1,16 @@
 using P1.Core;
+using P1.Weapons;
 using UnityEngine;
 
 namespace P1.Player
 {
     /// <summary>
-    /// 正交俯视相机控制器：平滑跟随主角 + 向瞄准方向 Look-ahead 偏移 + 爆炸/大招微震屏。
+    /// 第三人称轨道跟随相机（P9）：
+    /// 类名 <c>TopDownCameraFollow</c> 保留以兼容旧调用方/测试，实现已从俯视跟随改为 Inkwave 式第三人称。
+    /// 1. 鼠标 / 手柄右摇杆 / 触屏滑屏驱动 yaw-pitch；
+    /// 2. 枢轴跟随角色（人形 1.85m、潜墨 1.30m），吊臂 4.5m / 4.1m；
+    /// 3. 球探针防穿墙、贴墙自动收进、近距离右肩偏移、地面高度保护；
+    /// 4. 透视 52° FOV，蓄力狙变焦、手雷瞄准微调；保留 Trauma 震屏与全部旧公共 API。
     /// </summary>
     [RequireComponent(typeof(Camera))]
     public class TopDownCameraFollow : MonoBehaviour
@@ -15,20 +21,57 @@ namespace P1.Player
         [SerializeField] private GameConfigSO gameConfig;
 
         private Camera _cam;
-        private Vector3 _currentVelocity;
-        private Vector3 _aimGroundPoint;
+        private InkCharacterMotor _motor;
+        private WeaponController _weapon;
+
+        private float _yaw;
+        private float _pitch;
+        private Vector3 _pivot;
+        private Vector3 _pivotVelocity;
+        private Vector3 _lastTargetPosition;
+        private float _currentDistance;
+        private float _shoulder;
+        private float _smoothedFov;
         private float _trauma;
         private float _shakeRoll;
         private bool _isSubAimActive;
+        private bool _hasSnapped;
+        private Vector3 _aimGroundPoint;
+
+        private readonly RaycastHit[] _castHits = new RaycastHit[8];
 
         public Camera CameraComponent => _cam;
         public bool IsSubAimActive => _isSubAimActive;
+
+        /// <summary>当前水平朝向（度）。世界 +Z 为 0，顺时针为正。</summary>
+        public float YawDegrees => _yaw;
+
+        /// <summary>当前俯仰角（度）。正数 = 低头俯视，负数 = 抬头仰视。</summary>
+        public float PitchDegrees => _pitch;
+
+        /// <summary>当前相机吊臂长度（米），供自动化测试与调试面板读取。</summary>
+        public float CurrentDistance => _currentDistance;
+
+        /// <summary>屏幕中心瞄准射线的最大探测距离（米）。</summary>
+        public float AimRayDistance => gameConfig != null ? Mathf.Max(5f, gameConfig.tpsAimRayDistance) : 70f;
+
+        /// <summary>相机实际朝向（含俯仰，不含震屏 Roll）。</summary>
+        public Vector3 LookForward => Quaternion.Euler(_pitch, _yaw, 0f) * Vector3.forward;
+
+        /// <summary>水平前向：WASD 前进方向。</summary>
+        public Vector3 PlanarForward => Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
+
+        /// <summary>水平右向：D 键方向。</summary>
+        public Vector3 PlanarRight => Quaternion.Euler(0f, _yaw, 0f) * Vector3.right;
 
         private void Awake()
         {
             Instance = this;
             _cam = GetComponent<Camera>();
             ApplyCameraSettings();
+            ResolveActorRefs();
+            if (target != null)
+                SnapImmediately();
         }
 
         private void OnDestroy()
@@ -41,17 +84,19 @@ namespace P1.Player
         {
             target = followTarget;
             gameConfig = config;
+            ResolveActorRefs();
             ApplyCameraSettings();
             SnapImmediately();
         }
 
+        /// <summary>保留旧 API：TPS 下不再做瞄准前移，仅记录供调试/兼容。</summary>
         public void SetAimGroundPoint(Vector3 worldAimPoint)
         {
             _aimGroundPoint = worldAimPoint;
         }
 
         /// <summary>
-        /// 副武器抛物线瞄准或远射程瞄准时动态激活：平滑扩展视野 Look-ahead 距离，
+        /// 副武器抛物线瞄准 / 远射程瞄准时激活：FOV 轻微收窄、吊臂略拉远，
         /// 让远端 2.7m 爆炸红圈落点清晰可见。
         /// </summary>
         public void SetSubAimActive(bool active)
@@ -60,25 +105,39 @@ namespace P1.Player
         }
 
         /// <summary>
-        /// 安全将世界坐标转换为屏幕像素坐标，供 HUD/准星等组件使用。
+        /// 应用一次视角增量（度）。鼠标、右摇杆、触屏滑屏统一走这里；
+        /// 旋转立即写入 transform，保证同一帧内的瞄准射线使用最新朝向。
         /// </summary>
+        public void AddLookInput(float yawDeltaDegrees, float pitchDeltaDegrees)
+        {
+            if (float.IsNaN(yawDeltaDegrees) || float.IsInfinity(yawDeltaDegrees) ||
+                float.IsNaN(pitchDeltaDegrees) || float.IsInfinity(pitchDeltaDegrees))
+                return;
+
+            _yaw = Mathf.Repeat(_yaw + yawDeltaDegrees + 180f, 360f) - 180f;
+
+            float minPitch = gameConfig != null ? gameConfig.tpsPitchMin : -60f;
+            float maxPitch = gameConfig != null ? gameConfig.tpsPitchMax : 66f;
+            _pitch = ThirdPersonCameraMath.ClampPitch(_pitch + pitchDeltaDegrees, minPitch, maxPitch);
+
+            transform.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+        }
+
+        /// <summary>安全将世界坐标转换为屏幕像素坐标，供 HUD/受击弧等组件使用。</summary>
         public Vector3 WorldToScreenPoint(Vector3 worldPos)
         {
             return _cam != null ? _cam.WorldToScreenPoint(worldPos) : Vector3.zero;
         }
 
-        /// <summary>
-        /// 累加震屏创伤（0~1）。多次伤害叠加而非重置，符合 Inkwave 的 trauma 模型。
-        /// </summary>
+        /// <summary>累加震屏创伤（0~1）。多次伤害叠加而非重置，符合 Inkwave 的 trauma 模型。</summary>
         public void AddTrauma(float amount)
         {
             _trauma = Mathf.Clamp01(_trauma + amount);
         }
 
         /// <summary>
-        /// 按世界坐标距离精准附加震屏（P6-A）：用于大招砸地、手雷爆炸等瞬时冲击。
-        /// 半径内按距离平方衰减，核心处取 <paramref name="maxTrauma"/>，边缘保留 30% 强度；
-        /// 距离以本地玩家为参照，保证「离得越近越震」且 Bot 的爆炸不会无故晃玩家的屏幕。
+        /// 按世界坐标距离精准附加震屏（P6-A）：半径内按距离平方衰减，
+        /// 距离以本地玩家为参照，保证「离得越近越震」。
         /// </summary>
         public void AddTraumaFromPoint(Vector3 worldPoint, float maxTrauma, float falloffRadius = -1f)
         {
@@ -98,89 +157,302 @@ namespace P1.Player
             AddTrauma(Mathf.Clamp01(maxTrauma) * Mathf.Lerp(0.3f, 1f, falloff));
         }
 
+        /// <summary>立即把相机吸附到合法位置（开局、复活、传送、测试用）。</summary>
         public void SnapImmediately()
         {
-            if (target == null) return;
-            Vector3 offset = gameConfig != null ? gameConfig.cameraOffset : new Vector3(0f, 9.2f, -8.2f);
-            transform.position = target.position + offset;
-            transform.rotation = Quaternion.LookRotation(-offset.normalized, Vector3.up);
-        }
+            if (target == null)
+                return;
 
-        private void ApplyCameraSettings()
-        {
-            if (_cam == null) _cam = GetComponent<Camera>();
-            bool usePerspective = gameConfig != null ? gameConfig.usePerspective : true;
-            _cam.orthographic = !usePerspective;
-            if (usePerspective)
-            {
-                _cam.fieldOfView = gameConfig != null ? gameConfig.cameraFov : 40f;
-            }
-            else
-            {
-                _cam.orthographicSize = gameConfig != null ? gameConfig.cameraOrthoSize : 4.4f;
-            }
-            _cam.nearClipPlane = 0.3f;
-            _cam.farClipPlane = 100f;
+            ResolveActorRefs();
+            _yaw = Mathf.Repeat(target.eulerAngles.y + 180f, 360f) - 180f;
+            _pitch = gameConfig != null
+                ? ThirdPersonCameraMath.ClampPitch(gameConfig.tpsPitchDefault, gameConfig.tpsPitchMin, gameConfig.tpsPitchMax)
+                : 6f;
+
+            _pivot = target.position + Vector3.up * GetPivotHeight();
+            _pivotVelocity = Vector3.zero;
+            _lastTargetPosition = target.position;
+            _shoulder = 0f;
+
+            Quaternion lookRotation = Quaternion.Euler(_pitch, _yaw, 0f);
+            Vector3 forward = lookRotation * Vector3.forward;
+            _currentDistance = ResolveBoomDistance(_pivot, forward, GetBaseDistance());
+
+            Vector3 position = _pivot - forward * _currentDistance;
+            position = ApplyGroundClearance(position);
+
+            transform.position = position;
+            transform.rotation = lookRotation;
+
+            _smoothedFov = GetBaseFov();
+            if (_cam != null)
+                _cam.fieldOfView = _smoothedFov;
+
+            _hasSnapped = true;
         }
 
         private void LateUpdate()
         {
-            if (target == null) return;
+            if (target == null)
+                return;
 
-            if (_cam != null && gameConfig != null)
+            if (!_hasSnapped)
             {
-                bool wantPerspective = gameConfig.usePerspective;
-                if (_cam.orthographic == wantPerspective)
-                {
-                    _cam.orthographic = !wantPerspective;
-                }
+                SnapImmediately();
+                return;
+            }
 
-                if (_cam.orthographic)
+            ResolveActorRefs();
+
+            float dt = Mathf.Max(0f, Time.deltaTime);
+
+            // ---- 枢轴跟随：水平/垂直统一平滑 + 少量速度前馈，减少高速移动时的落后感
+            Vector3 targetPosition = target.position;
+            Vector3 targetDelta = targetPosition - _lastTargetPosition;
+            if (targetDelta.sqrMagnitude > 36f)
+            {
+                // 复活 / 传送：直接吸附，避免镜头横穿整张地图
+                SnapImmediately();
+                return;
+            }
+
+            Vector3 feedForward = dt > 0.0001f
+                ? Vector3.ClampMagnitude(targetDelta / dt * 0.03f, 0.8f)
+                : Vector3.zero;
+            _lastTargetPosition = targetPosition;
+
+            float smoothTime = gameConfig != null ? Mathf.Max(0.01f, gameConfig.tpsPivotSmoothTime) : 0.06f;
+            Vector3 pivotTarget = targetPosition + Vector3.up * GetPivotHeight() + feedForward;
+            if (dt > 0.0001f)
+            {
+                _pivot = Vector3.SmoothDamp(
+                    _pivot, pivotTarget, ref _pivotVelocity, smoothTime, Mathf.Infinity, dt);
+            }
+            else
+            {
+                _pivot = pivotTarget;
+            }
+
+            // ---- 朝向与吊臂
+            Quaternion lookRotation = Quaternion.Euler(_pitch, _yaw, 0f);
+            Vector3 forward = lookRotation * Vector3.forward;
+            Vector3 right = Quaternion.Euler(0f, _yaw, 0f) * Vector3.right;
+
+            // 只有蓄力狙在蓄力时拉近镜头；加特林等武器的 Charge01 用于自身机制，不应驱动相机变焦
+            float charge01 = 0f;
+            if (_weapon != null && _weapon.CurrentWeaponKind == WeaponKind.Charger)
+                charge01 = Mathf.Clamp01(_weapon.Charge01);
+
+            float targetDistance = GetBaseDistance();
+            if (charge01 > 0f)
+                targetDistance -= charge01 * (gameConfig != null ? gameConfig.tpsChargerZoomDistance : 0.6f);
+            if (_isSubAimActive)
+                targetDistance += gameConfig != null ? gameConfig.tpsSubAimDistanceKick : 0.35f;
+
+            float allowedDistance = ResolveBoomDistance(_pivot, forward, targetDistance);
+            if (dt > 0.0001f)
+            {
+                // 遇障瞬间收进（快），离开障碍缓慢退回（慢），避免镜头抽搐
+                float speed = allowedDistance < _currentDistance ? 60f : 8f;
+                _currentDistance = Mathf.MoveTowards(_currentDistance, allowedDistance, speed * dt);
+            }
+            else
+            {
+                _currentDistance = allowedDistance;
+            }
+
+            float minDistance = GetMinDistance();
+            _currentDistance = Mathf.Max(minDistance, _currentDistance);
+
+            // ---- 近距离右肩偏移：吊臂被墙压短时，把镜头向右移，避免角色后脑勺挡住准星
+            float closeStart = gameConfig != null ? gameConfig.tpsShoulderCloseDistance : 2.8f;
+            float close01 = Mathf.Clamp01((closeStart - _currentDistance) / Mathf.Max(0.01f, closeStart - minDistance));
+            close01 = close01 * close01 * (3f - 2f * close01); // smoothstep
+            float shoulderTarget = close01 * (gameConfig != null ? gameConfig.tpsShoulderOffset : 0.55f);
+
+            Vector3 cameraBase = _pivot - forward * _currentDistance;
+            if (shoulderTarget > 0.01f &&
+                TryRaycastIgnoringCombatants(cameraBase, right, out RaycastHit shoulderHit, shoulderTarget + 0.25f))
+            {
+                shoulderTarget = Mathf.Min(shoulderTarget, Mathf.Max(0f, shoulderHit.distance - 0.25f));
+            }
+
+            _shoulder = dt > 0.0001f
+                ? Mathf.MoveTowards(_shoulder, shoulderTarget, 6f * dt)
+                : shoulderTarget;
+
+            Vector3 position = cameraBase + right * _shoulder;
+            position = ApplyGroundClearance(position);
+
+            ApplyShake(ref position);
+
+            transform.position = position;
+            transform.rotation = lookRotation * Quaternion.Euler(0f, 0f, _shakeRoll);
+
+            // ---- FOV：蓄力狙变焦 + 手雷瞄准微收
+            float targetFov = GetBaseFov();
+            if (charge01 > 0f)
+                targetFov -= charge01 * (gameConfig != null ? gameConfig.tpsChargerZoomFov : 14f);
+            if (_isSubAimActive)
+                targetFov -= gameConfig != null ? gameConfig.tpsSubAimFovKick : 4f;
+            targetFov = Mathf.Clamp(targetFov, 25f, 90f);
+
+            if (dt > 0.0001f)
+                _smoothedFov = Mathf.MoveTowards(_smoothedFov, targetFov, 60f * dt);
+            else
+                _smoothedFov = targetFov;
+
+            if (_cam != null)
+                _cam.fieldOfView = _smoothedFov;
+        }
+
+        private void ApplyCameraSettings()
+        {
+            if (_cam == null)
+                _cam = GetComponent<Camera>();
+
+            _cam.orthographic = false;
+            _cam.fieldOfView = GetBaseFov();
+            _cam.nearClipPlane = 0.1f;
+            _cam.farClipPlane = 160f;
+            _smoothedFov = _cam.fieldOfView;
+        }
+
+        private void ResolveActorRefs()
+        {
+            if (target == null)
+            {
+                _motor = null;
+                _weapon = null;
+                return;
+            }
+
+            if (_motor == null)
+                _motor = target.GetComponent<InkCharacterMotor>();
+            if (_weapon == null)
+                _weapon = target.GetComponent<WeaponController>();
+        }
+
+        private float GetPivotHeight()
+        {
+            float standing = gameConfig != null ? gameConfig.tpsPivotHeight : 1.85f;
+            float swimming = gameConfig != null ? gameConfig.tpsPivotHeightSwimming : 1.30f;
+            bool isSwimming = _motor != null && _motor.IsSwimming;
+            return ThirdPersonCameraMath.ComputePivotHeight(isSwimming, standing, swimming);
+        }
+
+        private float GetBaseDistance()
+        {
+            bool isSwimming = _motor != null && _motor.IsSwimming;
+            float standing = gameConfig != null ? gameConfig.tpsDistance : 4.5f;
+            float swimming = gameConfig != null ? gameConfig.tpsDistanceSwimming : 4.1f;
+            return isSwimming ? swimming : standing;
+        }
+
+        private float GetMinDistance()
+        {
+            return gameConfig != null ? Mathf.Max(0.1f, gameConfig.tpsMinDistance) : 0.55f;
+        }
+
+        private float GetBaseFov()
+        {
+            return gameConfig != null ? Mathf.Clamp(gameConfig.tpsFov, 25f, 100f) : 52f;
+        }
+
+        /// <summary>
+        /// 从枢轴向后做球体扫掠，返回不被墙体截断的最大吊臂长度。
+        /// 跳过角色碰撞体；跳过远低于枢轴的水平地面（由 <see cref="ApplyGroundClearance"/> 兜底）。
+        /// </summary>
+        private float ResolveBoomDistance(Vector3 pivot, Vector3 forward, float desiredDistance)
+        {
+            float minDistance = GetMinDistance();
+            desiredDistance = Mathf.Max(minDistance, desiredDistance);
+
+            float radius = gameConfig != null ? Mathf.Max(0.05f, gameConfig.tpsCollisionRadius) : 0.32f;
+            Vector3 origin = pivot + Vector3.up * 0.1f;
+            Vector3 direction = -forward;
+
+            int count = Physics.SphereCastNonAlloc(
+                origin, radius, direction, _castHits, desiredDistance, ~0, QueryTriggerInteraction.Ignore);
+
+            float allowed = desiredDistance;
+            for (int i = 0; i < count; i++)
+            {
+                RaycastHit hit = _castHits[i];
+                Collider col = hit.collider;
+                if (col == null)
+                    continue;
+
+                if (col.GetComponentInParent<CombatantHealth>() != null)
+                    continue;
+
+                // 远低于枢轴的地面/平台交给地面保护，避免抬头时被地面把镜头吸近
+                if (hit.normal.y > 0.7f && hit.point.y < origin.y - 0.8f)
+                    continue;
+
+                float distance = Mathf.Max(0f, hit.distance - 0.05f);
+                if (distance < allowed)
+                    allowed = distance;
+            }
+
+            return Mathf.Max(minDistance, allowed);
+        }
+
+        /// <summary>从相机向下探测地面，保证镜头不会钻进地面。</summary>
+        private Vector3 ApplyGroundClearance(Vector3 position)
+        {
+            float clearance = gameConfig != null ? Mathf.Max(0f, gameConfig.tpsGroundClearance) : 0.25f;
+            if (TryRaycastIgnoringCombatants(position + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 8f))
+            {
+                float minimumY = hit.point.y + clearance;
+                if (position.y < minimumY)
+                    position.y = minimumY;
+            }
+
+            return position;
+        }
+
+        /// <summary>忽略所有角色碰撞体的射线检测（地面保护、肩部避墙用）。</summary>
+        private bool TryRaycastIgnoringCombatants(
+            Vector3 origin,
+            Vector3 direction,
+            out RaycastHit result,
+            float maxDistance)
+        {
+            result = default;
+            int count = Physics.RaycastNonAlloc(
+                origin, direction, _castHits, maxDistance, ~0, QueryTriggerInteraction.Ignore);
+
+            float best = float.PositiveInfinity;
+            for (int i = 0; i < count; i++)
+            {
+                RaycastHit hit = _castHits[i];
+                if (hit.collider == null)
+                    continue;
+                if (hit.collider.GetComponentInParent<CombatantHealth>() != null)
+                    continue;
+                if (hit.distance < best)
                 {
-                    if (Mathf.Abs(_cam.orthographicSize - gameConfig.cameraOrthoSize) > 0.01f)
-                    {
-                        _cam.orthographicSize = gameConfig.cameraOrthoSize;
-                    }
-                }
-                else
-                {
-                    if (Mathf.Abs(_cam.fieldOfView - gameConfig.cameraFov) > 0.01f)
-                    {
-                        _cam.fieldOfView = gameConfig.cameraFov;
-                    }
+                    best = hit.distance;
+                    result = hit;
                 }
             }
 
-            Vector3 offset = gameConfig != null ? gameConfig.cameraOffset : new Vector3(0f, 9.2f, -8.2f);
-            float baseLookAhead = gameConfig != null ? gameConfig.cameraLookAheadMax : 1.5f;
-            float maxLookAhead = _isSubAimActive ? baseLookAhead * 1.55f : baseLookAhead;
-            float smoothTime = gameConfig != null ? gameConfig.cameraSmoothTime : 0.10f;
-
-            Vector3 toAim = _aimGroundPoint - target.position;
-            toAim.y = 0f;
-            float lookAheadRatio = _isSubAimActive ? 0.38f : 0.25f;
-            Vector3 lookAhead = Vector3.ClampMagnitude(toAim * lookAheadRatio, maxLookAhead);
-
-            Vector3 desiredPos = target.position + lookAhead + offset;
-            Vector3 smoothed = Vector3.SmoothDamp(transform.position, desiredPos, ref _currentVelocity, smoothTime);
-
-            ApplyShake(ref smoothed);
-
-            transform.position = smoothed;
-            transform.rotation = Quaternion.LookRotation(-offset.normalized, Vector3.up) *
-                                 Quaternion.Euler(0f, 0f, _shakeRoll);
+            return best < float.PositiveInfinity;
         }
 
         /// <summary>
         /// Trauma 驱动的三层高频震颤（水平 X/Z + 镜头 Roll）：
         /// 用 trauma² 做响应曲线（小伤害几乎不动、大爆炸才有劲），
-        /// 用层叠正弦代替逐帧随机噪声（不会嗡嗡抖动），并用真实时间推进
-        /// 让 Hitstop 定格期间震屏仍在继续，冲击定格与震颤同时被读到。
+        /// 用层叠正弦代替逐帧随机噪声，并用真实时间推进让 Hitstop 定格期间震屏仍在继续。
+        /// TPS 下位移额外乘 tpsShakeScale，避免 4.5m 吊臂下 0.42m 震幅过强。
         /// </summary>
         private void ApplyShake(ref Vector3 position)
         {
             float decay = gameConfig != null ? gameConfig.shakeDecayPerSecond : 2.4f;
-            float maxOffset = gameConfig != null ? gameConfig.shakeMaxOffset : 0.42f;
+            float baseOffset = gameConfig != null ? gameConfig.shakeMaxOffset : 0.42f;
+            float tpsScale = gameConfig != null ? Mathf.Clamp01(gameConfig.tpsShakeScale) : 0.45f;
+            float maxOffset = baseOffset * tpsScale;
             float maxRoll = gameConfig != null ? gameConfig.shakeMaxRollDegrees : 1.3f;
             float frequency = gameConfig != null ? gameConfig.shakeFrequency : 38f;
 
@@ -191,7 +463,7 @@ namespace P1.Player
             }
 
             float t = Time.unscaledTime;
-            float shake = _trauma * _trauma;
+            float shake = _trauma * _trauma * GameSettingsService.ShakeScale;
 
             float noiseX = Mathf.Sin(t * frequency) * 0.62f + Mathf.Sin(t * frequency * 1.63f + 1.7f) * 0.38f;
             float noiseZ = Mathf.Sin(t * frequency * 0.86f + 0.9f) * 0.58f + Mathf.Sin(t * frequency * 1.47f + 2.4f) * 0.42f;

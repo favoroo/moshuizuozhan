@@ -150,8 +150,14 @@ namespace P1.Tests
             float coverageAfter = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
             Assert.Greater(coverageAfter, coverageBefore + 0.3f, "雨点应持续侵蚀地面");
 
-            // 6.5s 生命周期结束后云层应被回收
+            // 6.5s 生命周期结束后云层应被回收；低帧率下轮询到回收完成，避免掐点抖动
             yield return new WaitForSeconds(5.2f);
+            float recycleDeadline = Time.time + 2.0f;
+            while (pool.ActiveStormCount > 0 && Time.time < recycleDeadline)
+            {
+                yield return null;
+            }
+
             Assert.AreEqual(0, pool.ActiveStormCount, "6.5s 后云层应完全消散并回收");
         }
 

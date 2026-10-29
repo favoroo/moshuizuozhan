@@ -32,6 +32,7 @@ Shader "P1/InkWall"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -48,6 +49,7 @@ Shader "P1/InkWall"
                 float4 positionCS : SV_POSITION;
                 float3 normalWS   : TEXCOORD0;
                 float2 uv         : TEXCOORD1;
+                half   fogFactor  : TEXCOORD2;
             };
 
             TEXTURE2D(_InkTex);
@@ -67,6 +69,7 @@ Shader "P1/InkWall"
                 output.positionCS = posInputs.positionCS;
                 output.normalWS = normInputs.normalWS;
                 output.uv = input.uv;
+                output.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
                 return output;
             }
 
@@ -93,8 +96,10 @@ Shader "P1/InkWall"
 
                 half4 inkSample = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, input.uv);
 
-                // 墨格 alpha：0 = 未涂，255 = 已涂；双线性过滤让边缘自然过渡
-                half inkMask = smoothstep(0.30, 0.62, inkSample.a);
+                // 墨格 alpha：0 = 未涂；贴图侧已写入亚格子覆盖率，这里再用屏幕空间导数收一层 AA，
+                // 避免墙面墨迹出现 10cm 方块的锯齿边。
+                float fwA = max(fwidth(inkSample.a), 0.004);
+                half inkMask = smoothstep(0.5 - fwA, 0.5 + fwA, inkSample.a);
                 if (inkMask < 0.01)
                     discard;
 
@@ -104,6 +109,11 @@ Shader "P1/InkWall"
 
                 // 轻微高光让墙面墨水看起来湿润
                 half3 inkColor = inkSample.rgb * _Tint.rgb * ndotl;
+
+                // 薄缘提亮：墨迹内侧一圈微微反光，边缘才有厚度感
+                float rim = smoothstep(0.52, 0.9, inkMask) * (1.0 - smoothstep(0.9, 0.995, inkMask));
+                inkColor *= 1.0 + rim * 0.3;
+                inkColor = MixFog(inkColor, input.fogFactor);
 
                 return half4(inkColor, inkMask * _Tint.a);
             }

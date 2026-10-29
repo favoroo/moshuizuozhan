@@ -60,12 +60,28 @@ namespace P1.Editor
             }
         }
 
+        public static string ResolveAndroidOutputPath()
+        {
+            string[] args = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == "-buildOutput" || args[i] == "-customBuildOutput" || args[i] == "--output-path")
+                {
+                    return args[i + 1];
+                }
+            }
+            return AndroidOutputPath;
+        }
+
         [MenuItem("P1/构建/9. 构建 Android APK (ARM64 + Vulkan/GLES3) (P6-C)", false, 81)]
         public static bool BuildAndroid()
         {
-            Debug.Log("[P6-C][Build] 开始执行 Android 移动端 APK 构建...");
+            string outputPath = ResolveAndroidOutputPath();
+            Debug.Log($"[P6-C][Build] 开始执行 Android 移动端 APK 构建 (产物路径: {outputPath})...");
 
-            EnsureOutputDirectory("Builds/Android");
+            string outputDir = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(outputDir)) EnsureOutputDirectory(outputDir);
+
             EnsureSceneInBuildSettings();
             ApplyAndroidPlayerSettings();
 
@@ -76,7 +92,7 @@ namespace P1.Editor
             var options = new BuildPlayerOptions
             {
                 scenes = new[] { MainScenePath },
-                locationPathName = AndroidOutputPath,
+                locationPathName = outputPath,
                 target = BuildTarget.Android,
                 options = BuildOptions.None
             };
@@ -87,7 +103,7 @@ namespace P1.Editor
             if (summary.result == BuildResult.Succeeded)
             {
                 Debug.Log($"[P6-C][Build] Android APK 构建成功！\n" +
-                          $"- 产物路径: {AndroidOutputPath}\n" +
+                          $"- 产物路径: {outputPath}\n" +
                           $"- APK 大小: {summary.totalSize / (1024f * 1024f):F2} MB\n" +
                           $"- 耗时: {summary.totalTime.TotalSeconds:F2} 秒\n" +
                           $"- Errors: {summary.totalErrors}, Warnings: {summary.totalWarnings}");
@@ -325,6 +341,9 @@ namespace P1.Editor
             PlayerSettings.allowedAutorotateToLandscapeRight = true;
 
             var target = NamedBuildTarget.Android;
+            PlayerSettings.bundleVersion = GameVersion.APP_VERSION;
+            int[] v = GameVersion.ParseVersion(GameVersion.APP_VERSION);
+            PlayerSettings.Android.bundleVersionCode = v[0] * 10000 + v[1] * 100 + v[2];
             PlayerSettings.SetApplicationIdentifier(target, "com.p1studio.inkturfdemo");
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
             PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevel34;

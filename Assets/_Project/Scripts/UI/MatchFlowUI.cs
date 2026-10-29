@@ -26,6 +26,13 @@ namespace P1.UI
         [SerializeField] private Button startButton;
         [SerializeField] private Text startButtonLabel;
 
+        [Header("版本与检查更新")]
+        [SerializeField] private Button checkUpdateButton;
+        [SerializeField] private Text versionText;
+
+        public Button CheckUpdateButton => checkUpdateButton;
+        public Text VersionText => versionText;
+
         [Header("既有简单文本引用（保留向后兼容）")]
         [SerializeField] private Text countdownText;
         [SerializeField] private Text finishText;
@@ -95,6 +102,7 @@ namespace P1.UI
         {
             EnsureBannerView();
             EnsureResultVisuals();
+            EnsureUpdateUI();
 
             if (startButton != null) startButton.onClick.AddListener(OnStartClicked);
             if (restartButton != null) restartButton.onClick.AddListener(OnStartClicked);
@@ -104,6 +112,7 @@ namespace P1.UI
         {
             if (startButton != null) startButton.onClick.RemoveListener(OnStartClicked);
             if (restartButton != null) restartButton.onClick.RemoveListener(OnStartClicked);
+            if (checkUpdateButton != null) checkUpdateButton.onClick.RemoveListener(OnCheckUpdateClicked);
         }
 
         public void SetTheme(UIThemeSO themeAsset)
@@ -186,6 +195,92 @@ namespace P1.UI
             victoryBadgeText.raycastTarget = false;
 
             victoryBadgeRoot.gameObject.SetActive(false);
+        }
+
+        public void EnsureUpdateUI()
+        {
+            if (readyPanel == null) return;
+
+            if (checkUpdateButton == null)
+            {
+                var existingBtn = readyPanel.transform.Find("CheckUpdateButton");
+                if (existingBtn != null) checkUpdateButton = existingBtn.GetComponent<Button>();
+            }
+
+            if (versionText == null)
+            {
+                var existingVer = readyPanel.transform.Find("VersionText");
+                if (existingVer != null) versionText = existingVer.GetComponent<Text>();
+            }
+
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+
+            // 动态创建 VersionText
+            if (versionText == null)
+            {
+                var verGo = new GameObject("VersionText", typeof(RectTransform), typeof(Text));
+                verGo.transform.SetParent(readyPanel.transform, false);
+                var verRt = verGo.GetComponent<RectTransform>();
+                verRt.anchorMin = new Vector2(0.5f, 0f);
+                verRt.anchorMax = new Vector2(0.5f, 0f);
+                verRt.anchoredPosition = new Vector2(0f, 95f);
+                verRt.sizeDelta = new Vector2(400f, 32f);
+
+                versionText = verGo.GetComponent<Text>();
+                versionText.font = font;
+                versionText.fontSize = 20;
+                versionText.alignment = TextAnchor.MiddleCenter;
+                versionText.color = new Color(0.65f, 0.72f, 0.85f, 0.9f);
+            }
+            if (versionText != null)
+            {
+                versionText.text = $"{GameVersion.APP_NAME} {GameVersion.APP_VERSION_NAME}";
+            }
+
+            // 动态创建 CheckUpdateButton
+            if (checkUpdateButton == null)
+            {
+                var btnGo = new GameObject("CheckUpdateButton", typeof(RectTransform), typeof(Image), typeof(Button));
+                btnGo.transform.SetParent(readyPanel.transform, false);
+                var btnRt = btnGo.GetComponent<RectTransform>();
+                btnRt.anchorMin = new Vector2(0.5f, 0f);
+                btnRt.anchorMax = new Vector2(0.5f, 0f);
+                btnRt.anchoredPosition = new Vector2(0f, 48f);
+                btnRt.sizeDelta = new Vector2(200f, 44f);
+
+                var img = btnGo.GetComponent<Image>();
+                img.color = new Color(0.18f, 0.22f, 0.30f, 0.92f);
+
+                checkUpdateButton = btnGo.GetComponent<Button>();
+                checkUpdateButton.targetGraphic = img;
+
+                var labelGo = new GameObject("Label", typeof(RectTransform), typeof(Text));
+                labelGo.transform.SetParent(btnGo.transform, false);
+                var labelRt = labelGo.GetComponent<RectTransform>();
+                labelRt.anchorMin = Vector2.zero;
+                labelRt.anchorMax = Vector2.one;
+                labelRt.offsetMin = Vector2.zero;
+                labelRt.offsetMax = Vector2.zero;
+
+                var labelText = labelGo.GetComponent<Text>();
+                labelText.font = font;
+                labelText.fontSize = 20;
+                labelText.fontStyle = FontStyle.Bold;
+                labelText.alignment = TextAnchor.MiddleCenter;
+                labelText.color = new Color(0.85f, 0.92f, 1f, 1f);
+                labelText.text = "检 查 更 新";
+            }
+
+            if (checkUpdateButton != null)
+            {
+                checkUpdateButton.onClick.RemoveListener(OnCheckUpdateClicked);
+                checkUpdateButton.onClick.AddListener(OnCheckUpdateClicked);
+            }
+        }
+
+        private void OnCheckUpdateClicked()
+        {
+            UpdateManager.Instance?.CheckForUpdate(manual: true);
         }
 
         private void OnStartClicked()

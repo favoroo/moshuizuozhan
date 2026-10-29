@@ -225,6 +225,7 @@ namespace P1.UI.WeaponSelect
             closeTxt.raycastTarget = false;
 
             _closeButton = closeGo.GetComponent<Button>();
+            _closeButton.targetGraphic = closeBg;
             _closeButton.transition = Selectable.Transition.None;
             _closeButton.onClick.AddListener(() => SetDrawerOpen(false));
 
@@ -331,6 +332,7 @@ namespace P1.UI.WeaponSelect
             _toggleMotion.SetTheme(theme);
 
             _toggleButton = btnGo.GetComponent<Button>();
+            _toggleButton.targetGraphic = _toggleButtonBg;
             _toggleButton.transition = Selectable.Transition.None;
             _toggleButton.onClick.AddListener(() => SetDrawerOpen(!_isDrawerOpen));
 

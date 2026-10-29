@@ -133,6 +133,7 @@ namespace P1.UI.WeaponSelect
             {
                 _button = gameObject.AddComponent<Button>();
             }
+            _button.targetGraphic = _bgGraphic;
             _button.transition = Selectable.Transition.None;
             _button.onClick.RemoveAllListeners();
             _button.onClick.AddListener(() => _onSelect?.Invoke(_index));

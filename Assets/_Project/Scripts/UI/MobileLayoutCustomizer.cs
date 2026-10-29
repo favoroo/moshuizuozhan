@@ -32,6 +32,7 @@ namespace P1.UI
         private float _previousTimeScale = 1f;
 
         public bool IsEditing { get; private set; }
+        public event Action OnClosed;
 
         public static MobileLayoutCustomizer Create(MobileTouchUI touchUI, RectTransform safeArea, Sprite circleRingSprite)
         {
@@ -197,6 +198,7 @@ namespace P1.UI
             Time.timeScale = _previousTimeScale;
             if (_selectionHighlight != null) _selectionHighlight.gameObject.SetActive(false);
             gameObject.SetActive(false);
+            OnClosed?.Invoke();
         }
 
         public void SelectItem(MobileConfigurableItem item)

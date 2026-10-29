@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using P1.Core;
 using P1.Player;
 using P1.UI;
 using UnityEngine;
@@ -204,6 +205,103 @@ namespace P1.Tests
             Assert.IsNotNull(item);
             Assert.LessOrEqual(item.scale, 1.80f, "最大缩放不可超过 1.8 倍避免遮挡全屏");
             Assert.GreaterOrEqual(item.alpha, 0.25f, "最小透明度不可低于 0.25 避免按键彻底隐形");
+        }
+
+        [Test]
+        public void DynamicFloatingJoystick_And_RightAimSwipeZone_ResetProperlyOnDisable()
+        {
+            var go = new GameObject("TestResetHost", typeof(RectTransform));
+            var rt = go.GetComponent<RectTransform>();
+
+            var joystick = DynamicFloatingJoystick.Create(rt, new Vector2(200f, 200f), 100f, 10f, null, null, null);
+            joystick.OnPointerDown(new PointerEventData(EventSystem.current) { position = new Vector2(250f, 250f) });
+            joystick.OnDrag(new PointerEventData(EventSystem.current) { position = new Vector2(280f, 280f) });
+            Assert.AreNotEqual(Vector2.zero, joystick.Value, "拖拽后应产生位移输入");
+
+            joystick.ResetJoystick();
+            Assert.AreEqual(Vector2.zero, joystick.Value, "ResetJoystick 后输入必须归零");
+
+            var zone = RightAimSwipeZone.Create(rt);
+            zone.OnPointerDown(new PointerEventData(EventSystem.current));
+            zone.OnDrag(new PointerEventData(EventSystem.current) { delta = new Vector2(10f, 10f) });
+            Assert.IsTrue(zone.HasAimInput);
+
+            zone.ResetZone();
+            Assert.IsFalse(zone.HasAimInput, "ResetZone 后滑动状态必须清除");
+            Assert.AreEqual(Vector2.zero, zone.ConsumeLookDelta(), "增量必须归零");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void MobileLayoutCustomizer_Close_FiresOnClosedEvent()
+        {
+            var go = new GameObject("TestCustomizerHost", typeof(RectTransform));
+            var rt = go.GetComponent<RectTransform>();
+            var customizer = MobileLayoutCustomizer.Create(null, rt, null);
+
+            bool closedFired = false;
+            customizer.OnClosed += () => closedFired = true;
+
+            customizer.Open();
+            Assert.IsTrue(customizer.IsEditing);
+
+            customizer.Close(save: false);
+            Assert.IsFalse(customizer.IsEditing);
+            Assert.IsTrue(closedFired, "Close 后必须派发 OnClosed 事件以通知上层恢复阶段显隐");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void MobileTouchUI_VisibilityFollowsMatchPhase()
+        {
+            var matchGo = new GameObject("TestMatchHost", typeof(MatchManager));
+            var match = matchGo.GetComponent<MatchManager>();
+
+            var touchGo = new GameObject("TestTouchHost", typeof(MobileTouchUI));
+            var touchUI = touchGo.GetComponent<MobileTouchUI>();
+
+            // 启用强制显示开关供测试
+            var showField = typeof(MobileTouchUI).GetField("showTouchUiInEditor", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            showField.SetValue(touchUI, true);
+
+            var awakeMethod = typeof(MobileTouchUI).GetMethod("Awake", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            awakeMethod.Invoke(touchUI, null);
+
+            var startMethod = typeof(MobileTouchUI).GetMethod("Start", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            startMethod.Invoke(touchUI, null);
+
+            // 1. Ready 阶段必须隐藏
+            Assert.IsFalse(touchUI.IsShown, "Ready 首页阶段触控操作层必须隐藏，绝不遮挡开始比赛与选枪按钮");
+
+            // 2. Countdown 与 Playing 阶段必须显示
+            var setPhaseMethod = typeof(MatchManager).GetMethod("SetPhase", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Countdown });
+            Assert.IsTrue(touchUI.IsShown, "Countdown 倒计时阶段触控按键必须显示");
+
+            setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Playing });
+            Assert.IsTrue(touchUI.IsShown, "Playing 游玩阶段触控按键必须显示");
+
+            // 3. Finished 与 Result 阶段必须隐藏
+            setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Finished });
+            Assert.IsFalse(touchUI.IsShown, "Finished 定格阶段触控按键必须隐藏");
+
+            setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Result });
+            Assert.IsFalse(touchUI.IsShown, "Result 结算阶段触控按键必须隐藏，避免遮挡结算比分");
+
+            // 4. 在 Ready 阶段打开自定义键位后应临时显示，关闭后应恢复隐藏
+            setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Ready });
+            Assert.IsFalse(touchUI.IsShown);
+
+            touchUI.OpenLayoutCustomizer();
+            Assert.IsTrue(touchUI.IsShown, "在 Ready 阶段打开自定义键位时应临时展示画布与按键供玩家调整");
+
+            touchUI.Customizer.Close(save: false);
+            Assert.IsFalse(touchUI.IsShown, "关闭自定义键位后应根据 Ready 阶段恢复隐藏");
+
+            Object.DestroyImmediate(touchGo);
+            Object.DestroyImmediate(matchGo);
         }
     }
 }

@@ -50,66 +50,221 @@ namespace P1.UI
         private MobileActionButton _bombButton;
         private MobileActionButton _specialButton;
 
+        private MatchManager _match;
+        private bool _subscribedMatch;
+
         private static Sprite _circleFillSprite;
         private static Sprite _circleRingSprite;
 
-        public bool IsShown => _canvas != null && _canvas.gameObject.activeSelf;
+        public bool IsShown => _canvas != null && _canvas.gameObject.activeInHierarchy;
         public DynamicFloatingJoystick FloatingJoystick => _floatingJoystick;
         public MobileLayoutCustomizer Customizer => _customizer;
 
         /// <summary>是否处于触屏驱动模式（真机，或编辑器里手动勾选 showTouchUiInEditor 的模拟）。</summary>
         public static bool IsTouchSimulationActive { get; private set; }
 
-        public void OpenLayoutCustomizer() => _customizer?.Open();
+        public void OpenLayoutCustomizer()
+        {
+            EnsureBuilt();
+            if (_canvas != null && !_canvas.gameObject.activeSelf)
+            {
+                _canvas.gameObject.SetActive(true);
+            }
+            _customizer?.Open();
+        }
 
         private void Awake()
         {
             bool shouldShow = ShouldShowTouchUi();
             IsTouchSimulationActive = shouldShow;
 
-            if (!shouldShow)
+            if (shouldShow)
             {
-                enabled = false;
-                return;
+                EnsureBuilt();
             }
 
-            LoadIconsIfNeeded();
-            Build();
-
             var hud = FindAnyObjectByType<HudController>();
-            if (hud != null) hud.ApplyMobileLayout();
+            if (hud != null && shouldShow) hud.ApplyMobileLayout();
+        }
+
+        public bool ShowTouchUiInEditor
+        {
+            get => showTouchUiInEditor;
+            set
+            {
+                showTouchUiInEditor = value;
+                IsTouchSimulationActive = ShouldShowTouchUi();
+                UpdateVisibilityForCurrentPhase();
+            }
         }
 
         /// <summary>
         /// 真机始终显示；桌面/编辑器默认隐藏（避免全屏透明感应区抢鼠标视角），
-        /// 需要模拟手游时可同时勾选 showTouchUiInEditor（旧 forceShowInEditor 仍作为总开关保留）。
+        /// 需要模拟手游时勾选 showTouchUiInEditor 即可。
         /// </summary>
         private bool ShouldShowTouchUi()
         {
             return Application.isMobilePlatform ||
-                   (Application.isEditor && showTouchUiInEditor && forceShowInEditor);
+                   (Application.isEditor && (showTouchUiInEditor || forceShowInEditor));
         }
 
         private void OnEnable()
         {
             if (ShouldShowTouchUi())
                 IsTouchSimulationActive = true;
+            SubscribeMatch();
+            UpdateVisibilityForCurrentPhase();
         }
 
         private void OnDisable()
         {
             IsTouchSimulationActive = false;
+            UnsubscribeMatch();
+            ResetAllInputs();
         }
 
         private void OnDestroy()
         {
             IsTouchSimulationActive = false;
+            UnsubscribeMatch();
+            if (_customizer != null)
+            {
+                _customizer.OnClosed -= HandleCustomizerClosed;
+            }
         }
 
         private void Start()
         {
             var hud = FindAnyObjectByType<HudController>();
             if (hud != null) hud.ApplyMobileLayout();
+
+            SubscribeMatch();
+            UpdateVisibilityForCurrentPhase();
+        }
+
+        private void SubscribeMatch()
+        {
+            if (_subscribedMatch) return;
+            _match = MatchManager.Instance != null ? MatchManager.Instance : FindAnyObjectByType<MatchManager>();
+            if (_match != null)
+            {
+                _match.PhaseChanged += HandlePhaseChanged;
+                _subscribedMatch = true;
+            }
+        }
+
+        private void UnsubscribeMatch()
+        {
+            if (!_subscribedMatch) return;
+            if (_match != null)
+            {
+                _match.PhaseChanged -= HandlePhaseChanged;
+            }
+            _subscribedMatch = false;
+        }
+
+        private void HandlePhaseChanged(MatchManager.Phase phase)
+        {
+            // 如果玩家当前正在进行键位自定义编辑，保持画布展示供其拖拽
+            if (_customizer != null && _customizer.IsEditing)
+                return;
+
+            switch (phase)
+            {
+                case MatchManager.Phase.Ready:
+                    // 首页准备阶段：完全隐藏，不遮挡首页比赛/选枪/更新按钮
+                    SetVisible(false);
+                    break;
+                case MatchManager.Phase.Countdown:
+                case MatchManager.Phase.Playing:
+                    // 倒计时与游玩阶段：显示操作按钮与摇杆
+                    SetVisible(ShouldShowTouchUi());
+                    break;
+                case MatchManager.Phase.Finished:
+                case MatchManager.Phase.Result:
+                    // 比赛结束与结算阶段：隐藏操作按钮，避免遮挡结算画面与按钮
+                    SetVisible(false);
+                    break;
+            }
+        }
+
+        private void HandleCustomizerClosed()
+        {
+            UpdateVisibilityForCurrentPhase();
+        }
+
+        public void UpdateVisibilityForCurrentPhase()
+        {
+            if (_match != null)
+            {
+                HandlePhaseChanged(_match.CurrentPhase);
+            }
+            else
+            {
+                // 无比赛管理器（如独立 UI 测试场景），按环境配置默认可见
+                SetVisible(ShouldShowTouchUi());
+            }
+        }
+
+        /// <summary>
+        /// 显隐移动端触控交互层：
+        /// 隐藏时关闭 Canvas 并重置所有输入与摇杆，绝不产生多余渲染或拦截底层 UI 射线检测。
+        /// </summary>
+        public void SetVisible(bool visible)
+        {
+            if (visible && _canvas == null)
+            {
+                EnsureBuilt();
+            }
+
+            if (_canvas == null) return;
+
+            if (!visible)
+            {
+                ResetAllInputs();
+            }
+
+            if (_canvas.gameObject.activeSelf != visible)
+            {
+                _canvas.gameObject.SetActive(visible);
+            }
+        }
+
+        /// <summary>
+        /// 确保 Canvas 及全部触控按键、摇杆与感应区已构建完毕。
+        /// </summary>
+        public void EnsureBuilt()
+        {
+            if (_canvas != null) return;
+            LoadIconsIfNeeded();
+            Build();
+        }
+
+        /// <summary>
+        /// 重置所有触控按键、摇杆与滑屏增量，杜绝隐藏时残存持续开火或位移。
+        /// </summary>
+        public void ResetAllInputs()
+        {
+            if (_floatingJoystick != null) _floatingJoystick.ResetJoystick();
+            if (_aimSwipeZone != null) _aimSwipeZone.ResetZone();
+            if (_fireButton != null) _fireButton.ResetState();
+            if (_swimButton != null) _swimButton.ResetState();
+            if (_jumpButton != null) _jumpButton.ResetState();
+            if (_bombButton != null) _bombButton.ResetState();
+            if (_specialButton != null) _specialButton.ResetState();
+
+            var player = PlayerController.LocalPlayer;
+            if (player != null)
+            {
+                player.TouchMoveInput = Vector2.zero;
+                player.TouchLookDelta = Vector2.zero;
+                player.TouchFireHeld = false;
+                player.TouchSwimHeld = false;
+                player.TouchBombHeld = false;
+                player.TouchBombTriggered = false;
+                player.TouchJumpTriggered = false;
+                player.TouchSpecialTriggered = false;
+            }
         }
 
         private void LoadIconsIfNeeded()
@@ -127,6 +282,8 @@ namespace P1.UI
 
         private void Update()
         {
+            if (!IsShown) return;
+
             var player = PlayerController.LocalPlayer;
             if (player == null) return;
 
@@ -291,9 +448,17 @@ namespace P1.UI
             {
                 _customizer.ApplyConfig(savedConfig);
             }
+            _customizer.OnClosed += HandleCustomizerClosed;
 
             // 5. 屏幕左上角悬浮【⚙️ 键位】快速编辑入口
             CreateSettingsEntryButton(_safeArea);
+
+            // 初始构建完成后，若处于 Ready 阶段，默认先行隐藏，防止遮挡首屏按钮
+            var initialMatch = MatchManager.Instance != null ? MatchManager.Instance : FindAnyObjectByType<MatchManager>();
+            if (initialMatch != null && initialMatch.CurrentPhase == MatchManager.Phase.Ready)
+            {
+                SetVisible(false);
+            }
         }
 
         private void CreateSettingsEntryButton(RectTransform safeArea)
@@ -597,12 +762,22 @@ namespace P1.UI
         {
             if (eventData.pointerId != _activePointerId) return;
 
+            ResetJoystick();
+        }
+
+        public void ResetJoystick()
+        {
             _activePointerId = -999;
             Value = Vector2.zero;
 
             if (_knob != null) _knob.anchoredPosition = Vector2.zero;
-            _container.anchoredPosition = _defaultPos;
+            if (_container != null) _container.anchoredPosition = _defaultPos;
             if (_canvasGroup != null) _canvasGroup.alpha = 0.45f;
+        }
+
+        private void OnDisable()
+        {
+            ResetJoystick();
         }
     }
 
@@ -666,10 +841,20 @@ namespace P1.UI
         {
             if (eventData.pointerId != _activePointerId) return;
 
+            ResetZone();
+        }
+
+        public void ResetZone()
+        {
             _activePointerId = -999;
             HasAimInput = false;
             AimValue = Vector2.zero;
             _lookDelta = Vector2.zero;
+        }
+
+        private void OnDisable()
+        {
+            ResetZone();
         }
     }
 
@@ -906,13 +1091,21 @@ namespace P1.UI
             }
         }
 
-        private void OnDisable()
+        public void ResetState()
         {
             _isHeld = false;
+            _tapped = false;
             _isAimingHeld = false;
             HasDragAim = false;
             _lookDelta = Vector2.zero;
+            DragAimValue = Vector2.zero;
             if (_rectTransform != null) _rectTransform.localScale = Vector3.one;
+            if (_bgImage != null) _bgImage.color = _baseColor;
+        }
+
+        private void OnDisable()
+        {
+            ResetState();
         }
 
         /// <summary>同步大招充能状态视觉反馈。</summary>

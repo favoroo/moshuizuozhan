@@ -29,7 +29,18 @@ namespace P1.UI
     [Serializable]
     public class MobileLayoutConfig
     {
+        public const float MinScale = 0.60f;
+        public const float MaxScale = 1.80f;
+        public const float MinAlpha = 0.25f;
+        public const float MaxAlpha = 1.00f;
+
         public List<ButtonLayoutData> buttons = new List<ButtonLayoutData>();
+
+        /// <summary>左开火键是否显示；随布局一起保存，2 指方案默认关闭。</summary>
+        public bool leftFireVisible;
+
+        /// <summary>当前布局基于哪套预设（0=2指/1=3指/2=4指，-1=纯自定义）。</summary>
+        public int preset = -1;
 
         public ButtonLayoutData Find(string id)
         {
@@ -52,13 +63,17 @@ namespace P1.UI
                 buttons.Add(item);
             }
             item.anchoredPosition = pos;
-            item.scale = Mathf.Clamp(scale, 0.60f, 1.80f);
-            item.alpha = Mathf.Clamp(alpha, 0.25f, 1.0f);
+            item.scale = Mathf.Clamp(scale, MinScale, MaxScale);
+            item.alpha = Mathf.Clamp(alpha, MinAlpha, MaxAlpha);
         }
 
         public MobileLayoutConfig Clone()
         {
-            var copy = new MobileLayoutConfig();
+            var copy = new MobileLayoutConfig
+            {
+                leftFireVisible = leftFireVisible,
+                preset = preset
+            };
             if (buttons != null)
             {
                 for (int i = 0; i < buttons.Count; i++)

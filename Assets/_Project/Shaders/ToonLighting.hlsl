@@ -51,7 +51,11 @@ half3 P1ToonDiffuse(
     // 阴影色与白色混合 25%，避免暖色反照率被纯蓝阴影压成脏褐色。
     half3 shadeTint = lerp(shadowTint, half3(1.0, 1.0, 1.0), 0.25);
     half3 litTint = lerp(shadeTint, half3(1.0, 1.0, 1.0), band);
-    half3 direct = lightColor * (band * shadowTerm) * litTint;
+    // 直射项只用 shadowTerm 收阴影，不能再乘 band：band 在背光面为 0，
+    // 相乘会把背光/侧向面（集装箱、木箱、花坛的竖直立面）的直射光整体归零，
+    // 只剩很弱的环境光，观感就是"物体侧面一直是黑色"。角色着色
+    // （CharacterToonCommon.hlsl）一直是不乘 band 的写法，这里与之对齐。
+    half3 direct = lightColor * shadowTerm * litTint;
     return albedo * (ambient + direct);
 }
 

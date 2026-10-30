@@ -59,24 +59,28 @@ namespace P1.Environment
             southRamp.transform.rotation = Quaternion.Euler(-12.8f, 0f, 0f);
             if (inkableRenderers != null) inkableRenderers.Add(southRamp.GetComponent<Renderer>());
             southRamp.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddOrientedInkWallSurface(southRamp, inkCfg, inkWallMat);
 
             // 北斜坡 (Team B 进攻主道)
             var northRamp = CreateBox(arenaRoot.transform, "Ramp_North_Inkable", new Vector3(0f, 0.48f, 7.4f), new Vector3(4.4f, 0.25f, 5.0f), groundMat);
             northRamp.transform.rotation = Quaternion.Euler(12.8f, 0f, 0f);
             if (inkableRenderers != null) inkableRenderers.Add(northRamp.GetComponent<Renderer>());
             northRamp.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddOrientedInkWallSurface(northRamp, inkCfg, inkWallMat);
 
             // 西斜坡 (西侧翼切入高台)
             var westRamp = CreateBox(arenaRoot.transform, "Ramp_West_Inkable", new Vector3(-7.4f, 0.48f, 0f), new Vector3(5.0f, 0.25f, 4.4f), groundMat);
             westRamp.transform.rotation = Quaternion.Euler(0f, 0f, 12.8f);
             if (inkableRenderers != null) inkableRenderers.Add(westRamp.GetComponent<Renderer>());
             westRamp.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddOrientedInkWallSurface(westRamp, inkCfg, inkWallMat);
 
             // 东斜坡 (东侧翼切入高台)
             var eastRamp = CreateBox(arenaRoot.transform, "Ramp_East_Inkable", new Vector3(7.4f, 0.48f, 0f), new Vector3(5.0f, 0.25f, 4.4f), groundMat);
             eastRamp.transform.rotation = Quaternion.Euler(0f, 0f, -12.8f);
             if (inkableRenderers != null) inkableRenderers.Add(eastRamp.GetComponent<Renderer>());
             eastRamp.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddOrientedInkWallSurface(eastRamp, inkCfg, inkWallMat);
 
             // 中央高台低矮掩体花坛（高 0.8m，置于高台两侧，保持原点 (0,0) 高台争夺圈开阔可涂）
             CreateCover(arenaRoot.transform, "Cover_Center_West_Planter", new Vector3(-2.6f, 1.5f, 0f), new Vector3(1.6f, 0.8f, 1.6f),
@@ -112,11 +116,13 @@ namespace P1.Environment
             westSouthRamp.transform.rotation = Quaternion.Euler(-12.5f, 0f, 0f);
             if (inkableRenderers != null) inkableRenderers.Add(westSouthRamp.GetComponent<Renderer>());
             westSouthRamp.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddOrientedInkWallSurface(westSouthRamp, inkCfg, inkWallMat);
 
             var westNorthRamp = CreateBox(arenaRoot.transform, "Ramp_West_North_Inkable", new Vector3(-13.5f, 0.40f, 6.6f), new Vector3(3.6f, 0.25f, 4.4f), groundMat);
             westNorthRamp.transform.rotation = Quaternion.Euler(12.5f, 0f, 0f);
             if (inkableRenderers != null) inkableRenderers.Add(westNorthRamp.GetComponent<Renderer>());
             westNorthRamp.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddOrientedInkWallSurface(westNorthRamp, inkCfg, inkWallMat);
 
             var eastPlatform = CreateBox(arenaRoot.transform, "HighGround_East", new Vector3(13.5f, 0.45f, 0f), new Vector3(4.5f, 0.9f, 9.0f), groundMat);
             if (inkableRenderers != null) inkableRenderers.Add(eastPlatform.GetComponent<Renderer>());
@@ -127,11 +133,13 @@ namespace P1.Environment
             eastSouthRamp.transform.rotation = Quaternion.Euler(-12.5f, 0f, 0f);
             if (inkableRenderers != null) inkableRenderers.Add(eastSouthRamp.GetComponent<Renderer>());
             eastSouthRamp.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddOrientedInkWallSurface(eastSouthRamp, inkCfg, inkWallMat);
 
             var eastNorthRamp = CreateBox(arenaRoot.transform, "Ramp_East_North_Inkable", new Vector3(13.5f, 0.40f, 6.6f), new Vector3(3.6f, 0.25f, 4.4f), groundMat);
             eastNorthRamp.transform.rotation = Quaternion.Euler(12.5f, 0f, 0f);
             if (inkableRenderers != null) inkableRenderers.Add(eastNorthRamp.GetComponent<Renderer>());
             eastNorthRamp.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddOrientedInkWallSurface(eastNorthRamp, inkCfg, inkWallMat);
 
             // 4. 外侧战术绕后走廊与集装箱掩体群（保持旧坐标，测试锚点）
             CreateCover(arenaRoot.transform, "Container_Flank_West_01_Teal", new Vector3(-17.5f, 0.9f, -3.2f), new Vector3(2.2f, 1.8f, 4.6f),
@@ -216,7 +224,10 @@ namespace P1.Environment
                 southCol.center = new Vector3(0f, 2.227f, 0f);
                 southCol.size = new Vector3(1f, 5.454f, 1f);
             }
-            AddInkWallSurface(southWall, inkCfg, inkWallMat, false);
+            // 墨面按可见网格（0.55m 高）建：碰撞体为了拦住越界玩家被拉高到 3m，
+            // 若按 Collider AABB 建面，墨水会飘在矮墙上方 2.45m 的空中。
+            AddOrientedInkWallSurface(southWall, inkCfg, inkWallMat, false,
+                new Vector3(0f, 0.275f, -ArenaLayoutV2.BoundaryZ), new Vector3(42f, 0.55f, 1f));
 
             var northWall = CreateBox(arenaRoot.transform, "Boundary_North", new Vector3(0f, 1.2f, ArenaLayoutV2.BoundaryZ), new Vector3(42f, 2.4f, 1f), boundaryMat);
             AddInkWallSurface(northWall, inkCfg, inkWallMat, false);
@@ -228,12 +239,12 @@ namespace P1.Environment
             AddInkWallSurface(eastWall, inkCfg, inkWallMat, false);
 
             // 9. 双方安全出生台（8×6.5m，队色圆盘由 P1/SpawnPad Shader 绘制）
+            // 出生台也属于场上表面：顶面由 SpawnPad.shader 采样顶视墨迹图集，因此不再加入
+            // blockedColliders（否则网格层面会拒绝上墨，打上去什么都不会发生）。
             var spawnPadA = CreateBox(arenaRoot.transform, "SafeSpawnPad_TeamA", new Vector3(0f, 0.08f, -ArenaLayoutV2.SpawnZ), new Vector3(8.0f, 0.16f, 6.5f), spawnMatA);
-            if (blockedColliders != null) blockedColliders.Add(spawnPadA.GetComponent<Collider>());
             AddInkWallSurface(spawnPadA, inkCfg, inkWallMat, true);
 
             var spawnPadB = CreateBox(arenaRoot.transform, "SafeSpawnPad_TeamB", new Vector3(0f, 0.08f, ArenaLayoutV2.SpawnZ), new Vector3(8.0f, 0.16f, 6.5f), spawnMatB);
-            if (blockedColliders != null) blockedColliders.Add(spawnPadB.GetComponent<Collider>());
             AddInkWallSurface(spawnPadB, inkCfg, inkWallMat, true);
 
             var spawnAnchorGo = new GameObject("TeamA_SpawnAnchor");
@@ -361,6 +372,35 @@ namespace P1.Environment
 
             var wallBox = box.AddComponent<InkWallSurface>();
             wallBox.Configure(col, inkWallMat, inkCfg, allowClimb);
+        }
+
+        /// <summary>
+        /// 按"变换后的盒子"而不是世界 AABB 生成可涂立面：斜坡、旋转过的箱体等。
+        /// 省略 centerWorld/sizeWorld 时取 BoxCollider 的局部中心/尺寸乘以缩放；
+        /// 需要把墨面限制在可见网格内（例如南边界矮墙）时显式传入世界中心与尺寸。
+        /// </summary>
+        public static void AddOrientedInkWallSurface(
+            GameObject box,
+            InkGridConfigSO inkCfg,
+            Material inkWallMat,
+            bool allowClimb = false,
+            Vector3? centerWorld = null,
+            Vector3? sizeWorld = null)
+        {
+            if (box == null || (inkCfg != null && !inkCfg.enableWallInk))
+                return;
+
+            var col = box.GetComponent<Collider>();
+            if (col == null)
+                return;
+
+            Transform t = box.transform;
+            var boxCol = col as BoxCollider;
+            Vector3 size = sizeWorld ?? Vector3.Scale(boxCol != null ? boxCol.size : Vector3.one, t.lossyScale);
+            Vector3 center = centerWorld ?? t.TransformPoint(boxCol != null ? boxCol.center : Vector3.zero);
+
+            var wall = box.AddComponent<InkWallSurface>();
+            wall.ConfigureOrientedBox(col, center, size, t.rotation, inkWallMat, inkCfg, allowClimb);
         }
     }
 }

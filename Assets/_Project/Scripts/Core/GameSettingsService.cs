@@ -6,7 +6,8 @@ namespace P1.Core
     /// <summary>
     /// 全局游戏设置管理服务（单例静态类 + PlayerPrefs 持久化）：
     /// 包含主音量 (0~1)、无障碍屏幕震动比例 (0~1)、帧率上限 (30/60/120/无限制)、
-    /// 第三人称鼠标/触控视角灵敏度 (0.25~2.5) 与 Y 轴反转。
+    /// 第三人称鼠标/触控视角灵敏度 (0.25~2.5)、Y 轴反转，
+    /// 以及移动端辅助操作：固定摇杆、开火键拖动转视角、辅助瞄准档位（关/弱/中/强）。
     /// 启动时通过 RuntimeInitializeOnLoadMethod 自动读取并应用；
     /// 支持动态修改、重置为默认值及事件广播。
     /// </summary>
@@ -19,6 +20,9 @@ namespace P1.Core
         private static float _mouseLookSensitivity = GameSettingsMath.DefaultLookSensitivity;
         private static float _touchLookSensitivity = GameSettingsMath.DefaultLookSensitivity;
         private static bool _invertLookY;
+        private static bool _fixedJoystick = GameSettingsMath.DefaultFixedJoystick;
+        private static bool _fireButtonRotatesCamera = GameSettingsMath.DefaultFireButtonRotatesCamera;
+        private static int _aimAssistLevel = GameSettingsMath.DefaultAimAssistLevel;
 
         public static event Action<float> MasterVolumeChanged;
         public static event Action<float> ShakeScaleChanged;
@@ -26,6 +30,9 @@ namespace P1.Core
         public static event Action<float> MouseLookSensitivityChanged;
         public static event Action<float> TouchLookSensitivityChanged;
         public static event Action<bool> InvertLookYChanged;
+        public static event Action<bool> FixedJoystickChanged;
+        public static event Action<bool> FireButtonRotatesCameraChanged;
+        public static event Action<int> AimAssistLevelChanged;
         public static event Action SettingsChanged;
 
         /// <summary>
@@ -169,6 +176,70 @@ namespace P1.Core
             }
         }
 
+        /// <summary>移动端摇杆是否固定底座（默认关闭，保持浮动跟手摇杆）。</summary>
+        public static bool FixedJoystick
+        {
+            get
+            {
+                EnsureInitialized();
+                return _fixedJoystick;
+            }
+            set
+            {
+                EnsureInitialized();
+                if (_fixedJoystick == value)
+                    return;
+
+                _fixedJoystick = value;
+                SaveFixedJoystick();
+                FixedJoystickChanged?.Invoke(_fixedJoystick);
+                SettingsChanged?.Invoke();
+            }
+        }
+
+        /// <summary>右开火键拖动时是否同时旋转视角（默认开启，关闭后 3/4 指开火手不会抖视角）。</summary>
+        public static bool FireButtonRotatesCamera
+        {
+            get
+            {
+                EnsureInitialized();
+                return _fireButtonRotatesCamera;
+            }
+            set
+            {
+                EnsureInitialized();
+                if (_fireButtonRotatesCamera == value)
+                    return;
+
+                _fireButtonRotatesCamera = value;
+                SaveFireButtonRotatesCamera();
+                FireButtonRotatesCameraChanged?.Invoke(_fireButtonRotatesCamera);
+                SettingsChanged?.Invoke();
+            }
+        }
+
+        /// <summary>移动端辅助瞄准档位：0 关 / 1 弱 / 2 中 / 3 强（默认中档 0.8m）。</summary>
+        public static int AimAssistLevel
+        {
+            get
+            {
+                EnsureInitialized();
+                return _aimAssistLevel;
+            }
+            set
+            {
+                EnsureInitialized();
+                int normalized = GameSettingsMath.NormalizeAimAssistLevel(value);
+                if (_aimAssistLevel == normalized)
+                    return;
+
+                _aimAssistLevel = normalized;
+                SaveAimAssistLevel();
+                AimAssistLevelChanged?.Invoke(_aimAssistLevel);
+                SettingsChanged?.Invoke();
+            }
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void AutoInitialize()
         {
@@ -200,6 +271,9 @@ namespace P1.Core
             _mouseLookSensitivity = GameSettingsMath.DefaultLookSensitivity;
             _touchLookSensitivity = GameSettingsMath.DefaultLookSensitivity;
             _invertLookY = false;
+            _fixedJoystick = GameSettingsMath.DefaultFixedJoystick;
+            _fireButtonRotatesCamera = GameSettingsMath.DefaultFireButtonRotatesCamera;
+            _aimAssistLevel = GameSettingsMath.DefaultAimAssistLevel;
 
             SaveAll();
             ApplyAll();
@@ -210,6 +284,9 @@ namespace P1.Core
             MouseLookSensitivityChanged?.Invoke(_mouseLookSensitivity);
             TouchLookSensitivityChanged?.Invoke(_touchLookSensitivity);
             InvertLookYChanged?.Invoke(_invertLookY);
+            FixedJoystickChanged?.Invoke(_fixedJoystick);
+            FireButtonRotatesCameraChanged?.Invoke(_fireButtonRotatesCamera);
+            AimAssistLevelChanged?.Invoke(_aimAssistLevel);
             SettingsChanged?.Invoke();
         }
 
@@ -229,6 +306,10 @@ namespace P1.Core
             _touchLookSensitivity = GameSettingsMath.ClampLookSensitivity(
                 PlayerPrefs.GetFloat(GameSettingsMath.KeyTouchLookSensitivity, GameSettingsMath.DefaultLookSensitivity));
             _invertLookY = PlayerPrefs.GetInt(GameSettingsMath.KeyInvertLookY, 0) != 0;
+            _fixedJoystick = PlayerPrefs.GetInt(GameSettingsMath.KeyFixedJoystick, 0) != 0;
+            _fireButtonRotatesCamera = PlayerPrefs.GetInt(GameSettingsMath.KeyFireButtonRotatesCamera, 1) != 0;
+            _aimAssistLevel = GameSettingsMath.NormalizeAimAssistLevel(
+                PlayerPrefs.GetInt(GameSettingsMath.KeyAimAssistLevel, GameSettingsMath.DefaultAimAssistLevel));
         }
 
         private static void SaveVolume()
@@ -267,6 +348,24 @@ namespace P1.Core
             PlayerPrefs.Save();
         }
 
+        private static void SaveFixedJoystick()
+        {
+            PlayerPrefs.SetInt(GameSettingsMath.KeyFixedJoystick, _fixedJoystick ? 1 : 0);
+            PlayerPrefs.Save();
+        }
+
+        private static void SaveFireButtonRotatesCamera()
+        {
+            PlayerPrefs.SetInt(GameSettingsMath.KeyFireButtonRotatesCamera, _fireButtonRotatesCamera ? 1 : 0);
+            PlayerPrefs.Save();
+        }
+
+        private static void SaveAimAssistLevel()
+        {
+            PlayerPrefs.SetInt(GameSettingsMath.KeyAimAssistLevel, _aimAssistLevel);
+            PlayerPrefs.Save();
+        }
+
         private static void SaveAll()
         {
             PlayerPrefs.SetFloat(GameSettingsMath.KeyMasterVolume, _masterVolume);
@@ -275,6 +374,9 @@ namespace P1.Core
             PlayerPrefs.SetFloat(GameSettingsMath.KeyMouseLookSensitivity, _mouseLookSensitivity);
             PlayerPrefs.SetFloat(GameSettingsMath.KeyTouchLookSensitivity, _touchLookSensitivity);
             PlayerPrefs.SetInt(GameSettingsMath.KeyInvertLookY, _invertLookY ? 1 : 0);
+            PlayerPrefs.SetInt(GameSettingsMath.KeyFixedJoystick, _fixedJoystick ? 1 : 0);
+            PlayerPrefs.SetInt(GameSettingsMath.KeyFireButtonRotatesCamera, _fireButtonRotatesCamera ? 1 : 0);
+            PlayerPrefs.SetInt(GameSettingsMath.KeyAimAssistLevel, _aimAssistLevel);
             PlayerPrefs.Save();
         }
 

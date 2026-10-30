@@ -36,7 +36,6 @@ namespace P1.Environment
             Bench,
             AcUnit,
             PipeRun,
-            RailingRun,
             LampPost,
             PalmTree,
             FlagPole,
@@ -97,6 +96,28 @@ namespace P1.Environment
         public static IReadOnlyList<ArenaPropSpec> Props => PropList;
         public static IReadOnlyList<GroundMarking> GroundMarkings => MarkingList;
 
+        /// <summary>
+        /// 该道具是否作为实体掩体参与碰撞。
+        /// 地形装饰（锥桶、系缆桩、路灯、棕榈、旗杆、墙顶空调与管线）一律不生成碰撞：
+        /// 装饰网格是整场按材质合并后统一挂 MeshCollider 的，只要算进去，
+        /// 细杆件就会顶住角色胶囊、挡住子弹，并把 Bot 的 NavGrid 切出无数死格。
+        /// </summary>
+        public static bool IsSolidProp(ArenaPropKind kind)
+        {
+            switch (kind)
+            {
+                case ArenaPropKind.CrateCluster:
+                case ArenaPropKind.CrateTall:
+                case ArenaPropKind.BarrelCluster:
+                case ArenaPropKind.PlanterBox:
+                case ArenaPropKind.Bench:
+                case ArenaPropKind.Kiosk:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         static ArenaLayoutV2()
         {
             BuildProps();
@@ -129,20 +150,13 @@ namespace P1.Environment
             AddSymmetric(ArenaPropKind.CrateTall, new Vector3(11.4f, 0f, -19.6f), 8f, 1.0f, 0);
             AddSymmetric(ArenaPropKind.CrateCluster, new Vector3(7.6f, 0f, -17.2f), -6f, 0.85f, 2);
 
-            // 油桶与花坛：给延长区制造错落掩体感，同时保持中路线开阔。
-            AddSymmetric(ArenaPropKind.BarrelCluster, new Vector3(-15.6f, 0f, -13.4f), 0f, 1.0f, 0);
-            AddSymmetric(ArenaPropKind.BarrelCluster, new Vector3(14.2f, 0f, -12.0f), 0f, 0.9f, 1);
+            // 场内实体道具只剩"盒状"物件（木箱/花坛/售卖亭）：它们由 ArenaDecorationBuilder
+            // 按实体部件包围盒生成盒碰撞代理 + 四面可涂墨面。
+            // 原先摆在场内的油桶簇、长椅、锥桶、系缆桩属于曲面/细杆/镂空件，
+            // 用盒代理会飞出悬空墨片，用精确网格又会挡住子弹并切碎 NavGrid，
+            // 因此按"涂不上的就不摆在场内"的约定移除（网格工厂保留，后续可复用）。
             AddSymmetric(ArenaPropKind.PlanterBox, new Vector3(-6.9f, 0f, -13.6f), 0f, 1.0f, 0);
             AddSymmetric(ArenaPropKind.PlanterBox, new Vector3(6.9f, 0f, -13.6f), 0f, 1.0f, 0);
-
-            // 锥桶与系缆桩：纯装饰，强化施工/码头语义。
-            AddSymmetric(ArenaPropKind.ConeCluster, new Vector3(-9.6f, 0f, -11.8f), 0f, 1.0f, 0);
-            AddSymmetric(ArenaPropKind.ConeCluster, new Vector3(8.8f, 0f, -11.4f), 0f, 1.0f, 0);
-            AddSymmetric(ArenaPropKind.BollardRow, new Vector3(-19.2f, 0f, -9.0f), 90f, 6.0f, 0);
-
-            // 侧翼高台外缘栏杆（不挡弹道，只做剪影）。
-            AddSymmetric(ArenaPropKind.RailingRun, new Vector3(-13.5f, 0.9f, -4.3f), 0f, 5.0f, 0);
-            AddSymmetric(ArenaPropKind.RailingRun, new Vector3(-13.5f, 0.9f, 4.3f), 0f, 5.0f, 0);
 
             // 边界外侧路灯与棕榈：不参与碰撞，避免挡子弹。
             AddSymmetric(ArenaPropKind.LampPost, new Vector3(-21.5f, 0f, -20f), 0f, 1.0f, 0);
@@ -153,15 +167,18 @@ namespace P1.Environment
             AddSymmetric(ArenaPropKind.PalmTree, new Vector3(23.0f, 0f, -25.5f), 0f, 1.0f, 1);
 
             // 出生区：队旗 + 售卖亭，形成明确的队伍入口记忆点。
-            AddSymmetric(ArenaPropKind.FlagPole, new Vector3(-4.8f, 0f, -25.4f), 0f, 1.0f, 0);
-            AddSymmetric(ArenaPropKind.FlagPole, new Vector3(4.8f, 0f, -25.4f), 0f, 1.0f, 0);
+            // 旗杆没有碰撞体（细杆件会卡角色），因此摆在边界墙外 z=±29.6：
+            // 场内仍能看到旗面，但不会被当成"打不中的场内物件"。
+            AddSymmetric(ArenaPropKind.FlagPole, new Vector3(-4.8f, 0f, -29.6f), 0f, 1.0f, 0);
+            AddSymmetric(ArenaPropKind.FlagPole, new Vector3(4.8f, 0f, -29.6f), 0f, 1.0f, 0);
             AddSymmetric(ArenaPropKind.Kiosk, new Vector3(-7.4f, 0f, -26.0f), 0f, 1.0f, 0);
-            AddSymmetric(ArenaPropKind.Bench, new Vector3(7.4f, 0f, -25.8f), 180f, 1.0f, 0);
 
             // 边界墙顶的设备与管线（高于 1.8m，不参与地面战斗）。
+            // 管线必须沿墙走向贴墙铺设：PipeRun 沿局部 +Z 生长，所以贴西/东墙要 yaw=0，
+            // 贴南/北墙要 yaw=90，并按长度把起点前移半个身位，否则会横穿中场。
             AddSymmetric(ArenaPropKind.AcUnit, new Vector3(-19.85f, 1.9f, -5.0f), 90f, 1.0f, 0);
-            AddSymmetric(ArenaPropKind.PipeRun, new Vector3(-19.85f, 2.05f, 0f), 90f, 12.0f, 0);
-            AddSymmetric(ArenaPropKind.PipeRun, new Vector3(0f, 2.05f, -28.35f), 0f, 14.0f, 0);
+            AddSymmetric(ArenaPropKind.PipeRun, new Vector3(-19.85f, 2.05f, -6.0f), 0f, 12.0f, 0);
+            AddSymmetric(ArenaPropKind.PipeRun, new Vector3(-7.0f, 2.05f, -27.9f), 90f, 14.0f, 0);
         }
 
         private static void BuildMarkings()

@@ -93,7 +93,12 @@ namespace P1.Tests
         private static float WetnessFromTimestamp(Color ink, float nowTime, float dryingSeconds)
         {
             float ts01 = Mathf.Clamp01(ink.g / Mathf.Max(0.02f, ink.a));
-            float ageSec = Mathf.Repeat(nowTime - ts01 * WetClockPeriod, WetClockPeriod);
+            // 重建时间戳会比真实落墨时刻晚最多一个 8bit 量化步长（周期/256 = 0.125s）。
+            // Time.time 还很小（播放会话刚启动）时这点误差会让差值为负，Mathf.Repeat 直接回绕成
+            // 周期末尾（age≈32s），断言就会在"刚落墨"时报湿度 0。负差值只可能来自量化上取整，
+            // 按 age=0 处理；真正的陈旧墨迹差值仍为正，烘干衰减断言不受影响。
+            float delta = nowTime - ts01 * WetClockPeriod;
+            float ageSec = delta < 0f ? 0f : Mathf.Repeat(delta, WetClockPeriod);
             return Mathf.Clamp01(1f - ageSec / Mathf.Max(0.25f, dryingSeconds));
         }
 

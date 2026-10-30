@@ -56,6 +56,11 @@ namespace P1.Ink
         [Tooltip("图集是否生成 mipmap（远景不闪烁，代价是每 0.25s 一次 mip 重建）")]
         public bool atlasMipmaps = true;
 
+        [Tooltip("墨迹图集向场地四周外扩的可视边距（米）：边界墙顶、场边沿等落在 40x56 计分网格之外、" +
+                 "但玩家仍能打到的表面靠它才能受墨。0 = 使用默认 1.5m；计分网格本身不变")]
+        [Range(0f, 4f)]
+        public float atlasVisualMargin = 1.5f;
+
         [Tooltip("小地图贴图刷新频率（Hz）；0 = 每帧刷新")]
         [Range(0f, 30f)]
         public float minimapRefreshHz = 12f;

@@ -517,15 +517,19 @@ namespace P1.UI.Menus
             titleRt.offsetMin = Vector2.zero;
             titleRt.offsetMax = Vector2.zero;
 
-            // 7 行设置列表容器（每行高 72，纸白/纸黄交替底色 + 4px 墨线分隔）
+            // 设置列表容器（每行高 72，纸白/纸黄交替底色 + 4px 墨线分隔）。
+            // 移动端与编辑器多一行「触控操作与按键」入口；正式桌面包保持 7 行，避免出现点不动的死按钮。
+            bool showControlRow = Application.isMobilePlatform || Application.isEditor;
+            int totalRows = showControlRow ? 8 : 7;
+
             var tableGo = new GameObject("SettingsTable", typeof(RectTransform));
             tableGo.transform.SetParent(parent, false);
             var tableRt = tableGo.GetComponent<RectTransform>();
             tableRt.anchoredPosition = new Vector2(0f, -25f);
-            tableRt.sizeDelta = new Vector2(820f, 504f);
+            tableRt.sizeDelta = new Vector2(820f, 72f * totalRows);
 
             // Row 0: 主音量
-            var row0 = CreateSettingRow(tableGo.transform, 0, 7);
+            var row0 = CreateSettingRow(tableGo.transform, 0, totalRows);
             var volLabel = CreateTextMesh("VolLabel", row0.transform, "主音量", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var volLabelRt = volLabel.rectTransform;
             volLabelRt.anchorMin = new Vector2(0f, 0.5f);
@@ -544,7 +548,7 @@ namespace P1.UI.Menus
             UpdateVolumeLabel(GameSettingsService.MasterVolume);
 
             // Row 1: 屏幕震动
-            var row1 = CreateSettingRow(tableGo.transform, 1, 7);
+            var row1 = CreateSettingRow(tableGo.transform, 1, totalRows);
             var shakeLabel = CreateTextMesh("ShakeLabel", row1.transform, "屏幕震动 (无障碍减弱)", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var shakeLabelRt = shakeLabel.rectTransform;
             shakeLabelRt.anchorMin = new Vector2(0f, 0.5f);
@@ -563,7 +567,7 @@ namespace P1.UI.Menus
             UpdateShakeLabel(GameSettingsService.ShakeScale);
 
             // Row 2: 鼠标视角灵敏度
-            var row2 = CreateSettingRow(tableGo.transform, 2, 7);
+            var row2 = CreateSettingRow(tableGo.transform, 2, totalRows);
             var mouseLabel = CreateTextMesh("MouseSensLabel", row2.transform, "鼠标视角灵敏度", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var mouseLabelRt = mouseLabel.rectTransform;
             mouseLabelRt.anchorMin = new Vector2(0f, 0.5f);
@@ -585,7 +589,7 @@ namespace P1.UI.Menus
             UpdateLookSensitivityLabel(_mouseSensValueText, GameSettingsService.MouseLookSensitivity);
 
             // Row 3: 触控视角灵敏度
-            var row3 = CreateSettingRow(tableGo.transform, 3, 7);
+            var row3 = CreateSettingRow(tableGo.transform, 3, totalRows);
             var touchLabel = CreateTextMesh("TouchSensLabel", row3.transform, "触控视角灵敏度", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var touchLabelRt = touchLabel.rectTransform;
             touchLabelRt.anchorMin = new Vector2(0f, 0.5f);
@@ -607,7 +611,7 @@ namespace P1.UI.Menus
             UpdateLookSensitivityLabel(_touchSensValueText, GameSettingsService.TouchLookSensitivity);
 
             // Row 4: 视角反转 Y
-            var row4 = CreateSettingRow(tableGo.transform, 4, 7);
+            var row4 = CreateSettingRow(tableGo.transform, 4, totalRows);
             var invertLabel = CreateTextMesh("InvertYLabel", row4.transform, "视角垂直方向", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var invertLabelRt = invertLabel.rectTransform;
             invertLabelRt.anchorMin = new Vector2(0f, 0.5f);
@@ -631,7 +635,7 @@ namespace P1.UI.Menus
             UpdateInvertYLabel();
 
             // Row 5: 帧率上限
-            var row5 = CreateSettingRow(tableGo.transform, 5, 7);
+            var row5 = CreateSettingRow(tableGo.transform, 5, totalRows);
             var fpsLabel = CreateTextMesh("FpsLabel", row5.transform, "帧率上限", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var fpsLabelRt = fpsLabel.rectTransform;
             fpsLabelRt.anchorMin = new Vector2(0f, 0.5f);
@@ -643,7 +647,7 @@ namespace P1.UI.Menus
             BuildFrameRateButtons(row5.transform);
 
             // Row 6: 快捷操作（恢复默认 + 返回）
-            var row6 = CreateSettingRow(tableGo.transform, 6, 7);
+            var row6 = CreateSettingRow(tableGo.transform, 6, totalRows);
             var resetBtn = CreateStyledButton("ResetBtn", row6.transform, "恢复默认", ComicStyle.Paper, ComicStyle.Ink, new Vector2(200f, 52f), _theme, 20f, ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var resetRt = resetBtn.GetComponent<RectTransform>();
             resetRt.anchorMin = new Vector2(0f, 0.5f);
@@ -659,6 +663,46 @@ namespace P1.UI.Menus
             backRt.pivot = new Vector2(1f, 0.5f);
             backRt.anchoredPosition = new Vector2(-28f, 0f);
             backBtn.onClick.AddListener(CloseSettings);
+
+            // Row 7: 移动端操作设置入口（打开 2/3/4 指布局与辅助瞄准面板）
+            if (showControlRow)
+            {
+                BuildControlSettingsRow(tableGo.transform, 7, totalRows);
+            }
+        }
+
+        private void BuildControlSettingsRow(Transform parent, int index, int totalRows)
+        {
+            var row = CreateSettingRow(parent, index, totalRows);
+            var label = CreateTextMesh("ControlLabel", row.transform, "触控操作与按键", 24f, ComicStyle.Ink, null,
+                TextAlignmentOptions.Left, isDisplay: false);
+            var labelRt = label.rectTransform;
+            labelRt.anchorMin = new Vector2(0f, 0.5f);
+            labelRt.anchorMax = new Vector2(0f, 0.5f);
+            labelRt.pivot = new Vector2(0f, 0.5f);
+            labelRt.anchoredPosition = new Vector2(28f, 0f);
+            labelRt.sizeDelta = new Vector2(320f, 36f);
+
+            var button = CreateStyledButton("ControlSettingsBtn", row.transform, "打开操作设置",
+                ComicStyle.Yellow, ComicStyle.Ink, new Vector2(260f, 52f), _theme, 20f,
+                ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            var rt = button.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1f, 0.5f);
+            rt.anchorMax = new Vector2(1f, 0.5f);
+            rt.pivot = new Vector2(1f, 0.5f);
+            rt.anchoredPosition = new Vector2(-28f, 0f);
+            button.onClick.AddListener(OpenControlSettings);
+        }
+
+        private void OpenControlSettings()
+        {
+            // 关闭暂停（恢复时间/输入），再进入触控布局编辑器；编辑器会自行暂停。
+            Resume();
+            var touchUI = FindAnyObjectByType<MobileTouchUI>();
+            if (touchUI != null)
+            {
+                touchUI.OpenLayoutCustomizer();
+            }
         }
 
         private GameObject CreateSettingRow(Transform parent, int index, int totalRows)
@@ -876,6 +920,14 @@ namespace P1.UI.Menus
 
             if (toggleRequested)
             {
+                // 编辑布局时先退出编辑器，绝不再叠一层暂停：暂停恢复会把 timeScale 改成 1，
+                // 破坏编辑器“退出时还原进入前时间尺度”的约定。
+                if (MobileLayoutCustomizer.IsEditingAny)
+                {
+                    MobileLayoutCustomizer.ActiveEditor?.Close(false);
+                    return;
+                }
+
                 TogglePause();
             }
         }
@@ -885,6 +937,12 @@ namespace P1.UI.Menus
         /// </summary>
         public void TogglePause()
         {
+            if (!IsPaused && MobileLayoutCustomizer.IsEditingAny)
+            {
+                MobileLayoutCustomizer.ActiveEditor?.Close(false);
+                return;
+            }
+
             if (IsPaused)
             {
                 if (_isSettingsOpen)
@@ -908,7 +966,7 @@ namespace P1.UI.Menus
         /// </summary>
         public void Pause()
         {
-            if (IsPaused)
+            if (IsPaused || MobileLayoutCustomizer.IsEditingAny)
                 return;
 
             IsPaused = true;
@@ -1040,12 +1098,19 @@ namespace P1.UI.Menus
 
             bool isPlaying = _match != null && _match.CurrentPhase == MatchManager.Phase.Playing;
             bool isMobile = Application.isMobilePlatform || forceShowMobileButton;
-            bool shouldShow = !IsPaused && isPlaying && isMobile;
+            // 编辑布局时暂停按钮必须让位：它 sortingOrder=100 压在编辑器之上，会挡住顶栏并误开暂停。
+            bool shouldShow = !IsPaused && isPlaying && isMobile && !MobileLayoutCustomizer.IsEditingAny;
 
             if (_mobilePauseButton.gameObject.activeSelf != shouldShow)
             {
                 _mobilePauseButton.gameObject.SetActive(shouldShow);
             }
+        }
+
+        /// <summary>供布局编辑器开关时联动刷新移动端暂停按钮显隐。</summary>
+        public void RefreshMobileButtonVisibility()
+        {
+            UpdateMobileButtonVisibility();
         }
 
         private void CheckScreenResolutionChange()

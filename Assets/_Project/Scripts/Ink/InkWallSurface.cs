@@ -29,6 +29,13 @@ namespace P1.Ink
         [SerializeField] private InkGridConfigSO config;
         [SerializeField] private bool canClimb = true;
 
+        [Header("朝向盒立面（旋转道具 / 斜坡）")]
+        [Tooltip("启用后按 orientedCenterWorld / orientedSizeWorld / orientedRotation 生成 4 张立面，不再使用 Collider 的世界 AABB。")]
+        [SerializeField] private bool useOrientedBox;
+        [SerializeField] private Vector3 orientedCenterWorld;
+        [SerializeField] private Vector3 orientedSizeWorld = Vector3.one;
+        [SerializeField] private Quaternion orientedRotation = Quaternion.identity;
+
         private readonly List<InkWallFace> _faces = new List<InkWallFace>(4);
         private readonly List<Mesh> _meshes = new List<Mesh>(4);
         private readonly List<Renderer> _faceRenderers = new List<Renderer>(4);
@@ -149,6 +156,40 @@ namespace P1.Ink
             }
         }
 
+        /// <summary>
+        /// 按任意朝向的盒子生成 4 张立面（旋转过的木箱/花坛、带坡度的斜坡等）。
+        /// 与 <see cref="Configure(BoxCollider, Material, InkGridConfigSO, bool)"/> 的区别：
+        /// 前者取 Collider 的世界 AABB（只适合轴对齐盒），这里直接用传入的世界中心/尺寸/旋转，
+        /// 因此旋转盒的立面与网格表面严格贴合，不会出现"墨片悬空"。
+        /// collider 只用于弹道命中映射与攀爬探测。
+        /// </summary>
+        public void ConfigureOrientedBox(
+            Collider collider,
+            Vector3 centerWorld,
+            Vector3 sizeWorld,
+            Quaternion rotation,
+            Material material,
+            InkGridConfigSO gridConfig,
+            bool allowClimb = true)
+        {
+            if (collider is BoxCollider box)
+                wallCollider = box;
+            useOrientedBox = true;
+            orientedCenterWorld = centerWorld;
+            orientedSizeWorld = new Vector3(
+                Mathf.Max(0.01f, sizeWorld.x),
+                Mathf.Max(0.01f, sizeWorld.y),
+                Mathf.Max(0.01f, sizeWorld.z));
+            orientedRotation = rotation;
+            overlayMaterial = material;
+            config = gridConfig;
+            canClimb = allowClimb;
+            if (collider != null)
+            {
+                ColliderLookup[collider] = this;
+            }
+        }
+
         public bool InitializeIfNeeded(bool force = false)
         {
             if (_initialized)
@@ -164,7 +205,13 @@ namespace P1.Ink
             }
 
             Collider col = wallCollider != null ? (Collider)wallCollider : GetComponent<Collider>();
-            if (col != null)
+            if (useOrientedBox)
+            {
+                // 朝向盒自身就是墨面的真实范围：不能用 collider.bounds（南边界矮墙的
+                // 碰撞体比可见网格高 2.45m，用 AABB 会让墨片飘在墙上方）。
+                _worldBounds = ComputeOrientedWorldBounds();
+            }
+            else if (col != null)
             {
                 _worldBounds = col.bounds;
             }
@@ -204,11 +251,18 @@ namespace P1.Ink
             Vector3 max = _worldBounds.max;
             Vector3 size = _worldBounds.size;
 
-            // 4 张立面：原点取 (u=0,v=0) 角点，U×V 必须等于朝外法线，保证法线/朝向一致
-            AddFace("X+", new Vector3(max.x, min.y, max.z), Vector3.back, Vector3.up, size.z, size.y, cellSize, neutral, teamA, teamB);
-            AddFace("X-", new Vector3(min.x, min.y, min.z), Vector3.forward, Vector3.up, size.z, size.y, cellSize, neutral, teamA, teamB);
-            AddFace("Z+", new Vector3(min.x, min.y, max.z), Vector3.right, Vector3.up, size.x, size.y, cellSize, neutral, teamA, teamB);
-            AddFace("Z-", new Vector3(max.x, min.y, min.z), Vector3.left, Vector3.up, size.x, size.y, cellSize, neutral, teamA, teamB);
+            if (useOrientedBox)
+            {
+                AddOrientedBoxFaces(cellSize, neutral, teamA, teamB);
+            }
+            else
+            {
+                // 4 张立面：原点取 (u=0,v=0) 角点，U×V 必须等于朝外法线，保证法线/朝向一致
+                AddFace("X+", new Vector3(max.x, min.y, max.z), Vector3.back, Vector3.up, size.z, size.y, cellSize, neutral, teamA, teamB);
+                AddFace("X-", new Vector3(min.x, min.y, min.z), Vector3.forward, Vector3.up, size.z, size.y, cellSize, neutral, teamA, teamB);
+                AddFace("Z+", new Vector3(min.x, min.y, max.z), Vector3.right, Vector3.up, size.x, size.y, cellSize, neutral, teamA, teamB);
+                AddFace("Z-", new Vector3(max.x, min.y, min.z), Vector3.left, Vector3.up, size.x, size.y, cellSize, neutral, teamA, teamB);
+            }
 
             _initialized = true;
 
@@ -249,6 +303,60 @@ namespace P1.Ink
             _faces.Add(face);
             BuildFaceVisual(face);
             face.UploadIfDirty();
+        }
+
+        /// <summary>朝向盒 8 个角点的世界 AABB（供攀爬判定与诊断使用）。</summary>
+        private Bounds ComputeOrientedWorldBounds()
+        {
+            Vector3 right = orientedRotation * Vector3.right;
+            Vector3 up = orientedRotation * Vector3.up;
+            Vector3 forward = orientedRotation * Vector3.forward;
+            Vector3 half = orientedSizeWorld * 0.5f;
+
+            Bounds bounds = new Bounds(orientedCenterWorld, Vector3.zero);
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 sign = new Vector3(
+                    (i & 1) == 0 ? -1f : 1f,
+                    (i & 2) == 0 ? -1f : 1f,
+                    (i & 4) == 0 ? -1f : 1f);
+                Vector3 corner = orientedCenterWorld
+                                 + right * (half.x * sign.x)
+                                 + up * (half.y * sign.y)
+                                 + forward * (half.z * sign.z);
+                bounds.Encapsulate(corner);
+            }
+            return bounds;
+        }
+
+        /// <summary>
+        /// 按朝向盒生成 4 张竖直立面。U/V 取旋转后的局部轴，U×V = 朝外法线，
+        /// 因此旋转盒子与斜坡的墨面与网格表面共面（外扩 1cm 防 Z-Fighting 由 BuildFaceVisual 负责）。
+        /// </summary>
+        private void AddOrientedBoxFaces(float cellSize, Color32 neutral, Color32 teamA, Color32 teamB)
+        {
+            Vector3 right = orientedRotation * Vector3.right;
+            Vector3 up = orientedRotation * Vector3.up;
+            Vector3 forward = orientedRotation * Vector3.forward;
+            Vector3 center = orientedCenterWorld;
+            Vector3 half = orientedSizeWorld * 0.5f;
+            float height = orientedSizeWorld.y;
+
+            // X+ / X-：宽 = 局部 Z，法线 = ±right
+            AddFace("X+",
+                center + right * half.x - up * half.y + forward * half.z,
+                -forward, up, orientedSizeWorld.z, height, cellSize, neutral, teamA, teamB);
+            AddFace("X-",
+                center - right * half.x - up * half.y - forward * half.z,
+                forward, up, orientedSizeWorld.z, height, cellSize, neutral, teamA, teamB);
+
+            // Z+ / Z-：宽 = 局部 X，法线 = ±forward
+            AddFace("Z+",
+                center - right * half.x - up * half.y + forward * half.z,
+                right, up, orientedSizeWorld.x, height, cellSize, neutral, teamA, teamB);
+            AddFace("Z-",
+                center + right * half.x - up * half.y - forward * half.z,
+                -right, up, orientedSizeWorld.x, height, cellSize, neutral, teamA, teamB);
         }
 
         private void BuildFaceVisual(InkWallFace face)

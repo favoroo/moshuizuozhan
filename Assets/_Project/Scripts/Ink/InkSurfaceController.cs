@@ -16,6 +16,12 @@ namespace P1.Ink
 
         public const int MaxRipples = 8;
 
+        /// <summary>
+        /// 墨迹图集向场地四周外扩的默认可视边距（米）：计分网格仍是 40x56，
+        /// 但边界墙顶、场边沿这些落在网格外、玩家仍能打到的表面需要图集多覆盖一圈才能显墨。
+        /// </summary>
+        private const float DefaultAtlasVisualMargin = 1.5f;
+
         [SerializeField] private InkGridConfigSO config;
         [SerializeField] private List<Renderer> inkableSurfaceRenderers = new List<Renderer>();
         [SerializeField] private List<Collider> blockedColliders = new List<Collider>();
@@ -166,7 +172,11 @@ namespace P1.Ink
 
             if (_inkTexture != null)
             {
-                Destroy(_inkTexture);
+                // 编辑器菜单（ProjectScaffolder 重建场景）也会走 Configure → RebuildGridAndTexture：
+                // 编辑模式下必须 DestroyImmediate，否则 Unity 会报
+                // "RuntimeInkTexture: Destroy may not be called from edit mode" 并留下旧贴图。
+                if (Application.isPlaying) Destroy(_inkTexture);
+                else DestroyImmediate(_inkTexture);
             }
 
             _inkTexture = new Texture2D(res, res, TextureFormat.RGBA32, false, false)
@@ -197,7 +207,14 @@ namespace P1.Ink
             float dryingSeconds = config != null ? config.inkDryingSeconds : 6f;
             float wetClockPeriod = config != null ? config.atlasWetClockPeriod : InkSplatAtlas.DefaultWetClockPeriod;
 
-            _atlas = new InkSplatAtlas(mapSize, _grid.OriginXZ, atlasRes, mipmaps, growSeconds, dryingSeconds,
+            // 图集比计分网格四周多出可视边距：只影响贴图覆盖范围与显墨位置，玩法网格和计分不变。
+            float margin = config != null && config.atlasVisualMargin > 0.01f
+                ? config.atlasVisualMargin
+                : DefaultAtlasVisualMargin;
+            Vector2 atlasSize = mapSize + new Vector2(margin * 2f, margin * 2f);
+            Vector2 atlasOrigin = _grid.OriginXZ - new Vector2(margin, margin);
+
+            _atlas = new InkSplatAtlas(atlasSize, atlasOrigin, atlasRes, mipmaps, growSeconds, dryingSeconds,
                 wetClockPeriod: wetClockPeriod);
 
             // 图集内容不进序列化：重建后立刻清空一次，避免首帧读到未初始化显存
@@ -470,11 +487,13 @@ namespace P1.Ink
                 _surfaceBlock = new MaterialPropertyBlock();
             }
 
+            Vector2 atlasOrigin = _atlas != null ? _atlas.OriginXZ : _grid.OriginXZ;
+            Vector2 atlasMapSize = _atlas != null ? _atlas.MapSize : _grid.MapSize;
             Vector4 originAndSize = new Vector4(
-                _grid.OriginXZ.x,
-                _grid.OriginXZ.y,
-                _grid.MapSize.x,
-                _grid.MapSize.y);
+                atlasOrigin.x,
+                atlasOrigin.y,
+                atlasMapSize.x,
+                atlasMapSize.y);
 
             Color colorA = config != null ? config.teamAColor : new Color(1.00f, 0.44f, 0.06f, 1f);
             Color colorB = config != null ? config.teamBColor : new Color(0.15f, 0.42f, 1.00f, 1f);

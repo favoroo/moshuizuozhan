@@ -542,6 +542,10 @@ namespace P1.UI
                     hpRt.sizeDelta = new Vector2(340f, 14f);
                 }
             }
+
+            // 4. 墨水罐与大招球移到中间底部紧凑横排：避开左上摇杆与右下操作按键，
+            //    同时隐藏移动端无意义的「按 Q 释放」键盘提示。
+            HudSpecialGaugeFactory.ApplyMobileBottomLayout(inkTankView, liquidOrbView);
         }
 
         private void AdaptLayoutForInputMode()

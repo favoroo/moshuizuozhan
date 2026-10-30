@@ -55,6 +55,12 @@ namespace P1.UI
         private bool _ready;
         private bool _wired;
         private bool _iconApplied;
+        private bool _readyHintEnabled = true;
+        private bool _layoutDefaultsCaptured;
+        private Vector2 _defaultIconSize;
+        private Vector2 _defaultPercentSize;
+        private Vector2 _defaultPercentPos;
+        private float _defaultPercentFontSize;
         private SpecialKind _specialKind = SpecialKind.Slam;
 
         /// <summary>大招是否处于满能待放状态。</summary>
@@ -177,6 +183,54 @@ namespace P1.UI
         public void SetAutoBindLocalPlayerTeam(bool enabled)
         {
             autoBindLocalPlayerTeam = enabled;
+        }
+
+        /// <summary>
+        /// 移动端紧凑布局：缩小球心图标与百分比、隐藏「按 Q 释放」键盘提示。
+        /// 桌面端保持原尺寸；重复调用幂等。
+        /// </summary>
+        public void SetCompactBottomLayout(bool compact)
+        {
+            CaptureLayoutDefaults();
+
+            if (specialIconRoot != null)
+            {
+                specialIconRoot.sizeDelta = compact ? new Vector2(34f, 34f) : _defaultIconSize;
+            }
+
+            if (percentLabel != null)
+            {
+                percentLabel.fontSize = compact ? 17f : _defaultPercentFontSize;
+                RectTransform percentRect = percentLabel.rectTransform;
+                percentRect.sizeDelta = compact ? new Vector2(64f, 22f) : _defaultPercentSize;
+                percentRect.anchoredPosition = compact ? new Vector2(0f, 4f) : _defaultPercentPos;
+            }
+
+            SetReadyHintEnabled(!compact);
+        }
+
+        /// <summary>是否允许显示满能键盘提示（移动端由触控大招键承担提示，故关闭）。</summary>
+        public void SetReadyHintEnabled(bool enabled)
+        {
+            _readyHintEnabled = enabled;
+            if (!enabled && readyHint != null)
+            {
+                readyHint.gameObject.SetActive(false);
+            }
+        }
+
+        private void CaptureLayoutDefaults()
+        {
+            if (_layoutDefaultsCaptured) return;
+            _layoutDefaultsCaptured = true;
+
+            if (specialIconRoot != null) _defaultIconSize = specialIconRoot.sizeDelta;
+            if (percentLabel != null)
+            {
+                _defaultPercentFontSize = percentLabel.fontSize;
+                _defaultPercentSize = percentLabel.rectTransform.sizeDelta;
+                _defaultPercentPos = percentLabel.rectTransform.anchoredPosition;
+            }
         }
 
         private void Awake()
@@ -312,13 +366,24 @@ namespace P1.UI
 
                 if (readyHint != null)
                 {
-                    readyHint.gameObject.SetActive(true);
-                    if (readyHintMotion != null) readyHintMotion.PlayIn(resolved.readyHintDelay);
+                    if (_readyHintEnabled)
+                    {
+                        readyHint.gameObject.SetActive(true);
+                        if (readyHintMotion != null) readyHintMotion.PlayIn(resolved.readyHintDelay);
+                    }
+                    else
+                    {
+                        readyHint.gameObject.SetActive(false);
+                    }
                 }
             }
-            else if (readyHintMotion != null)
+            else
             {
-                readyHintMotion.PlayOut();
+                if (readyHint != null && !_readyHintEnabled)
+                {
+                    readyHint.gameObject.SetActive(false);
+                }
+                if (readyHintMotion != null) readyHintMotion.PlayOut();
             }
         }
 

@@ -34,6 +34,7 @@ Shader "P1/SpawnPad"
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "InkSurfaceOverlay.hlsl"
 
             struct Attributes
             {
@@ -131,6 +132,10 @@ Shader "P1/SpawnPad"
                 float NdotL = saturate(dot(N, normalize(mainLight.direction)));
                 half3 ambient = SampleSH(N) * 0.5 + half3(0.15, 0.15, 0.15);
                 half3 litColor = col * (ambient + mainLight.color * (NdotL * 0.6 + 0.4)) + glowCol * 0.6;
+
+                // 5.1 顶面墨迹：出生台与地面/集装箱顶面共用同一张顶视墨迹图集，射击台面同样留下墨
+                float3 viewDirWS = normalize(GetCameraPositionWS() - input.positionWS);
+                ApplyTopInkOverlay(litColor, input.positionWS, N, 1.0, mainLight.direction, viewDirWS);
 
                 // 6. 雾效
                 litColor = MixFog(litColor, input.fogFactor);

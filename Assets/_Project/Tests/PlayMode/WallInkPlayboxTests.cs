@@ -157,5 +157,43 @@ namespace P1.Tests
             Assert.Greater(player.transform.position.y, startY + 0.5f,
                 $"应沿墙面上爬，实际 Y={player.transform.position.y:F2}，起点 Y={startY:F2}");
         }
+
+        [UnityTest]
+        public IEnumerator DecorProp_SideFace_AcceptsInk()
+        {
+            yield return LoadPlaybox();
+
+            InkWallSurface propWall = null;
+            var walls = Object.FindObjectsByType<InkWallSurface>(FindObjectsSortMode.None);
+            for (int i = 0; i < walls.Length; i++)
+            {
+                var candidate = walls[i];
+                if (candidate == null || !candidate.gameObject.name.StartsWith("PropCollider_"))
+                {
+                    continue;
+                }
+
+                // 找一个未旋转的道具，便于用世界 +Z 作为命中法线
+                if (Mathf.Abs(Mathf.DeltaAngle(0f, candidate.transform.eulerAngles.y)) > 0.5f)
+                {
+                    continue;
+                }
+
+                propWall = candidate;
+                break;
+            }
+
+            Assert.IsNotNull(propWall, "场景里应有装饰道具盒代理（PropCollider_*），且至少一个朝向与世界轴对齐");
+            Assert.IsTrue(propWall.InitializeIfNeeded(), "运行时应能初始化道具立面的墨格");
+            Assert.AreEqual(4, propWall.FaceCount, "实体道具应生成 4 张可涂立面");
+
+            Bounds bounds = propWall.WorldBounds;
+            Vector3 point = new Vector3(bounds.center.x, bounds.center.y, bounds.max.z);
+            Assert.AreEqual(Team.Neutral, propWall.InkAtWorld(point, Vector3.forward), "初始应无墨");
+
+            int changed = propWall.PaintAtWorld(point, Vector3.forward, 0.4f, Team.TeamA);
+            Assert.Greater(changed, 0, "射击装饰木箱/花坛的侧面应能落墨");
+            Assert.AreEqual(Team.TeamA, propWall.InkAtWorld(point, Vector3.forward), "命中面应变为 TeamA 墨");
+        }
     }
 }

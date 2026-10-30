@@ -6,7 +6,8 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 程序化装配右上角 HUD 簇（P4-C）：墨水计量管 + 大招液体球。
+    /// 程序化装配 HUD 仪表簇（P4-C）：桌面在右上角，移动端由
+/// <see cref="ApplyMobileBottomLayout"/> 搬到中间底部，避开摇杆与操作按键。
     ///
     /// 全部用代码生成，不写场景、不依赖 Prefab，因此：
     /// - 现有主场景无需重建即可获得新 HUD（HudController 在 Awake 里自举）；
@@ -48,6 +49,34 @@ namespace P1.UI
 
             rootGo.SetActive(true);
             return cluster;
+        }
+
+        /// <summary>
+        /// 移动端：把右上角「墨水管 + 大招球」搬到中间底部，做成紧凑横排。
+        /// 位置经过验算：落在血条上方、左侧摇杆（中心 200,200，半径 170）右侧边界之外，
+        /// 且远离右下角操作按键，HUD 本身不拦截触控（sortingOrder 低于触控层）。
+        /// </summary>
+        public static void ApplyMobileBottomLayout(InkTankView tank, LiquidOrbView orb)
+        {
+            if (orb != null)
+            {
+                var orbRect = (RectTransform)orb.transform;
+                orbRect.anchorMin = orbRect.anchorMax = new Vector2(0.5f, 0f);
+                orbRect.pivot = new Vector2(0.5f, 0.5f);
+                orbRect.sizeDelta = new Vector2(84f, 84f);
+                orbRect.anchoredPosition = new Vector2(-75f, 108f);
+                orb.SetCompactBottomLayout(true);
+            }
+
+            if (tank != null)
+            {
+                var tankRect = (RectTransform)tank.transform;
+                tankRect.anchorMin = tankRect.anchorMax = new Vector2(0.5f, 0f);
+                tankRect.pivot = new Vector2(0.5f, 0.5f);
+                tankRect.sizeDelta = new Vector2(36f, 116f);
+                tankRect.anchoredPosition = new Vector2(-4f, 116f);
+                tank.SetCompactBottomLayout(true);
+            }
         }
 
         private static LiquidOrbView BuildOrb(RectTransform parent, UIThemeSO theme, HudGaugeStyleSO style)

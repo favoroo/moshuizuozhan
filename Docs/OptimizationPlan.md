@@ -856,8 +856,8 @@
        - 绘制全部车道虚线、侧翼导向箭头、坡道黄黑警示带、中央 P1 圆环与队伍导向标；
        - 基于场景 Collider 包围盒自动计算并烘焙环境软 AO（压暗 10%~22%），同时精准排除高台/斜坡/出生台顶面。
     3. **程序化道具与港口远景 (`ArenaPropMeshFactory` & `ArenaDecorationBuilder`)**：
-       - 100% 纯代码生成 14 类道具网格（倒角木箱群、油桶簇、混凝土花坛、交通锥、系缆桩、木长椅、空调外机、管线、栏杆、路灯、棕榈树、队旗、售卖亭）；
-       - 场内地表装饰合并为 4 个材质子网格（Matte / Metal / Emissive / Cloth），加贴 8 块墙面横幅（`ArenaBannerAtlas.png` 1024²，文字与图符正向对齐）；
+       - 100% 纯代码生成 13 类道具网格（倒角木箱群、油桶簇、混凝土花坛、交通锥、系缆桩、木长椅、空调外机、管线、路灯、棕榈树、队旗、售卖亭）；
+       - 场内地表装饰合并为 6 个材质子网格（实体掩体 Matte / Metal 挂碰撞，纯装饰 Matte_Thin / Metal_Thin / Emissive / Cloth 不碰撞），加贴 8 块墙面横幅（`ArenaBannerAtlas.png` 1024²，文字与图符正向对齐）；
        - 港口远景：64×1.1×76m 混凝土码头基座彻底托起两翼堆场、24 组集装箱垛、4 座黄色桁架岸桥（高 16m）、4 座双坡屋顶仓库、2 艘货船、24 座城市剪影楼与 8 座低多边形山丘；240×240m 远景水面；
        - 场景总 Renderer=540，唯一材质=27，DrawCalls 增量受控在 ~8 次，远景完全关闭 Cast Shadows。
     4. **Shader 体系与氛围全面升级**：
@@ -1469,6 +1469,120 @@
 
 - **验证汇总**：`compilationFailed: false`；EditMode **222/222**；PlayMode **73/75**
   （2 条失败均为并行 WIP 的 `WeaponSelectPlayTests`，与本次改动无关）。
+
+### 场景碰撞收敛：移除卡人栏杆 + 装饰件不再挡路（2026-10-30）
+
+> 触发：真机截图反馈「图上这根杆子会把人物卡住，卡着动不了」。
+
+- [x] **P14-A 删除 `RailingRun` 栏杆（4 处）**
+  - 根因：`ArenaLayoutV2` 把两段 5m 栏杆放在 `(-13.5, 0.9, ±4.3)`，横杆正好压在侧翼高台顶面
+    与坡道正中；0.95m 高的扶手顶住 1.25m 角色胶囊，玩家上坡/下高台被直接卡死。
+  - `Environment/ArenaLayoutV2.cs`：移除 2 条 `AddSymmetric(RailingRun, …)` 与枚举值；
+    `ArenaPropMeshFactory` 删除 `BuildRailingRun`；`ArenaDecorationBuilder` 移除其低密度保留判断。
+
+- [x] **P14-B 装饰件与实体掩体分离碰撞（同类问题根因）**
+  - 根因：`ArenaDecorationBuilder` 把全场道具按材质合并成 `Decor_Matte` / `Decor_Metal` 两个网格，
+    并给两个网格都挂 `MeshCollider`。于是交通锥（0.5m）、系缆桩（0.62m）、旗杆、路灯、
+    墙顶空调与管线全部变成实体：角色会被 6cm 见方的立柱卡住、子弹被细杆挡停，
+    `NavGrid` 还把无数格子判为不可走（可行走格 7470 → 7940）。
+  - 新增 `ArenaLayoutV2.IsSolidProp()`：只有木箱群 / 高箱 / 油桶簇 / 花坛 / 长椅 / 售卖亭算实体掩体。
+  - 合并网格拆为 6 个子网格：`Decor_Matte` / `Decor_Metal`（实体，带 MeshCollider）+
+    `Decor_Matte_Thin` / `Decor_Metal_Thin` / `Decor_Emissive` / `Decor_Cloth`（纯渲染）。
+    DrawCall +2，仍在桌面 120 / 移动 150 红线内。
+
+- [x] **P14-C 墙顶管线贴墙铺设**
+  - 根因：`PipeRun` 沿局部 +Z 生长，布置时西/东墙用了 yaw=90、南/北墙用了 yaw=0（正好写反），
+    两组管线各 12m / 14m 横穿中场，在 2.05m 高度上像悬空横杆，还挡跳跃与子弹。
+  - 改为 `(-19.85, 2.05, -6)` yaw 0（贴西/东墙，z −6..6）与 `(-7, 2.05, -27.9)` yaw 90
+    （贴南/北墙，x −7..7），对称件由 `AddSymmetric` 自动镜像。
+
+- [x] **P14-D `InkAtlasRenderPlayTests` 时间基脆弱点（测试侧，非玩法改动）**
+  - 现象：`PaintCircle_WritesTeamShareWetnessAndCoverage` 在播放会话刚启动时偶发报「湿润度 0」。
+  - 根因：图集 G 通道是 8bit 时间戳（量化步长 32/256 = 0.125s），重建值可能比真实落墨时刻
+    晚一步；`Time.time` 很小时差值为负，`Mathf.Repeat` 回绕成 ~32s，age 顶满、湿度算成 0。
+  - `WetnessFromTimestamp()` 对负差值按 age=0 处理；干墨衰减仍按正差值计算，断言强度不变。
+
+- [x] **P14-E 全场物件表面涂墨覆盖率提升 + 阴影死黑修复（2026-10-30）**
+  - **背景**：用户反馈场内多处打不中墨（尤其是各类近景道具与出生台），且箱体/掩体背光面出现死黑。
+  - **根因 1（物体面发黑）**：`ToonLighting.hlsl` 的 `P1ToonDiffuse` 直射项为 `lightColor * (band * shadowTerm) * litTint`，背光面 `band=0` 导致直射光彻底归零，在弱环境光下直接坍缩为纯黑（角色着色器一直是不乘 `band` 的写法）。
+    - 修复：直射项改为 `lightColor * shadowTerm * litTint`，背光面获得 `shadowTint * shadowFloor` 保底冷色阴影，暗面层次分明且彻底告别死黑。
+    - `InkGround.shader` 垂直崖壁底色（`_CliffColor`）提亮 1.6 倍，高台/斜坡未涂墨侧沿不再像黑边。
+  - **根因 2（近景道具打不中墨）**：`ArenaDecorationBuilder` 将场内地表道具合并网格，弹丸撞击时 `InkWallSurface.FindForCollider` 找不到组件，回退为涂抹掩体下方的地面；曲面/细杆件若强挂盒碰撞又会产生穿模悬空墨片。
+    - 修复：清理场内无法良好展出四面立面的镂空件/曲面件（锥桶、系缆桩、油桶、长椅）；旗杆移至边界墙外（保留背景视效且不产生阻挡）；保留的 14 个箱状掩体（木箱群×6、高木箱×2、花坛×4、售卖亭×2）拆解为独立朝向盒代理 `PropCollider_*`，尺寸严格取实体部件包围盒并挂载 `InkWallSurface`（朝向盒模式）。
+    - 横幅内缩距由 20mm 收紧至 4mm（墨面在 10mm 处），涂墨后立面墨水能正确覆盖横幅，杜绝「打了被横幅遮挡看不见」。
+  - **根因 3（出生台无法上墨）**：`SpawnPad.shader` 缺少顶面图集采样，且 Collider 被加入 `blockedColliders`。
+    - 修复：接入 `ApplyTopInkOverlay`；从 `blockedColliders` 中移出，顶面与 16cm 侧沿均可正常受墨。
+  - **根因 4（斜坡与边界墙墨面错位）**：斜坡以往无 InkWallSurface；南边界矮墙 Collider 高 3m（防越界）导致墨片飘在 0.55m 矮墙上方空中。
+    - 修复：`InkWallSurface` 新增 `ConfigureOrientedBox` 接口，支持任意中心/旋转/尺寸；8 条斜坡全部装配朝向立面；南边界矮墙墨面限定在可见网格尺寸（高 0.55m）。
+  - **根因 5（边界墙顶在图集范围外）**：图集范围严格限制在 40×56m，边界墙顶在边界外无法采样。
+    - 修复：`InkGridConfigSO` 新增 `atlasVisualMargin = 1.5m`，图集覆盖 43×59m，向 Shader 推送图集实际 Bounds，边界墙顶受墨恢复正常，玩法计分网格保持 40×56m 不变。
+  - **验证汇总**：`compilationFailed: false`；EditMode 增至 **226/226 全通过**（新增 `ArenaGeometry_SpawnPads_ArePaintable_NotBlocked`、`ArenaGeometry_AllRamps_HaveOrientedPaintableSideFaces`、`ArenaGeometry_SouthBoundaryInkFaces_MatchVisibleWallHeight`、`InkWallOrientedTests`）；PlayMode 增至 **76/76 全通过**（新增 `DecorProp_SideFace_AcceptsInk`，涵盖道具侧面、手雷爆墨、武器弹丸与潜行攀爬）；实机截图 `Logs/verify_props.png`、`Logs/verify_spawnpad.png`、`Logs/verify_topdown.png`、`Logs/verify_ramp.png` 确认受墨饱满、背光面通透。
+
+- **验证汇总**：`compilationFailed: false`；场景重建走 `P1/关卡与地图/场景视觉重构 (P7-B)`；
+  场内碰撞体扫描只剩掩体 / 围栏 / 高台 / 角色胶囊（细杆件全部消失）；
+  截图 `Logs/diag_after_top.png` / `diag_after_rail_south.png` / `diag_after_rail_north.png`
+  确认栏杆消失、坡道与高台出口净空、管线贴墙；EditMode 222/222；PlayMode 75/75。
+
+### 移动端操作手感与 3/4 指辅助配置（P15，2026-10-30）
+
+> 触发：用户反馈操作按钮位置/手感不舒服、调大小无效、选中按键变全黑，希望参考《和平精英》补 3/4 指辅助配置。
+
+- [x] **P15-A 修复按键缩放/透明度失效与选中框全黑**
+  - 根因 1：`TouchSlider` 按 pivot 居中计算 `(localX + width*0.5)/width`，但两个滑块 pivot 实为 `(0,0.5)`，
+    左半段只能映射到 50%~100%、右半段是死区；缩放最低约 118%、透明度最低约 65%。
+  - 根因 2：`MobileActionButton` 按下/抬起/ResetState/大招呼吸都把 `localScale` 硬编码成 `Vector3.one`，
+    自定义尺寸被状态动画覆盖；大招与摇杆的 alpha 同样被 0.55 状态覆盖。
+  - 根因 3：`MobileLayoutCustomizer.Open()` 只读存档不 Apply，再次打开时滑块读到 1.0 并写回工作配置。
+  - 根因 4：`SelectionFrame` 使用 `color=clear + HardShadow=true`，实心墨色阴影多边形把选中按键整块盖黑。
+  - 修复：滑块改为与 pivot 无关的 `rect.xMin` 归一化；按钮/摇杆新增 `BaseScale/BaseAlpha` 基准；
+    item 增加可选读写回调；Open 读档后 Apply；选中框关闭硬阴影，仅保留 4px 墨边。
+
+- [x] **P15-B 修复摇杆视觉错位与位置回弹**
+  - 根因 1：`ScreenPointToLocalPointInRectangle` 返回 pivot 相对坐标，却被直接赋给左下角锚定的
+    `VisualContainer.anchoredPosition`，摇杆底座偏移约半屏甚至飞出屏幕（移动值用增量所以角色仍能走）。
+  - 根因 2：自定义位置只改 transform，未同步 `_defaultPos`，松手/隐藏后 `ResetJoystick` 弹回旧点。
+  - 修复：坐标统一减去 `safeArea.rect.min`；新增 `SetDefaultPosition`；新增固定摇杆 `FixedBase`、
+    摇杆自定义透明度与 `InputEnabled`（编辑时暂停摇杆触摸）。
+
+- [x] **P15-C 2/3/4 指方案与左下角独立左开火键**
+  - 新增 `UI/MobileLayoutPresets.cs`：2 指（右拇指全包）、3 指（左食指左开火）、4 指（左开火 + 右上跳跃）。
+  - 2 指默认布局微调为 Fire(-150,150) / Swim(-320,100) / Jump(-108,320) / Bomb(-290,355) / Special(-430,245)，
+    尺寸维持 176/140/132/132/148，全部无重叠；预设应用时按设备 DPI 同步缩放位置与尺寸。
+  - 左开火键 160px、左下锚定、Hold 模式（不拖视角），`TouchFireHeld` 与右开火键取 OR；
+    显隐存入布局配置（`leftFireVisible`），旧存档缺字段按 2 指关闭处理，不覆盖既有自定义布局。
+  - 编辑器新增「方案与辅助」卡片：2/3/4 指、左开火、开火转视角、固定摇杆、辅助瞄准关/弱/中/强；
+    方案切换立即覆盖并保存，手动拖动/缩放后标记为自定义。
+
+- [x] **P15-D 辅助瞄准档位与暂停入口**
+  - `GameSettingsMath/Service` 新增 `FixedJoystick`、`FireButtonRotatesCamera`、`AimAssistLevel`
+    （0 关 / 1 弱 0.5m / 2 中 0.8m / 3 强 1.2m，默认中档保持原行为），全部 PlayerPrefs 持久化 + 事件 + 重置。
+  - `PlayerController.TryApplyMobileAimAssist` 读取档位，0 档直接跳过，其余替换写死的 0.8m。
+  - 暂停设置新增移动端「触控操作与按键 → 打开操作设置」行；编辑布局时暂停按钮自动让位，
+    ESC/Start 先退出编辑器而不是叠加暂停，避免把 `timeScale` 从 0 改成 1。
+
+- [x] **P15-E 墨水罐与大招球移到中间底部，避开摇杆/操作键**
+  - `UI/HudSpecialGaugeFactory.ApplyMobileBottomLayout`：大招球 84×84 @ (-75,108)、墨罐 36×116 @ (-4,116)，
+    统一锚定屏幕底部中央；按 1920×1080 验算，落在血条上方、左侧浮动摇杆（中心 200,200 / 半径 170）
+    右侧边界之外，且远离右下角操作按键。
+  - `InkTankView.SetCompactBottomLayout`：百分比标牌移到罐顶，手雷红刻度收窄到 34px 匹配窄罐体；
+    `LiquidOrbView.SetCompactBottomLayout`：球心图标缩到 34、百分比字号 17，并隐藏移动端无意义的
+    「按 Q 释放」键盘提示（大招键本身已有就绪提示）。桌面右上角原始参数保留，布局可重复调用幂等。
+
+- **改动文件**：`UI/MobileTouchUI.cs`、`UI/MobileLayoutCustomizer.cs`、`UI/MobileLayoutStorage.cs`、
+  `UI/HudController.cs`、`UI/HudSpecialGaugeFactory.cs`、`UI/InkTankView.cs`、`UI/LiquidOrbView.cs`、
+  `UI/MobileLayoutPresets.cs`（新增）、`Core/GameSettingsMath.cs`、`Core/GameSettingsService.cs`、
+  `Player/PlayerController.cs`、`UI/Menus/PauseMenuOverlay.cs`、`UI/MatchFlowUI.cs`（入口文案）、
+  `Tests/EditMode/MobileTouchUITests.cs`、`Tests/EditMode/GameSettingsTests.cs`、
+  `Tests/PlayMode/MobileLayoutCustomizerPlayTests.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`。
+
+- **验证汇总**：`compilationFailed: false`；EditMode **232/232**（新增滑块映射、选中框无实心阴影、
+  BaseScale/Alpha 保持、三套方案无重叠/左开火显隐、编辑态标记、设置档位等用例）；
+  PlayMode **81/81**（新增缩放保存/按下回弹、Open 读档恢复、4 指方案保存、摇杆默认位置保持、
+  底部中央仪表布局与 Q 提示隐藏）；
+  截图 `Logs/ui_ops_final.png`（2 指默认高亮/辅助卡片）、`Logs/ui_layout_scale135.png`（135% 生效）、
+  `Logs/ui_layout_3finger.png` + `Logs/ui_layout_3finger_left.png`（左开火可见）、
+  `Logs/ui_pause_settings.png`（暂停设置入口）、`Logs/hud_bottom_center_touch.png` +
+  `Logs/hud_gauge_exact.png`（墨水罐/大招球位于底部中央，摇杆与按键无重叠）确认布局正常。
 
 ## 5. 验收标准与风控纪律
 

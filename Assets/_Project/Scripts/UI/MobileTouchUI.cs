@@ -15,7 +15,8 @@ namespace P1.UI
     /// 3. 右半屏：滑屏转视角感应区（每帧触摸增量驱动相机 Yaw/Pitch）；
     /// 4. 图标库统一走 UIIconLibrary，缺失时安全隐藏并由文字兜底，绝无白方块；
     /// 5. 尺寸与排布默认值统一暴露为 DefaultLayout，便于运行时与测试共享；
-    /// 6. 支持 DPI 物理毫米自适应与自定义键位持久化。
+    /// 6. 支持 DPI 物理毫米自适应与自定义键位持久化；
+    /// 7. 3/4 指方案提供左下角独立左开火键，并与 2/3/4 指预设、固定摇杆、辅助瞄准档位联动。
     /// </summary>
     [DefaultExecutionOrder(-50)]
     public class MobileTouchUI : MonoBehaviour
@@ -27,10 +28,10 @@ namespace P1.UI
         public static readonly (string id, string label, Vector2 pos, float size)[] DefaultLayout = new[]
         {
             ("Fire",    "射击", new Vector2(-150f, 150f), 176f),
-            ("Swim",    "潜行", new Vector2(-330f, 96f),  140f),
-            ("Jump",    "跳跃", new Vector2(-112f, 320f), 132f),
-            ("Bomb",    "手雷", new Vector2(-250f, 400f), 132f),
-            ("Special", "大招", new Vector2(-370f, 300f), 148f)
+            ("Swim",    "潜行", new Vector2(-320f, 100f), 140f),
+            ("Jump",    "跳跃", new Vector2(-108f, 320f), 132f),
+            ("Bomb",    "手雷", new Vector2(-290f, 355f), 132f),
+            ("Special", "大招", new Vector2(-430f, 245f), 148f)
         };
 
         [Header("调试与显示")]
@@ -65,9 +66,12 @@ namespace P1.UI
         private MobileActionButton _jumpButton;
         private MobileActionButton _bombButton;
         private MobileActionButton _specialButton;
+        private MobileActionButton _leftFireButton;
+        private Button _settingsEntryButton;
 
         private MatchManager _match;
         private bool _subscribedMatch;
+        private bool _subscribedSettings;
         private bool _dpiScaleApplied;
 
         private static Sprite _circleFillSprite;
@@ -77,6 +81,9 @@ namespace P1.UI
         public DynamicFloatingJoystick FloatingJoystick => _floatingJoystick;
         public MobileLayoutCustomizer Customizer => _customizer;
         public float CanvasScaleFactor => _canvas != null ? _canvas.scaleFactor : 1.0f;
+
+        /// <summary>左开火键是否正在显示（3/4 指方案开启，2 指方案关闭）。</summary>
+        public bool IsLeftFireVisible => _leftFireButton != null && _leftFireButton.gameObject.activeSelf;
 
         /// <summary>是否处于触屏驱动模式（真机，或编辑器里手动勾选 showTouchUiInEditor 的模拟）。</summary>
         public static bool IsTouchSimulationActive { get; private set; }
@@ -89,6 +96,54 @@ namespace P1.UI
                 _canvas.gameObject.SetActive(true);
             }
             _customizer?.Open();
+        }
+
+        /// <summary>按当前设备 DPI 生成指定方案（位置与缩放已乘 DPI 系数）。</summary>
+        public MobileLayoutConfig BuildPresetConfig(MobileLayoutPreset preset)
+        {
+            float scale = MobileUiMetrics.ComputeScale(Screen.dpi, CanvasScaleFactor);
+            return MobileLayoutPresets.Build(preset, scale);
+        }
+
+        /// <summary>删除自定义布局后，按当前设备 DPI 重新应用默认排布（供「恢复默认」使用）。</summary>
+        public void ApplyDefaultDeviceLayout()
+        {
+            MobileUiMetrics.ApplyToTouchUI(this);
+        }
+
+        /// <summary>显示/隐藏左开火键；隐藏时立即清理按压状态，避免残留开火。</summary>
+        public void SetLeftFireVisible(bool visible)
+        {
+            if (_leftFireButton == null) return;
+
+            if (!visible)
+            {
+                _leftFireButton.ResetState();
+            }
+
+            if (_leftFireButton.gameObject.activeSelf != visible)
+            {
+                _leftFireButton.gameObject.SetActive(visible);
+            }
+        }
+
+        /// <summary>
+        /// 进入/退出按键编辑态：编辑时暂停摇杆触摸、隐藏左上角「操作」入口，
+        /// 并联动暂停按钮显隐，避免误触把编辑层盖掉。
+        /// </summary>
+        public void SetLayoutEditing(bool editing)
+        {
+            if (_floatingJoystick != null)
+            {
+                _floatingJoystick.InputEnabled = !editing;
+            }
+
+            if (_settingsEntryButton != null)
+            {
+                _settingsEntryButton.gameObject.SetActive(!editing);
+            }
+
+            P1.UI.Menus.PauseMenuOverlay.Instance?.RefreshMobileButtonVisibility();
         }
 
         private void Awake()
@@ -127,6 +182,8 @@ namespace P1.UI
             if (ShouldShowTouchUi())
                 IsTouchSimulationActive = true;
             SubscribeMatch();
+            SubscribeSettings();
+            ApplyAuxSettings();
             UpdateVisibilityForCurrentPhase();
         }
 
@@ -134,6 +191,7 @@ namespace P1.UI
         {
             IsTouchSimulationActive = false;
             UnsubscribeMatch();
+            UnsubscribeSettings();
             ResetAllInputs();
         }
 
@@ -141,9 +199,37 @@ namespace P1.UI
         {
             IsTouchSimulationActive = false;
             UnsubscribeMatch();
+            UnsubscribeSettings();
             if (_customizer != null)
             {
                 _customizer.OnClosed -= HandleCustomizerClosed;
+            }
+        }
+
+        private void SubscribeSettings()
+        {
+            if (_subscribedSettings) return;
+            GameSettingsService.SettingsChanged += HandleSettingsChanged;
+            _subscribedSettings = true;
+        }
+
+        private void UnsubscribeSettings()
+        {
+            if (!_subscribedSettings) return;
+            GameSettingsService.SettingsChanged -= HandleSettingsChanged;
+            _subscribedSettings = false;
+        }
+
+        private void HandleSettingsChanged()
+        {
+            ApplyAuxSettings();
+        }
+
+        private void ApplyAuxSettings()
+        {
+            if (_floatingJoystick != null)
+            {
+                _floatingJoystick.FixedBase = GameSettingsService.FixedJoystick;
             }
         }
 
@@ -201,6 +287,7 @@ namespace P1.UI
         private void HandleCustomizerClosed()
         {
             UpdateVisibilityForCurrentPhase();
+            P1.UI.Menus.PauseMenuOverlay.Instance?.RefreshMobileButtonVisibility();
         }
 
         public void UpdateVisibilityForCurrentPhase()
@@ -251,6 +338,7 @@ namespace P1.UI
             if (_jumpButton != null) _jumpButton.ResetState();
             if (_bombButton != null) _bombButton.ResetState();
             if (_specialButton != null) _specialButton.ResetState();
+            if (_leftFireButton != null) _leftFireButton.ResetState();
 
             var player = PlayerController.LocalPlayer;
             if (player != null)
@@ -320,8 +408,9 @@ namespace P1.UI
             if (_bombButton != null) lookDelta += _bombButton.ConsumeLookDelta();
             player.TouchLookDelta = lookDelta;
 
-            // 3. 开火与潜行
-            player.TouchFireHeld = _fireButton != null && _fireButton.IsHeld;
+            // 3. 开火与潜行（左开火键是 3/4 指方案的独立开火通道，任一按住即开火）
+            player.TouchFireHeld = (_fireButton != null && _fireButton.IsHeld) ||
+                                   (_leftFireButton != null && _leftFireButton.gameObject.activeSelf && _leftFireButton.IsHeld);
             player.TouchSwimHeld = _swimButton != null && _swimButton.IsHeld;
 
             // 4. 跳跃点按
@@ -409,6 +498,7 @@ namespace P1.UI
                 _circleFillSprite,
                 _circleRingSprite,
                 joystickKnobIcon);
+            _floatingJoystick.FixedBase = GameSettingsService.FixedJoystick;
 
             // 3. 右下角漫画风人体工学操作按键群
             var fireCfg = DefaultLayout[0];
@@ -452,14 +542,40 @@ namespace P1.UI
                 specialIcon, _circleFillSprite, _circleRingSprite,
                 MobileButtonMode.Special);
 
+            // 3b. 左开火键（3/4 指方案专用，2 指方案默认隐藏；左下角锚定，便于左食指开火）
+            _leftFireButton = MobileActionButton.Create(
+                _safeArea, "LeftFireButton", "射击",
+                MobileLayoutPresets.ThreeFingerLeftFirePos, MobileLayoutPresets.LeftFireSize,
+                new Color(1f, 0.44f, 0.08f, 1f),
+                fireIcon, _circleFillSprite, _circleRingSprite,
+                MobileButtonMode.Hold, new Vector2(0f, 0f));
+            _leftFireButton.gameObject.SetActive(false);
+
             // 4. 初始化按键自定义布局管理器
             _customizer = MobileLayoutCustomizer.Create(this, _safeArea, _circleRingSprite);
-            _customizer.RegisterItem("MoveStick", "移动摇杆", _floatingJoystick.VisualContainer, _floatingJoystick.CanvasGroup, moveStickDefaultPos, 1.0f, 0.85f);
+            _customizer.RegisterItem("MoveStick", "移动摇杆", _floatingJoystick.VisualContainer, _floatingJoystick.CanvasGroup, moveStickDefaultPos, 1.0f, MobileLayoutPresets.DefaultMoveStickAlpha);
             _customizer.RegisterItem(fireCfg.id, "射击大键", _fireButton.RectTransform, _fireButton.CanvasGroup, fireCfg.pos, 1.0f, 1.0f);
             _customizer.RegisterItem(swimCfg.id, "潜行按键", _swimButton.RectTransform, _swimButton.CanvasGroup, swimCfg.pos, 1.0f, 1.0f);
             _customizer.RegisterItem(jumpCfg.id, "跳跃按键", _jumpButton.RectTransform, _jumpButton.CanvasGroup, jumpCfg.pos, 1.0f, 1.0f);
             _customizer.RegisterItem(bombCfg.id, "手雷技能", _bombButton.RectTransform, _bombButton.CanvasGroup, bombCfg.pos, 1.0f, 1.0f);
             _customizer.RegisterItem(specialCfg.id, "大招技能", _specialButton.RectTransform, _specialButton.CanvasGroup, specialCfg.pos, 1.0f, 1.0f);
+            _customizer.RegisterItem("LeftFire", "左开火键", _leftFireButton.RectTransform, _leftFireButton.CanvasGroup,
+                MobileLayoutPresets.ThreeFingerLeftFirePos, 1.0f, 1.0f);
+
+            BindActionButtonItem(fireCfg.id, _fireButton);
+            BindActionButtonItem(swimCfg.id, _swimButton);
+            BindActionButtonItem(jumpCfg.id, _jumpButton);
+            BindActionButtonItem(bombCfg.id, _bombButton);
+            BindActionButtonItem(specialCfg.id, _specialButton);
+            BindActionButtonItem("LeftFire", _leftFireButton);
+
+            var stickItem = _customizer.GetItem("MoveStick");
+            if (stickItem != null)
+            {
+                stickItem.applyPosition = _floatingJoystick.SetDefaultPosition;
+                stickItem.applyAlpha = _floatingJoystick.SetBaseAlpha;
+                stickItem.readAlpha = () => _floatingJoystick.BaseAlpha;
+            }
 
             // 应用 DPI 物理毫米缩放适配
             MobileUiMetrics.ApplyToTouchUI(this);
@@ -470,6 +586,19 @@ namespace P1.UI
             {
                 _customizer.ApplyConfig(savedConfig);
             }
+            else
+            {
+                SetLeftFireVisible(false);
+            }
+
+            // 旧存档没有 LeftFire 项时，左开火键仍按当前设备 DPI 初始化，
+            // 避免玩家在旧自定义布局上打开它时突然比其他按键小一圈。
+            if (savedConfig == null || savedConfig.Find("LeftFire") == null)
+            {
+                float deviceScale = MobileUiMetrics.ComputeScale(Screen.dpi, CanvasScaleFactor);
+                ApplyButtonScale(_leftFireButton, MobileLayoutPresets.ThreeFingerLeftFirePos, deviceScale);
+            }
+
             _customizer.OnClosed += HandleCustomizerClosed;
 
             // 5. 屏幕左上角悬浮【⚙️ 键位】快速编辑入口（132x64，字号 20）
@@ -482,6 +611,18 @@ namespace P1.UI
             {
                 SetVisible(false);
             }
+        }
+
+        private void BindActionButtonItem(string id, MobileActionButton button)
+        {
+            // 由调用方保证 customizer 已创建；找不到 item 时静默跳过（独立测试/极端构造顺序）。
+            var item = _customizer != null ? _customizer.GetItem(id) : null;
+            if (item == null || button == null) return;
+
+            item.applyScale = button.SetBaseScale;
+            item.readScale = () => button.BaseScale;
+            item.applyAlpha = button.SetBaseAlpha;
+            item.readAlpha = () => button.BaseAlpha;
         }
 
         /// <summary>应用 DPI 缩放到触控层按键群（仅影响触控层）。</summary>
@@ -498,13 +639,14 @@ namespace P1.UI
             ApplyButtonScale(_jumpButton, DefaultLayout[2].pos, scale);
             ApplyButtonScale(_bombButton, DefaultLayout[3].pos, scale);
             ApplyButtonScale(_specialButton, DefaultLayout[4].pos, scale);
+            ApplyButtonScale(_leftFireButton, MobileLayoutPresets.ThreeFingerLeftFirePos, scale);
         }
 
         private static void ApplyButtonScale(MobileActionButton button, Vector2 basePos, float scale)
         {
             if (button == null) return;
             button.RectTransform.anchoredPosition = basePos * scale;
-            button.RectTransform.localScale = Vector3.one * scale;
+            button.SetBaseScale(scale);
         }
 
         private void CreateSettingsEntryButton(RectTransform safeArea)
@@ -555,6 +697,7 @@ namespace P1.UI
             var btn = go.GetComponent<Button>();
             btn.targetGraphic = shape;
             btn.onClick.AddListener(OpenLayoutCustomizer);
+            _settingsEntryButton = btn;
 
             // 3. 齿轮图标
             var gearSprite = UIIconLibrary.Get("glyph_gear");
@@ -584,7 +727,7 @@ namespace P1.UI
             trt.offsetMax = Vector2.zero;
 
             var txt = textGo.GetComponent<TextMeshProUGUI>();
-            txt.text = gearSprite != null ? "键位" : "⚙️ 键位";
+            txt.text = gearSprite != null ? "操作" : "⚙️ 操作";
             txt.fontSize = 20;
             txt.fontStyle = FontStyles.Bold;
             txt.alignment = TextAlignmentOptions.Center;
@@ -592,7 +735,7 @@ namespace P1.UI
             txt.raycastTarget = false;
 
             var theme = UIThemeSO.Resolve(null);
-            var font = theme.ResolveFont(false, "键位");
+            var font = theme.ResolveFont(false, "操作");
             if (font != null) txt.font = font;
         }
 
@@ -708,7 +851,16 @@ namespace P1.UI
         private float _deadZone;
         private Vector2 _defaultPos;
         private Vector2 _centerPos;
+        private float _baseAlpha = MobileLayoutPresets.DefaultMoveStickAlpha;
         private int _activePointerId = -999;
+
+        /// <summary>固定摇杆：底座不跟手，以配置位置为中心；按下点离底座过远时不激活。</summary>
+        public bool FixedBase { get; set; }
+
+        /// <summary>布局编辑期间关闭摇杆触摸逻辑，避免拖拽按键时摇杆跟着动。</summary>
+        public bool InputEnabled { get; set; } = true;
+
+        public float BaseAlpha => _baseAlpha;
 
         public static DynamicFloatingJoystick Create(
             RectTransform safeArea,
@@ -751,8 +903,9 @@ namespace P1.UI
             containerRt.sizeDelta = new Vector2(radius * 2f, radius * 2f);
 
             var group = containerGo.GetComponent<CanvasGroup>();
-            group.alpha = 0.55f;
+            group.alpha = MobileLayoutPresets.DefaultMoveStickAlpha;
             group.blocksRaycasts = false;
+            joystick._baseAlpha = MobileLayoutPresets.DefaultMoveStickAlpha;
             joystick._container = containerRt;
             joystick._canvasGroup = group;
 
@@ -832,28 +985,37 @@ namespace P1.UI
 
         public void OnPointerDown(PointerEventData eventData)
         {
-            if (_activePointerId != -999) return;
+            if (!InputEnabled || _activePointerId != -999) return;
+
+            Vector2 anchored = ScreenToAnchored(eventData.position, eventData.pressEventCamera);
+
+            if (FixedBase)
+            {
+                // 固定底座：以当前底座位置为中心；按在底座外太远则不抢这个指针，
+                // 避免左手随便一碰左侧空白就满速移动。
+                _centerPos = _container.anchoredPosition;
+                if ((anchored - _centerPos).sqrMagnitude > (_radius * 1.4f) * (_radius * 1.4f))
+                    return;
+            }
+            else
+            {
+                _centerPos = anchored;
+                _container.anchoredPosition = anchored;
+            }
+
             _activePointerId = eventData.pointerId;
-
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                _safeAreaRect, eventData.position, eventData.pressEventCamera, out Vector2 localPoint);
-
-            _centerPos = localPoint;
-            _container.anchoredPosition = localPoint;
             if (_knob != null) _knob.anchoredPosition = Vector2.zero;
             Value = Vector2.zero;
 
-            if (_canvasGroup != null) _canvasGroup.alpha = 0.95f;
+            if (_canvasGroup != null) _canvasGroup.alpha = Mathf.Clamp01(_baseAlpha + 0.4f);
         }
 
         public void OnDrag(PointerEventData eventData)
         {
-            if (eventData.pointerId != _activePointerId) return;
+            if (!InputEnabled || eventData.pointerId != _activePointerId) return;
 
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                _safeAreaRect, eventData.position, eventData.pressEventCamera, out Vector2 localPoint);
-
-            Vector2 delta = localPoint - _centerPos;
+            Vector2 anchored = ScreenToAnchored(eventData.position, eventData.pressEventCamera);
+            Vector2 delta = anchored - _centerPos;
             float dist = delta.magnitude;
             Vector2 dir = dist > 0.001f ? (delta / dist) : Vector2.zero;
 
@@ -885,7 +1047,43 @@ namespace P1.UI
 
             if (_knob != null) _knob.anchoredPosition = Vector2.zero;
             if (_container != null) _container.anchoredPosition = _defaultPos;
-            if (_canvasGroup != null) _canvasGroup.alpha = 0.55f;
+            if (_canvasGroup != null) _canvasGroup.alpha = _baseAlpha;
+        }
+
+        /// <summary>把自定义位置同步为新的默认位置，ResetJoystick 不再弹回建层时的旧坐标。</summary>
+        public void SetDefaultPosition(Vector2 pos)
+        {
+            _defaultPos = pos;
+            if (_activePointerId == -999 && _container != null)
+            {
+                _container.anchoredPosition = pos;
+            }
+        }
+
+        /// <summary>自定义待机透明度；按下态在此基础上 +0.4，保持“按下更明显”的反馈。</summary>
+        public void SetBaseAlpha(float alpha)
+        {
+            _baseAlpha = Mathf.Clamp(alpha, MobileLayoutConfig.MinAlpha, MobileLayoutConfig.MaxAlpha);
+            if (_canvasGroup != null && _activePointerId == -999)
+            {
+                _canvasGroup.alpha = _baseAlpha;
+            }
+        }
+
+        /// <summary>
+        /// 屏幕坐标 → SafeArea 左下角 anchored 空间。
+        /// ScreenPointToLocalPointInRectangle 返回的是 pivot 相对坐标，而 VisualContainer 锚定在左下角，
+        /// 直接赋值会让底座偏移半个屏幕；这里减去 rect.min 统一坐标系。
+        /// </summary>
+        private Vector2 ScreenToAnchored(Vector2 screenPos, Camera cam)
+        {
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    _safeAreaRect, screenPos, cam, out Vector2 localPoint))
+            {
+                return localPoint - _safeAreaRect.rect.min;
+            }
+
+            return _container != null ? _container.anchoredPosition : Vector2.zero;
         }
 
         private void OnDisable()
@@ -1012,11 +1210,40 @@ namespace P1.UI
         private int _lastChargePercentInt = -1;
         private bool _lastReadyState;
         private bool _hasSpecialState;
+        private float _baseScale = 1f;
+        private float _baseAlpha = 1f;
 
         public bool IsHeld => _isHeld;
         public bool IsAimingHeld => _isAimingHeld;
         public bool HasDragAim { get; private set; }
         public Vector2 DragAimValue { get; private set; }
+        public float BaseScale => _baseScale;
+        public float BaseAlpha => _baseAlpha;
+
+        /// <summary>自定义尺寸（相对基准的缩放）；按下/抬起/大招呼吸都在此基准上乘系数，不再重置回 1.0。</summary>
+        public void SetBaseScale(float scale)
+        {
+            _baseScale = Mathf.Clamp(scale, MobileLayoutConfig.MinScale, MobileLayoutConfig.MaxScale);
+            if (_rectTransform != null && !_isHeld)
+            {
+                _rectTransform.localScale = Vector3.one * _baseScale;
+            }
+        }
+
+        /// <summary>自定义透明度；大招未就绪的 55% 状态会在该基准上按比例相乘。</summary>
+        public void SetBaseAlpha(float alpha)
+        {
+            _baseAlpha = Mathf.Clamp(alpha, MobileLayoutConfig.MinAlpha, MobileLayoutConfig.MaxAlpha);
+            if (_canvasGroup != null)
+            {
+                _canvasGroup.alpha = _baseAlpha * GetSpecialStateAlpha();
+            }
+        }
+
+        private float GetSpecialStateAlpha()
+        {
+            return _mode == MobileButtonMode.Special && _hasSpecialState && !_lastReadyState ? 0.55f : 1f;
+        }
 
         public Vector2 ConsumeLookDelta()
         {
@@ -1044,12 +1271,32 @@ namespace P1.UI
             Sprite ringSprite,
             MobileButtonMode mode)
         {
+            return Create(parent, name, label, anchoredPos, size, mainColor, icon, fillSprite, ringSprite, mode,
+                new Vector2(1f, 0f));
+        }
+
+        /// <summary>
+        /// 带锚点重载：默认仍锚定右下角；左开火键传 (0,0) 锚定左下角。
+        /// </summary>
+        public static MobileActionButton Create(
+            Transform parent,
+            string name,
+            string label,
+            Vector2 anchoredPos,
+            float size,
+            Color mainColor,
+            Sprite icon,
+            Sprite fillSprite,
+            Sprite ringSprite,
+            MobileButtonMode mode,
+            Vector2 anchor)
+        {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasGroup));
             go.transform.SetParent(parent, false);
 
             var rt = go.GetComponent<RectTransform>();
-            rt.anchorMin = new Vector2(1f, 0f); // 右下角锚点
-            rt.anchorMax = new Vector2(1f, 0f);
+            rt.anchorMin = anchor;
+            rt.anchorMax = anchor;
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.anchoredPosition = anchoredPos;
             rt.sizeDelta = new Vector2(size, size);
@@ -1176,11 +1423,13 @@ namespace P1.UI
             _isHeld = true;
             _pointerDownTime = Time.unscaledTime;
             _lookDelta = Vector2.zero;
+            HasDragAim = false;
+            DragAimValue = Vector2.zero;
 
-            // 压印效果：内容向右下压入阴影，阴影暂时收起
+            // 压印效果：内容向右下压入阴影，阴影暂时收起（缩放基于自定义基准）
             if (_contentContainer != null) _contentContainer.anchoredPosition = _shadowOffset;
             if (_shadowImage != null) _shadowImage.enabled = false;
-            _rectTransform.localScale = Vector3.one * 0.96f;
+            _rectTransform.localScale = Vector3.one * (_baseScale * 0.96f);
             _bgImage.color = ComicStyle.Darken(_baseColor, 0.12f);
 
             if (_mode == MobileButtonMode.Tap || _mode == MobileButtonMode.Special)
@@ -1193,7 +1442,13 @@ namespace P1.UI
         {
             if (_mode == MobileButtonMode.HoldWithAimDrag)
             {
-                _lookDelta += eventData.delta;
+                // 3/4 指玩家可用右食指按住开火、右拇指在滑屏区瞄准；
+                // 关闭后开火键上的轻微滑动不再污染视角。
+                if (GameSettingsService.FireButtonRotatesCamera)
+                {
+                    _lookDelta += eventData.delta;
+                }
+
                 HasDragAim = _lookDelta.sqrMagnitude > 400f;
                 DragAimValue = HasDragAim ? _lookDelta.normalized : Vector2.zero;
             }
@@ -1219,7 +1474,7 @@ namespace P1.UI
             // 压印恢复（<=0.06s，禁止回弹）
             if (_contentContainer != null) _contentContainer.anchoredPosition = Vector2.zero;
             if (_shadowImage != null) _shadowImage.enabled = true;
-            _rectTransform.localScale = Vector3.one;
+            _rectTransform.localScale = Vector3.one * _baseScale;
             _bgImage.color = _baseColor;
 
             if (_mode == MobileButtonMode.HoldWithAimDrag)
@@ -1255,8 +1510,9 @@ namespace P1.UI
 
             if (_contentContainer != null) _contentContainer.anchoredPosition = Vector2.zero;
             if (_shadowImage != null) _shadowImage.enabled = true;
-            if (_rectTransform != null) _rectTransform.localScale = Vector3.one;
+            if (_rectTransform != null) _rectTransform.localScale = Vector3.one * _baseScale;
             if (_bgImage != null) _bgImage.color = _baseColor;
+            if (_canvasGroup != null) _canvasGroup.alpha = _baseAlpha * GetSpecialStateAlpha();
         }
 
         private void OnDisable()
@@ -1272,12 +1528,12 @@ namespace P1.UI
 
             if (isReady)
             {
-                _canvasGroup.alpha = 1.0f;
+                _canvasGroup.alpha = _baseAlpha;
                 _bgImage.color = _baseColor;
                 _ringImage.color = ComicStyle.Ink;
 
                 float breath = 1f + 0.04f * Mathf.Sin(Time.unscaledTime * 5.5f);
-                if (!_isHeld) _rectTransform.localScale = Vector3.one * breath;
+                if (!_isHeld) _rectTransform.localScale = Vector3.one * (_baseScale * breath);
                 if (_labelText != null && (!_hasSpecialState || !_lastReadyState))
                 {
                     _labelText.text = "大招就绪!";
@@ -1285,10 +1541,10 @@ namespace P1.UI
             }
             else
             {
-                _canvasGroup.alpha = 0.55f;
+                _canvasGroup.alpha = _baseAlpha * 0.55f;
                 _bgImage.color = new Color(0.38f, 0.36f, 0.32f, 0.90f);
                 _ringImage.color = new Color(0.2f, 0.2f, 0.2f, 0.7f);
-                if (!_isHeld) _rectTransform.localScale = Vector3.one;
+                if (!_isHeld) _rectTransform.localScale = Vector3.one * _baseScale;
                 if (_labelText != null && (!_hasSpecialState || _lastReadyState || _lastChargePercentInt != chargePct))
                 {
                     _labelText.text = $"{chargePct}%";

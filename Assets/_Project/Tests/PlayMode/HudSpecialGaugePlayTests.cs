@@ -187,5 +187,48 @@ namespace P1.Tests
             Object.Destroy(root);
             yield return null;
         }
+
+        [UnityTest]
+        public IEnumerator MobileLayout_MovesGaugesToBottomCenter_AndHidesKeyboardHint()
+        {
+            GameObject root = CreateCanvas();
+            var hud = root.AddComponent<HudController>();
+
+            yield return null;
+            yield return null;
+
+            Assert.IsNotNull(hud.LiquidOrb, "大招球应自动装配");
+            Assert.IsNotNull(hud.InkTank, "墨水罐应自动装配");
+
+            hud.ApplyMobileLayout();
+            yield return null;
+
+            var orbRect = (RectTransform)hud.LiquidOrb.transform;
+            Assert.AreEqual(0.5f, orbRect.anchorMin.x, 1e-4f, "移动端大招球应锚定屏幕水平中心");
+            Assert.AreEqual(0f, orbRect.anchorMin.y, 1e-4f, "移动端大招球应锚定屏幕底部");
+            Assert.AreEqual(84f, orbRect.sizeDelta.x, 0.01f, "移动端大招球应使用紧凑尺寸");
+            Assert.AreEqual(-75f, orbRect.anchoredPosition.x, 0.01f);
+
+            var tankRect = (RectTransform)hud.InkTank.transform;
+            Assert.AreEqual(0.5f, tankRect.anchorMin.x, 1e-4f, "移动端墨水罐应锚定屏幕水平中心");
+            Assert.AreEqual(0f, tankRect.anchorMin.y, 1e-4f, "移动端墨水罐应锚定屏幕底部");
+            Assert.AreEqual(36f, tankRect.sizeDelta.x, 0.01f, "移动端墨水罐应使用窄罐体");
+            Assert.AreEqual(116f, tankRect.sizeDelta.y, 0.01f);
+
+            // 满能时移动端不应弹出「按 Q 释放」，大招键本身已有就绪提示
+            hud.LiquidOrb.SetCharge(1f, true);
+            yield return null;
+            Transform readyHint = orbRect.Find("ReadyHint");
+            Assert.IsNotNull(readyHint, "大招球应包含满能提示节点");
+            Assert.IsFalse(readyHint.gameObject.activeSelf, "移动端必须隐藏键盘 Q 提示");
+
+            // 重复应用布局必须幂等（分辨率/安全区变化会重复调用）
+            hud.ApplyMobileLayout();
+            Assert.AreEqual(84f, orbRect.sizeDelta.x, 0.01f);
+            Assert.AreEqual(36f, tankRect.sizeDelta.x, 0.01f);
+
+            Object.Destroy(root);
+            yield return null;
+        }
     }
 }

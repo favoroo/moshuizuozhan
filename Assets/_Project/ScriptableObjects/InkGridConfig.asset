@@ -24,6 +24,7 @@ MonoBehaviour:
   splatToneStrength: 1
   maxSplatsPerFrame: 192
   atlasMipmaps: 1
+  atlasVisualMargin: 1.5
   minimapRefreshHz: 12
   neutralGroundColor: {r: 0.22, g: 0.24, b: 0.28, a: 0}
   teamAColor: {r: 1, g: 0.44, b: 0.06, a: 1}

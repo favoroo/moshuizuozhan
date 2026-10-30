@@ -311,7 +311,9 @@ Shader "P1/InkGround"
                 half upness = smoothstep(0.55, 0.85, geomN.y);
                 inkMask *= upness;
 
-                half3 baseSurfaceCol = lerp(_CliffColor.rgb, elevatedGroundCol, upness);
+                // 垂直侧沿（高台/斜坡裸露边）几乎只能吃环境光，直接用 _CliffColor 会压成死黑；
+                // 提亮 1.6 倍，让它读作"深一号的混凝土"，未涂墨时也有体积感。
+                half3 baseSurfaceCol = lerp(_CliffColor.rgb * 1.6, elevatedGroundCol, upness);
 
                 // -------------------------------------------------------------
                 // 1. 边缘接触软阴影 (Contact Shadow)

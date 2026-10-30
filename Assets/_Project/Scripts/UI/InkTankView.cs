@@ -37,6 +37,11 @@ namespace P1.UI
 
         private float _thresholdInset = 4f;
 
+        private bool _layoutDefaultsCaptured;
+        private Vector2 _defaultPlateSize;
+        private Vector2 _defaultPlatePos;
+        private int _defaultPercentFontSize = 16;
+
         private Team _team = Team.Neutral;
         private float _ink01 = 1f;
         private float _threshold01 = 0.55f;
@@ -141,6 +146,46 @@ namespace P1.UI
         public void SetAutoBindLocalPlayerTeam(bool enabled)
         {
             autoBindLocalPlayerTeam = enabled;
+        }
+
+        /// <summary>
+        /// 移动端紧凑布局：百分比标牌从罐底移到罐顶，收窄手雷刻度线以匹配窄罐体。
+        /// 桌面端不会调用；重复调用幂等。
+        /// </summary>
+        public void SetCompactBottomLayout(bool compact)
+        {
+            RectTransform plate = percentLabel != null ? percentLabel.transform.parent as RectTransform : null;
+            if (plate != null)
+            {
+                if (!_layoutDefaultsCaptured)
+                {
+                    _layoutDefaultsCaptured = true;
+                    _defaultPlateSize = plate.sizeDelta;
+                    _defaultPlatePos = plate.anchoredPosition;
+                    _defaultPercentFontSize = percentLabel.fontSize;
+                }
+
+                plate.anchorMin = plate.anchorMax = new Vector2(0.5f, compact ? 1f : 0f);
+                plate.pivot = new Vector2(0.5f, compact ? 0f : 1f);
+                plate.sizeDelta = compact ? new Vector2(58f, 24f) : _defaultPlateSize;
+                plate.anchoredPosition = compact ? new Vector2(0f, 3f) : _defaultPlatePos;
+                percentLabel.fontSize = compact ? 14 : _defaultPercentFontSize;
+            }
+
+            if (thresholdMarker != null)
+            {
+                var root = (RectTransform)transform;
+                float width = root.rect.width;
+                if (width <= 1f) width = compact ? 36f : 54f;
+
+                thresholdMarker.sizeDelta = new Vector2(width - 2f, 8f);
+                var backing = thresholdMarker.Find("ThresholdBacking") as RectTransform;
+                if (backing != null) backing.sizeDelta = new Vector2(width - 2f, 7f);
+                var line = thresholdMarker.Find("ThresholdLine") as RectTransform;
+                if (line != null) line.sizeDelta = new Vector2(width - 1f, 3.4f);
+            }
+
+            ApplyThreshold();
         }
 
         private void OnEnable()

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using P1.Environment;
+using P1.Ink;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -17,6 +18,8 @@ namespace P1.Editor
     public static class ArenaDecorationBuilder
     {
         public const string MeshFolder = "Assets/_Project/Art/Meshes/Arena";
+
+        private const string InkConfigPath = "Assets/_Project/ScriptableObjects/InkGridConfig.asset";
 
         #region 公开构建入口
         /// <summary>
@@ -34,18 +37,26 @@ namespace P1.Editor
 
             // 1. 遍历道具并按密度过滤
             float density = style != null ? style.decorationDensity : 1.0f;
-            var matteBucket = new MeshCombiner();
-            var metalBucket = new MeshCombiner();
+            // 实体掩体与纯装饰分开合批。实体掩体（木箱/花坛/售卖亭）不再使用合并网格的
+            // MeshCollider：改为每个道具一个盒碰撞代理 + InkWallSurface（见 CreateInkPropProxy），
+            // 这样弹丸命中时能把墨涂在对应立面上，而不是穿透到地面。
+            // 锥桶、系缆桩、旗杆、墙顶空调与管线这类细杆件仍不带碰撞：
+            // 它们会把 1.25m 高的角色胶囊顶住，同时挡子弹、切碎 Bot 寻路。
+            var matteSolidBucket = new MeshCombiner();
+            var metalSolidBucket = new MeshCombiner();
+            var matteDecorBucket = new MeshCombiner();
+            var metalDecorBucket = new MeshCombiner();
             var emissiveBucket = new MeshCombiner();
             var clothBucket = new MeshCombiner();
 
             var propParts = new List<ArenaPropMeshPart>(8);
+            InkGridConfigSO inkCfg = AssetDatabase.LoadAssetAtPath<InkGridConfigSO>(InkConfigPath);
+            int proxySerial = 0;
 
             foreach (var prop in ArenaLayoutV2.Props)
             {
-                // 出生区道具、路灯与高台栏杆始终保留；移动端低密度下跳过部分小装饰
+                // 出生区道具、路灯与旗杆始终保留；移动端低密度下跳过部分小装饰
                 bool isPreserved = prop.Kind == ArenaLayoutV2.ArenaPropKind.LampPost
-                                   || prop.Kind == ArenaLayoutV2.ArenaPropKind.RailingRun
                                    || prop.Kind == ArenaLayoutV2.ArenaPropKind.FlagPole
                                    || prop.Kind == ArenaLayoutV2.ArenaPropKind.Kiosk
                                    || Mathf.Abs(prop.Position.z) > 20.0f;
@@ -60,19 +71,37 @@ namespace P1.Editor
 
                 Quaternion rot = Quaternion.Euler(0f, prop.Yaw, 0f);
                 Vector3 pos = prop.Position;
+                bool solid = ArenaLayoutV2.IsSolidProp(prop.Kind);
+
+                // 实体部件包围盒（道具局部空间）：既做碰撞盒，也做四面涂墨立面的尺寸。
+                Bounds solidBounds = default;
+                bool hasSolidBounds = false;
 
                 for (int i = 0; i < propParts.Count; i++)
                 {
                     var part = propParts[i];
                     if (part.Mesh == null) continue;
 
+                    if (solid && part.Solid)
+                    {
+                        if (!hasSolidBounds)
+                        {
+                            solidBounds = part.Mesh.bounds;
+                            hasSolidBounds = true;
+                        }
+                        else
+                        {
+                            solidBounds.Encapsulate(part.Mesh.bounds);
+                        }
+                    }
+
                     switch (part.Surface)
                     {
                         case ArenaPropSurface.Matte:
-                            matteBucket.AddMesh(part.Mesh, pos, rot, Vector3.one, part.Color);
+                            (solid ? matteSolidBucket : matteDecorBucket).AddMesh(part.Mesh, pos, rot, Vector3.one, part.Color);
                             break;
                         case ArenaPropSurface.Metal:
-                            metalBucket.AddMesh(part.Mesh, pos, rot, Vector3.one, part.Color);
+                            (solid ? metalSolidBucket : metalDecorBucket).AddMesh(part.Mesh, pos, rot, Vector3.one, part.Color);
                             break;
                         case ArenaPropSurface.Emissive:
                             emissiveBucket.AddMesh(part.Mesh, pos, rot, Vector3.one, part.Color);
@@ -85,22 +114,37 @@ namespace P1.Editor
                     // 释放临时生成的零散 Mesh，避免编辑器内存堆积
                     UnityEngine.Object.DestroyImmediate(part.Mesh);
                 }
+
+                // 实体道具：每个道具一个盒碰撞代理 + 四面可涂墨面。
+                // 旋转盒必须用朝向盒建面（见 InkWallSurface.ConfigureOrientedBox），
+                // 用世界 AABB 会让旋转木箱/花坛的墨片悬在四个角外。
+                if (solid && hasSolidBounds)
+                {
+                    CreateInkPropProxy(decorRoot.transform, prop, rot, solidBounds, mats, inkCfg, proxySerial++);
+                }
             }
 
-            // 2. 生成并保存 4 个合并网格资产
-            Mesh matteMesh = matteBucket.BuildMesh("arena_decor_matte");
-            Mesh metalMesh = metalBucket.BuildMesh("arena_decor_metal");
+            // 2. 生成并保存 6 个合并网格资产
+            Mesh matteMesh = matteSolidBucket.BuildMesh("arena_decor_matte");
+            Mesh metalMesh = metalSolidBucket.BuildMesh("arena_decor_metal");
+            Mesh matteDecorMesh = matteDecorBucket.BuildMesh("arena_decor_matte_thin");
+            Mesh metalDecorMesh = metalDecorBucket.BuildMesh("arena_decor_metal_thin");
             Mesh emissiveMesh = emissiveBucket.BuildMesh("arena_decor_emissive");
             Mesh clothMesh = clothBucket.BuildMesh("arena_decor_cloth");
 
             SaveAsset(matteMesh, $"{MeshFolder}/arena_decor_matte.asset");
             SaveAsset(metalMesh, $"{MeshFolder}/arena_decor_metal.asset");
+            SaveAsset(matteDecorMesh, $"{MeshFolder}/arena_decor_matte_thin.asset");
+            SaveAsset(metalDecorMesh, $"{MeshFolder}/arena_decor_metal_thin.asset");
             SaveAsset(emissiveMesh, $"{MeshFolder}/arena_decor_emissive.asset");
             SaveAsset(clothMesh, $"{MeshFolder}/arena_decor_cloth.asset");
 
-            // 3. 创建子渲染对象 (近景装饰阴影开启；Matte/Metal 挂载网格碰撞体以支持弹丸直击落墨与碰撞阻挡)
-            CreateRendererChild(decorRoot.transform, "Decor_Matte", matteMesh, mats?.propMatte ?? mats?.concrete, true, true);
-            CreateRendererChild(decorRoot.transform, "Decor_Metal", metalMesh, mats?.propMetal ?? mats?.steel, true, true);
+            // 3. 创建子渲染对象 (近景装饰阴影开启；碰撞与涂墨由每个实体道具的盒代理负责，
+            //    合并网格不再挂 MeshCollider —— 否则弹丸命中合并网格找不到对应的 InkWallSurface)
+            CreateRendererChild(decorRoot.transform, "Decor_Matte", matteMesh, mats?.propMatte ?? mats?.concrete, true, false);
+            CreateRendererChild(decorRoot.transform, "Decor_Metal", metalMesh, mats?.propMetal ?? mats?.steel, true, false);
+            CreateRendererChild(decorRoot.transform, "Decor_Matte_Thin", matteDecorMesh, mats?.propMatte ?? mats?.concrete, true, false);
+            CreateRendererChild(decorRoot.transform, "Decor_Metal_Thin", metalDecorMesh, mats?.propMetal ?? mats?.steel, true, false);
             CreateRendererChild(decorRoot.transform, "Decor_Emissive", emissiveMesh, mats?.propEmissive ?? mats?.propMatte, true, false);
             CreateRendererChild(decorRoot.transform, "Decor_Cloth", clothMesh, mats?.propCloth ?? mats?.propMatte, true, false);
 
@@ -173,7 +217,9 @@ namespace P1.Editor
 
         #region 边界墙横幅网格生成
         /// <summary>
-        /// 在边界墙内侧生成 8 个横幅 Quad，内缩 0.02m 防 z-fight，分 4 个 UV 图集区域。
+        /// 在边界墙内侧生成 8 个横幅 Quad，分 4 个 UV 图集区域。
+        /// 距墙面只留 4mm：墨迹立面 Quad 在墙外 10mm 处，涂墨后墨会盖住横幅，
+        /// 不再出现"横幅挡在墨前面、打了看不见"的死角（未涂区域仍能看到横幅）。
         /// </summary>
         private static Mesh BuildWallBannersMesh()
         {
@@ -181,20 +227,21 @@ namespace P1.Editor
             float w = 6.0f;
             float h = 2.4f;
             float cy = 1.2f;
+            const float bannerOffset = 0.004f;
 
             // 北墙内侧 (z=+28.0，朝 -Z，正常墙高足够)
-            float northZ = 28.0f - 0.02f;
+            float northZ = 28.0f - bannerOffset;
             AddBannerQuad(combiner, new Vector3(-8.0f, cy, northZ), w, h, Vector3.back, 0);
             AddBannerQuad(combiner, new Vector3(8.0f, cy, northZ), w, h, Vector3.back, 1);
 
-            // 西墙内侧 (x=-19.95，朝 +X)
-            float westX = -19.95f + 0.02f;
+            // 西墙内侧 (x=-20.0，朝 +X)
+            float westX = -20.0f + bannerOffset;
             AddBannerQuad(combiner, new Vector3(westX, cy, -14.0f), w, h, Vector3.right, 2);
             AddBannerQuad(combiner, new Vector3(westX, cy, 0.0f), w, h, Vector3.right, 3);
             AddBannerQuad(combiner, new Vector3(westX, cy, 14.0f), w, h, Vector3.right, 0);
 
-            // 东墙内侧 (x=+19.95，朝 -X)
-            float eastX = 19.95f - 0.02f;
+            // 东墙内侧 (x=+20.0，朝 -X)
+            float eastX = 20.0f - bannerOffset;
             AddBannerQuad(combiner, new Vector3(eastX, cy, -14.0f), w, h, Vector3.left, 1);
             AddBannerQuad(combiner, new Vector3(eastX, cy, 0.0f), w, h, Vector3.left, 2);
             AddBannerQuad(combiner, new Vector3(eastX, cy, 14.0f), w, h, Vector3.left, 3);
@@ -493,6 +540,49 @@ namespace P1.Editor
             EnsureFolder();
             AssetDatabase.DeleteAsset(path);
             AssetDatabase.CreateAsset(mesh, path);
+        }
+
+        /// <summary>
+        /// 实体道具的碰撞 + 涂墨代理：一个朝向盒碰撞体 + 四面 <see cref="InkWallSurface"/>。
+        /// 合并网格仍然负责渲染；代理盒只负责挡子弹/挡人和"打中时把墨涂在哪一面"。
+        /// 尺寸取实体部件的局部包围盒（花坛的灌木、售卖亭的挑檐这类非实体件已排除）。
+        /// </summary>
+        private static void CreateInkPropProxy(
+            Transform parent,
+            ArenaLayoutV2.ArenaPropSpec prop,
+            Quaternion rotation,
+            Bounds localBounds,
+            ArenaMaterialSet mats,
+            InkGridConfigSO inkCfg,
+            int serial)
+        {
+            var go = new GameObject($"PropCollider_{prop.Kind}_{serial:00}");
+            go.transform.SetParent(parent, false);
+            go.transform.position = prop.Position;
+            go.transform.rotation = rotation;
+            go.transform.localScale = Vector3.one;
+
+            var box = go.AddComponent<BoxCollider>();
+            box.center = localBounds.center;
+            box.size = localBounds.size;
+
+            if (inkCfg != null && !inkCfg.enableWallInk)
+            {
+                return;
+            }
+
+            Vector3 centerWorld = prop.Position + rotation * localBounds.center;
+            var wall = go.AddComponent<InkWallSurface>();
+            // 售卖亭 2.4m 高、顶檐外挑，爬上去会挡住俯视角视线，禁止上爬；
+            // 木箱 / 花坛保持可爬（与场上掩体一致）。
+            wall.ConfigureOrientedBox(
+                box,
+                centerWorld,
+                localBounds.size,
+                rotation,
+                mats != null ? mats.inkWall : null,
+                inkCfg,
+                allowClimb: prop.Kind != ArenaLayoutV2.ArenaPropKind.Kiosk);
         }
 
         private static GameObject CreateRendererChild(Transform parent, string name, Mesh mesh, Material mat, bool castShadows, bool addCollider = false)

@@ -82,23 +82,52 @@ namespace P1.Tests
         [Test]
         public void PlayerPrefsKeys_AreNonEmptyAndUnique()
         {
-            Assert.IsNotEmpty(GameSettingsMath.KeyMasterVolume);
-            Assert.IsNotEmpty(GameSettingsMath.KeyShakeScale);
-            Assert.IsNotEmpty(GameSettingsMath.KeyTargetFrameRate);
-            Assert.IsNotEmpty(GameSettingsMath.KeyMouseLookSensitivity);
-            Assert.IsNotEmpty(GameSettingsMath.KeyTouchLookSensitivity);
-            Assert.IsNotEmpty(GameSettingsMath.KeyInvertLookY);
+            string[] keys =
+            {
+                GameSettingsMath.KeyMasterVolume,
+                GameSettingsMath.KeyShakeScale,
+                GameSettingsMath.KeyTargetFrameRate,
+                GameSettingsMath.KeyMouseLookSensitivity,
+                GameSettingsMath.KeyTouchLookSensitivity,
+                GameSettingsMath.KeyInvertLookY,
+                GameSettingsMath.KeyFixedJoystick,
+                GameSettingsMath.KeyFireButtonRotatesCamera,
+                GameSettingsMath.KeyAimAssistLevel
+            };
+
+            for (int i = 0; i < keys.Length; i++)
+            {
+                Assert.IsNotEmpty(keys[i], $"设置键 {i} 不得为空");
+                for (int j = i + 1; j < keys.Length; j++)
+                {
+                    Assert.AreNotEqual(keys[i], keys[j], $"设置键 {i} 与 {j} 不得重复");
+                }
+            }
 
             Assert.AreEqual("P1_Settings_MouseLookSensitivity", GameSettingsMath.KeyMouseLookSensitivity);
             Assert.AreEqual("P1_Settings_TouchLookSensitivity", GameSettingsMath.KeyTouchLookSensitivity);
             Assert.AreEqual("P1_Settings_InvertLookY", GameSettingsMath.KeyInvertLookY);
+            Assert.AreEqual("P1_Settings_FixedJoystick", GameSettingsMath.KeyFixedJoystick);
+            Assert.AreEqual("P1_Settings_FireRotatesCamera", GameSettingsMath.KeyFireButtonRotatesCamera);
+            Assert.AreEqual("P1_Settings_AimAssistLevel", GameSettingsMath.KeyAimAssistLevel);
+        }
 
-            Assert.AreNotEqual(GameSettingsMath.KeyMasterVolume, GameSettingsMath.KeyShakeScale);
-            Assert.AreNotEqual(GameSettingsMath.KeyMasterVolume, GameSettingsMath.KeyTargetFrameRate);
-            Assert.AreNotEqual(GameSettingsMath.KeyShakeScale, GameSettingsMath.KeyTargetFrameRate);
-            Assert.AreNotEqual(GameSettingsMath.KeyTargetFrameRate, GameSettingsMath.KeyMouseLookSensitivity);
-            Assert.AreNotEqual(GameSettingsMath.KeyMouseLookSensitivity, GameSettingsMath.KeyTouchLookSensitivity);
-            Assert.AreNotEqual(GameSettingsMath.KeyTouchLookSensitivity, GameSettingsMath.KeyInvertLookY);
+        [Test]
+        public void AimAssistLevel_NormalizesAndMapsToRadiusAndLabel()
+        {
+            Assert.AreEqual(GameSettingsMath.MinAimAssistLevel, GameSettingsMath.NormalizeAimAssistLevel(-5));
+            Assert.AreEqual(GameSettingsMath.MaxAimAssistLevel, GameSettingsMath.NormalizeAimAssistLevel(99));
+            Assert.AreEqual(2, GameSettingsMath.NormalizeAimAssistLevel(2));
+
+            Assert.AreEqual(0f, GameSettingsMath.GetAimAssistRadius(0), 1e-4f);
+            Assert.AreEqual(GameSettingsMath.AimAssistRadiusWeak, GameSettingsMath.GetAimAssistRadius(1), 1e-4f);
+            Assert.AreEqual(GameSettingsMath.AimAssistRadiusMedium, GameSettingsMath.GetAimAssistRadius(2), 1e-4f);
+            Assert.AreEqual(GameSettingsMath.AimAssistRadiusStrong, GameSettingsMath.GetAimAssistRadius(3), 1e-4f);
+
+            Assert.AreEqual("关", GameSettingsMath.GetAimAssistLevelLabel(0));
+            Assert.AreEqual("弱", GameSettingsMath.GetAimAssistLevelLabel(1));
+            Assert.AreEqual("中", GameSettingsMath.GetAimAssistLevelLabel(2));
+            Assert.AreEqual("强", GameSettingsMath.GetAimAssistLevelLabel(3));
         }
 
         [Test]
@@ -111,6 +140,9 @@ namespace P1.Tests
             GameSettingsService.MouseLookSensitivity = 2.0f;
             GameSettingsService.TouchLookSensitivity = 0.5f;
             GameSettingsService.InvertLookY = true;
+            GameSettingsService.FixedJoystick = true;
+            GameSettingsService.FireButtonRotatesCamera = false;
+            GameSettingsService.AimAssistLevel = 0;
 
             GameSettingsService.ResetToDefaults();
 
@@ -120,6 +152,9 @@ namespace P1.Tests
             Assert.AreEqual(GameSettingsMath.DefaultLookSensitivity, GameSettingsService.MouseLookSensitivity, 1e-4f);
             Assert.AreEqual(GameSettingsMath.DefaultLookSensitivity, GameSettingsService.TouchLookSensitivity, 1e-4f);
             Assert.IsFalse(GameSettingsService.InvertLookY);
+            Assert.AreEqual(GameSettingsMath.DefaultFixedJoystick, GameSettingsService.FixedJoystick);
+            Assert.AreEqual(GameSettingsMath.DefaultFireButtonRotatesCamera, GameSettingsService.FireButtonRotatesCamera);
+            Assert.AreEqual(GameSettingsMath.DefaultAimAssistLevel, GameSettingsService.AimAssistLevel);
         }
     }
 }

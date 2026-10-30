@@ -13,6 +13,9 @@ namespace P1.Core
         public const string KeyMouseLookSensitivity = "P1_Settings_MouseLookSensitivity";
         public const string KeyTouchLookSensitivity = "P1_Settings_TouchLookSensitivity";
         public const string KeyInvertLookY = "P1_Settings_InvertLookY";
+        public const string KeyFixedJoystick = "P1_Settings_FixedJoystick";
+        public const string KeyFireButtonRotatesCamera = "P1_Settings_FireRotatesCamera";
+        public const string KeyAimAssistLevel = "P1_Settings_AimAssistLevel";
 
         public const float DefaultMasterVolume = 1.0f;
         public const float DefaultShakeScale = 1.0f;
@@ -20,6 +23,16 @@ namespace P1.Core
         public const float DefaultLookSensitivity = 1.0f;
         public const float MinLookSensitivity = 0.25f;
         public const float MaxLookSensitivity = 2.5f;
+
+        public const bool DefaultFixedJoystick = false;
+        public const bool DefaultFireButtonRotatesCamera = true;
+        public const int DefaultAimAssistLevel = 2;
+        public const int MinAimAssistLevel = 0;
+        public const int MaxAimAssistLevel = 3;
+
+        public const float AimAssistRadiusWeak = 0.5f;
+        public const float AimAssistRadiusMedium = 0.8f;
+        public const float AimAssistRadiusStrong = 1.2f;
 
         public const int FrameRate30 = 30;
         public const int FrameRate60 = 60;
@@ -73,6 +86,52 @@ namespace P1.Core
                 return FrameRate60;
 
             return FrameRate120;
+        }
+
+        /// <summary>
+        /// 规范化移动端辅助瞄准档位：0 关 / 1 弱 / 2 中 / 3 强。
+        /// </summary>
+        public static int NormalizeAimAssistLevel(int level)
+        {
+            if (level <= MinAimAssistLevel)
+                return MinAimAssistLevel;
+            if (level >= MaxAimAssistLevel)
+                return MaxAimAssistLevel;
+            return level;
+        }
+
+        /// <summary>辅助瞄准档位对应的吸附半径（米）；0 档返回 0。</summary>
+        public static float GetAimAssistRadius(int level)
+        {
+            switch (NormalizeAimAssistLevel(level))
+            {
+                case 1:
+                    return AimAssistRadiusWeak;
+                case 3:
+                    return AimAssistRadiusStrong;
+                case 2:
+                    return AimAssistRadiusMedium;
+                case MinAimAssistLevel:
+                default:
+                    return 0f;
+            }
+        }
+
+        /// <summary>辅助瞄准档位的中文展示文案。</summary>
+        public static string GetAimAssistLevelLabel(int level)
+        {
+            switch (NormalizeAimAssistLevel(level))
+            {
+                case 1:
+                    return "弱";
+                case 2:
+                    return "中";
+                case 3:
+                    return "强";
+                case MinAimAssistLevel:
+                default:
+                    return "关";
+            }
         }
 
         /// <summary>

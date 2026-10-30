@@ -832,7 +832,7 @@ namespace P1.UI
                 llabelText.fontStyle = FontStyle.Bold;
                 llabelText.alignment = TextAnchor.MiddleCenter;
                 llabelText.color = new Color(1f, 0.85f, 0.28f, 1f);
-                llabelText.text = "⚙️ 自定义键位";
+                llabelText.text = "⚙️ 操作设置";
 
                 // P9：桌面/非触控模式下隐藏自定义键位入口，避免出现点击无响应的死按钮
                 if (!Application.isMobilePlatform && !MobileTouchUI.IsTouchSimulationActive)

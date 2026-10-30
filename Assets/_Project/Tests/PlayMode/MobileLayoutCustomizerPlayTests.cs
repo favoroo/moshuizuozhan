@@ -1,5 +1,6 @@
 using System.Collections;
 using NUnit.Framework;
+using P1.Core;
 using P1.UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -27,6 +28,7 @@ namespace P1.Tests
             // 兜底：任何用例失败都不能把 timeScale=0 泄露给后面的场景用例（会让 WaitForSeconds 永久挂起）
             Time.timeScale = 1f;
             MobileLayoutStorage.Delete();
+            GameSettingsService.ResetToDefaults();
 
             if (EventSystem.current == null)
             {
@@ -38,6 +40,7 @@ namespace P1.Tests
         public void TearDown()
         {
             MobileLayoutStorage.Delete();
+            GameSettingsService.ResetToDefaults();
             Time.timeScale = 1f;
 
             if (_canvasGo != null)
@@ -210,6 +213,152 @@ namespace P1.Tests
 
             // 立即恢复：本用例故意把全局时间停在 0，若留给后续用例会让 WaitForSeconds 永久等待
             Time.timeScale = 1f;
+        }
+
+        [UnityTest]
+        public IEnumerator Customizer_ScaleSlider_AppliesBaseScale_AndSurvivesPressAndReopen()
+        {
+            var rig = CreateButtonTestRig();
+            yield return null;
+
+            rig.customizer.Open();
+            rig.customizer.SelectItem(rig.customizer.GetItem("Fire"));
+            rig.customizer.SetSelectedScale(1.35f);
+
+            Assert.AreEqual(1.35f, rig.button.BaseScale, 1e-3f, "滑块必须写入按钮 BaseScale");
+            Assert.AreEqual(1.35f, rig.button.RectTransform.localScale.x, 1e-3f, "按钮应立即显示自定义尺寸");
+
+            // 模拟按下/抬起：旧实现会把 localScale 重置回 1.0，这里必须保持 1.35 基准。
+            rig.button.OnPointerDown(new PointerEventData(EventSystem.current));
+            Assert.AreEqual(1.35f * 0.96f, rig.button.RectTransform.localScale.x, 1e-3f);
+            rig.button.OnPointerUp(new PointerEventData(EventSystem.current));
+            Assert.AreEqual(1.35f, rig.button.RectTransform.localScale.x, 1e-3f);
+
+            rig.customizer.Close(save: true);
+            Assert.IsTrue(MobileLayoutStorage.HasCustomLayout, "保存后必须写入持久化配置");
+
+            // 重新打开：Open 必须把存档 Apply 回按钮，而不是让滑块读到 1.0。
+            rig.customizer.Open();
+            Assert.AreEqual(1.35f, rig.button.BaseScale, 1e-3f, "重新打开必须恢复存档中的 1.35 倍");
+            rig.customizer.Close(save: false);
+        }
+
+        [UnityTest]
+        public IEnumerator Customizer_Open_ReappliesSavedConfigToTransforms()
+        {
+            var rig = CreateTestRig();
+            yield return null;
+
+            var config = new MobileLayoutConfig();
+            config.Set("Fire", new Vector2(-200f, 220f), 1.4f, 0.7f);
+            MobileLayoutStorage.Save(config);
+
+            // 模拟玩法期动画把 transform 重置为基准值
+            rig.target.anchoredPosition = Vector2.zero;
+            rig.target.localScale = Vector3.one;
+            rig.group.alpha = 1f;
+
+            rig.customizer.Open();
+
+            Assert.AreEqual(-200f, rig.target.anchoredPosition.x, 0.01f,
+                "Open 必须把存档位置 Apply 回按键");
+            Assert.AreEqual(1.4f, rig.target.localScale.x, 0.01f,
+                "Open 必须把存档缩放 Apply 回按键");
+            Assert.AreEqual(0.7f, rig.group.alpha, 0.01f,
+                "Open 必须把存档透明度 Apply 回按键");
+
+            rig.customizer.Close(save: false);
+        }
+
+        [UnityTest]
+        public IEnumerator Customizer_ApplyPreset_SavesFourFingerLayout()
+        {
+            var rig = CreateTestRig();
+            yield return null;
+
+            rig.customizer.Open();
+            rig.customizer.ApplyPreset(MobileLayoutPreset.FourFinger);
+
+            var loaded = MobileLayoutStorage.Load();
+            Assert.IsNotNull(loaded, "切换方案必须立即写入存档");
+            Assert.AreEqual((int)MobileLayoutPreset.FourFinger, loaded.preset);
+            Assert.IsTrue(loaded.leftFireVisible, "4 指方案必须显示左开火键");
+
+            var jump = loaded.Find("Jump");
+            Assert.IsNotNull(jump);
+            Assert.AreEqual(-135f, jump.anchoredPosition.x, 1f, "4 指方案跳跃键应移到右上");
+            Assert.AreEqual(500f, jump.anchoredPosition.y, 1f, "4 指方案跳跃键应移到右上");
+
+            var leftFire = loaded.Find("LeftFire");
+            Assert.IsNotNull(leftFire, "4 指方案必须包含左开火键位置");
+            Assert.AreEqual(190f, leftFire.anchoredPosition.x, 1f);
+
+            rig.customizer.Close(save: false);
+        }
+
+        [UnityTest]
+        public IEnumerator Joystick_SetDefaultPosition_PersistsAfterReset()
+        {
+            yield return null;
+
+            var go = new GameObject("TestJoystickHost", typeof(RectTransform));
+            var rt = go.GetComponent<RectTransform>();
+            rt.sizeDelta = new Vector2(1920f, 1080f);
+
+            var joystick = DynamicFloatingJoystick.Create(
+                rt, new Vector2(200f, 200f), 100f, 10f, null, null, null);
+
+            var customDefault = new Vector2(320f, 260f);
+            joystick.SetDefaultPosition(customDefault);
+            Assert.AreEqual(customDefault.x, joystick.VisualContainer.anchoredPosition.x, 0.01f);
+            Assert.AreEqual(customDefault.y, joystick.VisualContainer.anchoredPosition.y, 0.01f);
+
+            joystick.ResetJoystick();
+            Assert.AreEqual(customDefault.x, joystick.VisualContainer.anchoredPosition.x, 0.01f,
+                "ResetJoystick 必须回到自定义默认位置，而不是建层时的旧坐标");
+            Assert.AreEqual(customDefault.y, joystick.VisualContainer.anchoredPosition.y, 0.01f);
+
+            Object.DestroyImmediate(go);
+        }
+
+        private (MobileLayoutCustomizer customizer, MobileActionButton button) CreateButtonTestRig()
+        {
+            _canvasGo = new GameObject("TestButtonCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            var canvas = _canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+
+            var scaler = _canvasGo.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+
+            var rootRt = _canvasGo.GetComponent<RectTransform>();
+            rootRt.sizeDelta = new Vector2(1920f, 1080f);
+
+            var safeGo = new GameObject("SafeArea", typeof(RectTransform));
+            safeGo.transform.SetParent(rootRt, false);
+            var safeArea = safeGo.GetComponent<RectTransform>();
+            safeArea.anchorMin = Vector2.zero;
+            safeArea.anchorMax = Vector2.one;
+            safeArea.offsetMin = Vector2.zero;
+            safeArea.offsetMax = Vector2.zero;
+            safeArea.sizeDelta = Vector2.zero;
+
+            var button = MobileActionButton.Create(
+                safeGo.transform, "TestFireButton", "射击",
+                new Vector2(-150f, 150f), 176f, Color.red,
+                null, null, null, MobileButtonMode.HoldWithAimDrag);
+
+            var customizer = MobileLayoutCustomizer.Create(null, safeArea, null);
+            customizer.RegisterItem("Fire", "射击大键", button.RectTransform, button.CanvasGroup,
+                new Vector2(-150f, 150f), 1f, 1f);
+
+            var item = customizer.GetItem("Fire");
+            item.applyScale = button.SetBaseScale;
+            item.readScale = () => button.BaseScale;
+            item.applyAlpha = button.SetBaseAlpha;
+            item.readAlpha = () => button.BaseAlpha;
+
+            return (customizer, button);
         }
     }
 }

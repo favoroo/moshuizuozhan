@@ -17,18 +17,23 @@ namespace P1.Environment
 
     /// <summary>
     /// 单个道具网格部件，携带网格、所属表面类型与基础调色。
+    /// Solid 标记该部件是否参与碰撞/涂墨代理盒的包围盒计算：
+    /// 花坛的土壤与灌木、售卖亭的挑檐这类伸出主体、又薄又碎的装饰件标 false，
+    /// 让碰撞盒贴合真正能挡子弹、能涂墨的实体轮廓。
     /// </summary>
     public struct ArenaPropMeshPart
     {
         public Mesh Mesh;
         public ArenaPropSurface Surface;
         public Color Color;
+        public bool Solid;
 
-        public ArenaPropMeshPart(Mesh mesh, ArenaPropSurface surface, Color color)
+        public ArenaPropMeshPart(Mesh mesh, ArenaPropSurface surface, Color color, bool solid = true)
         {
             Mesh = mesh;
             Surface = surface;
             Color = color;
+            Solid = solid;
         }
     }
 
@@ -125,9 +130,6 @@ namespace P1.Environment
                     break;
                 case ArenaLayoutV2.ArenaPropKind.PipeRun:
                     BuildPipeRun(s, variant, palette, output);
-                    break;
-                case ArenaLayoutV2.ArenaPropKind.RailingRun:
-                    BuildRailingRun(s, variant, palette, output);
                     break;
                 case ArenaLayoutV2.ArenaPropKind.LampPost:
                     BuildLampPost(s, variant, palette, output);
@@ -380,8 +382,8 @@ namespace P1.Environment
             AddBush(new Vector3(-0.06f, h * 0.95f, 0.28f), 0.28f, 0.38f);
 
             output.Add(new ArenaPropMeshPart(concreteBuf.ToMesh("PlanterBox_Concrete"), ArenaPropSurface.Matte, pal.ConcreteMid));
-            output.Add(new ArenaPropMeshPart(soilBuf.ToMesh("PlanterBox_Soil"), ArenaPropSurface.Matte, pal.ConcreteDark));
-            output.Add(new ArenaPropMeshPart(foliageBuf.ToMesh("PlanterBox_Foliage"), ArenaPropSurface.Matte, pal.Foliage));
+            output.Add(new ArenaPropMeshPart(soilBuf.ToMesh("PlanterBox_Soil"), ArenaPropSurface.Matte, pal.ConcreteDark, false));
+            output.Add(new ArenaPropMeshPart(foliageBuf.ToMesh("PlanterBox_Foliage"), ArenaPropSurface.Matte, pal.Foliage, false));
         }
         #endregion
 
@@ -579,37 +581,6 @@ namespace P1.Environment
 
             output.Add(new ArenaPropMeshPart(pipeBuf.ToMesh("PipeRun_Pipe"), ArenaPropSurface.Metal, pal.Steel));
             output.Add(new ArenaPropMeshPart(bracketBuf.ToMesh("PipeRun_Brackets"), ArenaPropSurface.Metal, pal.SteelDark));
-        }
-        #endregion
-
-        #region 10. RailingRun (沿 +Z 栏杆：立柱 + 2 根横杆，scale 为长度)
-        private static void BuildRailingRun(float scale, int variant, Palette pal, List<ArenaPropMeshPart> output)
-        {
-            var metalBuf = new MeshBuffer();
-
-            float totalLength = Mathf.Max(scale, 1.5f);
-            float h = 0.95f;
-
-            // 顶层扶手横杆 (沿 Z 贯穿)
-            metalBuf.AddBox(new Vector3(0f, h, totalLength * 0.5f), new Vector3(0.07f, 0.05f, totalLength), Color.white);
-            // 中间膝部横杆
-            metalBuf.AddBox(new Vector3(0f, h * 0.50f, totalLength * 0.5f), new Vector3(0.04f, 0.04f, totalLength), Color.white);
-            // 底脚挡踢板
-            metalBuf.AddBox(new Vector3(0f, 0.06f, totalLength * 0.5f), new Vector3(0.03f, 0.08f, totalLength), Color.white);
-
-            // 垂直立柱 (间距约 1.6m)
-            int postCount = Mathf.Max(2, Mathf.RoundToInt(totalLength / 1.6f) + 1);
-            float pStep = totalLength / (postCount - 1);
-            for (int k = 0; k < postCount; k++)
-            {
-                float z = k * pStep;
-                // 立柱
-                metalBuf.AddBox(new Vector3(0f, h * 0.5f, z), new Vector3(0.06f, h, 0.06f), Color.white);
-                // 柱底安装底板
-                metalBuf.AddBox(new Vector3(0f, 0.02f, z), new Vector3(0.14f, 0.04f, 0.14f), Color.white);
-            }
-
-            output.Add(new ArenaPropMeshPart(metalBuf.ToMesh("RailingRun_Metal"), ArenaPropSurface.Metal, pal.SteelDark));
         }
         #endregion
 
@@ -813,7 +784,7 @@ namespace P1.Environment
             stripeBuf.AddBox(new Vector3(0f, 2.38f * scale, 0.83f * scale), new Vector3(kSz.x * 1.16f, 0.12f * scale, 0.04f * scale), Color.white);
 
             output.Add(new ArenaPropMeshPart(wallBuf.ToMesh("Kiosk_Walls"), ArenaPropSurface.Matte, pal.ConcreteMid));
-            output.Add(new ArenaPropMeshPart(roofBuf.ToMesh("Kiosk_Roof"), ArenaPropSurface.Metal, pal.Steel));
+            output.Add(new ArenaPropMeshPart(roofBuf.ToMesh("Kiosk_Roof"), ArenaPropSurface.Metal, pal.Steel, false));
             output.Add(new ArenaPropMeshPart(metalBuf.ToMesh("Kiosk_Metal"), ArenaPropSurface.Metal, pal.SteelDark));
             output.Add(new ArenaPropMeshPart(stripeBuf.ToMesh("Kiosk_Stripe"), ArenaPropSurface.Matte, stripeCol));
         }

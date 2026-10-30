@@ -137,6 +137,8 @@ Material:
     - _InkShadeSoftness: 0.08
     - _InkShadeThreshold: 0.48
     - _InkShadowFloor: 0.72
+    - _InkTexelMeters: 0.01
+    - _InkYFlip: 1
     - _LipHeight: 0.014
     - _LipSoftness: 1.7
     - _LipStrength: 2.4
@@ -175,6 +177,7 @@ Material:
     - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
     - _GridLineColor: {r: 0.23302203, g: 0.21404114, b: 0.17064494, a: 1}
     - _InkMapOriginXZ: {r: -20, g: -20, b: 40, a: 40}
+    - _InkMapSize: {r: 40, g: 56, b: 0, a: 0}
     - _InkTexelSize: {r: 0.0002441406, g: 0.0002441406, b: 4096, a: 4096}
     - _ShadowTint: {r: 0.13286833, g: 0.17064494, b: 0.34239164, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}

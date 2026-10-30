@@ -233,7 +233,11 @@ namespace P1.Tests
         [Test]
         public void MobileLayoutStorage_SaveAndLoad_PreservesCustomPositionsAndScales()
         {
-            var config = new MobileLayoutConfig();
+            var config = new MobileLayoutConfig
+            {
+                leftFireVisible = true,
+                preset = (int)MobileLayoutPreset.ThreeFinger
+            };
             config.Set("Fire", new Vector2(-180f, 190f), 1.25f, 0.85f);
             config.Set("Jump", new Vector2(-130f, 330f), 0.90f, 0.70f);
 
@@ -249,6 +253,8 @@ namespace P1.Tests
             Assert.AreEqual(190f, fireData.anchoredPosition.y, 0.01f);
             Assert.AreEqual(1.25f, fireData.scale, 0.01f);
             Assert.AreEqual(0.85f, fireData.alpha, 0.01f);
+            Assert.IsTrue(loaded.leftFireVisible, "左开火键显隐必须随布局一起持久化");
+            Assert.AreEqual((int)MobileLayoutPreset.ThreeFinger, loaded.preset, "方案编号必须随布局持久化");
 
             MobileLayoutStorage.Delete();
             Assert.IsFalse(MobileLayoutStorage.HasCustomLayout, "清理后 HasCustomLayout 应为 false");
@@ -407,6 +413,149 @@ namespace P1.Tests
             customizer.Close(save: false);
             Assert.IsFalse(hitProxy.gameObject.activeSelf,
                 "退出编辑后必须立即收回命中层，恢复玩法期按键点击");
+
+            Object.DestroyImmediate(host);
+        }
+
+        [Test]
+        public void TouchSlider_NormalizeLocalX_HandlesBothPivotModes()
+        {
+            // pivot=(0.5,0.5)：rect.xMin=-85、width=170，中心 0 应映射到 50%
+            Assert.AreEqual(0f, TouchSlider.NormalizeLocalX(-85f, -85f, 170f), 1e-4f);
+            Assert.AreEqual(0.5f, TouchSlider.NormalizeLocalX(0f, -85f, 170f), 1e-4f);
+            Assert.AreEqual(1f, TouchSlider.NormalizeLocalX(85f, -85f, 170f), 1e-4f);
+
+            // pivot=(0,0.5)：rect.xMin=0，左端 0 → 0%、中点 85 → 50%、右端 170 → 100%
+            Assert.AreEqual(0f, TouchSlider.NormalizeLocalX(0f, 0f, 170f), 1e-4f);
+            Assert.AreEqual(0.5f, TouchSlider.NormalizeLocalX(85f, 0f, 170f), 1e-4f);
+            Assert.AreEqual(1f, TouchSlider.NormalizeLocalX(170f, 0f, 170f), 1e-4f);
+
+            // 超界与非法宽度
+            Assert.AreEqual(0f, TouchSlider.NormalizeLocalX(-50f, 0f, 170f), 1e-4f);
+            Assert.AreEqual(1f, TouchSlider.NormalizeLocalX(250f, 0f, 170f), 1e-4f);
+            Assert.AreEqual(0f, TouchSlider.NormalizeLocalX(50f, 0f, 0f), 1e-4f);
+        }
+
+        [Test]
+        public void MobileLayoutCustomizer_SelectionFrame_UsesBorderOnlyWithoutSolidShadow()
+        {
+            // 回归用例：透明填充 + HardShadow 会让实心墨色阴影盖住选中按键，表现为“选中就全黑”。
+            var host = new GameObject("TestSelectionHost", typeof(RectTransform));
+            var customizer = MobileLayoutCustomizer.Create(null, host.GetComponent<RectTransform>(), null);
+
+            var frame = customizer.transform.Find("SelectionFrame");
+            Assert.IsNotNull(frame, "编辑器必须包含 SelectionFrame");
+            var shape = frame.GetComponent<UIInkShapeGraphic>();
+            Assert.IsNotNull(shape, "SelectionFrame 必须挂 UIInkShapeGraphic");
+            Assert.IsFalse(shape.HardShadow, "选中框只能画墨边，不能开实心硬阴影");
+            Assert.AreEqual(0f, shape.color.a, 1e-4f, "选中框内部必须保持透明");
+
+            Object.DestroyImmediate(host);
+        }
+
+        [Test]
+        public void MobileActionButton_BaseScaleAndAlpha_SurvivePressAndSpecialState()
+        {
+            var host = new GameObject("TestButtonHost", typeof(RectTransform));
+
+            var btn = MobileActionButton.Create(
+                host.transform, "ScaleBtn", "测试",
+                new Vector2(-100f, 100f), 100f, Color.white,
+                null, null, null, MobileButtonMode.Hold);
+
+            btn.SetBaseScale(1.35f);
+            Assert.AreEqual(1.35f, btn.BaseScale, 1e-4f, "BaseScale 应记录自定义尺寸");
+            Assert.AreEqual(1.35f, btn.RectTransform.localScale.x, 1e-4f);
+
+            btn.OnPointerDown(new PointerEventData(EventSystem.current));
+            Assert.AreEqual(1.35f * 0.96f, btn.RectTransform.localScale.x, 1e-4f,
+                "按下态应在自定义基准上乘 0.96，而不是回到 1.0 基准");
+            btn.OnPointerUp(new PointerEventData(EventSystem.current));
+            Assert.AreEqual(1.35f, btn.RectTransform.localScale.x, 1e-4f,
+                "抬起后必须回到自定义基准，而不是 Vector3.one");
+            btn.ResetState();
+            Assert.AreEqual(1.35f, btn.RectTransform.localScale.x, 1e-4f,
+                "ResetState 不得抹掉自定义尺寸");
+
+            var special = MobileActionButton.Create(
+                host.transform, "SpecialBtn", "大招",
+                new Vector2(-300f, 300f), 120f, new Color(1f, 0.8f, 0.2f, 1f),
+                null, null, null, MobileButtonMode.Special);
+
+            special.SetBaseAlpha(0.6f);
+            special.UpdateSpecialState(false, 0.4f);
+            Assert.AreEqual(0.6f * 0.55f, special.CanvasGroup.alpha, 1e-4f,
+                "大招未就绪的 55% 应乘在自定义透明度上");
+            special.UpdateSpecialState(true, 1f);
+            Assert.AreEqual(0.6f, special.CanvasGroup.alpha, 1e-4f,
+                "大招就绪后应恢复自定义透明度");
+
+            Object.DestroyImmediate(host);
+        }
+
+        [Test]
+        public void MobileLayoutPresets_AllPresets_ContainRequiredItemsAndNoOverlaps()
+        {
+            string[] required = { "MoveStick", "Fire", "Swim", "Jump", "Bomb", "Special", "LeftFire" };
+            var presets = new[]
+            {
+                MobileLayoutPreset.TwoFinger,
+                MobileLayoutPreset.ThreeFinger,
+                MobileLayoutPreset.FourFinger
+            };
+
+            for (int p = 0; p < presets.Length; p++)
+            {
+                var preset = presets[p];
+                var config = MobileLayoutPresets.Build(preset, 1f);
+
+                Assert.AreEqual(p, config.preset, $"{preset} 的 preset 编号必须正确");
+                Assert.AreEqual(MobileLayoutPresets.UsesLeftFire(preset), config.leftFireVisible,
+                    $"{preset} 的左开火键显隐必须正确");
+
+                // 摇杆/左开火锚定左下角，其余动作键锚定右下角；比较前统一换算到 1920 宽的屏幕坐标。
+                Vector2 ScreenPos(string id, ButtonLayoutData data)
+                {
+                    float x = id == "MoveStick" || id == "LeftFire"
+                        ? data.anchoredPosition.x
+                        : 1920f + data.anchoredPosition.x;
+                    return new Vector2(x, data.anchoredPosition.y);
+                }
+
+                for (int i = 0; i < required.Length; i++)
+                {
+                    Assert.IsNotNull(config.Find(required[i]), $"{preset} 缺少布局项 {required[i]}");
+                }
+
+                for (int i = 0; i < required.Length; i++)
+                {
+                    var a = config.Find(required[i]);
+                    float ra = MobileLayoutPresets.GetBaseSize(required[i]) * a.scale * 0.5f;
+
+                    for (int j = i + 1; j < required.Length; j++)
+                    {
+                        var b = config.Find(required[j]);
+                        float rb = MobileLayoutPresets.GetBaseSize(required[j]) * b.scale * 0.5f;
+                        float dist = Vector2.Distance(ScreenPos(required[i], a), ScreenPos(required[j], b));
+                        Assert.GreaterOrEqual(dist, ra + rb - 1f,
+                            $"{preset} 的 {required[i]} 与 {required[j]} 重叠 (距离 {dist:F1} < {ra + rb:F1})");
+                    }
+                }
+            }
+        }
+
+        [Test]
+        public void MobileLayoutCustomizer_IsEditingAny_TracksOpenAndClose()
+        {
+            var host = new GameObject("TestEditingFlagHost", typeof(RectTransform));
+            var customizer = MobileLayoutCustomizer.Create(null, host.GetComponent<RectTransform>(), null);
+
+            Assert.IsFalse(MobileLayoutCustomizer.IsEditingAny, "初始状态不应处于编辑中");
+            customizer.Open();
+            Assert.IsTrue(MobileLayoutCustomizer.IsEditingAny, "Open 后静态编辑标记必须为 true");
+            customizer.Close(save: false);
+            Assert.IsFalse(MobileLayoutCustomizer.IsEditingAny, "Close 后静态编辑标记必须为 false");
+            Assert.IsNull(MobileLayoutCustomizer.ActiveEditor, "Close 后不得残留 ActiveEditor 引用");
 
             Object.DestroyImmediate(host);
         }

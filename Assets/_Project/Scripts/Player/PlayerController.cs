@@ -434,11 +434,18 @@ namespace P1.Player
 
         /// <summary>
         /// 移动端轻量辅助瞄准（对齐 GamePlan「Android 一定角度内吸附最近敌人」）：
-        /// 只在屏幕中心射线附近 0.8m 内、且在武器射程内、Linecast 无遮挡时，
-        /// 把瞄准点吸附到敌人胸口；桌面不启用，不做自动锁定。
+        /// 档位 0 关闭；弱/中/强分别使用 0.5m / 0.8m / 1.2m 吸附半径。
+        /// 只在屏幕中心射线附近、且在武器射程内、Linecast 无遮挡时把瞄准点吸附到敌人胸口；
+        /// 桌面不启用，不做自动锁定。
         /// </summary>
         private void TryApplyMobileAimAssist(Vector3 origin, Vector3 forward, ref Vector3 hitPoint)
         {
+            int aimAssistLevel = GameSettingsService.AimAssistLevel;
+            if (aimAssistLevel <= GameSettingsMath.MinAimAssistLevel)
+                return;
+
+            float aimAssistRadius = GameSettingsMath.GetAimAssistRadius(aimAssistLevel);
+
             var all = CombatantHealthRegistry.All;
             if (all == null)
                 return;
@@ -470,7 +477,7 @@ namespace P1.Player
 
                 Vector3 closest = origin + forward * along;
                 float perpendicular = Vector3.Distance(center, closest);
-                if (perpendicular > 0.8f)
+                if (perpendicular > aimAssistRadius)
                     continue;
 
                 if (!HasClearShot(origin, center, target))

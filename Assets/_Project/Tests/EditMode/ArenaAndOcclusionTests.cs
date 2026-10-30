@@ -86,15 +86,17 @@ namespace P1.Tests.EditMode
         }
 
         private GameObject _testArena;
+        private System.Collections.Generic.List<Renderer> _inkableRenderers;
+        private System.Collections.Generic.List<Collider> _blockedColliders;
 
         [SetUp]
         public void SetUp()
         {
-            var inkable = new System.Collections.Generic.List<Renderer>();
-            var blocked = new System.Collections.Generic.List<Collider>();
+            _inkableRenderers = new System.Collections.Generic.List<Renderer>();
+            _blockedColliders = new System.Collections.Generic.List<Collider>();
             _testArena = ArenaGeometryBuilder.BuildArenaGeometry(
                 null, null, null, null, null, null, null, null, null,
-                null, null, inkable, blocked, out _);
+                null, null, _inkableRenderers, _blockedColliders, out _);
         }
 
         [TearDown]
@@ -105,6 +107,9 @@ namespace P1.Tests.EditMode
                 Object.DestroyImmediate(_testArena);
                 _testArena = null;
             }
+
+            _inkableRenderers = null;
+            _blockedColliders = null;
         }
 
         [Test]
@@ -299,6 +304,62 @@ namespace P1.Tests.EditMode
             {
                 Object.DestroyImmediate(go);
             }
+        }
+
+        [Test]
+        public void ArenaGeometry_SpawnPads_ArePaintable_NotBlocked()
+        {
+            var padA = _testArena.transform.Find("SafeSpawnPad_TeamA")?.gameObject;
+            var padB = _testArena.transform.Find("SafeSpawnPad_TeamB")?.gameObject;
+            Assert.IsNotNull(padA, "Team A 出生台必须存在");
+            Assert.IsNotNull(padB, "Team B 出生台必须存在");
+
+            // 出生台顶面由 SpawnPad.shader 采样墨迹图集，网格层面不能再标记为不可涂
+            Assert.IsFalse(_blockedColliders.Contains(padA.GetComponent<Collider>()),
+                "出生台不得加入 blockedColliders，否则射击台面永远涂不上");
+            Assert.IsFalse(_blockedColliders.Contains(padB.GetComponent<Collider>()),
+                "出生台不得加入 blockedColliders");
+
+            Assert.IsNotNull(padA.GetComponent<InkWallSurface>(), "出生台侧沿仍需可涂");
+            Assert.IsNotNull(padB.GetComponent<InkWallSurface>(), "出生台侧沿仍需可涂");
+        }
+
+        [Test]
+        public void ArenaGeometry_AllRamps_HaveOrientedPaintableSideFaces()
+        {
+            string[] rampNames =
+            {
+                "Ramp_South_Inkable", "Ramp_North_Inkable", "Ramp_West_Inkable", "Ramp_East_Inkable",
+                "Ramp_West_South_Inkable", "Ramp_West_North_Inkable", "Ramp_East_South_Inkable", "Ramp_East_North_Inkable",
+            };
+
+            for (int i = 0; i < rampNames.Length; i++)
+            {
+                var ramp = _testArena.transform.Find(rampNames[i])?.gameObject;
+                Assert.IsNotNull(ramp, $"坡道 {rampNames[i]} 必须存在");
+
+                var wall = ramp.GetComponent<InkWallSurface>();
+                Assert.IsNotNull(wall, $"坡道 {rampNames[i]} 的侧面必须可涂墨");
+                Assert.IsFalse(wall.CanClimb, $"坡道 {rampNames[i]} 的侧面不应触发上墙攀爬");
+
+                Assert.IsTrue(wall.InitializeIfNeeded(true));
+                Assert.AreEqual(4, wall.FaceCount, "坡道应生成 4 张侧面墨面");
+            }
+        }
+
+        [Test]
+        public void ArenaGeometry_SouthBoundaryInkFaces_MatchVisibleWallHeight()
+        {
+            var south = _testArena.transform.Find("Boundary_South")?.gameObject;
+            Assert.IsNotNull(south, "南向边界围墙必须存在");
+
+            var wall = south.GetComponent<InkWallSurface>();
+            Assert.IsNotNull(wall, "南向边界围墙必须支持涂墨");
+            Assert.IsFalse(wall.CanClimb, "南向边界围墙仍严禁攀爬");
+
+            Assert.IsTrue(wall.InitializeIfNeeded(true));
+            Assert.AreEqual(0.55f, wall.WorldBounds.size.y, 0.01f,
+                "南墙墨面只应覆盖 0.55m 可见矮墙；按 3m 碰撞体建面会让墨飘在空中");
         }
     }
 }

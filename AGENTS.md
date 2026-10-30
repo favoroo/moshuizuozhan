@@ -15,7 +15,7 @@ Unity 第三人称 3D「涂地对战」游戏（玩法参考 Splatoon 涂地模�
 | `Docs/GamePlan.md` | 设计定位、核心循环、技术决策（为什么这样做） |
 | `Docs/OptimizationPlan.md` | **多 Agent 任务看板**：领任务、标 `[-]`、完工打 `[x]`，含依赖与领域锁 |
 | `Docs/P6B-QA-Report.md` / `Docs/ProfilerReport_P6C.md` | 测试与性能验收留底 |
-| `Docs/UI-ComicStyle.md` | **UI 漫画风规范**：token、动效上限、组件 API、禁止项、自检工具 |
+| `Docs/UI-GeometricBold.md` | **UI 几何大胆风规范**（唯一风格规范）：token、字号阶梯、动效上限、组件 API、禁止项、自检工具 |
 
 > 详细操作手册（Unity CLI 全量命令、菜单/批处理、测试与环境坑、素材落地、并行冲突细则）
 > 见技能 **`p1-dev-workflow`**；生成素材见 **`media-gen`**；发版见 **`p1-release`**。
@@ -31,8 +31,8 @@ Assets/_Project/
     Weapons/     7 武器策略（Strategy）+ 弹丸/光束/滚筒/炸弹/风暴云对象池；WeaponController 为对外门面
     AI/          Bot 状态机、NavGrid 寻路、类人瞄准弹簧、战术决策
     Environment/ 竞技场几何生成、第三人称遮挡 Dither 淡出（OcclusionFader / TopDownOcclusionManager）
-    UI/          HUD 视图：计时器、比分、墨水罐、大招球、小地图、击杀卡、战况条、触屏
-    UI/Core/     潮流 UI 基元：墨滴形状、弹簧动效、粗描边、主题 SO
+    UI/          HUD 视图：计时器、比分、底部横向墨水/大招条、小地图、击杀卡、战况条、触屏
+    UI/Core/     UI 基元：直角色块、硬切动效、主题 SO、纯色精灵（UIFlatSprite）
     UI/WeaponSelect/ 战前 7 武器选择/配装抽屉（运行时装配）
     UI/Menus/    暂停、设置、无障碍震屏（运行时装配）
     Editor/      场景生成、素材导入/体检、UI/构建/性能菜单（仅编辑器）
@@ -61,7 +61,7 @@ inkwave-aah-research/  竞品（INKWAVE）逆向资料，只读参考
 | 移动/潜墨/踩墨/生命 | `Player/InkCharacterMotor`、`PlayerConfigSO`、`CombatantHealth` | 60 HP 踩墨保护底线不可破 |
 | 比赛流程/时长/结算 | `Core/MatchManager`、`GameConfigSO` | 阶段事件 `PhaseChanged` 被 UI/音频订阅 |
 | Bot 行为 | `AI/BotController`、`BotConfigSO`、`NavGrid`、`BotTactics` | 寻路按墨水加权，撤退不得朝敌 |
-| HUD/UI 样式 | `UI/HudController` + 对应 View；`UIThemeSO`、`HudGaugeStyleSO`、`UI/Core/ComicStyle` | 先读 `Docs/UI-ComicStyle.md`；运行时建 Graphic 必须补 `CanvasRenderer`，已有 Image 的物体不能 `AddComponent<UIInkShapeGraphic>`（用 `CreateChildBackground`） |
+| HUD/UI 样式 | `UI/HudController` + 对应 View；`UIThemeSO`、`HudGaugeStyleSO`、`UI/Core/ComicStyle` | 先读 `Docs/UI-GeometricBold.md`；运行时建 Graphic 必须补 `CanvasRenderer`，已有 Image 的物体不能 `AddComponent<UIInkShapeGraphic>`（用 `CreateChildBackground`） |
 | 战前选枪/配装 | `UI/WeaponSelect/WeaponSelectBootstrap`、`WeaponSelectView` | 选择存 PlayerPrefs；独立包依赖 `P1RuntimeAssets` |
 | 暂停/设置/震屏 | `UI/Menus/PauseMenuOverlay`、`Core/GameSettingsService` | 暂停用 `Time.timeScale=0`，与 Hitstop 协调 |
 | 音效/循环音 | `Core/AudioManager`、`Weapons/WeaponAudioDriver`、`Player/MovementAudioDriver` | 新增音效后必须重建运行时资源库 |
@@ -70,7 +70,7 @@ inkwave-aah-research/  竞品（INKWAVE）逆向资料，只读参考
 | 场景装配 | `Editor/ProjectScaffolder`（菜单 `P1/构建/…`） | **禁止手改 `.unity`** |
 | 图标/字体/音效/BGM | `MediaRaw/` 原稿 + `tools/bake_*.py`，落地 `Art|Audio` | 落地后必须 Refresh + 体检 |
 | UI 图标运行时查找 | `UI/Core/UIIconLibrary` + `P1RuntimeAssets.uiIcons` | 取不到必须隐藏 Image；新增图标后跑菜单 `P1/构建/11` |
-| 中文字体 | `Art/Fonts/ZCOOL*.ttf` + 菜单 `P1/画风/漫画风/0` | 项目原字体无 CJK；缺字会显示 □，菜单 0 会自检 1200+ 汉字 |
+| 中文字体 | `Art/Fonts/MiSans-*.ttf` + 菜单 `P1/画风/漫画风/0` | 项目原字体无 CJK；缺字会显示 □，菜单 0 会自检 1200+ 汉字 |
 
 ## 硬性规则
 
@@ -132,8 +132,8 @@ U="$HOME/.unity/bin/unity"
   正式发版走 `python3 .agents/skills/p1-release/release.py`（版本递增 + 双端 Release）。
 - **新增/替换 SFX、武器图标或 UI 主题后**：先运行 `P1/构建/11. 生成运行时资源库 (P1RuntimeAssets)`，
   否则独立包会静音/缺图标（编辑器内仍能靠 `AssetDatabase` 兜底，容易漏检）。
-- **改 UI 外观前先跑** `P1/画风/漫画风/2. 生成样式画廊场景`，在 `Scenes/ComicGallery.unity` 里确认
-  面板/气泡/网点/字体正常，再改真实界面；主题数值用菜单 `P1/画风/漫画风/1` 写入，不手改 `.asset`。
+- **改 UI 外观前先跑** `P1/画风/几何风/2. 生成样式画廊场景`，在 `Scenes/ComicGallery.unity` 里确认
+  面板/直角/纯色块/字体正常，再改真实界面；主题数值用菜单 `P1/画风/几何风/1` 写入，不手改 `.asset`。
 - **同一物体已有 Image 时禁止 `AddComponent<UIInkShapeGraphic>()`**：Unity 的 `Graphic` 带
   `[DisallowMultipleComponent]`，会静默返回 null（表现为"换了皮但什么都没发生"）。
 - **纯装饰性换肤代码要 try/catch + LogWarning**：装饰失败不该让整局游戏起不来，

@@ -9,14 +9,14 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 移动端触控交互系统（漫画风重绘 P10）：
-    /// 1. 左侧：半屏动态浮动摇杆（Floating Joystick），支持半屏唤醒与平滑跟踪；
-    /// 2. 右侧：漫画风人体工学扇形按键群（实心队伍色 + 6px 墨线边框 + 硬阴影压印效果）；
+    /// 移动端触控交互系统（几何大胆风 Geometric Bold P14）：
+    /// 1. 左侧：半屏动态浮动摇杆（Floating Joystick），纯色块底盘（黑底白圈 + 白底黑边把手），拖动高亮硬切；
+    /// 2. 右侧：几何纯色实心大色块按键群（实心队伍色 + 4px 墨边 + 白色超粗大字，无阴影无网点）；
     /// 3. 右半屏：滑屏转视角感应区（每帧触摸增量驱动相机 Yaw/Pitch）；
     /// 4. 图标库统一走 UIIconLibrary，缺失时安全隐藏并由文字兜底，绝无白方块；
     /// 5. 尺寸与排布默认值统一暴露为 DefaultLayout，便于运行时与测试共享；
     /// 6. 支持 DPI 物理毫米自适应与自定义键位持久化；
-    /// 7. 3/4 指方案提供左下角独立左开火键，并与 2/3/4 指预设、固定摇杆、辅助瞄准档位联动。
+    /// 7. 3/4 指方案提供左上角独立左开火键，并与 2/3/4 指预设、固定摇杆、辅助瞄准档位联动。
     /// </summary>
     [DefaultExecutionOrder(-50)]
     public class MobileTouchUI : MonoBehaviour
@@ -235,8 +235,10 @@ namespace P1.UI
 
         private void Start()
         {
+            // 只有真机/触屏模拟才切移动端 HUD 布局；桌面编辑器保持右上角仪表簇。
+            // （历史 bug：这里无条件调用，导致桌面 HUD 也被压成底部紧凑条。）
             var hud = FindAnyObjectByType<HudController>();
-            if (hud != null) hud.ApplyMobileLayout();
+            if (hud != null && ShouldShowTouchUi()) hud.ApplyMobileLayout();
 
             SubscribeMatch();
             UpdateVisibilityForCurrentPhase();
@@ -542,7 +544,7 @@ namespace P1.UI
                 specialIcon, _circleFillSprite, _circleRingSprite,
                 MobileButtonMode.Special);
 
-            // 3b. 左开火键（3/4 指方案专用，2 指方案默认隐藏；左下角锚定，便于左食指开火）
+            // 3b. 左开火键（3/4 指方案专用，2 指方案默认隐藏；左上角锚定，便于左食指开火）
             _leftFireButton = MobileActionButton.Create(
                 _safeArea, "LeftFireButton", "射击",
                 MobileLayoutPresets.ThreeFingerLeftFirePos, MobileLayoutPresets.LeftFireSize,
@@ -596,7 +598,7 @@ namespace P1.UI
             if (savedConfig == null || savedConfig.Find("LeftFire") == null)
             {
                 float deviceScale = MobileUiMetrics.ComputeScale(Screen.dpi, CanvasScaleFactor);
-                ApplyButtonScale(_leftFireButton, MobileLayoutPresets.ThreeFingerLeftFirePos, deviceScale);
+                ApplyDefaultLeftFireLayout(deviceScale);
             }
 
             _customizer.OnClosed += HandleCustomizerClosed;
@@ -639,7 +641,7 @@ namespace P1.UI
             ApplyButtonScale(_jumpButton, DefaultLayout[2].pos, scale);
             ApplyButtonScale(_bombButton, DefaultLayout[3].pos, scale);
             ApplyButtonScale(_specialButton, DefaultLayout[4].pos, scale);
-            ApplyButtonScale(_leftFireButton, MobileLayoutPresets.ThreeFingerLeftFirePos, scale);
+            ApplyDefaultLeftFireLayout(scale);
         }
 
         private static void ApplyButtonScale(MobileActionButton button, Vector2 basePos, float scale)
@@ -649,9 +651,23 @@ namespace P1.UI
             button.SetBaseScale(scale);
         }
 
+        /// <summary>
+        /// 左上角开火键的默认外观：位置取预设左上角，基准缩放比其他动作键大 1.7 倍，
+        /// 并略微透出战场。3/4 指预设应用后仍以布局配置里的数值为准。
+        /// </summary>
+        private void ApplyDefaultLeftFireLayout(float scale)
+        {
+            if (_leftFireButton == null) return;
+
+            _leftFireButton.RectTransform.anchoredPosition =
+                MobileLayoutPresets.ThreeFingerLeftFirePos * scale;
+            _leftFireButton.SetBaseScale(scale * MobileLayoutPresets.TopActionScale);
+            _leftFireButton.SetBaseAlpha(MobileLayoutPresets.LeftFireAlpha);
+        }
+
         private void CreateSettingsEntryButton(RectTransform safeArea)
         {
-            // 漫画标签块：纸面 + 4px 墨边 + 硬阴影 + 齿轮图标
+            // 几何大胆风操作入口：直角纯色块 + 4px 墨边 + 齿轮图标 + 放大粗字（无阴影）
             var go = new GameObject("SettingsLayoutBtn", typeof(RectTransform), typeof(Button));
             go.transform.SetParent(safeArea, false);
 
@@ -662,21 +678,9 @@ namespace P1.UI
             // 暂停按钮占 (24,-24) 的 88x88；键位入口贴在其右侧（间隔 12px），
             // 用 -36 让 64 高的小标签与 88 高的暂停按钮垂直中心对齐（-68）。
             rt.anchoredPosition = new Vector2(124f, -36f);
-            rt.sizeDelta = new Vector2(132f, 64f);
+            rt.sizeDelta = new Vector2(136f, 64f);
 
-            // 1. 硬阴影
-            var shadowGo = new GameObject("Shadow", typeof(RectTransform), typeof(Image));
-            shadowGo.transform.SetParent(go.transform, false);
-            var shadowRt = shadowGo.GetComponent<RectTransform>();
-            shadowRt.anchorMin = Vector2.zero;
-            shadowRt.anchorMax = Vector2.one;
-            shadowRt.anchoredPosition = new Vector2(4f, -4f);
-            shadowRt.sizeDelta = Vector2.zero;
-            var shadowImg = shadowGo.GetComponent<Image>();
-            shadowImg.color = ComicStyle.Ink;
-            shadowImg.raycastTarget = false;
-
-            // 2. 纸面底盘 + 4px 墨边
+            // 纸面底盘 + 4px 墨边（直角 SharpRect）
             var shapeGo = new GameObject("Visual", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             shapeGo.transform.SetParent(go.transform, false);
             var shapeRt = shapeGo.GetComponent<RectTransform>();
@@ -685,21 +689,31 @@ namespace P1.UI
             shapeRt.offsetMin = Vector2.zero;
             shapeRt.offsetMax = Vector2.zero;
             var shape = shapeGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.RoundedRect;
-            shape.CornerRadius = 6f;
-            shape.BorderWidth = 4f;
+            shape.Shape = UIInkShape.SharpRect;
+            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.BorderWidth = ComicStyle.Border;
             shape.BorderColor = ComicStyle.Ink;
             shape.color = ComicStyle.Paper;
             shape.GlossAlpha = 0f;
             shape.WobbleAmplitude = 0f;
+            shape.HardShadow = false;
+            shape.ShadowOffset = Vector2.zero;
+            shape.Halftone = false;
             shape.raycastTarget = true;
 
             var btn = go.GetComponent<Button>();
             btn.targetGraphic = shape;
+            var colors = btn.colors;
+            colors.normalColor = ComicStyle.Paper;
+            colors.highlightedColor = ComicStyle.PaperAlt;
+            colors.pressedColor = ComicStyle.Yellow;
+            colors.selectedColor = ComicStyle.Paper;
+            colors.fadeDuration = ComicStyle.PressDuration;
+            btn.colors = colors;
             btn.onClick.AddListener(OpenLayoutCustomizer);
             _settingsEntryButton = btn;
 
-            // 3. 齿轮图标
+            // 齿轮图标
             var gearSprite = UIIconLibrary.Get("glyph_gear");
             if (gearSprite != null)
             {
@@ -717,18 +731,18 @@ namespace P1.UI
                 iconImg.raycastTarget = false;
             }
 
-            // 4. 文字标签（字号 20，墨线色，加粗）
+            // 文字标签（字号 >= 22，移动端 >= 26，墨线色，超粗体）
             var textGo = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             textGo.transform.SetParent(shapeGo.transform, false);
             var trt = textGo.GetComponent<RectTransform>();
             trt.anchorMin = Vector2.zero;
             trt.anchorMax = Vector2.one;
-            trt.offsetMin = new Vector2(gearSprite != null ? 36f : 0f, 0f);
+            trt.offsetMin = new Vector2(gearSprite != null ? 40f : 0f, 0f);
             trt.offsetMax = Vector2.zero;
 
             var txt = textGo.GetComponent<TextMeshProUGUI>();
             txt.text = gearSprite != null ? "操作" : "⚙️ 操作";
-            txt.fontSize = 20;
+            txt.fontSize = UITypography.FontSnapped(22f);
             txt.fontStyle = FontStyles.Bold;
             txt.alignment = TextAlignmentOptions.Center;
             txt.color = ComicStyle.Ink;
@@ -909,7 +923,7 @@ namespace P1.UI
             joystick._container = containerRt;
             joystick._canvasGroup = group;
 
-            // 底盘暗黑背景
+            // 底盘纯黑纯色块（黑底白圈几何风）
             var bgGo = new GameObject("BaseBg", typeof(RectTransform), typeof(Image));
             bgGo.transform.SetParent(containerRt, false);
             var bgRt = bgGo.GetComponent<RectTransform>();
@@ -919,10 +933,10 @@ namespace P1.UI
             bgRt.offsetMax = Vector2.zero;
             var bgImg = bgGo.GetComponent<Image>();
             bgImg.sprite = fillSprite;
-            bgImg.color = new Color(0.06f, 0.08f, 0.12f, 0.50f);
+            bgImg.color = ComicStyle.Ink;
             bgImg.raycastTarget = false;
 
-            // 漫画风 6px 墨线外环
+            // 几何风 4px 纸白实线外环（黑底白圈）
             var ringGo = new GameObject("BaseRing", typeof(RectTransform), typeof(Image));
             ringGo.transform.SetParent(containerRt, false);
             var ringRt = ringGo.GetComponent<RectTransform>();
@@ -932,10 +946,10 @@ namespace P1.UI
             ringRt.offsetMax = Vector2.zero;
             var ringImg = ringGo.GetComponent<Image>();
             ringImg.sprite = ringSprite;
-            ringImg.color = ComicStyle.Ink;
+            ringImg.color = ComicStyle.Paper;
             ringImg.raycastTarget = false;
 
-            // 中心把手（Knob）：纸面底 + 6px 墨环
+            // 中心把手（Knob）：白底黑边（纸白底 + 墨黑环）
             var knobGo = new GameObject("Knob", typeof(RectTransform), typeof(Image));
             knobGo.transform.SetParent(containerRt, false);
             var knobRt = knobGo.GetComponent<RectTransform>();
@@ -950,7 +964,7 @@ namespace P1.UI
             knobImg.color = ComicStyle.Paper;
             knobImg.raycastTarget = false;
 
-            // 把手 6px 墨线环
+            // 把手 4px 墨黑实线环（白底黑边）
             var knobRingGo = new GameObject("KnobRing", typeof(RectTransform), typeof(Image));
             knobRingGo.transform.SetParent(knobRt, false);
             var knobRingRt = knobRingGo.GetComponent<RectTransform>();
@@ -1004,10 +1018,16 @@ namespace P1.UI
             }
 
             _activePointerId = eventData.pointerId;
-            if (_knob != null) _knob.anchoredPosition = Vector2.zero;
+            if (_knob != null)
+            {
+                _knob.anchoredPosition = Vector2.zero;
+                var kImg = _knob.GetComponent<Image>();
+                if (kImg != null) kImg.color = ComicStyle.Yellow;
+            }
             Value = Vector2.zero;
 
-            if (_canvasGroup != null) _canvasGroup.alpha = Mathf.Clamp01(_baseAlpha + 0.4f);
+            // 几何大胆风：硬切高亮（满不透明度 1.0）
+            if (_canvasGroup != null) _canvasGroup.alpha = 1.0f;
         }
 
         public void OnDrag(PointerEventData eventData)
@@ -1045,7 +1065,12 @@ namespace P1.UI
             _activePointerId = -999;
             Value = Vector2.zero;
 
-            if (_knob != null) _knob.anchoredPosition = Vector2.zero;
+            if (_knob != null)
+            {
+                _knob.anchoredPosition = Vector2.zero;
+                var kImg = _knob.GetComponent<Image>();
+                if (kImg != null) kImg.color = ComicStyle.Paper;
+            }
             if (_container != null) _container.anchoredPosition = _defaultPos;
             if (_canvasGroup != null) _canvasGroup.alpha = _baseAlpha;
         }
@@ -1178,12 +1203,13 @@ namespace P1.UI
     }
 
     /// <summary>
-    /// 移动端漫画风触控按钮（Comic P10）：
-    /// 1. 实心语义色填充 + 6px 墨线粗边框（#1A1A1A）+ 硬阴影压印效果；
-    /// 2. 按下时按钮位移并收缩阴影（压印感），松开瞬时复原（<=0.06s），禁止渐变与回弹；
-    /// 3. 图标安全查找，缺失时隐藏并由中文标签兜底，绝无白块；
-    /// 4. 支持像素级圆形命中测试，防止误触透明角落；
-    /// 5. 支持开火按住、滑拽瞄准、手雷短按投掷/长按瞄准、大招就绪状态。
+    /// 移动端几何大胆风触控按钮（Geometric Bold P14）：
+    /// 1. 实心大色块填充 + 4px 墨黑实线粗边框（#141414）+ 白色超粗大标签，无阴影无网点；
+    /// 2. 按下时 scale 0.96 + 纯墨底颜色硬切，松开 50ms 内复原，禁止软 alpha 与回弹；
+    /// 3. 标签字号走 UITypography.FontSnapped(max(24, size*0.20))，物理极佳可读；
+    /// 4. 图标安全查找，缺失时隐藏并由中文标签兜底，绝无白块；
+    /// 5. 支持像素级圆形命中测试，防止误触透明角落；
+    /// 6. 支持开火按住、滑拽瞄准、手雷短按投掷/长按瞄准、大招就绪状态。
     /// </summary>
     public class MobileActionButton : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
     {
@@ -1201,7 +1227,7 @@ namespace P1.UI
         private CanvasGroup _canvasGroup;
 
         private Color _baseColor;
-        private Vector2 _shadowOffset = new Vector2(5f, -5f);
+        private Vector2 _shadowOffset = Vector2.zero;
         private bool _isHeld;
         private bool _tapped;
         private float _pointerDownTime;
@@ -1303,20 +1329,21 @@ namespace P1.UI
 
             var group = go.GetComponent<CanvasGroup>();
 
-            // 1. 硬阴影（墨色实心，无模糊）
+            // 1. 阴影占位（几何大胆风全局禁用阴影，设为 disabled 避免画出偏移阴影，同时保留对象避免外部判空）
             var shadowGo = new GameObject("Shadow", typeof(RectTransform), typeof(Image));
             shadowGo.transform.SetParent(go.transform, false);
             var shadowRt = shadowGo.GetComponent<RectTransform>();
             shadowRt.anchorMin = Vector2.zero;
             shadowRt.anchorMax = Vector2.one;
-            shadowRt.anchoredPosition = new Vector2(5f, -5f);
+            shadowRt.anchoredPosition = Vector2.zero;
             shadowRt.sizeDelta = Vector2.zero;
             var shadowImg = shadowGo.GetComponent<Image>();
             shadowImg.sprite = fillSprite;
-            shadowImg.color = ComicStyle.Ink;
+            shadowImg.color = Color.clear;
+            shadowImg.enabled = false;
             shadowImg.raycastTarget = false;
 
-            // 2. 视觉内容容器（按下时向右下轻微偏移制造压印感）
+            // 2. 视觉内容容器
             var contentGo = new GameObject("Content", typeof(RectTransform));
             contentGo.transform.SetParent(go.transform, false);
             var contentRt = contentGo.GetComponent<RectTransform>();
@@ -1325,7 +1352,7 @@ namespace P1.UI
             contentRt.offsetMin = Vector2.zero;
             contentRt.offsetMax = Vector2.zero;
 
-            // 3. 底盘背景（实心队伍/语义色填充，带像素级透明穿透）
+            // 3. 底盘背景（实心大色块填充，带像素级透明穿透）
             var bgGo = new GameObject("Bg", typeof(RectTransform), typeof(Image));
             bgGo.transform.SetParent(contentRt, false);
             var bgRt = bgGo.GetComponent<RectTransform>();
@@ -1339,7 +1366,7 @@ namespace P1.UI
             bgImg.raycastTarget = true;
             bgImg.alphaHitTestMinimumThreshold = 0.1f;
 
-            // 4. 6px 墨线粗边框（#1A1A1A）
+            // 4. 4px 墨黑实线粗边框（#141414）
             var ringGo = new GameObject("InkBorder", typeof(RectTransform), typeof(Image));
             ringGo.transform.SetParent(contentRt, false);
             var ringRt = ringGo.GetComponent<RectTransform>();
@@ -1371,22 +1398,24 @@ namespace P1.UI
                 iconImg.raycastTarget = false;
             }
 
-            // 6. 中文文字标题（字号 >= 20，粗体高对比度）
+            // 6. 中文超粗大标签（字号走 UITypography: max(24, size*0.20)，纯白高对比度）
             var textGo = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             textGo.transform.SetParent(contentRt, false);
             var textRt = textGo.GetComponent<RectTransform>();
-            textRt.anchorMin = new Vector2(0.05f, 0.06f);
-            textRt.anchorMax = new Vector2(0.95f, 0.38f);
+            textRt.anchorMin = new Vector2(0.04f, 0.06f);
+            textRt.anchorMax = new Vector2(0.96f, 0.38f);
             textRt.offsetMin = Vector2.zero;
             textRt.offsetMax = Vector2.zero;
 
             var txt = textGo.GetComponent<TextMeshProUGUI>();
             txt.text = label;
-            txt.fontSize = Mathf.Max(20f, size * 0.18f);
+            txt.fontSize = MobileUiMetrics.ComputeButtonLabelFontSize(size);
             txt.fontStyle = FontStyles.Bold;
             txt.alignment = TextAlignmentOptions.Center;
             txt.color = ComicStyle.Paper;
             txt.raycastTarget = false;
+            txt.textWrappingMode = TextWrappingModes.NoWrap;
+            txt.overflowMode = TextOverflowModes.Overflow;
 
             var theme = UIThemeSO.Resolve(null);
             var font = theme.ResolveFont(false, label);
@@ -1426,11 +1455,11 @@ namespace P1.UI
             HasDragAim = false;
             DragAimValue = Vector2.zero;
 
-            // 压印效果：内容向右下压入阴影，阴影暂时收起（缩放基于自定义基准）
-            if (_contentContainer != null) _contentContainer.anchoredPosition = _shadowOffset;
+            // 几何大胆风硬切反馈：scale 乘 0.96（测试硬编码断言），纯黑底颜色硬切
+            if (_contentContainer != null) _contentContainer.anchoredPosition = Vector2.zero;
             if (_shadowImage != null) _shadowImage.enabled = false;
             _rectTransform.localScale = Vector3.one * (_baseScale * 0.96f);
-            _bgImage.color = ComicStyle.Darken(_baseColor, 0.12f);
+            _bgImage.color = ComicStyle.Ink;
 
             if (_mode == MobileButtonMode.Tap || _mode == MobileButtonMode.Special)
             {
@@ -1471,11 +1500,11 @@ namespace P1.UI
             _isHeld = false;
             _lookDelta = Vector2.zero;
 
-            // 压印恢复（<=0.06s，禁止回弹）
+            // 硬切复原（<=50ms 内立即恢复，禁止回弹）
             if (_contentContainer != null) _contentContainer.anchoredPosition = Vector2.zero;
-            if (_shadowImage != null) _shadowImage.enabled = true;
+            if (_shadowImage != null) _shadowImage.enabled = false;
             _rectTransform.localScale = Vector3.one * _baseScale;
-            _bgImage.color = _baseColor;
+            _bgImage.color = GetDefaultBgColor();
 
             if (_mode == MobileButtonMode.HoldWithAimDrag)
             {
@@ -1497,6 +1526,15 @@ namespace P1.UI
             }
         }
 
+        private Color GetDefaultBgColor()
+        {
+            if (_mode == MobileButtonMode.Special && _hasSpecialState && !_lastReadyState)
+            {
+                return new Color(0.24f, 0.24f, 0.26f, 0.95f);
+            }
+            return _baseColor;
+        }
+
         public void ResetState()
         {
             _isHeld = false;
@@ -1509,9 +1547,9 @@ namespace P1.UI
             _lastChargePercentInt = -1;
 
             if (_contentContainer != null) _contentContainer.anchoredPosition = Vector2.zero;
-            if (_shadowImage != null) _shadowImage.enabled = true;
+            if (_shadowImage != null) _shadowImage.enabled = false;
             if (_rectTransform != null) _rectTransform.localScale = Vector3.one * _baseScale;
-            if (_bgImage != null) _bgImage.color = _baseColor;
+            if (_bgImage != null) _bgImage.color = GetDefaultBgColor();
             if (_canvasGroup != null) _canvasGroup.alpha = _baseAlpha * GetSpecialStateAlpha();
         }
 
@@ -1529,7 +1567,7 @@ namespace P1.UI
             if (isReady)
             {
                 _canvasGroup.alpha = _baseAlpha;
-                _bgImage.color = _baseColor;
+                _bgImage.color = _isHeld ? ComicStyle.Ink : _baseColor;
                 _ringImage.color = ComicStyle.Ink;
 
                 float breath = 1f + 0.04f * Mathf.Sin(Time.unscaledTime * 5.5f);
@@ -1542,8 +1580,8 @@ namespace P1.UI
             else
             {
                 _canvasGroup.alpha = _baseAlpha * 0.55f;
-                _bgImage.color = new Color(0.38f, 0.36f, 0.32f, 0.90f);
-                _ringImage.color = new Color(0.2f, 0.2f, 0.2f, 0.7f);
+                _bgImage.color = _isHeld ? ComicStyle.Ink : new Color(0.24f, 0.24f, 0.26f, 0.95f);
+                _ringImage.color = ComicStyle.Ink;
                 if (!_isHeld) _rectTransform.localScale = Vector3.one * _baseScale;
                 if (_labelText != null && (!_hasSpecialState || _lastReadyState || _lastChargePercentInt != chargePct))
                 {

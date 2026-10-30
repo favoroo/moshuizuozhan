@@ -77,6 +77,10 @@ Shader "P1/InkWall"
                 half4 _ShadowTint;
             CBUFFER_END
 
+            // 全局胶质内发光（InkSurfaceController 每帧 SetGlobalFloat），与地面/顶面墨共用，
+            // 不放进 UnityPerMaterial，避免不同材质各写一份导致墙地墨色再次分叉。
+            float _GlobalInkGlow;
+
             Varyings vert(Attributes input)
             {
                 Varyings output;
@@ -124,11 +128,19 @@ Shader "P1/InkWall"
                 float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
                 Light mainLight = GetMainLight(shadowCoord);
                 float3 N = normalize(input.normalWS);
-                half band = P1ToonBand(dot(N, normalize(mainLight.direction)), _ShadeThreshold, _ShadeSoftness);
-                half shadowTerm = P1ToonShadowTerm(mainLight.shadowAttenuation, 0.55, _ShadeSoftness);
-                half ndotl = lerp(0.62, 1.0, band * shadowTerm);
-                half3 toonTint = lerp(_ShadowTint.rgb, half3(1,1,1), band);
-                half3 inkColor = inkSample.rgb * _Tint.rgb * ndotl * toonTint;
+                float3 L = normalize(mainLight.direction);
+                half band = P1ToonBand(dot(N, L), _ShadeThreshold, _ShadeSoftness);
+                half shadowTerm = P1ToonShadowTerm(mainLight.shadowAttenuation, 0.72, _ShadeSoftness);
+
+                // 与地面墨（InkGround）和顶面墨（ApplyTopInkOverlay）同一套"墨色明暗"：
+                // 只把队伍色压到 0.72~1.0，绝不乘暗色阴影 tint、也不按朝向重压。
+                // 旧写法 toonTint = lerp(_ShadowTint, 1, band) 会把橙墨乘成纯黑/深褐，
+                // 于是同一片墨"地面鲜艳、墙面纯黑"，玩家看到的就是颜色不统一。
+                half diffuseLight = lerp(0.72, 1.0, band * shadowTerm);
+                half3 inkColor = inkSample.rgb * _Tint.rgb * diffuseLight;
+
+                // 胶质内发光：与地面 _InkGlow / 顶面 _GlobalInkGlow 同项，保证背光墙面的墨仍鲜艳
+                inkColor += inkColor * _GlobalInkGlow * 0.85;
 
                 // 薄缘提亮：墨迹内侧一圈微微反光，边缘才有厚度感
                 float rim = smoothstep(0.52, 0.9, inkMask) * (1.0 - smoothstep(0.9, 0.995, inkMask));

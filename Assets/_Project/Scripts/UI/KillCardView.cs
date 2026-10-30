@@ -65,21 +65,19 @@ namespace P1.UI
                 bgGo.transform.SetParent(transform, false);
                 Stretch((RectTransform)bgGo.transform);
                 cardBgGraphic = bgGo.GetComponent<UIInkShapeGraphic>();
-                cardBgGraphic.Shape = UIInkShape.SpeechBubble;
-                cardBgGraphic.CornerRadius = ComicStyle.CornerBubble;
-                cardBgGraphic.SpeechTail = true;
-                cardBgGraphic.TailSize = new Vector2(16f, 16f);
-                cardBgGraphic.TailAngle = 0f; // 尖角朝向右侧边缘
+                cardBgGraphic.Shape = UIInkShape.SharpRect;
+                cardBgGraphic.CornerRadius = ComicStyle.CornerSharp;
+                cardBgGraphic.SpeechTail = false;
                 cardBgGraphic.BorderWidth = ComicStyle.Border;
                 cardBgGraphic.BorderColor = ComicStyle.Ink;
-                cardBgGraphic.HardShadow = true;
-                cardBgGraphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+                cardBgGraphic.HardShadow = false;
+                cardBgGraphic.ShadowOffset = Vector2.zero;
                 cardBgGraphic.ShadowColor = ComicStyle.Ink;
                 cardBgGraphic.Halftone = false;
                 cardBgGraphic.GlossAlpha = 0f;
                 cardBgGraphic.DrawGloss = false;
                 cardBgGraphic.InnerRimAlpha = 0f;
-                cardBgGraphic.color = ComicStyle.Paper;
+                cardBgGraphic.color = ComicStyle.Ink;
                 cardBgGraphic.raycastTarget = false;
             }
 
@@ -91,8 +89,8 @@ namespace P1.UI
                 weaponIconCircle.anchorMin = new Vector2(0f, 0.5f);
                 weaponIconCircle.anchorMax = new Vector2(0f, 0.5f);
                 weaponIconCircle.pivot = new Vector2(0.5f, 0.5f);
-                weaponIconCircle.anchoredPosition = new Vector2(28f, 0f);
-                weaponIconCircle.sizeDelta = new Vector2(38f, 38f);
+                weaponIconCircle.anchoredPosition = new Vector2(32f, 0f);
+                weaponIconCircle.sizeDelta = new Vector2(44f, 44f);
 
                 weaponCircleBg = circleGo.GetComponent<Image>();
                 weaponCircleBg.sprite = GetCircleSprite();
@@ -115,14 +113,14 @@ namespace P1.UI
                 kRect.anchorMin = new Vector2(0f, 0.5f);
                 kRect.anchorMax = new Vector2(0f, 0.5f);
                 kRect.pivot = new Vector2(0f, 0.5f);
-                kRect.anchoredPosition = new Vector2(56f, 10f);
-                kRect.sizeDelta = new Vector2(170f, 24f);
+                kRect.anchoredPosition = new Vector2(66f, 13f);
+                kRect.sizeDelta = new Vector2(260f, 28f);
 
                 killerText = killerGo.GetComponent<TextMeshProUGUI>();
-                killerText.fontSize = 17f;
+                killerText.fontSize = UITypography.FontSnapped(20f);
                 killerText.fontStyle = FontStyles.Bold;
                 killerText.alignment = TextAlignmentOptions.Left;
-                killerText.color = ComicStyle.Ink;
+                killerText.color = ComicStyle.Paper;
                 killerText.raycastTarget = false;
             }
 
@@ -134,14 +132,14 @@ namespace P1.UI
                 tRect.anchorMin = new Vector2(0f, 0.5f);
                 tRect.anchorMax = new Vector2(0f, 0.5f);
                 tRect.pivot = new Vector2(0f, 0.5f);
-                tRect.anchoredPosition = new Vector2(56f, -12f);
-                tRect.sizeDelta = new Vector2(80f, 20f);
+                tRect.anchoredPosition = new Vector2(66f, -14f);
+                tRect.sizeDelta = new Vector2(100f, 26f);
 
                 actionTagText = tagGo.GetComponent<TextMeshProUGUI>();
-                actionTagText.fontSize = 16f;
+                actionTagText.fontSize = UITypography.FontSnapped(20f);
                 actionTagText.fontStyle = FontStyles.Bold;
                 actionTagText.alignment = TextAlignmentOptions.Left;
-                actionTagText.color = ComicStyle.Ink;
+                actionTagText.color = ComicStyle.Yellow;
                 actionTagText.text = "SPLAT";
                 actionTagText.raycastTarget = false;
             }
@@ -154,14 +152,14 @@ namespace P1.UI
                 vRect.anchorMin = new Vector2(0f, 0.5f);
                 vRect.anchorMax = new Vector2(0f, 0.5f);
                 vRect.pivot = new Vector2(0f, 0.5f);
-                vRect.anchoredPosition = new Vector2(138f, -12f);
-                vRect.sizeDelta = new Vector2(150f, 20f);
+                vRect.anchoredPosition = new Vector2(170f, -14f);
+                vRect.sizeDelta = new Vector2(160f, 26f);
 
                 victimText = victimGo.GetComponent<TextMeshProUGUI>();
-                victimText.fontSize = 16f;
+                victimText.fontSize = UITypography.FontSnapped(20f);
                 victimText.fontStyle = FontStyles.Bold;
                 victimText.alignment = TextAlignmentOptions.Left;
-                victimText.color = ComicStyle.Ink;
+                victimText.color = ComicStyle.Paper;
                 victimText.raycastTarget = false;
             }
 
@@ -182,27 +180,34 @@ namespace P1.UI
             Color killerCol = resolved.GetTeamColor(ev.KillerTeam);
             Color victimCol = resolved.GetTeamColor(ev.VictimTeam);
 
-            // 1. 对话气泡背景与漫画红/黄强调（粗墨边 6px + 硬阴影）
+            // 1. 直角黑底白字块（几何风：SharpRect，无阴影，无气泡尾）
             if (cardBgGraphic != null)
             {
-                cardBgGraphic.BorderColor = ComicStyle.Ink;
+                cardBgGraphic.Shape = UIInkShape.SharpRect;
+                cardBgGraphic.CornerRadius = ComicStyle.CornerSharp;
+                cardBgGraphic.SpeechTail = false;
+                cardBgGraphic.HardShadow = false;
+                cardBgGraphic.ShadowOffset = Vector2.zero;
                 cardBgGraphic.BorderWidth = ComicStyle.Border;
 
-                if (ev.IsLocalPlayerKiller)
-                {
-                    cardBgGraphic.color = ComicStyle.Yellow;
-                }
-                else if (ev.IsLocalPlayerVictim)
+                if (ev.IsLocalPlayerVictim)
                 {
                     cardBgGraphic.color = ComicStyle.Red;
+                    cardBgGraphic.BorderColor = ComicStyle.Ink;
+                }
+                else if (ev.IsLocalPlayerKiller)
+                {
+                    cardBgGraphic.color = ComicStyle.Ink;
+                    cardBgGraphic.BorderColor = ComicStyle.Yellow;
                 }
                 else
                 {
-                    cardBgGraphic.color = ComicStyle.Paper;
+                    cardBgGraphic.color = ComicStyle.Ink;
+                    cardBgGraphic.BorderColor = ComicStyle.Ink;
                 }
             }
 
-            // 2. 武器圆形底与图标
+            // 2. 武器纯色圆底与纯白图标
             if (weaponCircleBg != null)
             {
                 weaponCircleBg.color = killerCol;
@@ -212,14 +217,18 @@ namespace P1.UI
             {
                 weaponIconImage.sprite = weaponIcon;
                 weaponIconImage.enabled = weaponIcon != null;
+                weaponIconImage.color = Color.white;
             }
 
-            // 3. 文字（必须 >= 16px，使用字体解析）
+            // 3. 文字（字号 ≥20，移动端走 UITypography ≥24）
+            float fontSize = UITypography.FontSnapped(20f);
+
             if (killerText != null)
             {
                 killerText.font = resolved.ResolveFont(true, ev.KillerName);
                 killerText.text = ev.KillerName;
-                killerText.color = ev.IsLocalPlayerKiller ? ComicStyle.Ink : (ev.IsLocalPlayerVictim ? ComicStyle.Paper : killerCol);
+                killerText.fontSize = fontSize;
+                killerText.color = ev.IsLocalPlayerKiller ? ComicStyle.Yellow : ComicStyle.Paper;
             }
 
             if (actionTagText != null)
@@ -227,14 +236,16 @@ namespace P1.UI
                 string tag = ev.IsLocalPlayerKiller ? "CRUSHED!" : "SPLAT!";
                 actionTagText.font = resolved.ResolveFont(true, tag);
                 actionTagText.text = tag;
-                actionTagText.color = ev.IsLocalPlayerVictim ? ComicStyle.Yellow : ComicStyle.Ink;
+                actionTagText.fontSize = fontSize;
+                actionTagText.color = ev.IsLocalPlayerVictim ? ComicStyle.Yellow : ComicStyle.Yellow;
             }
 
             if (victimText != null)
             {
                 victimText.font = resolved.ResolveFont(true, ev.VictimName);
                 victimText.text = ev.VictimName;
-                victimText.color = ev.IsLocalPlayerKiller ? ComicStyle.Ink : (ev.IsLocalPlayerVictim ? ComicStyle.Paper : victimCol);
+                victimText.fontSize = fontSize;
+                victimText.color = ComicStyle.Paper;
             }
 
             gameObject.SetActive(true);
@@ -298,7 +309,7 @@ namespace P1.UI
                 for (int x = 0; x < size; x++)
                 {
                     float d = Vector2.Distance(new Vector2(x, y), c);
-                    float a = Mathf.Clamp01((r - d) * 1.5f);
+                    float a = d <= r ? 1f : 0f;
                     cols[y * size + x] = new Color(1f, 1f, 1f, a);
                 }
             }

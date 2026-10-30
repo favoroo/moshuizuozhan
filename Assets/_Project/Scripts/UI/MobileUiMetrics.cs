@@ -106,6 +106,16 @@ namespace P1.UI
         }
 
         /// <summary>
+        /// 几何大胆风：计算动作按键在移动端上的最小可读标签字号（保证物理可读性）。
+        /// 基准为 max(24, buttonSize * 0.20)，并走 UITypography 统一放大。
+        /// </summary>
+        public static float ComputeButtonLabelFontSize(float buttonDiameter)
+        {
+            float baseSize = Mathf.Max(24f, buttonDiameter * 0.20f);
+            return UITypography.FontSnapped(baseSize);
+        }
+
+        /// <summary>
         /// 应用 DPI 缩放到移动端触控交互层（仅影响触控层，绝不触碰 HUD）。
         /// </summary>
         public static float ApplyToTouchUI(MobileTouchUI touchUI)

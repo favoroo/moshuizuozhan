@@ -47,12 +47,25 @@ namespace P1.UI.WeaponSelect
         {
             if (Instance != null) return;
 
-            MatchManager match = Object.FindAnyObjectByType<MatchManager>();
-            if (match == null) return;
-
+            // 不要求此刻已经能 Find 到 MatchManager：RuntimeInitializeOnLoadMethod(AfterSceneLoad)
+            // 与场景对象的就绪顺序并不保证，实测有进入 Play 后找不到比赛管理器、
+            // 于是整个武器栏 + 「武器整备」入口都不出现的空窗。先建主机，Update 里再重试。
             var hostGo = new GameObject("[WeaponSelectBootstrap]");
             DontDestroyOnLoad(hostGo);
             hostGo.AddComponent<WeaponSelectBootstrap>();
+        }
+
+        private float _retryTimer;
+
+        private void Update()
+        {
+            // 比赛管理器晚于本组件就绪时，每 0.5s 重试一次，直到接管为止。
+            if (_currentMatch != null) return;
+
+            _retryTimer += Time.unscaledDeltaTime;
+            if (_retryTimer < 0.5f) return;
+            _retryTimer = 0f;
+            SetupSystem();
         }
 
         private void Awake()

@@ -6,15 +6,20 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 比赛全流程界面控制器（P4-D 重构升级）：
-    /// 1. 赛前 Ready 界面（潮流圆角大按钮 + 键盘一键开赛）；
-    /// 2. 开局 3-2-1 弹性大字与 READY / GO 墨水炸开全屏横幅（MatchBannerView）；
-    /// 3. 1:00 决战横幅与 FINISH 终局定格横幅；
-    /// 4. 结算界面（Battle Judgement）：
-    ///    - 双方墨水柱爆发对决（圆角对撞槽）；
-    ///    - 百分比数字 Cubic-easeout 滚动上升；
-    ///    - VICTORY / DEFEAT 胜负徽章弹性弹入；
-    ///    - 一键再来一局街头果冻按钮。
+    /// 比赛全流程界面控制器（P14 几何大胆风 Geometric Bold 重构）：
+    /// 1. 赛前 Ready 界面：
+    ///    - 非对称几何构图：左侧 Hero 级大标题 + 拉丁副标题 (uppercase tracking-tight)；
+    ///    - 右侧/下方错位纯色块（黑底白字 / 红底黑字 / 白底墨边）；
+    ///    - 直角墨底白字超大开赛按钮（移动端自适应放大）；
+    ///    - 四角 15~45° 旋转的几何装饰（直角方块、正圆、三角，纯色无网点无阴影）；
+    /// 2. 流程横幅系统（MatchBannerView）：3-2-1 倒计时、READY/GO、1:00 决战与 FINISH 终局定格；
+    /// 3. 结算界面（ResultPanel · 大数字即设计）：
+    ///    - 顶部 Hero 级 VICTORY / DEFEAT 判定徽章（移动端 ≥120）；
+    ///    - 双方涂地覆盖率超大百分比数字（桌面 ≥72，移动端 ≥96）分列左右队伍纯色大块；
+    ///    - 直角纯色粗墨水柱；
+    ///    - 关键 CTA「再来一局」红底白字直角大按钮 + 次级「返回」白底墨字直角按钮；
+    /// 4. 彻底杜绝网点、渐变、动作线、气泡尾巴、硬阴影、有机 wobble 与弹簧过度回弹；
+    /// 5. 所有字号严格走 UITypography，移动端 ×1.28 保证移动端字号 ≥ 桌面。
     /// 保持所有原有 public 签名与 BindReferences 向后兼容。
     /// </summary>
     public class MatchFlowUI : MonoBehaviour
@@ -51,7 +56,7 @@ namespace P1.UI
         [SerializeField] private Text verdictText;
         [SerializeField] private Button restartButton;
 
-        [Header("结算精致化徽章与效果（P4-D）")]
+        [Header("结算精致化徽章与效果（P14 几何风）")]
         [SerializeField] private RectTransform victoryBadgeRoot;
         [SerializeField] private UIInkShapeGraphic victoryBadgeBg;
         [SerializeField] private TMP_Text victoryBadgeText;
@@ -114,6 +119,7 @@ namespace P1.UI
 
         private void Awake()
         {
+            EnsureTheme();
             EnsureFullscreenPaperUnderlay();
             EnsureSafeAreaRoot();
             EnsureBannerView();
@@ -198,253 +204,377 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 主菜单（P11 重做）：一张不透明的漫画封面，完全遮住 3D 场景，点「开始比赛」才进对局。
-        /// 结构：纸面网点底 + 队伍色墨渍 + 放射动作线 + 倾斜标题贴纸（墨水大作战）
-        ///       + 大号黄色开赛按钮 + 底部次级按钮行 + 右下角版本号。
-        /// 场景里的旧 Text/Image 由 <c>ProjectScaffolder</c> 烘焙，这里只做运行时「换皮」，
-        /// 不改场景文件，也不破坏 ReadyPanel 原有的遮罩与按钮引用。
+        /// 主菜单（P14 几何大胆风 · P14-I 移动端重排）：
+        /// 1. 内容全部放进 SafeArea（刘海/手势条不吃字），背景装饰留在全屏层；
+        /// 2. 左上：模式标签；左侧：Hero 大标题 + 红色拉丁副标题 + 规格行；
+        /// 3. 右下：黄色超大开赛按钮（移动端 820×200，拇指区）；上方右对齐两个次级按钮；
+        /// 4. 左下预留「武器整备」整备卡位置（由 WeaponSelectView 绘制），版本号落在它上方；
+        /// 5. 纯色几何装饰：左上 45° 墨方块、右缘红色大圆，无阴影无渐变。
         /// </summary>
         private void EnsureReadyVisuals()
         {
             if (readyPanel == null) return;
-            if (readyPanel.transform.Find("ComicMenuRoot") != null) return;
+            EnsureTheme();
+            if (readyPanel.transform.Find("GeometricMenuRoot") != null) return;
 
             UIThemeSO resolved = UIThemeSO.Resolve(uiTheme);
+            bool mobile = UITypography.IsMobileLike;
+            HomeMenuMetrics m = MenuLayoutMath.Home(mobile);
 
-            // 移动端整体放大一档：参考分辨率 1920×1080 在 19.5:9 手机上物理尺寸偏小。
-            // 判定只看触摸输入（真机或编辑器模拟），不再用 aspect>=1.9 猜——
-            // 21:9 带鱼屏桌面曾被误判成手机，16:10 平板反而吃不到放大。
-            bool mobile = Application.isMobilePlatform || MobileTouchUI.IsTouchSimulationActive;
-
-            float logoY = mobile ? 150f : 170f;
-            float chipY = mobile ? 170f : 185f;
-            float stickerW = mobile ? 1100f : 920f;
-            float stickerH = mobile ? 300f : 250f;
-            float titleSize = mobile ? 158f : 132f;
-            float latinY = mobile ? -180f : -155f;
-            float latinSize = mobile ? 32f : 28f;
-            Vector2 startPos = new Vector2(0f, mobile ? -160f : -150f);
-            Vector2 startSize = mobile ? new Vector2(600f, 170f) : new Vector2(560f, 140f);
-            float startFont = mobile ? 66f : 58f;
-            float hintY = mobile ? -275f : -245f;
-            float hintFont = mobile ? 28f : 24f;
-            float secX = mobile ? 150f : 130f;
-            float secY = mobile ? -370f : -330f;
-            Vector2 secSize = mobile ? new Vector2(260f, 80f) : new Vector2(224f, 68f);
-            float secFont = mobile ? 28f : 24f;
-
-            // 1) 全屏底：不透明纸面（主菜单不能透出 3D 场景）
+            // 1) 全屏底：纯白不透明纸面（禁止透出 3D 场景）
             var overlay = readyPanel.GetComponent<Image>();
             if (overlay != null)
             {
-                overlay.color = resolved.paperColor;
+                overlay.color = ComicStyle.Paper;
             }
 
-            // 背景容器：网点 / 墨渍 / Logo 都压在按钮层之下
-            var menuRootGo = new GameObject("ComicMenuRoot", typeof(RectTransform));
+            // 2) 背景几何装饰根容器（全屏，在内容层之下）
+            var menuRootGo = new GameObject("GeometricMenuRoot", typeof(RectTransform));
             menuRootGo.transform.SetParent(readyPanel.transform, false);
             var menuRoot = (RectTransform)menuRootGo.transform;
-            menuRoot.anchorMin = Vector2.zero;
-            menuRoot.anchorMax = Vector2.one;
-            menuRoot.offsetMin = Vector2.zero;
-            menuRoot.offsetMax = Vector2.zero;
+            Stretch(menuRoot);
             menuRoot.SetAsFirstSibling();
 
-            // 1.1) 半调网点印刷底
-            var halfGo = new GameObject("ComicHalftone",
-                typeof(RectTransform), typeof(CanvasRenderer), typeof(ComicHalftoneGraphic));
-            halfGo.transform.SetParent(menuRoot, false);
-            Stretch(halfGo.GetComponent<RectTransform>());
-            var halftone = halfGo.GetComponent<ComicHalftoneGraphic>();
-            halftone.color = ComicStyle.Ink;
-            halftone.Alpha = 0.07f;
-            halftone.Spacing = 14f;
-            halftone.raycastTarget = false;
+            // 左上 45° 墨方块（一半露出屏幕角，作为构图锚点）
+            CreateGeometricSquare(menuRoot, "DecoSquareTL", new Vector2(0f, 1f), new Vector2(0.5f, 0.5f),
+                new Vector2(-m.DecoSquare * 0.12f, m.DecoSquare * 0.12f),
+                new Vector2(m.DecoSquare, m.DecoSquare), 45f, ComicStyle.Ink);
 
-            // 1.2) 队伍色墨渍：右上橙、左下蓝，给纯纸面一点品牌色
-            CreateDecorBlob(menuRoot, "BlobOrange", resolved.GetTeamColor(Team.TeamA),
-                new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-50f, -70f), new Vector2(520f, 420f));
-            CreateDecorBlob(menuRoot, "BlobBlue", resolved.GetTeamColor(Team.TeamB),
-                new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(60f, 80f), new Vector2(560f, 460f));
+            // 右缘大圆（红色强调，露出约一半）
+            CreateGeometricCircle(menuRoot, "DecoCircleR", new Vector2(1f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(m.DecoCircle * 0.26f, 0f), new Vector2(m.DecoCircle, m.DecoCircle), ComicStyle.Red);
 
-            // 2) Logo 群组：动作线 + 顶部标签 + 倾斜标题贴纸 + 拉丁副题
-            var logoGo = new GameObject("LogoRoot", typeof(RectTransform));
-            logoGo.transform.SetParent(menuRoot, false);
-            var logoRect = (RectTransform)logoGo.transform;
-            logoRect.anchorMin = new Vector2(0.5f, 0.5f);
-            logoRect.anchorMax = new Vector2(0.5f, 0.5f);
-            logoRect.anchoredPosition = new Vector2(0f, logoY);
-            logoRect.sizeDelta = new Vector2(1500f, 700f);
+            // 3) 安全区内容容器（刘海屏左右不被切）
+            var safeGo = new GameObject("MenuSafeArea", typeof(RectTransform), typeof(SafeAreaFitter));
+            safeGo.transform.SetParent(readyPanel.transform, false);
+            var safeRect = (RectTransform)safeGo.transform;
+            Stretch(safeRect);
 
-            // 2.1) 放射动作线（漫画速度线，压在贴纸后面）
-            var linesGo = new GameObject("ActionLines",
-                typeof(RectTransform), typeof(CanvasRenderer), typeof(ComicActionLinesGraphic));
-            linesGo.transform.SetParent(logoRect, false);
-            Stretch(linesGo.GetComponent<RectTransform>());
-            var lines = linesGo.GetComponent<ComicActionLinesGraphic>();
-            lines.color = ComicStyle.Ink;
-            lines.Alpha = 0.09f;
-            lines.RayCount = 28;
-            lines.raycastTarget = false;
+            ReparentInto(startButton != null ? startButton.transform : null, safeRect);
+            ReparentInto(checkUpdateButton != null ? checkUpdateButton.transform : null, safeRect);
+            ReparentInto(FindMenuNode("CustomLayoutButton"), safeRect);
+            ReparentInto(versionText != null ? versionText.transform : null, safeRect);
 
-            // 2.2) 顶部小标签「4v4 涂地对战」
-            Vector2 chipSize = new Vector2(mobile ? 380f : 330f, mobile ? 62f : 56f);
-            var chipShape = CreateComicPanel(logoRect, "OverlineChip",
-                new Vector2(0f, chipY), chipSize, ComicStyle.Ink, 1.5f);
-            chipShape.BorderWidth = ComicStyle.BorderThin;
-            chipShape.HardShadow = true;
-            chipShape.ShadowOffset = new Vector2(4f, -4f);
-            CreateComicTmp(chipShape.transform, "ChipText", "4v4 涂地对战", mobile ? 28f : 25f, false,
-                ComicStyle.Paper, Vector2.zero, new Vector2(chipSize.x - 24f, chipSize.y - 8f));
-
-            // 2.3) 标题贴纸：纸面圆角块 + 墨线硬阴影，整体 -2° 微倾
-            var sticker = CreateComicPanel(logoRect, "TitleSticker",
-                Vector2.zero, new Vector2(stickerW, stickerH), ComicStyle.Paper, -2f);
-            sticker.BorderWidth = ComicStyle.BorderHeavy;
-            sticker.HardShadow = true;
-            sticker.ShadowOffset = new Vector2(10f, -10f);
-            sticker.Halftone = true;
-            sticker.HalftoneAlpha = ComicStyle.HalftoneAlpha;
-
-            CreateComicTmp(sticker.transform, "ComicTitle", "墨水大作战", titleSize, true,
-                resolved.GetTeamColor(Team.TeamA), Vector2.zero,
-                new Vector2(stickerW - 60f, stickerH - 40f));
-
-            // 2.4) 拉丁副题
-            var latin = CreateComicTmp(logoRect, "LatinSub", "INK TURF WAR", latinSize, true,
-                ComicStyle.Ink, new Vector2(0f, latinY), new Vector2(700f, 44f), 2f);
-
-            // 3) 隐藏旧场景标题，旧浅色文字统一压成墨色
+            // 隐藏旧场景默认标题
             if (titleText != null) titleText.gameObject.SetActive(false);
             if (subtitleText != null) subtitleText.gameObject.SetActive(false);
 
-            foreach (var legacy in readyPanel.GetComponentsInChildren<Text>(true))
-            {
-                if (legacy == null) continue;
-                Color c = legacy.color;
-                if (c.r + c.g + c.b > 1.5f)
-                {
-                    legacy.color = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.8f);
-                }
-            }
+            // 4) 左上模式标签（墨底白字直角块）
+            var tagGo = new GameObject("ModeTag", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            tagGo.transform.SetParent(safeRect, false);
+            var tagRect = tagGo.GetComponent<RectTransform>();
+            tagRect.anchorMin = new Vector2(0f, 1f);
+            tagRect.anchorMax = new Vector2(0f, 1f);
+            tagRect.pivot = new Vector2(0f, 1f);
+            tagRect.anchoredPosition = new Vector2(m.Margin, -m.Margin);
+            tagRect.sizeDelta = m.TagSize;
 
-            // 4) 开始按钮：加大下移（旧场景里它被标题气泡盖住，这次明确挪到 Logo 下方独立位置）
+            var tagShape = tagGo.GetComponent<UIInkShapeGraphic>();
+            tagShape.Shape = UIInkShape.SharpRect;
+            tagShape.CornerRadius = ComicStyle.CornerSharp;
+            tagShape.BorderWidth = 0f;
+            tagShape.color = ComicStyle.Ink;
+            tagShape.HardShadow = false;
+            tagShape.Halftone = false;
+            tagShape.raycastTarget = false;
+
+            var tagTextGo = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
+            tagTextGo.transform.SetParent(tagGo.transform, false);
+            Stretch(tagTextGo.GetComponent<RectTransform>());
+            var tagText = tagTextGo.GetComponent<TextMeshProUGUI>();
+            tagText.font = resolved.ResolveFont(false, "4V4 涂地对战 · TURF WAR");
+            tagText.fontSize = UITypography.FontSnapped(m.TagFont);
+            tagText.fontStyle = FontStyles.Bold;
+            tagText.alignment = TextAlignmentOptions.Center;
+            tagText.color = ComicStyle.Paper;
+            tagText.text = "4V4 涂地对战 · TURF WAR";
+            tagText.textWrappingMode = TextWrappingModes.NoWrap;
+            tagText.overflowMode = TextOverflowModes.Overflow;
+            tagText.raycastTarget = false;
+
+            // 5) Hero 标题群（左上，标签下方）
+            var heroGo = new GameObject("HeroTitleGroup", typeof(RectTransform));
+            heroGo.transform.SetParent(safeRect, false);
+            var heroRt = (RectTransform)heroGo.transform;
+            heroRt.anchorMin = new Vector2(0f, 1f);
+            heroRt.anchorMax = new Vector2(0f, 1f);
+            heroRt.pivot = new Vector2(0f, 1f);
+            heroRt.anchoredPosition = new Vector2(m.Margin, -(m.Margin + m.TagSize.y + (mobile ? 34f : 30f)));
+            heroRt.sizeDelta = m.HeroBox;
+
+            float titleSize = UITypography.FontSnapped(m.TitleFont);
+            float titleH = titleSize * 1.32f;
+            float latinSize = UITypography.FontSnapped(m.LatinFont);
+            float latinH = latinSize * 1.6f;
+
+            // 5.1 标题上方一条黄色短杠（几何标点）
+            var accentBarGo = new GameObject("AccentBar", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            accentBarGo.transform.SetParent(heroGo.transform, false);
+            var accentBarRect = accentBarGo.GetComponent<RectTransform>();
+            accentBarRect.anchorMin = new Vector2(0f, 1f);
+            accentBarRect.anchorMax = new Vector2(0f, 1f);
+            accentBarRect.pivot = new Vector2(0f, 1f);
+            accentBarRect.anchoredPosition = Vector2.zero;
+            accentBarRect.sizeDelta = new Vector2(mobile ? 104f : 78f, mobile ? 14f : 11f);
+            var accentBarShape = accentBarGo.GetComponent<UIInkShapeGraphic>();
+            accentBarShape.Shape = UIInkShape.SharpRect;
+            accentBarShape.CornerRadius = ComicStyle.CornerSharp;
+            accentBarShape.BorderWidth = 0f;
+            accentBarShape.color = ComicStyle.Yellow;
+            accentBarShape.raycastTarget = false;
+
+            // 5.2 Hero 大标题
+            var titleTmp = CreateTmpText(heroGo.transform, "HeroTitle", "墨水大作战",
+                titleSize, isDisplay: true, ComicStyle.Ink,
+                new Vector2(0f, -(26f + titleH * 0.5f)), new Vector2(m.HeroBox.x, titleH), -2f, TextAlignmentOptions.MidlineLeft);
+            // 超大中文标题改用 Semibold 且不再叠 faux bold：MiSans-Heavy 在 100px+ 时
+            // 密笔字（如「墨」）的笔画会糊成实心黑块；Synthetic Bold 又会让字面发胀发斜。
+            titleTmp.fontStyle = FontStyles.Normal;
+            var heroCjkFont = resolved.GetCjkFont(false);
+            if (heroCjkFont != null) titleTmp.font = heroCjkFont;
+            titleTmp.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            titleTmp.rectTransform.anchorMin = new Vector2(0f, 1f);
+            titleTmp.rectTransform.anchorMax = new Vector2(0f, 1f);
+            titleTmp.rectTransform.anchoredPosition = new Vector2(m.HeroBox.x * 0.5f, -(26f + titleH * 0.5f));
+            titleTmp.rectTransform.sizeDelta = new Vector2(m.HeroBox.x, titleH);
+
+            // 5.3 拉丁副标题（红）
+            var latinTmp = CreateTmpText(heroGo.transform, "LatinSubtitle", "INK TURF WAR",
+                latinSize, isDisplay: true, ComicStyle.Red,
+                new Vector2(0f, -(26f + titleH + latinH * 0.5f)),
+                new Vector2(m.HeroBox.x, latinH), -3f, TextAlignmentOptions.MidlineLeft);
+            latinTmp.fontStyle = FontStyles.Bold;
+            latinTmp.rectTransform.anchorMin = new Vector2(0f, 1f);
+            latinTmp.rectTransform.anchorMax = new Vector2(0f, 1f);
+            latinTmp.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            latinTmp.rectTransform.anchoredPosition = new Vector2(m.HeroBox.x * 0.5f, -(26f + titleH + latinH * 0.5f));
+            latinTmp.rectTransform.sizeDelta = new Vector2(m.HeroBox.x, latinH);
+
+            // 5.4 规格行
+            var specTmp = CreateTmpText(heroGo.transform, "FeatureDesc", "40×40M 对称竞技场 · 涂地覆盖率决胜",
+                UITypography.FontSnapped(m.SpecFont), isDisplay: false, ComicStyle.WithAlpha(ComicStyle.Ink, 0.72f),
+                Vector2.zero, new Vector2(m.HeroBox.x, 40f), 0.5f, TextAlignmentOptions.MidlineLeft);
+            specTmp.rectTransform.anchorMin = new Vector2(0f, 1f);
+            specTmp.rectTransform.anchorMax = new Vector2(0f, 1f);
+            specTmp.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            specTmp.rectTransform.anchoredPosition = new Vector2(m.HeroBox.x * 0.5f, -(26f + titleH + latinH + 8f + 20f));
+            specTmp.rectTransform.sizeDelta = new Vector2(m.HeroBox.x, 40f);
+
+            // 6) 开赛按钮（右下，拇指区；黄色块 + 墨字 + 左侧墨色竖条）
             if (startButton != null)
             {
                 var btnRect = startButton.transform as RectTransform;
                 if (btnRect != null)
                 {
-                    btnRect.anchorMin = new Vector2(0.5f, 0.5f);
-                    btnRect.anchorMax = new Vector2(0.5f, 0.5f);
-                    btnRect.anchoredPosition = startPos;
-                    btnRect.sizeDelta = startSize;
+                    btnRect.anchorMin = new Vector2(1f, 0f);
+                    btnRect.anchorMax = new Vector2(1f, 0f);
+                    btnRect.pivot = new Vector2(1f, 0f);
+                    btnRect.anchoredPosition = new Vector2(-m.Margin, m.Margin);
+                    btnRect.sizeDelta = m.CtaSize;
                 }
 
                 try
                 {
-                    StyleStartButton(resolved, startFont);
+                    StyleStartButtonGeometric(resolved, UITypography.FontSnapped(m.CtaFont), mobile);
                 }
                 catch (System.Exception ex)
                 {
-                    // 纯装饰失败不该让整局游戏起不来：记 warning（不触发 PlayMode 的 log-error 门禁）
-                    Debug.LogWarning("[MatchFlowUI] 开赛按钮漫画换肤失败：" + ex);
+                    Debug.LogWarning("[MatchFlowUI] 开赛按钮几何换肤失败：" + ex);
                 }
             }
 
-            // 5) 键盘提示行（旧 StartHint 重排到按钮下方；场景缺失时补建）
-            var hintTrans = readyPanel.transform.Find("StartHint");
+            // 7) 键盘提示（仅桌面，位于次级按钮上方）
+            float secY = m.Margin + m.CtaSize.y + (mobile ? 24f : 20f);
+            Transform hintTrans = FindMenuNode("StartHint");
             if (hintTrans == null)
             {
                 var hintGo = new GameObject("StartHint", typeof(RectTransform), typeof(Text));
-                hintGo.transform.SetParent(readyPanel.transform, false);
-                hintTrans = hintGo.transform;
+                hintGo.transform.SetParent(safeRect, false);
                 var hintText = hintGo.GetComponent<Text>();
                 hintText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                hintText.text = "也可以按 空格 / 回车 开始";
-                hintText.alignment = TextAnchor.MiddleCenter;
+                hintText.text = "也可以按 空格 / 回车 / R 开始";
+                hintText.alignment = TextAnchor.MiddleRight;
+                hintTrans = hintGo.transform;
             }
+            ReparentInto(hintTrans, safeRect);
             var hintRect = (RectTransform)hintTrans;
-            hintRect.anchorMin = new Vector2(0.5f, 0.5f);
-            hintRect.anchorMax = new Vector2(0.5f, 0.5f);
-            hintRect.anchoredPosition = new Vector2(0f, hintY);
-            hintRect.sizeDelta = new Vector2(760f, 44f);
+            hintRect.anchorMin = new Vector2(1f, 0f);
+            hintRect.anchorMax = new Vector2(1f, 0f);
+            hintRect.pivot = new Vector2(1f, 0f);
+            hintRect.anchoredPosition = new Vector2(-m.Margin, secY + m.SecondarySize.y + 10f);
+            hintRect.sizeDelta = new Vector2(520f, 30f);
             var hintLabel = hintTrans.GetComponent<Text>();
             if (hintLabel != null)
             {
-                hintLabel.fontSize = Mathf.RoundToInt(hintFont);
+                hintLabel.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(18f));
+                hintLabel.alignment = TextAnchor.MiddleRight;
                 hintLabel.color = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.62f);
             }
+            hintTrans.gameObject.SetActive(!mobile);
 
-            // 触屏设备上没有键盘，「按空格/回车开始」是无意义提示，直接隐藏
-            if (mobile) hintTrans.gameObject.SetActive(false);
+            // 8) 次级按钮（右对齐，开赛按钮上方）
+            StyleSecondaryButtonGeometric("CheckUpdateButton",
+                new Vector2(-m.Margin, secY), m.SecondarySize,
+                UITypography.FontSnapped(m.SecondaryFont), "检查更新");
+            StyleSecondaryButtonGeometric("CustomLayoutButton",
+                new Vector2(-m.Margin - m.SecondarySize.x - (mobile ? 18f : 16f), secY), m.SecondarySize,
+                UITypography.FontSnapped(m.SecondaryFont), "自定义按键");
 
-            // 6) 次要按钮行：检查更新 / 自定义按键，纸面漫画小方块
-            StyleSecondaryButton("CheckUpdateButton", new Vector2(-secX, secY), secSize, secFont, "检查更新");
-            StyleSecondaryButton("CustomLayoutButton", new Vector2(secX, secY), secSize, secFont, "自定义按键");
-
-            // 7) 版本号：右下角小字
+            // 9) 版本号（左下，整备卡上方）
             if (versionText != null)
             {
+                float loadoutH = MenuLayoutMath.LoadoutCard(mobile).Size.y;
                 var verRect = versionText.transform as RectTransform;
                 if (verRect != null)
                 {
-                    verRect.anchorMin = new Vector2(1f, 0f);
-                    verRect.anchorMax = new Vector2(1f, 0f);
-                    verRect.pivot = new Vector2(1f, 0f);
-                    verRect.anchoredPosition = new Vector2(-20f, 16f);
-                    verRect.sizeDelta = new Vector2(560f, 32f);
+                    verRect.anchorMin = new Vector2(0f, 0f);
+                    verRect.anchorMax = new Vector2(0f, 0f);
+                    verRect.pivot = new Vector2(0f, 0f);
+                    verRect.anchoredPosition = new Vector2(m.Margin, m.Margin + loadoutH + 10f);
+                    verRect.sizeDelta = new Vector2(560f, 30f);
                 }
-                versionText.fontSize = mobile ? 22 : 20;
-                versionText.alignment = TextAnchor.MiddleRight;
-                versionText.color = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.55f);
+                versionText.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(m.VersionFont));
+                versionText.alignment = TextAnchor.MiddleLeft;
+                versionText.color = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.58f);
             }
         }
 
-        /// <summary>开赛按钮：黄底墨线硬阴影 + 按压反馈；根 Image 保留为透明射线目标。</summary>
-        private void StyleStartButton(UIThemeSO resolved, float fontSize)
+        /// <summary>
+        /// 主题兜底：场景里的 MatchFlowUI 历史上没有序列化 uiTheme，
+        /// 于是首页所有字体都落到 TMP 默认 LiberationSans + 全局 fallback
+        /// （超大中文标题会被糊成黑块）。这里按武器栏同一套路径补齐：
+        /// 运行时资源库 → 编辑器 AssetDatabase → 保持 null 由 Resolve 兜底。
+        /// </summary>
+        private void EnsureTheme()
+        {
+            if (uiTheme != null) return;
+
+            RuntimeAssetLibrary library = RuntimeAssetLibrary.Load();
+            if (library != null && library.uiTheme != null)
+            {
+                uiTheme = library.uiTheme;
+                if (bannerView != null) bannerView.SetTheme(uiTheme);
+                return;
+            }
+
+#if UNITY_EDITOR
+            uiTheme = UnityEditor.AssetDatabase.LoadAssetAtPath<UIThemeSO>(
+                "Assets/_Project/ScriptableObjects/UITheme.asset");
+#endif
+        }
+
+        /// <summary>把节点移动到父节点下（保持世界位置无关的新布局；已是目标父节点则跳过）。</summary>
+        private static void ReparentInto(Transform node, Transform parent)
+        {
+            if (node == null || parent == null) return;
+            if (node.parent == parent) return;
+            node.SetParent(parent, false);
+        }
+
+        /// <summary>在 readyPanel 子树里找节点（内容会被搬进 MenuSafeArea，不能再只看直接子级）。</summary>
+        private Transform FindMenuNode(string name)
+        {
+            if (readyPanel == null) return null;
+            Transform direct = readyPanel.transform.Find(name);
+            if (direct != null) return direct;
+
+            var all = readyPanel.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] != null && all[i].name == name) return all[i];
+            }
+            return null;
+        }
+
+        /// <summary>开赛按钮：黄色直角大块 + 墨色粗体字 + 左侧墨色竖条，纯色硬切，禁止弹簧。</summary>
+        private void StyleStartButtonGeometric(UIThemeSO resolved, float fontSize, bool mobile = false)
         {
             var graphic = startButton.targetGraphic as Image;
             if (graphic != null)
             {
-                // Image 保留为全透明：它仍是 Button 的射线目标（关掉就点不动了）
                 graphic.color = new Color(1f, 1f, 1f, 0f);
                 graphic.raycastTarget = true;
                 graphic.enabled = true;
             }
 
-            // 同一物体已有 Image（Graphic 不允许重复），漫画面板铺在子物体上
             var btnShape = startButton.GetComponentInChildren<UIInkShapeGraphic>(true);
             if (btnShape == null)
             {
                 btnShape = UIInkShapeGraphic.CreateChildBackground(
-                    startButton.transform as RectTransform, "ComicButtonBg");
+                    startButton.transform as RectTransform, "GeometricButtonBg");
             }
 
             if (btnShape == null)
             {
-                Debug.LogWarning("[MatchFlowUI] 开赛按钮无法挂载 UIInkShapeGraphic（跳过换肤）");
+                Debug.LogWarning("[MatchFlowUI] 开赛按钮无法挂载 UIInkShapeGraphic");
                 return;
             }
 
-            btnShape.Shape = UIInkShape.RoundedRect;
+            btnShape.Shape = UIInkShape.SharpRect;
             btnShape.CornerRadius = ComicStyle.CornerSharp;
-            btnShape.BorderWidth = ComicStyle.BorderHeavy;
+            btnShape.BorderWidth = ComicStyle.Border;
             btnShape.BorderColor = ComicStyle.Ink;
-            btnShape.HardShadow = true;
-            btnShape.ShadowOffset = new Vector2(10f, -10f);
-            btnShape.ShadowColor = ComicStyle.Ink;
-            btnShape.Halftone = true;
-            btnShape.HalftoneAlpha = ComicStyle.HalftoneAlpha;
+            btnShape.HardShadow = false;
+            btnShape.ShadowOffset = Vector2.zero;
+            btnShape.Halftone = false;
             btnShape.GlossAlpha = 0f;
-            btnShape.color = ComicStyle.Yellow;
+            btnShape.color = ComicStyle.Yellow; // 黄色强调块（主 CTA）
             btnShape.raycastTarget = true;
 
-            var label = startButtonLabel != null ? startButtonLabel : startButton.GetComponentInChildren<Text>(true);
-            if (label != null)
+            // 左侧墨色竖条（几何标点，压住按钮左缘）
+            Transform accent = btnShape.transform.Find("CtaAccent");
+            if (accent == null)
             {
-                label.color = ComicStyle.Ink;
-                label.fontStyle = FontStyle.Bold;
-                label.fontSize = Mathf.RoundToInt(fontSize);
+                var accentGo = new GameObject("CtaAccent", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                accentGo.transform.SetParent(btnShape.transform, false);
+                accent = accentGo.transform;
+                var accentShape = accentGo.GetComponent<UIInkShapeGraphic>();
+                accentShape.Shape = UIInkShape.SharpRect;
+                accentShape.CornerRadius = ComicStyle.CornerSharp;
+                accentShape.BorderWidth = 0f;
+                accentShape.color = ComicStyle.Ink;
+                accentShape.raycastTarget = false;
+            }
+            var accentRect = (RectTransform)accent;
+            accentRect.anchorMin = new Vector2(0f, 0f);
+            accentRect.anchorMax = new Vector2(0f, 1f);
+            accentRect.pivot = new Vector2(0f, 0.5f);
+            accentRect.offsetMin = Vector2.zero;
+            accentRect.offsetMax = new Vector2(mobile ? 20f : 16f, 0f);
+
+            // 主标签用 TMP：Legacy Text 的 bold 对中文不生效，黄底上的字会显得发虚。
+            var legacyLabel = startButtonLabel != null ? startButtonLabel : startButton.GetComponentInChildren<Text>(true);
+            if (legacyLabel != null) legacyLabel.gameObject.SetActive(false);
+
+            Transform labelTrans = startButton.transform.Find("CtaLabel");
+            TextMeshProUGUI labelTmp;
+            if (labelTrans == null)
+            {
+                var labelGo = new GameObject("CtaLabel", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+                labelGo.transform.SetParent(startButton.transform, false);
+                labelTmp = labelGo.GetComponent<TextMeshProUGUI>();
+            }
+            else
+            {
+                labelTmp = labelTrans.GetComponent<TextMeshProUGUI>();
+            }
+
+            if (labelTmp != null)
+            {
+                var labelRect = labelTmp.rectTransform;
+                labelRect.anchorMin = Vector2.zero;
+                labelRect.anchorMax = Vector2.one;
+                labelRect.offsetMin = new Vector2(mobile ? 30f : 24f, 0f);
+                labelRect.offsetMax = Vector2.zero;
+                labelTmp.text = "开 始 比 赛";
+                labelTmp.font = resolved.GetCjkFont(false) ?? resolved.ResolveFont(false, "开始比赛");
+                labelTmp.fontSize = fontSize;
+                labelTmp.fontStyle = FontStyles.Bold;
+                labelTmp.alignment = TextAlignmentOptions.Center;
+                labelTmp.color = ComicStyle.Ink;
+                labelTmp.textWrappingMode = TextWrappingModes.NoWrap;
+                labelTmp.overflowMode = TextOverflowModes.Overflow;
+                labelTmp.raycastTarget = false;
             }
 
             var jelly = startButton.gameObject.GetComponent<UIJellyButton>();
@@ -452,29 +582,26 @@ namespace P1.UI
             if (jelly != null) jelly.Configure(resolved, startButton, btnShape);
         }
 
-        /// <summary>
-        /// 次要按钮（检查更新 / 自定义按键）：纸面 + 墨线 + 硬阴影的漫画小方块，
-        /// 与主按钮拉开层级（黄 = 主行动，纸 = 次行动）。
-        /// </summary>
-        private void StyleSecondaryButton(string btnName, Vector2 pos, Vector2 size, float fontSize, string label)
+        /// <summary>次要按钮（检查更新 / 自定义按键）：白底墨字直角方块，3px 实线墨边。</summary>
+        private void StyleSecondaryButtonGeometric(string btnName, Vector2 anchoredPos, Vector2 size, float fontSize, string label)
         {
-            Transform t = readyPanel.transform.Find(btnName);
+            Transform t = FindMenuNode(btnName);
             if (t == null) return;
 
             var rect = t as RectTransform;
             if (rect == null) rect = t.GetComponent<RectTransform>();
             if (rect != null)
             {
-                rect.anchorMin = new Vector2(0.5f, 0.5f);
-                rect.anchorMax = new Vector2(0.5f, 0.5f);
-                rect.anchoredPosition = pos;
+                rect.anchorMin = new Vector2(1f, 0f);
+                rect.anchorMax = new Vector2(1f, 0f);
+                rect.pivot = new Vector2(1f, 0f);
+                rect.anchoredPosition = anchoredPos;
                 rect.sizeDelta = size;
             }
 
             var img = t.GetComponent<Image>();
             if (img != null)
             {
-                // 根 Image 留作射线目标，外观交给子物体漫画面板
                 img.color = new Color(1f, 1f, 1f, 0f);
                 img.raycastTarget = true;
             }
@@ -482,20 +609,18 @@ namespace P1.UI
             var shape = t.GetComponentInChildren<UIInkShapeGraphic>(true);
             if (shape == null)
             {
-                shape = UIInkShapeGraphic.CreateChildBackground(rect, "ComicBg");
+                shape = UIInkShapeGraphic.CreateChildBackground(rect, "GeometricBg");
             }
             if (shape != null)
             {
-                shape.Shape = UIInkShape.RoundedRect;
+                shape.Shape = UIInkShape.SharpRect;
                 shape.CornerRadius = ComicStyle.CornerSharp;
-                shape.BorderWidth = ComicStyle.Border;
+                shape.BorderWidth = ComicStyle.BorderThin;
                 shape.BorderColor = ComicStyle.Ink;
-                shape.HardShadow = true;
-                shape.ShadowOffset = new Vector2(5f, -5f);
-                shape.ShadowColor = ComicStyle.Ink;
+                shape.HardShadow = false;
                 shape.Halftone = false;
                 shape.GlossAlpha = 0f;
-                shape.color = ComicStyle.Paper;
+                shape.color = ComicStyle.Paper; // 白底
                 shape.raycastTarget = false;
             }
 
@@ -503,7 +628,7 @@ namespace P1.UI
             if (labelText != null)
             {
                 labelText.text = label;
-                labelText.color = ComicStyle.Ink;
+                labelText.color = ComicStyle.Ink; // 墨字
                 labelText.fontSize = Mathf.RoundToInt(fontSize);
                 labelText.fontStyle = FontStyle.Bold;
                 labelText.alignment = TextAnchor.MiddleCenter;
@@ -518,37 +643,60 @@ namespace P1.UI
             }
         }
 
-        /// <summary>程序化漫画面板：圆角块 + 墨线，返回形状组件供调用方继续调边框/阴影。</summary>
-        private UIInkShapeGraphic CreateComicPanel(Transform parent, string name,
-            Vector2 pos, Vector2 size, Color fill, float tiltDegrees)
+        private static UIInkShapeGraphic CreateGeometricBox(Transform parent, string name,
+            Vector2 pos, Vector2 size, Color fill, float rotDegrees, float borderWidth = 0f, Color? borderColor = null)
         {
-            var go = new GameObject(name,
-                typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             go.transform.SetParent(parent, false);
             var rect = (RectTransform)go.transform;
             rect.anchorMin = new Vector2(0.5f, 0.5f);
             rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.anchoredPosition = pos;
             rect.sizeDelta = size;
-            rect.localRotation = Quaternion.Euler(0f, 0f, tiltDegrees);
+            rect.localRotation = Quaternion.Euler(0f, 0f, rotDegrees);
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.RoundedRect;
+            shape.Shape = UIInkShape.SharpRect;
             shape.CornerRadius = ComicStyle.CornerSharp;
-            shape.BorderWidth = ComicStyle.Border;
-            shape.BorderColor = ComicStyle.Ink;
+            shape.BorderWidth = borderWidth;
+            shape.BorderColor = borderColor ?? ComicStyle.Ink;
             shape.color = fill;
+            shape.HardShadow = false;
+            shape.Halftone = false;
             shape.GlossAlpha = 0f;
             shape.raycastTarget = false;
             return shape;
         }
 
-        /// <summary>队伍色墨渍装饰：无边的 Blob 形，低透明度平铺在纸面上。</summary>
-        private void CreateDecorBlob(Transform parent, string blobName, Color color,
-            Vector2 anchor, Vector2 pivot, Vector2 pos, Vector2 size)
+        private static void CreateGeometricSquare(Transform parent, string name,
+            Vector2 anchor, Vector2 pivot, Vector2 pos, Vector2 size, float rotDegrees, Color fill,
+            float border = 0f, Color? borderColor = null)
         {
-            var go = new GameObject(blobName,
-                typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            go.transform.SetParent(parent, false);
+            var rect = (RectTransform)go.transform;
+            rect.anchorMin = anchor;
+            rect.anchorMax = anchor;
+            rect.pivot = pivot;
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = size;
+            rect.localRotation = Quaternion.Euler(0f, 0f, rotDegrees);
+
+            var shape = go.GetComponent<UIInkShapeGraphic>();
+            shape.Shape = UIInkShape.SharpRect;
+            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.BorderWidth = border;
+            shape.BorderColor = borderColor ?? ComicStyle.Ink;
+            shape.HardShadow = false;
+            shape.Halftone = false;
+            shape.color = fill;
+            shape.raycastTarget = false;
+        }
+
+        private static void CreateGeometricCircle(Transform parent, string name,
+            Vector2 anchor, Vector2 pivot, Vector2 pos, Vector2 size, Color fill)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             go.transform.SetParent(parent, false);
             var rect = (RectTransform)go.transform;
             rect.anchorMin = anchor;
@@ -557,14 +705,22 @@ namespace P1.UI
             rect.anchoredPosition = pos;
             rect.sizeDelta = size;
 
-            var blob = go.GetComponent<UIInkShapeGraphic>();
-            blob.Shape = UIInkShape.Blob;
-            blob.BorderWidth = 0f;
-            blob.HardShadow = false;
-            blob.Halftone = false;
-            blob.GlossAlpha = 0f;
-            blob.color = new Color(color.r, color.g, color.b, 0.14f);
-            blob.raycastTarget = false;
+            var shape = go.GetComponent<UIInkShapeGraphic>();
+            shape.Shape = UIInkShape.Blob;
+            shape.WobbleAmplitude = 0f;
+            shape.BorderWidth = 0f;
+            shape.HardShadow = false;
+            shape.Halftone = false;
+            shape.color = fill;
+            shape.raycastTarget = false;
+        }
+
+        /// <summary>场景里遗留的旧结算柱条容器：几何结算页不再使用，直接隐藏。</summary>
+        private static void HideLegacyResultBar(Transform panel, string name)
+        {
+            if (panel == null) return;
+            Transform legacy = panel.Find(name);
+            if (legacy != null && legacy.gameObject.activeSelf) legacy.gameObject.SetActive(false);
         }
 
         private static void Stretch(RectTransform rect)
@@ -575,8 +731,9 @@ namespace P1.UI
             rect.offsetMax = Vector2.zero;
         }
 
-        private TextMeshProUGUI CreateComicTmp(Transform parent, string name, string text, float size,
-            bool display, Color color, Vector2 pos, Vector2 box, float charSpacing = 0f)
+        private TextMeshProUGUI CreateTmpText(Transform parent, string name, string text, float size,
+            bool isDisplay, Color color, Vector2 pos, Vector2 box, float charSpacing = 0f,
+            TextAlignmentOptions alignment = TextAlignmentOptions.Center)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
             go.transform.SetParent(parent, false);
@@ -591,17 +748,14 @@ namespace P1.UI
             tmp.text = text;
             tmp.fontSize = size;
             tmp.characterSpacing = charSpacing;
-            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.alignment = alignment;
             tmp.textWrappingMode = TextWrappingModes.NoWrap;
             tmp.color = color;
             tmp.raycastTarget = false;
 
-            var font = UIThemeSO.Resolve(uiTheme).ResolveFont(display, text);
+            var font = UIThemeSO.Resolve(uiTheme).ResolveFont(isDisplay, text);
             if (font != null) tmp.font = font;
 
-            var chunky = go.AddComponent<UIChunkyText>();
-            // 大字号中文标题不做描边（会糊），靠双层错位形成印刷阴影
-            chunky.Configure(UIThemeSO.Resolve(uiTheme), text, size, display, true, color, false);
             return tmp;
         }
 
@@ -635,91 +789,389 @@ namespace P1.UI
             }
         }
 
+        /// <summary>
+        /// 结算页（P14 几何大胆风重构 · 大数字即设计）：
+        /// 1. 顶部 Hero 级 VICTORY / DEFEAT 判定徽章（移动端 ≥120）；
+        /// 2. 双方覆盖率百分比做成超大数字（桌面 76，移动端 98）分列左右队伍纯色大块；
+        /// 3. 柱状条改直角粗墨水槽；
+        /// 4. 关键 CTA「再来一局」改 Red 底白字直角大按钮；
+        /// 5. 次级「返回」按钮白底墨字直角方块，复用重开路径。
+        /// </summary>
         private void EnsureResultVisuals()
         {
-            if (resultPanel == null || victoryBadgeRoot != null) return;
+            if (resultPanel == null || resultPanel.transform.Find("GeometricResultRoot") != null) return;
 
             UIThemeSO resolved = UIThemeSO.Resolve(uiTheme);
+            bool mobile = Application.isMobilePlatform || MobileTouchUI.IsTouchSimulationActive;
 
-            // 结算页漫画网点底（全屏印刷质感）
-            Transform existingHalf = resultPanel.transform.Find("HalftoneBg");
-            if (existingHalf == null)
+            // 纸面白底
+            var panelImg = resultPanel.GetComponent<Image>();
+            if (panelImg != null)
             {
-                var hGo = new GameObject("HalftoneBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(ComicHalftoneGraphic));
-                hGo.transform.SetParent(resultPanel.transform, false);
-                hGo.transform.SetAsFirstSibling();
-                var hRt = (RectTransform)hGo.transform;
-                hRt.anchorMin = Vector2.zero;
-                hRt.anchorMax = Vector2.one;
-                hRt.offsetMin = Vector2.zero;
-                hRt.offsetMax = Vector2.zero;
-                var half = hGo.GetComponent<ComicHalftoneGraphic>();
-                half.color = ComicStyle.Ink;
-                half.Alpha = 0.10f;
-                half.Spacing = 14f;
-                half.raycastTarget = false;
+                panelImg.color = ComicStyle.Paper;
             }
 
-            var badgeGo = new GameObject("VictoryBadge", typeof(RectTransform), typeof(UISpringMotion));
-            badgeGo.transform.SetParent(resultPanel.transform, false);
-            victoryBadgeRoot = badgeGo.GetComponent<RectTransform>();
+            // 清理旧漫画网点背景
+            Transform legacyHalf = resultPanel.transform.Find("HalftoneBg");
+            if (legacyHalf != null) Destroy(legacyHalf.gameObject);
+
+            var rootGo = new GameObject("GeometricResultRoot", typeof(RectTransform));
+            rootGo.transform.SetParent(resultPanel.transform, false);
+            var rootRt = (RectTransform)rootGo.transform;
+            Stretch(rootRt);
+            rootRt.SetAsFirstSibling();
+
+            // 四角几何纯色装饰
+            CreateGeometricSquare(rootRt, "ResultSquareTL", new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(mobile ? 50f : 40f, mobile ? -50f : -40f), new Vector2(70f, 70f), 45f, ComicStyle.Ink);
+            CreateGeometricSquare(rootRt, "ResultSquareTR", new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(mobile ? -60f : -50f, mobile ? -60f : -50f), new Vector2(80f, 80f), 15f, ComicStyle.Red);
+            CreateGeometricCircle(rootRt, "ResultCircleBL", new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(mobile ? 60f : 50f, mobile ? 60f : 50f), new Vector2(90f, 90f), resolved.GetTeamColor(Team.TeamA));
+            CreateGeometricSquare(rootRt, "ResultSquareBR", new Vector2(1f, 0f), new Vector2(1f, 0f),
+                new Vector2(mobile ? -70f : -60f, mobile ? 70f : 60f), new Vector2(75f, 75f), 30f, resolved.GetTeamColor(Team.TeamB));
+
+            // 1. 顶部 Hero 级 VICTORY / DEFEAT 判定大牌
+            if (victoryBadgeRoot == null)
+            {
+                var badgeGo = new GameObject("VictoryBadge", typeof(RectTransform), typeof(UISpringMotion));
+                badgeGo.transform.SetParent(resultPanel.transform, false);
+                victoryBadgeRoot = badgeGo.GetComponent<RectTransform>();
+                victoryBadgeMotion = badgeGo.GetComponent<UISpringMotion>();
+                victoryBadgeMotion.SetTheme(resolved);
+
+                var bgGo = new GameObject("BadgeBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                bgGo.transform.SetParent(victoryBadgeRoot, false);
+                Stretch(bgGo.GetComponent<RectTransform>());
+                victoryBadgeBg = bgGo.GetComponent<UIInkShapeGraphic>();
+                victoryBadgeBg.Shape = UIInkShape.SharpRect;
+                victoryBadgeBg.CornerRadius = ComicStyle.CornerSharp;
+                victoryBadgeBg.BorderWidth = ComicStyle.BorderHeavy;
+                victoryBadgeBg.BorderColor = ComicStyle.Ink;
+                victoryBadgeBg.HardShadow = false;
+                victoryBadgeBg.Halftone = false;
+                victoryBadgeBg.color = ComicStyle.Yellow;
+                victoryBadgeBg.raycastTarget = false;
+
+                var txtGo = new GameObject("BadgeText", typeof(RectTransform), typeof(TextMeshProUGUI));
+                txtGo.transform.SetParent(victoryBadgeRoot, false);
+                Stretch(txtGo.GetComponent<RectTransform>());
+                victoryBadgeText = txtGo.GetComponent<TextMeshProUGUI>();
+                victoryBadgeText.fontSize = UITypography.FontSnapped(96f); // 桌面 96，移动端 124（≥120）
+                victoryBadgeText.fontStyle = FontStyles.Bold;
+                victoryBadgeText.alignment = TextAlignmentOptions.Center;
+                victoryBadgeText.color = ComicStyle.Ink;
+                victoryBadgeText.text = "VICTORY!";
+                victoryBadgeText.raycastTarget = false;
+                victoryBadgeText.font = resolved.ResolveFont(true, "VICTORY!");
+            }
+
             victoryBadgeRoot.anchorMin = new Vector2(0.5f, 0.5f);
             victoryBadgeRoot.anchorMax = new Vector2(0.5f, 0.5f);
             victoryBadgeRoot.pivot = new Vector2(0.5f, 0.5f);
-            victoryBadgeRoot.anchoredPosition = new Vector2(0f, -60f);
-            victoryBadgeRoot.sizeDelta = new Vector2(480f, 120f);
-
-            victoryBadgeMotion = badgeGo.GetComponent<UISpringMotion>();
-            victoryBadgeMotion.SetTheme(resolved);
-
-            var burstGo = new GameObject("Burst", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIBurstGraphic));
-            burstGo.transform.SetParent(victoryBadgeRoot, false);
-            var burstRect = (RectTransform)burstGo.transform;
-            burstRect.anchorMin = Vector2.zero;
-            burstRect.anchorMax = Vector2.one;
-            burstRect.sizeDelta = Vector2.zero;
-            victoryBurst = burstGo.GetComponent<UIBurstGraphic>();
-            victoryBurst.Configure(0.9f, 16, ComicStyle.Yellow);
-            victoryBurst.raycastTarget = false;
-
-            var bgGo = new GameObject("BadgeBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-            bgGo.transform.SetParent(victoryBadgeRoot, false);
-            var bgRect = (RectTransform)bgGo.transform;
-            bgRect.anchorMin = Vector2.zero;
-            bgRect.anchorMax = Vector2.one;
-            bgRect.sizeDelta = Vector2.zero;
-            victoryBadgeBg = bgGo.GetComponent<UIInkShapeGraphic>();
-            victoryBadgeBg.Shape = UIInkShape.RoundedRect;
-            victoryBadgeBg.CornerRadius = ComicStyle.CornerSharp;
-            victoryBadgeBg.BorderWidth = ComicStyle.BorderHeavy;
-            victoryBadgeBg.BorderColor = ComicStyle.Ink;
-            victoryBadgeBg.HardShadow = true;
-            victoryBadgeBg.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
-            victoryBadgeBg.ShadowColor = ComicStyle.Ink;
-            victoryBadgeBg.Halftone = true;
-            victoryBadgeBg.HalftoneAlpha = 0.14f;
-            victoryBadgeBg.color = ComicStyle.Yellow;
-            victoryBadgeBg.raycastTarget = false;
-
-            var txtGo = new GameObject("BadgeText", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(UIChunkyText));
-            txtGo.transform.SetParent(victoryBadgeRoot, false);
-            var txtRect = (RectTransform)txtGo.transform;
-            txtRect.anchorMin = Vector2.zero;
-            txtRect.anchorMax = Vector2.one;
-            txtRect.sizeDelta = Vector2.zero;
-
-            victoryBadgeText = txtGo.GetComponent<TextMeshProUGUI>();
-            victoryBadgeText.fontSize = 58f;
-            victoryBadgeText.fontStyle = FontStyles.Bold;
-            victoryBadgeText.alignment = TextAlignmentOptions.Center;
-            victoryBadgeText.color = ComicStyle.Ink;
-            victoryBadgeText.text = "VICTORY!";
-            victoryBadgeText.raycastTarget = false;
-
-            var chunky = txtGo.GetComponent<UIChunkyText>();
-            chunky.Configure(resolved, "VICTORY!", 58f, displayFont: true, doubleLayered: true, fill: ComicStyle.Yellow, outlinedText: true);
-
+            victoryBadgeRoot.anchoredPosition = new Vector2(0f, mobile ? 310f : 320f);
+            victoryBadgeRoot.sizeDelta = new Vector2(mobile ? 760f : 680f, mobile ? 140f : 120f);
             victoryBadgeRoot.gameObject.SetActive(false);
+
+            // 2. 左右分列队伍色块与超大数字（Team A 橙 vs Team B 蓝）
+            float cardOffsetX = mobile ? 360f : 330f;
+            float cardCenterY = mobile ? 40f : 50f;
+            Vector2 cardSize = mobile ? new Vector2(520f, 320f) : new Vector2(460f, 280f);
+
+            // 2.1 队伍 A 纯色色块（我方）
+            var teamAGo = new GameObject("TeamACard", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            teamAGo.transform.SetParent(rootRt, false);
+            var teamARt = (RectTransform)teamAGo.transform;
+            teamARt.anchorMin = new Vector2(0.5f, 0.5f);
+            teamARt.anchorMax = new Vector2(0.5f, 0.5f);
+            teamARt.anchoredPosition = new Vector2(-cardOffsetX, cardCenterY);
+            teamARt.sizeDelta = cardSize;
+
+            var teamAShape = teamAGo.GetComponent<UIInkShapeGraphic>();
+            teamAShape.Shape = UIInkShape.SharpRect;
+            teamAShape.CornerRadius = ComicStyle.CornerSharp;
+            teamAShape.BorderWidth = ComicStyle.BorderHeavy;
+            teamAShape.BorderColor = ComicStyle.Ink;
+            teamAShape.color = ComicStyle.Paper;
+            teamAShape.HardShadow = false;
+
+            // 队伍 A 顶部色块条
+            var barTagAGo = new GameObject("TagA", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            barTagAGo.transform.SetParent(teamAGo.transform, false);
+            var tagARt = (RectTransform)barTagAGo.transform;
+            tagARt.anchorMin = new Vector2(0f, 1f);
+            tagARt.anchorMax = new Vector2(1f, 1f);
+            tagARt.pivot = new Vector2(0.5f, 1f);
+            tagARt.anchoredPosition = Vector2.zero;
+            tagARt.sizeDelta = new Vector2(0f, mobile ? 62f : 54f);
+            var tagAShape = barTagAGo.GetComponent<UIInkShapeGraphic>();
+            tagAShape.Shape = UIInkShape.SharpRect;
+            tagAShape.CornerRadius = ComicStyle.CornerSharp;
+            tagAShape.BorderWidth = 0f;
+            tagAShape.color = resolved.GetTeamColor(Team.TeamA);
+            tagAShape.HardShadow = false;
+
+            CreateTmpText(barTagAGo.transform, "Label", "TEAM A · 我方队伍",
+                UITypography.FontSnapped(22f), isDisplay: false, ComicStyle.Paper, Vector2.zero,
+                new Vector2(cardSize.x, mobile ? 62f : 54f), 0.5f, TextAlignmentOptions.Center);
+
+            // 2.2 队伍 B 纯色色块（敌方）
+            var teamBGo = new GameObject("TeamBCard", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            teamBGo.transform.SetParent(rootRt, false);
+            var teamBRt = (RectTransform)teamBGo.transform;
+            teamBRt.anchorMin = new Vector2(0.5f, 0.5f);
+            teamBRt.anchorMax = new Vector2(0.5f, 0.5f);
+            teamBRt.anchoredPosition = new Vector2(cardOffsetX, cardCenterY);
+            teamBRt.sizeDelta = cardSize;
+
+            var teamBShape = teamBGo.GetComponent<UIInkShapeGraphic>();
+            teamBShape.Shape = UIInkShape.SharpRect;
+            teamBShape.CornerRadius = ComicStyle.CornerSharp;
+            teamBShape.BorderWidth = ComicStyle.BorderHeavy;
+            teamBShape.BorderColor = ComicStyle.Ink;
+            teamBShape.color = ComicStyle.Paper;
+            teamBShape.HardShadow = false;
+
+            // 队伍 B 顶部色块条
+            var barTagBGo = new GameObject("TagB", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            barTagBGo.transform.SetParent(teamBGo.transform, false);
+            var tagBRt = (RectTransform)barTagBGo.transform;
+            tagBRt.anchorMin = new Vector2(0f, 1f);
+            tagBRt.anchorMax = new Vector2(1f, 1f);
+            tagBRt.pivot = new Vector2(0.5f, 1f);
+            tagBRt.anchoredPosition = Vector2.zero;
+            tagBRt.sizeDelta = new Vector2(0f, mobile ? 62f : 54f);
+            var tagBShape = barTagBGo.GetComponent<UIInkShapeGraphic>();
+            tagBShape.Shape = UIInkShape.SharpRect;
+            tagBShape.CornerRadius = ComicStyle.CornerSharp;
+            tagBShape.BorderWidth = 0f;
+            tagBShape.color = resolved.GetTeamColor(Team.TeamB);
+            tagBShape.HardShadow = false;
+
+            CreateTmpText(barTagBGo.transform, "Label", "TEAM B · 敌方队伍",
+                UITypography.FontSnapped(22f), isDisplay: false, ComicStyle.Paper, Vector2.zero,
+                new Vector2(cardSize.x, mobile ? 62f : 54f), 0.5f, TextAlignmentOptions.Center);
+
+            // 3. 将现有的 resultPercentA / resultPercentB 挂入对应色块并升级超大字号
+            float bigNumberSize = UITypography.FontSnapped(96f); // 桌面 96，移动端 124（大数字即设计）
+
+            if (resultPercentA != null)
+            {
+                resultPercentA.transform.SetParent(teamAGo.transform, false);
+                var pRtA = resultPercentA.rectTransform;
+                pRtA.anchorMin = new Vector2(0.5f, 0.5f);
+                pRtA.anchorMax = new Vector2(0.5f, 0.5f);
+                pRtA.anchoredPosition = new Vector2(0f, mobile ? 15f : 10f);
+                pRtA.sizeDelta = new Vector2(cardSize.x - 40f, 110f);
+                resultPercentA.fontSize = Mathf.RoundToInt(bigNumberSize);
+                resultPercentA.fontStyle = FontStyle.Bold;
+                resultPercentA.alignment = TextAnchor.MiddleCenter;
+                resultPercentA.color = ComicStyle.Ink;
+                resultPercentA.horizontalOverflow = HorizontalWrapMode.Overflow;
+                resultPercentA.verticalOverflow = VerticalWrapMode.Overflow;
+            }
+
+            if (resultPercentB != null)
+            {
+                resultPercentB.transform.SetParent(teamBGo.transform, false);
+                var pRtB = resultPercentB.rectTransform;
+                pRtB.anchorMin = new Vector2(0.5f, 0.5f);
+                pRtB.anchorMax = new Vector2(0.5f, 0.5f);
+                pRtB.anchoredPosition = new Vector2(0f, mobile ? 15f : 10f);
+                pRtB.sizeDelta = new Vector2(cardSize.x - 40f, 110f);
+                resultPercentB.fontSize = Mathf.RoundToInt(bigNumberSize);
+                resultPercentB.fontStyle = FontStyle.Bold;
+                resultPercentB.alignment = TextAnchor.MiddleCenter;
+                resultPercentB.color = ComicStyle.Ink;
+                resultPercentB.horizontalOverflow = HorizontalWrapMode.Overflow;
+                resultPercentB.verticalOverflow = VerticalWrapMode.Overflow;
+            }
+
+            // 4. 直角粗墨水柱（放入各自卡片底部）
+            float barSlotH = mobile ? 28f : 24f;
+            float barSlotY = mobile ? -90f : -80f;
+
+            if (resultBarA != null)
+            {
+                var barSlotGo = new GameObject("BarSlotA", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                barSlotGo.transform.SetParent(teamAGo.transform, false);
+                var bsRt = (RectTransform)barSlotGo.transform;
+                bsRt.anchorMin = new Vector2(0.5f, 0.5f);
+                bsRt.anchorMax = new Vector2(0.5f, 0.5f);
+                bsRt.anchoredPosition = new Vector2(0f, barSlotY);
+                bsRt.sizeDelta = new Vector2(cardSize.x - 48f, barSlotH);
+
+                var bsShape = barSlotGo.GetComponent<UIInkShapeGraphic>();
+                bsShape.Shape = UIInkShape.SharpRect;
+                bsShape.CornerRadius = ComicStyle.CornerSharp;
+                bsShape.BorderWidth = ComicStyle.BorderThin;
+                bsShape.BorderColor = ComicStyle.Ink;
+                bsShape.color = ComicStyle.PaperAlt;
+                bsShape.HardShadow = false;
+
+                resultBarA.transform.SetParent(barSlotGo.transform, false);
+                var barRt = resultBarA.rectTransform;
+                barRt.anchorMin = Vector2.zero;
+                barRt.anchorMax = Vector2.one;
+                barRt.offsetMin = new Vector2(2f, 2f);
+                barRt.offsetMax = new Vector2(-2f, -2f);
+                resultBarA.type = Image.Type.Filled;
+                resultBarA.fillMethod = Image.FillMethod.Horizontal;
+                resultBarA.fillOrigin = (int)Image.OriginHorizontal.Left;
+                resultBarA.color = resolved.GetTeamColor(Team.TeamA);
+            }
+
+            if (resultBarB != null)
+            {
+                var barSlotGo = new GameObject("BarSlotB", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                barSlotGo.transform.SetParent(teamBGo.transform, false);
+                var bsRt = (RectTransform)barSlotGo.transform;
+                bsRt.anchorMin = new Vector2(0.5f, 0.5f);
+                bsRt.anchorMax = new Vector2(0.5f, 0.5f);
+                bsRt.anchoredPosition = new Vector2(0f, barSlotY);
+                bsRt.sizeDelta = new Vector2(cardSize.x - 48f, barSlotH);
+
+                var bsShape = barSlotGo.GetComponent<UIInkShapeGraphic>();
+                bsShape.Shape = UIInkShape.SharpRect;
+                bsShape.CornerRadius = ComicStyle.CornerSharp;
+                bsShape.BorderWidth = ComicStyle.BorderThin;
+                bsShape.BorderColor = ComicStyle.Ink;
+                bsShape.color = ComicStyle.PaperAlt;
+                bsShape.HardShadow = false;
+
+                resultBarB.transform.SetParent(barSlotGo.transform, false);
+                var barRt = resultBarB.rectTransform;
+                barRt.anchorMin = Vector2.zero;
+                barRt.anchorMax = Vector2.one;
+                barRt.offsetMin = new Vector2(2f, 2f);
+                barRt.offsetMax = new Vector2(-2f, -2f);
+                resultBarB.type = Image.Type.Filled;
+                resultBarB.fillMethod = Image.FillMethod.Horizontal;
+                resultBarB.fillOrigin = (int)Image.OriginHorizontal.Left;
+                resultBarB.color = resolved.GetTeamColor(Team.TeamB);
+            }
+
+            // 4b. 隐藏旧场景里的柱条容器（ResultBarA/B 的黑底条）；
+            //     真正的 Fill 已被搬进新的 BarSlot，不隐藏会在卡片中央留下两条遮挡条。
+            HideLegacyResultBar(resultPanel.transform, "ResultBarA");
+            HideLegacyResultBar(resultPanel.transform, "ResultBarB");
+
+            // 5. 判定文字（正在计算 / 胜负结果）
+            if (verdictText != null)
+            {
+                var vRt = verdictText.rectTransform;
+                vRt.anchorMin = new Vector2(0.5f, 0.5f);
+                vRt.anchorMax = new Vector2(0.5f, 0.5f);
+                vRt.anchoredPosition = new Vector2(0f, mobile ? -150f : -135f);
+                vRt.sizeDelta = new Vector2(mobile ? 820f : 740f, 44f);
+                verdictText.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(30f));
+                verdictText.fontStyle = FontStyle.Bold;
+                verdictText.alignment = TextAnchor.MiddleCenter;
+                verdictText.color = ComicStyle.Ink;
+            }
+
+            // 6. 再来一局 CTA（Red 底白字直角大按钮）
+            float btnY = mobile ? -255f : -235f;
+            Vector2 restartSize = mobile ? new Vector2(380f, 92f) : new Vector2(320f, 80f);
+            Vector2 backSize = mobile ? new Vector2(240f, 92f) : new Vector2(200f, 80f);
+            float btnSpacing = mobile ? 140f : 120f;
+
+            if (restartButton != null)
+            {
+                var rRt = restartButton.transform as RectTransform;
+                if (rRt != null)
+                {
+                    rRt.anchorMin = new Vector2(0.5f, 0.5f);
+                    rRt.anchorMax = new Vector2(0.5f, 0.5f);
+                    rRt.anchoredPosition = new Vector2(-btnSpacing, btnY);
+                    rRt.sizeDelta = restartSize;
+                }
+
+                var rImg = restartButton.GetComponent<Image>();
+                if (rImg != null)
+                {
+                    rImg.color = new Color(1f, 1f, 1f, 0f);
+                    rImg.raycastTarget = true;
+                }
+
+                var rShape = restartButton.GetComponentInChildren<UIInkShapeGraphic>(true);
+                if (rShape == null)
+                {
+                    rShape = UIInkShapeGraphic.CreateChildBackground(rRt, "RestartBg");
+                }
+                if (rShape != null)
+                {
+                    rShape.Shape = UIInkShape.SharpRect;
+                    rShape.CornerRadius = ComicStyle.CornerSharp;
+                    rShape.BorderWidth = ComicStyle.BorderHeavy;
+                    rShape.BorderColor = ComicStyle.Ink;
+                    rShape.color = ComicStyle.Red; // Red 关键 CTA
+                    rShape.HardShadow = false;
+                    rShape.Halftone = false;
+                    rShape.raycastTarget = false;
+                }
+
+                var rLabel = restartButton.GetComponentInChildren<Text>(true);
+                if (rLabel != null)
+                {
+                    rLabel.text = "再 来 一 局";
+                    rLabel.color = ComicStyle.Paper; // 白字
+                    rLabel.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(28f));
+                    rLabel.fontStyle = FontStyle.Bold;
+                    rLabel.alignment = TextAnchor.MiddleCenter;
+                }
+
+                var jelly = restartButton.GetComponent<UIJellyButton>();
+                if (jelly == null) jelly = restartButton.gameObject.AddComponent<UIJellyButton>();
+                jelly.Configure(resolved, restartButton, rShape);
+            }
+
+            // 7. 次级「返回」按钮（白底墨字直角方块，复用现有重开路径）
+            Transform backBtnTrans = resultPanel.transform.Find("ResultBackButton");
+            if (backBtnTrans == null)
+            {
+                var backGo = new GameObject("ResultBackButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+                backGo.transform.SetParent(resultPanel.transform, false);
+                var bRt = (RectTransform)backGo.transform;
+                bRt.anchorMin = new Vector2(0.5f, 0.5f);
+                bRt.anchorMax = new Vector2(0.5f, 0.5f);
+                bRt.anchoredPosition = new Vector2(btnSpacing + (restartSize.x - backSize.x) * 0.5f, btnY);
+                bRt.sizeDelta = backSize;
+
+                var bImg = backGo.GetComponent<Image>();
+                bImg.color = new Color(1f, 1f, 1f, 0f);
+                bImg.raycastTarget = true;
+
+                var bShape = UIInkShapeGraphic.CreateChildBackground(bRt, "BackBg");
+                bShape.Shape = UIInkShape.SharpRect;
+                bShape.CornerRadius = ComicStyle.CornerSharp;
+                bShape.BorderWidth = ComicStyle.BorderHeavy;
+                bShape.BorderColor = ComicStyle.Ink;
+                bShape.color = ComicStyle.Paper; // 白底
+                bShape.HardShadow = false;
+                bShape.Halftone = false;
+                bShape.raycastTarget = false;
+
+                var bLabelGo = new GameObject("Label", typeof(RectTransform), typeof(Text));
+                bLabelGo.transform.SetParent(backGo.transform, false);
+                Stretch(bLabelGo.GetComponent<RectTransform>());
+                var bLabel = bLabelGo.GetComponent<Text>();
+                bLabel.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                bLabel.text = "返 回";
+                bLabel.color = ComicStyle.Ink; // 墨字
+                bLabel.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(24f));
+                bLabel.fontStyle = FontStyle.Bold;
+                bLabel.alignment = TextAnchor.MiddleCenter;
+
+                var bBtn = backGo.GetComponent<Button>();
+                bBtn.onClick.AddListener(OnStartClicked);
+
+                var bJelly = backGo.AddComponent<UIJellyButton>();
+                bJelly.Configure(resolved, bBtn, bShape);
+            }
+
+            // 隐藏旧场景多余标题
+            if (resultTitleText != null) resultTitleText.gameObject.SetActive(false);
         }
 
         public void EnsureUpdateUI()
@@ -728,13 +1180,13 @@ namespace P1.UI
 
             if (checkUpdateButton == null)
             {
-                var existingBtn = readyPanel.transform.Find("CheckUpdateButton");
+                var existingBtn = FindMenuNode("CheckUpdateButton");
                 if (existingBtn != null) checkUpdateButton = existingBtn.GetComponent<Button>();
             }
 
             if (versionText == null)
             {
-                var existingVer = readyPanel.transform.Find("VersionText");
+                var existingVer = FindMenuNode("VersionText");
                 if (existingVer != null) versionText = existingVer.GetComponent<Text>();
             }
 
@@ -746,16 +1198,17 @@ namespace P1.UI
                 var verGo = new GameObject("VersionText", typeof(RectTransform), typeof(Text));
                 verGo.transform.SetParent(readyPanel.transform, false);
                 var verRt = verGo.GetComponent<RectTransform>();
-                verRt.anchorMin = new Vector2(0.5f, 0f);
-                verRt.anchorMax = new Vector2(0.5f, 0f);
-                verRt.anchoredPosition = new Vector2(0f, 95f);
-                verRt.sizeDelta = new Vector2(400f, 32f);
+                verRt.anchorMin = new Vector2(1f, 0f);
+                verRt.anchorMax = new Vector2(1f, 0f);
+                verRt.pivot = new Vector2(1f, 0f);
+                verRt.anchoredPosition = new Vector2(-24f, 18f);
+                verRt.sizeDelta = new Vector2(560f, 32f);
 
                 versionText = verGo.GetComponent<Text>();
                 versionText.font = font;
-                versionText.fontSize = 20;
-                versionText.alignment = TextAnchor.MiddleCenter;
-                versionText.color = new Color(0.65f, 0.72f, 0.85f, 0.9f);
+                versionText.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(18f));
+                versionText.alignment = TextAnchor.MiddleRight;
+                versionText.color = ComicStyle.Ink;
             }
             if (versionText != null)
             {
@@ -771,32 +1224,28 @@ namespace P1.UI
                 btnRt.anchorMin = new Vector2(0.5f, 0f);
                 btnRt.anchorMax = new Vector2(0.5f, 0f);
                 btnRt.anchoredPosition = new Vector2(-115f, 48f);
-                btnRt.sizeDelta = new Vector2(190f, 44f);
+                btnRt.sizeDelta = new Vector2(210f, 58f);
 
                 var img = btnGo.GetComponent<Image>();
-                img.color = new Color(0.18f, 0.22f, 0.30f, 0.92f);
+                img.color = ComicStyle.Paper;
 
                 checkUpdateButton = btnGo.GetComponent<Button>();
                 checkUpdateButton.targetGraphic = img;
 
                 var labelGo = new GameObject("Label", typeof(RectTransform), typeof(Text));
                 labelGo.transform.SetParent(btnGo.transform, false);
-                var labelRt = labelGo.GetComponent<RectTransform>();
-                labelRt.anchorMin = Vector2.zero;
-                labelRt.anchorMax = Vector2.one;
-                labelRt.offsetMin = Vector2.zero;
-                labelRt.offsetMax = Vector2.zero;
+                Stretch(labelGo.GetComponent<RectTransform>());
 
                 var labelText = labelGo.GetComponent<Text>();
                 labelText.font = font;
-                labelText.fontSize = 18;
+                labelText.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(20f));
                 labelText.fontStyle = FontStyle.Bold;
                 labelText.alignment = TextAnchor.MiddleCenter;
-                labelText.color = new Color(0.85f, 0.92f, 1f, 1f);
-                labelText.text = "检 查 更 新";
+                labelText.color = ComicStyle.Ink;
+                labelText.text = "检查更新";
             }
 
-            Transform layoutBtnTrans = readyPanel.transform.Find("CustomLayoutButton");
+            Transform layoutBtnTrans = FindMenuNode("CustomLayoutButton");
             if (layoutBtnTrans == null)
             {
                 var lbtnGo = new GameObject("CustomLayoutButton", typeof(RectTransform), typeof(Image), typeof(Button));
@@ -805,10 +1254,10 @@ namespace P1.UI
                 lbtnRt.anchorMin = new Vector2(0.5f, 0f);
                 lbtnRt.anchorMax = new Vector2(0.5f, 0f);
                 lbtnRt.anchoredPosition = new Vector2(115f, 48f);
-                lbtnRt.sizeDelta = new Vector2(190f, 44f);
+                lbtnRt.sizeDelta = new Vector2(210f, 58f);
 
                 var limg = lbtnGo.GetComponent<Image>();
-                limg.color = new Color(0.24f, 0.28f, 0.38f, 0.92f);
+                limg.color = ComicStyle.Paper;
 
                 var lbtn = lbtnGo.GetComponent<Button>();
                 lbtn.targetGraphic = limg;
@@ -820,21 +1269,16 @@ namespace P1.UI
 
                 var llabelGo = new GameObject("Label", typeof(RectTransform), typeof(Text));
                 llabelGo.transform.SetParent(lbtnGo.transform, false);
-                var llabelRt = llabelGo.GetComponent<RectTransform>();
-                llabelRt.anchorMin = Vector2.zero;
-                llabelRt.anchorMax = Vector2.one;
-                llabelRt.offsetMin = Vector2.zero;
-                llabelRt.offsetMax = Vector2.zero;
+                Stretch(llabelGo.GetComponent<RectTransform>());
 
                 var llabelText = llabelGo.GetComponent<Text>();
                 llabelText.font = font;
-                llabelText.fontSize = 18;
+                llabelText.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(20f));
                 llabelText.fontStyle = FontStyle.Bold;
                 llabelText.alignment = TextAnchor.MiddleCenter;
-                llabelText.color = new Color(1f, 0.85f, 0.28f, 1f);
-                llabelText.text = "⚙️ 操作设置";
+                llabelText.color = ComicStyle.Ink;
+                llabelText.text = "自定义按键";
 
-                // P9：桌面/非触控模式下隐藏自定义键位入口，避免出现点击无响应的死按钮
                 if (!Application.isMobilePlatform && !MobileTouchUI.IsTouchSimulationActive)
                 {
                     lbtnGo.SetActive(false);
@@ -863,7 +1307,7 @@ namespace P1.UI
             var match = MatchManager.Instance;
             if (match == null) return;
 
-            // 快捷键重开（触屏设备跳过：连外接键盘时避免误触重开）
+            // 快捷键开赛与重开
             if (!Application.isMobilePlatform && !MobileTouchUI.IsTouchSimulationActive &&
                 (match.CurrentPhase == MatchManager.Phase.Ready || match.CurrentPhase == MatchManager.Phase.Result))
             {
@@ -1007,13 +1451,13 @@ namespace P1.UI
                 if (rollProgress < 1f)
                 {
                     verdictText.text = "正在计算全图涂地覆盖率...";
-                    verdictText.color = ComicStyle.Paper;
+                    verdictText.color = ComicStyle.Ink;
                 }
                 else
                 {
                     bool won = match.PlayerWon;
                     verdictText.text = won ? "【 胜 利 获 胜 】" : "惜 败 · 再 接 再 厉";
-                    verdictText.color = won ? ComicStyle.Yellow : ComicStyle.Blue;
+                    verdictText.color = won ? ComicStyle.Ink : ComicStyle.Blue;
 
                     // 胜利徽章弹入
                     if (!_badgePlayed)
@@ -1051,23 +1495,9 @@ namespace P1.UI
             {
                 string text = playerWon ? "VICTORY!" : "DEFEAT";
                 victoryBadgeText.text = text;
-
-                var chunky = victoryBadgeText.GetComponent<UIChunkyText>();
-                if (chunky != null)
-                {
-                    chunky.Configure(resolved, text, 58f, displayFont: true, doubleLayered: true,
-                        fill: playerWon ? ComicStyle.Yellow : ComicStyle.Blue, outlinedText: true);
-                }
-                else
-                {
-                    victoryBadgeText.color = playerWon ? ComicStyle.Ink : Color.white;
-                }
-            }
-
-            if (playerWon && victoryBurst != null)
-            {
-                victoryBurst.Configure(0.9f, 16, ComicStyle.Yellow);
-                victoryBurst.Play();
+                victoryBadgeText.color = playerWon ? ComicStyle.Ink : Color.white;
+                var font = resolved.ResolveFont(true, text);
+                if (font != null) victoryBadgeText.font = font;
             }
 
             victoryBadgeRoot.gameObject.SetActive(true);

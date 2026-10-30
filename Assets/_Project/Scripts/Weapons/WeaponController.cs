@@ -68,6 +68,13 @@ namespace P1.Weapons
         private static readonly int BaseColorProp = Shader.PropertyToID("_BaseColor");
         private static readonly int ColorProp = Shader.PropertyToID("_Color");
 
+        // 枪口防穿墙：小半径重叠检测，命中非本角色碰撞体时从胸口补正射击起点
+        private readonly Collider[] _muzzleOverlaps = new Collider[4];
+
+        // 枪口闪光节流：滚筒挥击 / 泼桶一次会生成 8~9 颗弹丸，不能每颗都闪一下
+        private const float MuzzleFlashMinInterval = 0.045f;
+        private float _lastMuzzleFlashTime = -99f;
+
         public WeaponConfigSO Config => config;
         public float SpecialPoints => _specialPoints;
         public float SpecialRequired => config != null ? config.specialPointsRequired : 180f;
@@ -270,6 +277,7 @@ namespace P1.Weapons
             _triggerHeldLastFrame = false;
             _hasAim = false;
             _rollHitTimes.Clear();
+            _lastMuzzleFlashTime = -99f;
             _strategy?.Reset();
 
             if (_laserSight != null)
@@ -324,13 +332,16 @@ namespace P1.Weapons
             if (_strategy == null)
                 RebuildStrategy();
 
-            Vector3 flatAim = new Vector3(aimDirection.x, 0f, aimDirection.z);
-            if (flatAim.sqrMagnitude < 0.0001f)
-                flatAim = transform.forward;
-            flatAim.Normalize();
+            // 保留完整 3D 方向（不再压平）：抬头时武器必须真的朝天上打，
+            // 具体弹道由各策略按「枪口 → 准星命中点」自行解算。
+            Vector3 aimDir = aimDirection.sqrMagnitude > 0.0001f
+                ? aimDirection.normalized
+                : transform.forward;
+            if (aimDir.sqrMagnitude < 0.0001f)
+                aimDir = Vector3.forward;
 
             _triggerHeldThisFrame = true;
-            _lastAim = WeaponAim.FromDirection(flatAim, aimGroundPoint);
+            _lastAim = WeaponAim.FromDirection(aimDir, aimGroundPoint);
             _hasAim = true;
 
             return _strategy.OnTriggerHeld(_lastAim, Time.deltaTime, this);
@@ -658,7 +669,8 @@ namespace P1.Weapons
                 {
                     AudioManager.Instance.PlayOne(AudioManager.Instance.specialSlamClip, 0.95f, 0.98f, 1.02f);
                 }
-                AudioManager.Instance.PlayInkHitGround(2f);
+                AudioManager.Instance.PlayInkHitGround(
+                    _specialGroundCenter, 2f, config != null ? config.specialPaintRadius : 5f);
             }
 
             if (TopDownCameraFollow.Instance != null)
@@ -750,14 +762,14 @@ namespace P1.Weapons
                 EnsureLaserSight();
 
                 Vector3 origin = ResolveMuzzlePosition();
-                Vector3 target = _lastAim.HasGroundPoint
-                    ? _lastAim.GroundPoint + Vector3.up * 0.45f
-                    : origin + _lastAim.FlatDirection * (config != null ? config.chargeRangeMax : 27f);
+                float rangeMax = config != null ? Mathf.Max(1f, config.chargeRangeMax) : 27f;
+                float rangeMin = config != null ? Mathf.Max(0.5f, config.chargeRangeMin) : 11f;
+                // 指示线长度跟随蓄力：低蓄力时如实显示这一枪能打多远，也顺带给蓄力一个视觉反馈。
+                float range = Mathf.Lerp(rangeMin, rangeMax, Mathf.Clamp01(charger.Charge01));
+                Vector3 direction = _lastAim.GetShotDirection(origin);
+                Vector3 target = origin + direction * range;
 
-                Vector3 delta = target - origin;
-                float distance = delta.magnitude;
-                if (distance > 0.01f &&
-                    WeaponBeamSystem.TryFindWorldHit(origin, delta / distance, distance, gameObject, out RaycastHit wallHit))
+                if (WeaponBeamSystem.TryFindWorldHit(origin, direction, range, gameObject, out RaycastHit wallHit))
                 {
                     target = wallHit.point;
                 }
@@ -857,11 +869,36 @@ namespace P1.Weapons
 
         private Vector3 ResolveMuzzlePosition()
         {
-            if (muzzleTransform != null)
-                return muzzleTransform.position;
+            Vector3 aimDir = _hasAim ? _lastAim.Direction : transform.forward;
+            if (aimDir.sqrMagnitude < 0.0001f)
+                aimDir = Vector3.forward;
 
-            Vector3 flatAim = _lastAim.FlatDirection;
-            return transform.position + Vector3.up * 0.75f + flatAim * 0.55f;
+            if (muzzleTransform != null)
+            {
+                Vector3 muzzle = muzzleTransform.position;
+                if (!IsMuzzleBlocked(muzzle))
+                    return muzzle;
+
+                // 枪口被墙体/掩体挤出时从胸口沿瞄准方向补正，避免子弹从墙里飞出去（对齐 INKWAVE 的枪口兜底）
+                return transform.position + Vector3.up * 0.95f + aimDir * 0.3f;
+            }
+
+            return transform.position + Vector3.up * 0.75f + aimDir * 0.55f;
+        }
+
+        /// <summary>枪口是否埋进了非本角色的碰撞体（贴墙、趴地、抵住掩体）。</summary>
+        private bool IsMuzzleBlocked(Vector3 muzzle)
+        {
+            int count = Physics.OverlapSphereNonAlloc(
+                muzzle, 0.06f, _muzzleOverlaps, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < count; i++)
+            {
+                Collider col = _muzzleOverlaps[i];
+                if (col != null && col.transform.root != transform.root)
+                    return true;
+            }
+
+            return false;
         }
 
         private Team TeamId => _health != null ? _health.Team : Team.TeamA;
@@ -909,6 +946,7 @@ namespace P1.Weapons
             {
                 InkProjectilePool.Instance.SpawnProjectile(shot, TeamId, config, gameObject, AddSpecialPoints);
             }
+            EmitShotFeedback(shot.Origin, shot.Direction, shot.IsBlaster ? 1.25f : 1f);
             OnFired?.Invoke();
         }
 
@@ -917,7 +955,43 @@ namespace P1.Weapons
             ShotsFired++;
             BeamResult result = WeaponBeamSystem.Fire(beam, TeamId, gameObject, AddSpecialPoints);
             PlayBeamVisual(result, beam.Intensity01);
+            EmitShotFeedback(beam.Origin, beam.Direction, 1.2f);
             OnFired?.Invoke();
+        }
+
+        /// <summary>
+        /// 开火瞬间的枪口闪光 + 本地玩家镜头冲击（P16）。
+        /// 闪光对所有角色可见（远处敌人开火才有可读性），镜头冲击只作用于本地玩家。
+        /// </summary>
+        private void EmitShotFeedback(Vector3 origin, Vector3 direction, float extraScale)
+        {
+            WeaponFeelParams feel = WeaponFeelProfile.Resolve(config);
+
+            float interval = config != null
+                ? Mathf.Clamp(config.fireInterval * 0.6f, MuzzleFlashMinInterval, 0.3f)
+                : MuzzleFlashMinInterval;
+            if (Time.time - _lastMuzzleFlashTime >= interval)
+            {
+                _lastMuzzleFlashTime = Time.time;
+
+                Color teamColor = InkSurfaceController.Instance != null
+                    ? InkSurfaceController.Instance.GetTeamColor(TeamId)
+                    : (TeamId == Team.TeamB ? new Color(0.15f, 0.42f, 1f) : new Color(1f, 0.44f, 0.06f));
+
+                if (VfxPool.Instance != null)
+                {
+                    VfxPool.Instance.SpawnShotFlash(
+                        origin, direction, teamColor, feel.MuzzleFlashScale * extraScale);
+                }
+
+                // Bot 没有 PlayerController：镜头冲击只属于本地玩家，4v4 里被敌人开火震屏会很晕。
+                // 与枪口闪光共用节流：滚筒挥击 / 泼桶一次会生成 8~9 颗弹丸，不能每颗都推一次镜头。
+                if (_playerController != null && TopDownCameraFollow.Instance != null)
+                {
+                    TopDownCameraFollow.Instance.AddShotPunch(
+                        feel.CameraKickMeters, feel.CameraKickRollDegrees, feel.CameraKickFovDegrees);
+                }
+            }
         }
 
         void IWeaponRuntimeHost.ApplyRoll(RollSweep sweep)

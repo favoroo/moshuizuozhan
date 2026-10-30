@@ -21,8 +21,8 @@ namespace P1.UI
         [Header("主题与配置")]
         [SerializeField] private UIThemeSO theme;
         [SerializeField] private int maxVisibleCards = 4;
-        [SerializeField] private float cardSpacing = 72f;
-        [SerializeField] private Vector2 cardSize = new Vector2(320f, 66f);
+        [SerializeField] private float cardSpacing = 84f;
+        [SerializeField] private Vector2 cardSize = new Vector2(350f, 76f);
 
         [Header("武器与技能图标库")]
         [SerializeField] private Sprite shooterIcon;

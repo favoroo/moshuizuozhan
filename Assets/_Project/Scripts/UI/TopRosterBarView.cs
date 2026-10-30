@@ -39,8 +39,6 @@ namespace P1.UI
         /// 左右两队容器内边缘距屏幕中心的距离。
         /// 中央比分条半宽 130 + 两侧百分比读数（约 78）≈ 208，取 230 让阵容条不再压住比分条。
         /// </summary>
-        private const float CenterGap = 230f;
-
         public IReadOnlyList<RosterAvatarSlot> TeamASlots => teamASlots;
         public IReadOnlyList<RosterAvatarSlot> TeamBSlots => teamBSlots;
 
@@ -179,18 +177,21 @@ namespace P1.UI
 
         private void ApplyLayoutMetrics()
         {
-            float slotSize = _isMobileLayout ? 76f : 72f;
-            float spacing = 10f;
+            float slotSize = _isMobileLayout ? 84f : 72f;
+            float spacing = _isMobileLayout ? 8f : 10f;
             float containerWidth = 4f * slotSize + 3f * spacing;
+            float centerGap = _isMobileLayout ? 360f : 340f;
 
             if (teamAContainer != null)
             {
+                teamAContainer.anchoredPosition = new Vector2(-centerGap, 0f);
                 teamAContainer.sizeDelta = new Vector2(containerWidth, slotSize);
                 var lA = teamAContainer.GetComponent<HorizontalLayoutGroup>();
                 if (lA != null) lA.spacing = spacing;
             }
             if (teamBContainer != null)
             {
+                teamBContainer.anchoredPosition = new Vector2(centerGap, 0f);
                 teamBContainer.sizeDelta = new Vector2(containerWidth, slotSize);
                 var lB = teamBContainer.GetComponent<HorizontalLayoutGroup>();
                 if (lB != null) lB.spacing = spacing;
@@ -252,18 +253,22 @@ namespace P1.UI
             RectTransform rootRect = GetComponent<RectTransform>();
             if (rootRect == null) rootRect = gameObject.AddComponent<RectTransform>();
 
-            float slotSize = _isMobileLayout ? 76f : 72f;
-            float spacing = 10f;
+            float slotSize = _isMobileLayout ? 84f : 72f;
+            float spacing = _isMobileLayout ? 8f : 10f;
             float containerWidth = 4f * slotSize + 3f * spacing;
+
+            // 中央让位：比分条 280 宽、两侧百分比各 96 宽并外挂 12px，
+            // 半边距至少要 248；取 340 保证百分比不被头像压住。
+            float centerGap = _isMobileLayout ? 360f : 340f;
 
             // 根节点锚定在顶部居中（宽度只作容器参考；子容器按中心偏移排布，可越出根矩形）
             rootRect.anchorMin = new Vector2(0.5f, 1f);
             rootRect.anchorMax = new Vector2(0.5f, 1f);
             rootRect.pivot = new Vector2(0.5f, 1f);
             rootRect.anchoredPosition = new Vector2(0f, -8f);
-            rootRect.sizeDelta = new Vector2(1200f, 84f);
+            rootRect.sizeDelta = new Vector2(1360f, 84f);
 
-            // 1. 左侧队伍 A 容器（内边缘固定在中心左侧 CenterGap 处，整体向屏幕左侧外移）
+            // 1. 左侧队伍 A 容器（内边缘固定在中心左侧 centerGap 处，整体向屏幕左侧外移）
             if (teamAContainer == null)
             {
                 var goA = new GameObject("SquadA_Container", typeof(RectTransform), typeof(HorizontalLayoutGroup));
@@ -272,7 +277,7 @@ namespace P1.UI
                 teamAContainer.anchorMin = new Vector2(0.5f, 0.5f);
                 teamAContainer.anchorMax = new Vector2(0.5f, 0.5f);
                 teamAContainer.pivot = new Vector2(1f, 0.5f);
-                teamAContainer.anchoredPosition = new Vector2(-CenterGap, 0f);
+                teamAContainer.anchoredPosition = new Vector2(-centerGap, 0f);
                 teamAContainer.sizeDelta = new Vector2(containerWidth, slotSize);
 
                 var layoutA = goA.GetComponent<HorizontalLayoutGroup>();
@@ -284,7 +289,7 @@ namespace P1.UI
                 layoutA.childForceExpandHeight = false;
             }
 
-            // 2. 右侧队伍 B 容器（内边缘固定在中心右侧 CenterGap 处）
+            // 2. 右侧队伍 B 容器（内边缘固定在中心右侧 centerGap 处）
             if (teamBContainer == null)
             {
                 var goB = new GameObject("SquadB_Container", typeof(RectTransform), typeof(HorizontalLayoutGroup));
@@ -293,7 +298,7 @@ namespace P1.UI
                 teamBContainer.anchorMin = new Vector2(0.5f, 0.5f);
                 teamBContainer.anchorMax = new Vector2(0.5f, 0.5f);
                 teamBContainer.pivot = new Vector2(0f, 0.5f);
-                teamBContainer.anchoredPosition = new Vector2(CenterGap, 0f);
+                teamBContainer.anchoredPosition = new Vector2(centerGap, 0f);
                 teamBContainer.sizeDelta = new Vector2(containerWidth, slotSize);
 
                 var layoutB = goB.GetComponent<HorizontalLayoutGroup>();
@@ -331,7 +336,7 @@ namespace P1.UI
             var springMotion = slotGo.GetComponent<UISpringMotion>();
             springMotion.SetTheme(resolvedTheme);
 
-            // 1. 背景圆角方章（6px 墨边 + 硬阴影 (6, -6)）
+            // 1. 背景直角方块（几何风：SharpRect，4px 墨边，纯色块，无阴影）
             var bgGo = new GameObject("BackgroundBlob", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             bgGo.transform.SetParent(slotGo.transform, false);
             var bgRect = bgGo.GetComponent<RectTransform>();
@@ -340,12 +345,12 @@ namespace P1.UI
             bgRect.sizeDelta = Vector2.zero;
 
             var bgShape = bgGo.GetComponent<UIInkShapeGraphic>();
-            bgShape.Shape = UIInkShape.RoundedRect;
+            bgShape.Shape = UIInkShape.SharpRect;
             bgShape.CornerRadius = ComicStyle.CornerSharp;
             bgShape.BorderWidth = ComicStyle.Border;
             bgShape.BorderColor = ComicStyle.Ink;
-            bgShape.HardShadow = true;
-            bgShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            bgShape.HardShadow = false;
+            bgShape.ShadowOffset = Vector2.zero;
             bgShape.ShadowColor = ComicStyle.Ink;
             bgShape.Halftone = false;
             bgShape.GlossAlpha = 0f;
@@ -377,12 +382,12 @@ namespace P1.UI
             var fbSquidTmp = fallbackSquidGo.GetComponent<TextMeshProUGUI>();
             fbSquidTmp.font = resolvedTheme.ResolveFont(true, "^");
             fbSquidTmp.text = "^";
-            fbSquidTmp.fontSize = 28f;
+            fbSquidTmp.fontSize = UITypography.FontSnapped(28f);
             fbSquidTmp.alignment = TextAlignmentOptions.Center;
             fbSquidTmp.color = Color.white;
             fallbackSquidGo.SetActive(squidSprite == null);
 
-            // 3. 阵亡骷髅/X 标与兜底（红底黑 X）
+            // 3. 阵亡骷髅/X 标与兜底（纯 Red 红字，配合黑底遮罩）
             var deathGo = new GameObject("DeathIcon", typeof(RectTransform), typeof(Image));
             deathGo.transform.SetParent(slotGo.transform, false);
             var deathRect = deathGo.GetComponent<RectTransform>();
@@ -392,7 +397,7 @@ namespace P1.UI
 
             var deathImg = deathGo.GetComponent<Image>();
             deathImg.sprite = deathSprite;
-            deathImg.color = ComicStyle.Ink;
+            deathImg.color = ComicStyle.Red;
             deathImg.preserveAspect = true;
             deathImg.enabled = deathSprite != null;
             deathGo.SetActive(false);
@@ -406,10 +411,10 @@ namespace P1.UI
             var fbDeathTmp = fallbackDeathGo.GetComponent<TextMeshProUGUI>();
             fbDeathTmp.font = resolvedTheme.ResolveFont(true, "X");
             fbDeathTmp.text = "X";
-            fbDeathTmp.fontSize = 32f;
+            fbDeathTmp.fontSize = UITypography.FontSnapped(32f);
             fbDeathTmp.fontStyle = FontStyles.Bold;
             fbDeathTmp.alignment = TextAlignmentOptions.Center;
-            fbDeathTmp.color = ComicStyle.Ink;
+            fbDeathTmp.color = ComicStyle.Red;
             fallbackDeathGo.SetActive(false);
 
             // 4. 复活倒计时环（加粗到 5px）
@@ -439,7 +444,27 @@ namespace P1.UI
             specRing.Configure(1.18f, 5f, 8, 140f, resolvedTheme.readyGold);
             specRing.Intensity = 0f;
 
-            // 6. 倒计时秒数角标
+            // 5b. 大招就绪角标：几何风用右上角 14×14 纯黄方块，替代旋转金色光环（8 个头像同时转太吵）
+            var pipGo = new GameObject("SpecialReadyPip", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            pipGo.transform.SetParent(slotGo.transform, false);
+            var pipRect = pipGo.GetComponent<RectTransform>();
+            pipRect.anchorMin = new Vector2(1f, 1f);
+            pipRect.anchorMax = new Vector2(1f, 1f);
+            pipRect.pivot = new Vector2(1f, 1f);
+            pipRect.anchoredPosition = new Vector2(-2f, -2f);
+            pipRect.sizeDelta = new Vector2(14f, 14f);
+
+            var pipShape = pipGo.GetComponent<UIInkShapeGraphic>();
+            pipShape.Shape = UIInkShape.SharpRect;
+            pipShape.CornerRadius = ComicStyle.CornerSharp;
+            pipShape.BorderWidth = 2f;
+            pipShape.BorderColor = ComicStyle.Ink;
+            pipShape.HardShadow = false;
+            pipShape.color = ComicStyle.Yellow;
+            pipShape.raycastTarget = false;
+            pipGo.SetActive(false);
+
+            // 6. 倒计时秒数角标（直角黑块）
             var badgeGo = new GameObject("CountdownBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             badgeGo.transform.SetParent(slotGo.transform, false);
             var badgeRect = badgeGo.GetComponent<RectTransform>();
@@ -447,14 +472,15 @@ namespace P1.UI
             badgeRect.anchorMax = new Vector2(1f, 0f);
             badgeRect.pivot = new Vector2(1f, 0f);
             badgeRect.anchoredPosition = new Vector2(6f, -6f);
-            badgeRect.sizeDelta = new Vector2(26f, 24f);
+            badgeRect.sizeDelta = new Vector2(28f, 28f);
 
             var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
-            badgeShape.Shape = UIInkShape.RoundedRect;
-            badgeShape.CornerRadius = 3f;
-            badgeShape.BorderWidth = 2.5f;
+            badgeShape.Shape = UIInkShape.SharpRect;
+            badgeShape.CornerRadius = ComicStyle.CornerSharp;
+            badgeShape.BorderWidth = ComicStyle.BorderThin;
             badgeShape.BorderColor = ComicStyle.Paper;
             badgeShape.color = ComicStyle.Ink;
+            badgeShape.HardShadow = false;
 
             var countTextGo = new GameObject("CountdownText", typeof(RectTransform), typeof(TextMeshProUGUI));
             countTextGo.transform.SetParent(badgeGo.transform, false);
@@ -465,13 +491,13 @@ namespace P1.UI
 
             var tmp = countTextGo.GetComponent<TextMeshProUGUI>();
             tmp.font = resolvedTheme.ResolveFont(true, "9");
-            tmp.fontSize = 14f;
+            tmp.fontSize = UITypography.FontSnapped(16f);
             tmp.fontStyle = FontStyles.Bold;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.color = ComicStyle.Yellow;
             badgeGo.SetActive(false);
 
-            // 7. 本地玩家「YOU」黄底黑字角标
+            // 7. 本地玩家「YOU」黄底黑字角标（直角色块、无阴影）
             var youGo = new GameObject("YouIndicator", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             youGo.transform.SetParent(slotGo.transform, false);
             var youRect = youGo.GetComponent<RectTransform>();
@@ -479,16 +505,15 @@ namespace P1.UI
             youRect.anchorMax = new Vector2(0.5f, 1f);
             youRect.pivot = new Vector2(0.5f, 0f);
             youRect.anchoredPosition = new Vector2(0f, 4f);
-            youRect.sizeDelta = new Vector2(38f, 18f);
+            youRect.sizeDelta = new Vector2(46f, 22f);
 
             var youShape = youGo.GetComponent<UIInkShapeGraphic>();
-            youShape.Shape = UIInkShape.RoundedRect;
-            youShape.CornerRadius = 3f;
-            youShape.BorderWidth = 2.5f;
+            youShape.Shape = UIInkShape.SharpRect;
+            youShape.CornerRadius = ComicStyle.CornerSharp;
+            youShape.BorderWidth = ComicStyle.BorderThin;
             youShape.BorderColor = ComicStyle.Ink;
-            youShape.HardShadow = true;
-            youShape.ShadowOffset = new Vector2(2f, -2f);
-            youShape.ShadowColor = ComicStyle.Ink;
+            youShape.HardShadow = false;
+            youShape.ShadowOffset = Vector2.zero;
             youShape.color = ComicStyle.Yellow;
 
             var youTextGo = new GameObject("YouText", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -500,7 +525,7 @@ namespace P1.UI
 
             var youTmp = youTextGo.GetComponent<TextMeshProUGUI>();
             youTmp.font = resolvedTheme.ResolveFont(true, "YOU");
-            youTmp.fontSize = 11f;
+            youTmp.fontSize = UITypography.FontSnapped(14f);
             youTmp.fontStyle = FontStyles.Bold;
             youTmp.alignment = TextAlignmentOptions.Center;
             youTmp.color = ComicStyle.Ink;

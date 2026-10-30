@@ -174,11 +174,14 @@ namespace P1.Environment
             AddSymmetric(ArenaPropKind.Kiosk, new Vector3(-7.4f, 0f, -26.0f), 0f, 1.0f, 0);
 
             // 边界墙顶的设备与管线（高于 1.8m，不参与地面战斗）。
-            // 管线必须沿墙走向贴墙铺设：PipeRun 沿局部 +Z 生长，所以贴西/东墙要 yaw=0，
-            // 贴南/北墙要 yaw=90，并按长度把起点前移半个身位，否则会横穿中场。
+            // 管线必须沿墙走向贴墙铺设：PipeRun 沿局部 +Z 生长，所以贴西/东墙要 yaw=0。
             AddSymmetric(ArenaPropKind.AcUnit, new Vector3(-19.85f, 1.9f, -5.0f), 90f, 1.0f, 0);
             AddSymmetric(ArenaPropKind.PipeRun, new Vector3(-19.85f, 2.05f, -6.0f), 0f, 12.0f, 0);
-            AddSymmetric(ArenaPropKind.PipeRun, new Vector3(-7.0f, 2.05f, -27.9f), 90f, 14.0f, 0);
+
+            // 出生区（z=±27.9）不再放墙顶管线：14m 横管正好横在出生点正后方，
+            // 管心 2.05m 与第三人称相机吊臂末端（约 2.14m）重合；细装饰没有 Collider，
+            // 相机防穿墙探针看不到它，镜头会卡进管身，开局整屏被管壁糊住。
+            // 另外南侧边界墙只有 0.55m 高，放在这里的管线本身就是悬空的。
         }
 
         private static void BuildMarkings()

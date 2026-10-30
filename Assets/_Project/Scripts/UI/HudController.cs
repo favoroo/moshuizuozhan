@@ -253,7 +253,7 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// P4-C：确保右上角墨水计量管与大招液体球存在。
+        /// P4-C / P14-H：确保底部横向仪表条（墨水条 + 大招条）存在。
         /// 优先复用场景/子节点里已摆放的视图；两者都不存在时才程序化装配。
         /// </summary>
         private void EnsureSpecialGauges()
@@ -261,12 +261,14 @@ namespace P1.UI
             if (inkTankView == null) inkTankView = GetComponentInChildren<InkTankView>(true);
             if (liquidOrbView == null) liquidOrbView = GetComponentInChildren<LiquidOrbView>(true);
 
-            if (inkTankView != null || liquidOrbView != null) return;
+            // 场景里已带视图（旧场景/预制体）时不再重复装配；
+            // 这类情况没有仪表条根节点，_gaugeRoot 保持 null，面板布局照常生效。
+            if (inkTankView != null && liquidOrbView != null) return;
             if (!autoBuildSpecialGauges) return;
 
 #if UNITY_EDITOR
             // 现有主场景是在 P4-C 之前生成的，没有序列化这两个资产引用；
-            // 编辑器里按路径补一次，保证运行时用的是 Titan One 字体与主题配色，而不是兜底实例。
+            // 编辑器里按路径补一次，保证运行时用的是主题配色，而不是兜底实例。
             if (uiTheme == null)
             {
                 uiTheme = UnityEditor.AssetDatabase.LoadAssetAtPath<UIThemeSO>(EditorThemePath);
@@ -283,6 +285,7 @@ namespace P1.UI
 
             liquidOrbView = cluster.Orb;
             inkTankView = cluster.Tank;
+            _gaugeRoot = cluster.Root;
         }
 
         /// <summary>P4-C 显式写入主题与仪表样式（场景生成器 / 编辑器工具调用，不重建视图）。</summary>
@@ -319,10 +322,13 @@ namespace P1.UI
 
         public LiquidOrbView LiquidOrb => liquidOrbView;
 
+        /// <summary>底部横向仪表条根节点（与底部信息条同尺寸同心，移动端适配时同步缩放）。</summary>
+        public RectTransform GaugeRoot => _gaugeRoot;
+
         private void Start()
         {
             EnsureWeaponReticle();
-            ApplyThirdPersonControlsHint();
+            ApplyBottomStatusPanel();
             RecolorLegacyHudTexts();
             HideLegacyGauges();
             AdaptLayoutForInputMode();
@@ -334,6 +340,7 @@ namespace P1.UI
 
         private Canvas _hudCanvas;
         private RectTransform _contentRoot;
+        private RectTransform _gaugeRoot;
         private Vector2Int _lastScreenSize;
         private Rect _lastSafeArea;
         private MatchManager _phaseMatch;
@@ -441,10 +448,15 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// P9：把场景里烘焙的旧俯视/双摇杆操作提示更新为第三人称键鼠说明。
-        /// 漫画重绘：纸面对话气泡 + 6px 粗墨边 + 硬阴影，移动端会在 <see cref="ApplyMobileLayout"/> 中直接隐藏该气泡。
+        /// 底部信息条（P14-H）：黑底 + 4px 白边的直角面板，从上到下三行——
+        /// 横向墨水条 / 横向大招条（由 <see cref="HudSpecialGaugeFactory"/> 生成）、
+        /// 纯平生命条、键鼠操作提示（移动端隐藏）。
+        ///
+        /// 生命条必须在这里改成 1×1 纯白精灵：场景烘焙的是内置九宫格 UISprite，
+        /// 拉到 18px 高会露出圆角与边缘渐变（实机表现为"两头尖尖 + 中间发灰"），
+        /// 几何风要求的是纯色直角块。
         /// </summary>
-        private void ApplyThirdPersonControlsHint()
+        private void ApplyBottomStatusPanel()
         {
             Transform bottomPanel = FindHudChild("BottomStatusPanel");
             if (bottomPanel != null)
@@ -455,7 +467,7 @@ namespace P1.UI
                     var img = bottomPanel.GetComponent<Image>();
                     if (img != null)
                     {
-                        // 只关不掉：Image 关掉后由子物体上的漫画面板接管绘制。
+                        // 只关不掉：Image 关掉后由子物体上的面板 Graphic 接管绘制。
                         // 不能在同一物体再加 Graphic（[DisallowMultipleComponent] 会返回 null）。
                         img.enabled = false;
                         img.raycastTarget = false;
@@ -465,17 +477,16 @@ namespace P1.UI
                 }
                 if (bg != null)
                 {
-                    bg.Shape = UIInkShape.SpeechBubble;
-                    bg.CornerRadius = ComicStyle.CornerBubble;
-                    bg.SpeechTail = true;
-                    bg.TailSize = new Vector2(16f, 14f);
-                    bg.TailAngle = 270f;
+                    bg.Shape = UIInkShape.SharpRect;
+                    bg.CornerRadius = ComicStyle.CornerSharp;
+                    bg.SpeechTail = false;
                     bg.BorderWidth = ComicStyle.Border;
-                    bg.BorderColor = ComicStyle.Ink;
-                    bg.HardShadow = true;
-                    bg.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+                    bg.BorderColor = ComicStyle.Paper;
+                    bg.HardShadow = false;
+                    bg.ShadowOffset = Vector2.zero;
                     bg.ShadowColor = ComicStyle.Ink;
-                    bg.color = ComicStyle.Paper;
+                    // 棋盘式黑底面板：白字 + 纯色仪表，比大白板更贴场地、不刺眼。
+                    bg.color = ComicStyle.Ink;
                     bg.Halftone = false;
                     bg.GlossAlpha = 0f;
                     bg.DrawGloss = false;
@@ -484,22 +495,94 @@ namespace P1.UI
             }
 
             Transform hint = FindHudChild("BottomStatusPanel/ControlsHintText");
-            if (hint == null)
-                return;
-
-            var text = hint.GetComponent<Text>();
-            if (text != null)
+            if (hint != null)
             {
-                text.text = "操作：[WASD]移动  [鼠标]转视角  [左键]开火  [右键/Shift]己墨潜行  [空格]跳跃  [E/中键]手雷  [Q]大招  [Esc]暂停";
-                text.color = ComicStyle.Ink;
-                text.fontSize = 16;
-                text.fontStyle = FontStyle.Bold;
+                var text = hint.GetComponent<Text>();
+                if (text != null)
+                {
+                    text.text = "WASD 移动 · 鼠标 视角 · 左键 开火 · 右键/Shift 潜行 · 空格 跳跃 · E 手雷 · Q 大招 · Esc 暂停";
+                    text.color = ComicStyle.Paper;
+                    text.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(18f));
+                    text.fontStyle = FontStyle.Bold;
+                }
+            }
+
+            ApplyBottomPanelLayout(false);
+        }
+
+        /// <summary>
+        /// 底部面板几何（桌面 / 移动共用）：面板与仪表条同尺寸同心，行位置按锚点定义——
+        /// 仪表行贴顶、生命条贴底、提示行最下。移动端只是面板变矮、提示行隐藏。
+        /// </summary>
+        private void ApplyBottomPanelLayout(bool mobile)
+        {
+            float width = HudSpecialGaugeFactory.StripWidth;
+            float height = mobile
+                ? HudSpecialGaugeFactory.StripHeightMobile
+                : HudSpecialGaugeFactory.StripHeightDesktop;
+            float bottomY = mobile
+                ? HudSpecialGaugeFactory.StripBottomYMobile
+                : HudSpecialGaugeFactory.StripBottomYDesktop;
+            var size = new Vector2(width, height);
+            var position = new Vector2(0f, bottomY);
+
+            Transform bottomPanel = FindHudChild("BottomStatusPanel");
+            if (bottomPanel is RectTransform panelRect)
+            {
+                // 场景里烘焙的面板是中心轴心；仪表条根节点是底边轴心。
+                // 两者必须统一成「底边锚定」才能用同一个 anchoredPosition 精确重合。
+                panelRect.anchorMin = panelRect.anchorMax = new Vector2(0.5f, 0f);
+                panelRect.pivot = new Vector2(0.5f, 0f);
+                panelRect.sizeDelta = size;
+                panelRect.anchoredPosition = position;
+            }
+
+            if (_gaugeRoot != null)
+            {
+                _gaugeRoot.sizeDelta = size;
+                _gaugeRoot.anchoredPosition = position;
+            }
+
+            if (bottomPanel == null) return;
+
+            Transform hpBg = bottomPanel.Find("HealthBarBg");
+            if (hpBg is RectTransform hpRect)
+            {
+                hpRect.anchorMin = hpRect.anchorMax = new Vector2(0.5f, 0f);
+                hpRect.pivot = new Vector2(0.5f, 0f);
+                hpRect.sizeDelta = new Vector2(width - 48f, 18f);
+                hpRect.anchoredPosition = new Vector2(0f, mobile ? 12f : 38f);
+
+                var trackImage = hpBg.GetComponent<Image>();
+                if (trackImage != null)
+                {
+                    trackImage.color = new Color(ComicStyle.Paper.r, ComicStyle.Paper.g, ComicStyle.Paper.b, 0.16f);
+                    UIFlatSprite.MakeFlat(trackImage);
+                }
+
+                Transform hpFill = hpBg.Find("HealthBarFill");
+                var fillImage = hpFill != null ? hpFill.GetComponent<Image>() : null;
+                if (fillImage != null)
+                {
+                    // 纯平绿色直角条：无渐变、无圆角、无描边
+                    fillImage.color = ComicStyle.Green;
+                    UIFlatSprite.MakeFlat(fillImage, filled: true);
+                }
+            }
+
+            Transform hint = FindHudChild("BottomStatusPanel/ControlsHintText");
+            if (hint is RectTransform hintRect)
+            {
+                hintRect.anchorMin = hintRect.anchorMax = new Vector2(0.5f, 0f);
+                hintRect.pivot = new Vector2(0.5f, 0f);
+                hintRect.sizeDelta = new Vector2(width - 48f, 22f);
+                hintRect.anchoredPosition = new Vector2(0f, 8f);
             }
         }
 
         /// <summary>
-        /// 移动端布局适配：隐藏 PC 键鼠操作说明（[WASD]移动...）及与右上角重复的旧墨水/大招表，
-        /// 将底部面板精简为居中紧凑血条，彻底释放下半屏视野与触控操作空间。
+        /// 移动端布局适配：与桌面共用同一块底部信息条，只做三件事——
+        /// 隐藏键鼠提示、把面板收矮、把「Q 释放」提示交给触控大招键。
         /// </summary>
         public void ApplyMobileLayout()
         {
@@ -511,7 +594,7 @@ namespace P1.UI
             Transform hint = FindHudChild("BottomStatusPanel/ControlsHintText");
             if (hint != null) hint.gameObject.SetActive(false);
 
-            // 2. 隐藏与右上角 InkTankView / LiquidOrbView 重复的旧仪表
+            // 2. 隐藏被 InkTankView / LiquidOrbView 取代的旧仪表
             Transform inkBg = FindHudChild("BottomStatusPanel/InkBarBg");
             if (inkBg != null) inkBg.gameObject.SetActive(false);
             Transform specBg = FindHudChild("BottomStatusPanel/SpecialBarBg");
@@ -519,32 +602,11 @@ namespace P1.UI
             Transform inkText = FindHudChild("BottomStatusPanel/InkStateText");
             if (inkText != null) inkText.gameObject.SetActive(false);
 
-            // 3. 将底部黑底大面板重构为紧凑居中血条，避免遮挡脚下墨水与角色
-            Transform bottomPanel = FindHudChild("BottomStatusPanel");
-            if (bottomPanel != null)
-            {
-                var panelRt = bottomPanel.GetComponent<RectTransform>();
-                panelRt.sizeDelta = new Vector2(360f, 28f);
-                panelRt.anchoredPosition = new Vector2(0f, 22f);
+            // 3. 面板收矮 + 生命条与仪表行贴到新的锚点（横向条不会被手指挡住：
+            //    面板宽 940 居中，左右各留下 490px 给摇杆与操作键）
+            ApplyBottomPanelLayout(true);
 
-                var panelImg = bottomPanel.GetComponent<Image>();
-                if (panelImg != null)
-                {
-                    // 漫画风：移动端紧凑条也用纸面白，不再用旧版深蓝玻璃底
-                    panelImg.color = ComicStyle.Paper;
-                }
-
-                Transform hpBg = bottomPanel.Find("HealthBarBg");
-                if (hpBg != null)
-                {
-                    var hpRt = hpBg.GetComponent<RectTransform>();
-                    hpRt.anchoredPosition = Vector2.zero;
-                    hpRt.sizeDelta = new Vector2(340f, 14f);
-                }
-            }
-
-            // 4. 墨水罐与大招球移到中间底部紧凑横排：避开左上摇杆与右下操作按键，
-            //    同时隐藏移动端无意义的「按 Q 释放」键盘提示。
+            // 4. 移动端隐藏「Q 释放」键盘提示
             HudSpecialGaugeFactory.ApplyMobileBottomLayout(inkTankView, liquidOrbView);
         }
 
@@ -726,9 +788,7 @@ namespace P1.UI
             if (healthBarFill != null)
             {
                 healthBarFill.fillAmount = health.Health01;
-                healthBarFill.color = motor.IsInEnemyInk
-                    ? new Color(1f, 0.25f, 0.35f, 1f)
-                    : new Color(0.25f, 0.92f, 0.48f, 1f);
+                healthBarFill.color = motor.IsInEnemyInk ? ComicStyle.Red : ComicStyle.Green;
             }
 
             if (inkStateText != null && inkStateText.gameObject.activeInHierarchy)

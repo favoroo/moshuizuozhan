@@ -198,6 +198,80 @@ namespace P1.Tests
 
         [UnityTest]
         [Category("UI")]
+        public IEnumerator WeaponSelectView_LoadoutCard_ReplacesFlatTab_AndShowsCurrentWeapon()
+        {
+            yield return null;
+            var view = WeaponSelectView.Instance;
+            Assert.IsNotNull(view, "场景中应已自动就绪 WeaponSelectView.Instance");
+
+            var toggle = view.transform.Find("SafeAreaContainer/DrawerToggleButton");
+            Assert.IsNotNull(toggle, "抽屉收起时应有左下角「武器整备」整备卡");
+            var toggleRect = (RectTransform)toggle;
+            Assert.AreEqual(Vector2.zero, toggleRect.anchorMin, "整备卡应锚定左下角");
+            Assert.AreEqual(Vector2.zero, toggleRect.anchorMax, "整备卡应锚定左下角");
+            Assert.AreEqual(MenuLayoutMath.LoadoutCard(view.IsMobileLayout).Size.y, toggleRect.sizeDelta.y, 0.5f,
+                "整备卡高度应与版面表一致");
+            Assert.AreEqual(view.DrawerWidth, MenuLayoutMath.Drawer(view.IsMobileLayout).Width, 0.5f,
+                "抽屉宽度应与版面表一致");
+
+            // 图标是正圆色盘，而不是「直愣愣的方块」
+            var plate = toggle.Find("LoadoutIconPlate");
+            Assert.IsNotNull(plate, "整备卡应有武器圆形色盘");
+            var plateShape = plate.GetComponent<UIInkShapeGraphic>();
+            Assert.IsNotNull(plateShape);
+            Assert.AreEqual(UIInkShape.Blob, plateShape.Shape, "武器图标底色必须是正圆（Blob）");
+
+            var title = toggle.Find("Text")?.GetComponent<TextMeshProUGUI>();
+            Assert.IsNotNull(title);
+            StringAssert.Contains("武器整备", title.text);
+
+            var weaponName = toggle.Find("WeaponName")?.GetComponent<TextMeshProUGUI>();
+            Assert.IsNotNull(weaponName);
+
+            view.SelectWeapon(2, silent: true);
+            yield return null;
+            StringAssert.Contains(WeaponSelectMath.GetWeaponChineseName(WeaponKind.Charger), weaponName.text,
+                "整备卡应显示当前选中的武器名");
+
+            // 抽屉打开时整备卡隐藏，收起后回来
+            view.SetDrawerOpen(true);
+            yield return null;
+            Assert.IsFalse(toggle.gameObject.activeSelf, "抽屉展开时整备卡应隐藏");
+            view.SetDrawerOpen(false);
+            yield return null;
+            Assert.IsTrue(toggle.gameObject.activeSelf, "抽屉收起后整备卡应重新出现");
+
+            view.SelectWeapon(0, silent: true);
+            yield return null;
+        }
+
+        [UnityTest]
+        [Category("UI")]
+        public IEnumerator MatchFlowUI_ReadyHome_PutsContentInSafeAreaWithLargeCta()
+        {
+            yield return null;
+            var flow = Object.FindAnyObjectByType<MatchFlowUI>();
+            Assert.IsNotNull(flow, "场景中应有 MatchFlowUI");
+
+            var ready = flow.transform.Find("ReadyPanel");
+            Assert.IsNotNull(ready);
+            var safe = ready.Find("MenuSafeArea");
+            Assert.IsNotNull(safe, "首页内容必须放进 SafeArea 容器（刘海/圆角不吃字）");
+
+            var start = safe.Find("StartButton");
+            Assert.IsNotNull(start, "开始按钮应在安全区内，锚定右下角拇指区");
+            var startRect = (RectTransform)start;
+            Assert.AreEqual(new Vector2(1f, 0f), startRect.anchorMin, "开始按钮应锚定右下角");
+            Assert.AreEqual(new Vector2(1f, 0f), startRect.anchorMax, "开始按钮应锚定右下角");
+
+            var home = MenuLayoutMath.Home(false);
+            Assert.AreEqual(home.CtaSize.x, startRect.sizeDelta.x, 0.5f, "开始按钮宽度应来自版面表");
+            Assert.AreEqual(home.CtaSize.y, startRect.sizeDelta.y, 0.5f, "开始按钮高度应来自版面表");
+            Assert.GreaterOrEqual(startRect.sizeDelta.y, 140f, "开赛按钮必须是超大触控目标");
+        }
+
+        [UnityTest]
+        [Category("UI")]
         public IEnumerator MatchFlowUI_FullscreenPanelsAndUnderlay_FillScreen()
         {
             var flowGo = new GameObject("TestMatchFlowUI", typeof(RectTransform), typeof(Canvas), typeof(MatchFlowUI));

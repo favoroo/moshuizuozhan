@@ -193,14 +193,10 @@ namespace P1.Weapons
             float hitRadius = Config != null ? Config.projectileRadius : 0.18f;
 
             Vector3 muzzle = host.MuzzlePosition;
-            Vector3 flatAim = aim.FlatDirection;
-            Vector3 solveTarget = aim.HasGroundPoint
-                ? aim.GroundPoint + Vector3.up * hitRadius
-                : muzzle + flatAim * maxRange;
+            Vector3 solveTarget = aim.GetShotTarget(muzzle, maxRange) + Vector3.up * hitRadius;
 
             Vector3 launchDir = InkBallistics.SolveLaunchDirection(muzzle, solveTarget, speed, gravity, maxRange);
-            float yawOffset = Random.Range(-SpreadDegrees, SpreadDegrees);
-            Vector3 shotDir = Quaternion.Euler(0f, yawOffset, 0f) * launchDir;
+            Vector3 shotDir = InkBallistics.ApplySpread(launchDir, SpreadDegrees);
 
             host.SpawnShot(new WeaponShot
             {

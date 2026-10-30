@@ -103,8 +103,14 @@ Shader "P1/InkGround"
                 half   fogFactor  : TEXCOORD2;
             };
 
-            TEXTURE2D(_InkTex);
-            SAMPLER(sampler_InkTex);
+            // 墨迹图集改为采样全局 uniform：由 InkSurfaceController 每帧 Shader.SetGlobal* 推送
+            // （UpdateDynamicMaterialProperties），不依赖 per-renderer MaterialPropertyBlock。
+            // 历史写法读取 UnityPerMaterial._InkTex，而 OcclusionFader 恢复不透明时会
+            // SetPropertyBlock(null) 把整块 MPB 清空 —— 高台/坡道/出生台随即回落到材质默认的
+            // 黑贴图，覆盖率恒为 0，表现为"这些地方永远喷不上油漆"。改全局后与遮挡系统彻底解耦。
+            TEXTURE2D(_GlobalInkAtlasTex);
+            float4 _GlobalInkMapOriginXZ;
+            float4 _GlobalInkTexelSize;
 
             TEXTURE2D(_GroundTex);
             SAMPLER(sampler_GroundTex);
@@ -228,20 +234,22 @@ Shader "P1/InkGround"
                     }
                 }
 
-                float2 mapOrigin = _InkMapOriginXZ.xy;
-                float2 mapSize = max(float2(0.001, 0.001), _InkMapOriginXZ.zw);
+                float2 mapOrigin = _GlobalInkMapOriginXZ.xy;
+                float2 mapSize = max(float2(0.001, 0.001), _GlobalInkMapOriginXZ.zw);
                 float2 inkUV = saturate((input.positionWS.xz - mapOrigin) / mapSize);
 
                 // 图集采样：图集已是高分辨率的连续覆盖率场，不再是二值网格
-                float2 texelUV = _InkTexelSize.xy > 0.000001 ? _InkTexelSize.xy : float2(1.0 / 4096.0, 1.0 / 4096.0);
-                float4 inkSample = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, inkUV);
+                float2 texelUV = _GlobalInkTexelSize.xy > 0.000001
+                    ? _GlobalInkTexelSize.xy
+                    : float2(1.0 / 4096.0, 1.0 / 4096.0);
+                float4 inkSample = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, inkUV);
 
                 // 4 邻域采样：解析覆盖率 / 队伍比例 / 湿润度梯度
                 float2 uvOffset = texelUV;
-                float4 sampR = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, saturate(inkUV + float2(uvOffset.x, 0.0)));
-                float4 sampL = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, saturate(inkUV - float2(uvOffset.x, 0.0)));
-                float4 sampU = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, saturate(inkUV + float2(0.0, uvOffset.y)));
-                float4 sampD = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, saturate(inkUV - float2(0.0, uvOffset.y)));
+                float4 sampR = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(uvOffset.x, 0.0)));
+                float4 sampL = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV - float2(uvOffset.x, 0.0)));
+                float4 sampU = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(0.0, uvOffset.y)));
+                float4 sampD = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV - float2(0.0, uvOffset.y)));
 
                 // R/G/B 均按覆盖率预乘，这里反预乘回真实数据：
                 // G = 最新落墨时间戳 × 覆盖率（InkAtlasStamp Pass 预乘后 Max 混合写入），
@@ -281,7 +289,7 @@ Shader "P1/InkGround"
                     {
                         // gradAmt 指向覆盖率增大方向（墨内部），向外偏移采样即得侵蚀后的覆盖
                         float2 erodeUV = saturate(inkUV - (gradAmt / gradMag) * (shrinkM / mapSize));
-                        amtEff = min(amtEff, SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, erodeUV).a);
+                        amtEff = min(amtEff, SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, erodeUV).a);
                     }
                 }
 
@@ -311,9 +319,12 @@ Shader "P1/InkGround"
                 half upness = smoothstep(0.55, 0.85, geomN.y);
                 inkMask *= upness;
 
-                // 垂直侧沿（高台/斜坡裸露边）几乎只能吃环境光，直接用 _CliffColor 会压成死黑；
-                // 提亮 1.6 倍，让它读作"深一号的混凝土"，未涂墨时也有体积感。
-                half3 baseSurfaceCol = lerp(_CliffColor.rgb * 1.6, elevatedGroundCol, upness);
+                // 垂直侧沿（高台/斜坡裸露边）出现在高光台地四周，是玩家视线的焦点之一。
+                // 只靠 `_CliffColor` 单独成色会读作"贴了一片深色板"，和地面脱节；
+                // 这里让侧沿向"压暗一档的地面色"过渡 55%，结构上保持同一族材质，
+                // 再配合下面的垂直面环境保底，避免背光侧沿被压成死黑。
+                half3 cliffCol = lerp(_CliffColor.rgb, elevatedGroundCol * 0.62, 0.55);
+                half3 baseSurfaceCol = lerp(cliffCol, elevatedGroundCol, upness);
 
                 // -------------------------------------------------------------
                 // 1. 边缘接触软阴影 (Contact Shadow)
@@ -497,6 +508,10 @@ Shader "P1/InkGround"
                 half groundShadow = P1ToonShadowTerm(shadowAtten, _ShadowFloor, _ShadeSoftness);
                 half3 groundAmbient = SampleSH(geomN) * 0.35 + _ShadowTint.rgb * 0.18;
                 half3 baseDiffuse = groundAmbient + lerp(_ShadowTint.rgb, half3(1,1,1), groundBand) * groundShadow * 0.85;
+                // 垂直侧沿的环境保底：半球球谐在竖直法线方向本身取值很低，再叠上阴影项后
+                // 高台/坡道的裸露侧面会塌成纯黑。按 (1 - upness) 补一层极弱的冷色环境光，
+                // 让侧沿始终读作"深一号的混凝土"而不是一块黑边。
+                baseDiffuse += (1.0 - upness) * _ShadowTint.rgb * 0.55;
                 half3 finalRgb = lerp(baseSurfaceCol * baseDiffuse, litInkColor, inkMask);
                 finalRgb = MixFog(finalRgb, input.fogFactor);
 
@@ -606,30 +621,11 @@ Shader "P1/InkGround"
 
             half4 ShadowPassFragment(ShadowVaryings input) : SV_Target
             {
-                float effectiveAlpha = _DitherAlpha;
-                if (_FocusWeight > 0.001)
-                {
-                    float d = length(input.positionWS.xz - _FocusPos.xz);
-                    float focusFade = saturate(d / max(0.1, _FocusRadius));
-                    effectiveAlpha = lerp(_FocusMinAlpha, _DitherAlpha, focusFade);
-                }
-
-                if (effectiveAlpha < 0.999)
-                {
-                    static const float4x4 _BayerMatrix4x4 = float4x4(
-                         0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
-                        12.0/16.0,  4.0/16.0, 14.0/16.0,  6.0/16.0,
-                         3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
-                        15.0/16.0,  7.0/16.0, 13.0/16.0,  5.0/16.0
-                    );
-                    float2 screenPixel = input.positionCS.xy;
-                    int bx = int(fmod(screenPixel.x, 4.0));
-                    int by = int(fmod(screenPixel.y, 4.0));
-                    if (_BayerMatrix4x4[by][bx] >= effectiveAlpha)
-                    {
-                        discard;
-                    }
-                }
+                // 阴影 Pass 不做网点剔除：这里从光源视角渲染阴影贴图，
+                // input.positionCS.xy 是阴影图像素坐标，而不是屏幕像素坐标。
+                // 单级联/硬阴影（Android）下图案会随相机每帧重新拟合而滑动，
+                // 角色身上就会看到乱闪的碎影。遮挡淡化只作用于颜色 Pass，
+                // 阴影保持实体，物理上掩体仍然存在。
                 return 0;
             }
             ENDHLSL
@@ -721,32 +717,8 @@ Shader "P1/InkGround"
 
             half4 DepthNormalsFragment(DepthNormalsVaryings input) : SV_Target
             {
-                // 俯视角网点半透明遮挡剔除 (Screen-Door Dither Occlusion)
-                float effectiveAlpha = _DitherAlpha;
-                if (_FocusWeight > 0.001)
-                {
-                    float d = length(input.positionWS.xz - _FocusPos.xz);
-                    float focusFade = saturate(d / max(0.1, _FocusRadius));
-                    effectiveAlpha = lerp(_FocusMinAlpha, _DitherAlpha, focusFade);
-                }
-
-                if (effectiveAlpha < 0.999)
-                {
-                    static const float4x4 _BayerMatrix4x4 = float4x4(
-                         0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
-                        12.0/16.0,  4.0/16.0, 14.0/16.0,  6.0/16.0,
-                         3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
-                        15.0/16.0,  7.0/16.0, 13.0/16.0,  5.0/16.0
-                    );
-                    float2 screenPixel = input.positionCS.xy;
-                    int bx = int(fmod(screenPixel.x, 4.0));
-                    int by = int(fmod(screenPixel.y, 4.0));
-                    if (_BayerMatrix4x4[by][bx] >= effectiveAlpha)
-                    {
-                        discard;
-                    }
-                }
-
+                // 法线缓冲不做网点剔除：遮挡物在几何上仍然存在，保持实体法线
+                // 可避免 PC 全屏描边在网点孔洞上误描黑边；Android 无此 Pass 消费者。
                 #if defined(_GBUFFER_NORMALS_OCT)
                 float3 normalWS = normalize(input.normalWS);
                 float2 octNormalWS = PackNormalOctQuadEncode(normalWS);

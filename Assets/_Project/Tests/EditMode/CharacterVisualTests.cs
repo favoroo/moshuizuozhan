@@ -3,6 +3,7 @@ using P1.Core;
 using P1.Player;
 using P1.Weapons;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace P1.Tests
 {
@@ -187,6 +188,28 @@ namespace P1.Tests
             Assert.IsNotNull(kid.Find("Chest/BodySquash/Face/Eye_R"), "右眼必须存在");
             Assert.IsNotNull(kid.Find("Chest/BodySquash/InkTankBackpack/LiquidFill"), "墨罐液面必须存在（墨量联动）");
             Assert.IsNotNull(_controller.BodySquashTransform, "控制器必须绑定 BodySquash 挤压节点");
+        }
+
+        [Test]
+        public void EggShells_DoNotCastRedundantShadows()
+        {
+            Transform squash = _controller.KidRoot.transform.Find("Chest/BodySquash");
+            Assert.IsNotNull(squash, "BodySquash 节点必须存在");
+
+            var egg = squash.Find("EggBody").GetComponent<Renderer>();
+            var shorts = squash.Find("EggShorts").GetComponent<Renderer>();
+            var band = squash.Find("EggWaistband").GetComponent<Renderer>();
+
+            Assert.IsNotNull(egg, "EggBody 渲染器必须存在");
+            Assert.IsNotNull(shorts, "EggShorts 渲染器必须存在");
+            Assert.IsNotNull(band, "EggWaistband 渲染器必须存在");
+
+            Assert.AreEqual(ShadowCastingMode.On, egg.shadowCastingMode,
+                "蛋体主躯干必须投影");
+            Assert.AreEqual(ShadowCastingMode.Off, shorts.shadowCastingMode,
+                "短裤薄壳与蛋体轮廓重合，不应重复投影");
+            Assert.AreEqual(ShadowCastingMode.Off, band.shadowCastingMode,
+                "腰带薄壳与蛋体轮廓重合，不应重复投影");
         }
 
         [Test]

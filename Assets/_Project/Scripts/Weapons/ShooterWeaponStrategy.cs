@@ -55,15 +55,12 @@ namespace P1.Weapons
             float maxRange = Config != null ? Config.maxRange : 7.2f;
 
             Vector3 muzzle = host.MuzzlePosition;
-            Vector3 flatAim = aim.FlatDirection;
-            Vector3 solveTarget = aim.HasGroundPoint
-                ? aim.GroundPoint + Vector3.up * hitRadius
-                : muzzle + flatAim * maxRange;
+            Vector3 solveTarget = aim.GetShotTarget(muzzle, maxRange) + Vector3.up * hitRadius;
 
-            // 先反解仰角，再做纯偏航散布：落点以准星为中心横向散开，不会因散布而提前/延后落地。
+            // 先反解仰角（射程内落点与准星重合），再做绕弹道轴的锥形散布：
+            // 抬头朝天时弹丸会真的向上飞，而不是被压平水平射出。
             Vector3 launchDir = InkBallistics.SolveLaunchDirection(muzzle, solveTarget, speed, gravity, maxRange);
-            float yawOffset = Random.Range(-SpreadDegrees, SpreadDegrees);
-            Vector3 shotDir = Quaternion.Euler(0f, yawOffset, 0f) * launchDir;
+            Vector3 shotDir = InkBallistics.ApplySpread(launchDir, SpreadDegrees);
 
             host.SpawnShot(new WeaponShot
             {

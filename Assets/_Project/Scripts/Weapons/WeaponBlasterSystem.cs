@@ -88,7 +88,7 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayInkHitGround(1.1f);
+                AudioManager.Instance.PlayInkHitGround(groundPoint, 1.1f, paintRadius);
             }
 
             return painted;

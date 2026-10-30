@@ -1,3 +1,4 @@
+using P1.Core;
 using P1.Weapons;
 using TMPro;
 using UnityEngine;
@@ -6,15 +7,22 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 程序化装配 HUD 仪表簇（P4-C）：桌面在右上角，移动端由
-/// <see cref="ApplyMobileBottomLayout"/> 搬到中间底部，避开摇杆与操作按键。
+    /// 程序化装配 HUD 底部中央仪表条（P14-H 重做，取代旧的「右上角竖墨罐 + 大招球」）。
     ///
-    /// 全部用代码生成，不写场景、不依赖 Prefab，因此：
-    /// - 现有主场景无需重建即可获得新 HUD（HudController 在 Awake 里自举）；
-    /// - 后续若想持久化摆放，编辑器工具或 P4-B/D 可以直接调用本工厂。
+    /// 为什么改成横向：本作同时出桌面与横屏移动端，屏幕左右下角在移动端是摇杆 / 开火 / 跳跃 / 大招
+    /// 五个触控键的地盘；把仪表挂在两侧等于让手指盖住读数。因此墨水量与大招充能统一收进
+    /// 底部中央的黑底信息条，**永远落在血条正上方**，桌面与移动端同一套位置：
     ///
-    /// 颜色 / 字体 / 弹簧来自 <see cref="UIThemeSO"/>，几何 / 阈值 / 节拍来自 <see cref="HudGaugeStyleSO"/>；
-    /// 唯一的外部素材是球心大招图标（`Art/Sprites/Icons/Specials`），其余全部自绘。
+    /// <code>
+    ///  ┌──────────────────────────────────────────────┐
+    ///  │ 💧 ██████████████░░ 78%   ◆ ██████░░░ 42%    │  ← 横向仪表行（本文件生成）
+    ///  │ ███████████████████████████████████████████ │  ← 生命条（HudController）
+    ///  │ WASD 移动 · 鼠标 视角 · …                    │  ← 键盘提示（桌面）
+    ///  └──────────────────────────────────────────────┘
+    /// </code>
+    ///
+    /// 风格约束（Docs/UI-GeometricBold.md）：纯色直角块、无渐变、无阴影、无网点，
+    /// 数字用主题显示字体，满能只用「黄块 + 黄条」硬切表达。
     /// </summary>
     public static class HudSpecialGaugeFactory
     {
@@ -26,7 +34,45 @@ namespace P1.UI
             public RectTransform Root;
         }
 
-        private static Font _legacyFont;
+        /// <summary>底部信息条宽度（1920×1080 参考分辨率）。</summary>
+        public const float StripWidth = 940f;
+
+        /// <summary>桌面信息条高度（含键盘提示行）。</summary>
+        public const float StripHeightDesktop = 104f;
+
+        /// <summary>移动端信息条高度（隐藏键盘提示行后收紧）。</summary>
+        public const float StripHeightMobile = 76f;
+
+        /// <summary>桌面板底边距屏幕底部的距离（面板与仪表条共用，轴心都在底边）。</summary>
+        public const float StripBottomYDesktop = 12f;
+
+        /// <summary>移动端板底边距；与桌面一致，靠隐藏提示行把面板收矮。</summary>
+        public const float StripBottomYMobile = 12f;
+
+        /// <summary>仪表行高度。</summary>
+        public const float MeterRowHeight = 28f;
+
+        /// <summary>仪表行距信息条顶边的内边距。</summary>
+        public const float MeterRowTopInset = 8f;
+
+        private const float SideMargin = 24f;
+        private const float MeterGap = 32f;
+        private const float GroupWidth = (StripWidth - SideMargin * 2f - MeterGap) * 0.5f;
+        private const float BarHeight = 18f;
+        private const float PercentColumn = 92f;
+        private const float PercentGap = 10f;
+        private const float InkIconColumn = 34f;
+        private const float SpecialIconColumn = 36f;
+        private const float SpecialPlateSize = 28f;
+        private const float InkBarWidth = GroupWidth - InkIconColumn - PercentGap - PercentColumn;
+        private const float SpecialBarWidth = GroupWidth - SpecialIconColumn - PercentGap - PercentColumn;
+
+        private struct BarParts
+        {
+            public RectTransform Track;
+            public Image Fill;
+            public UIInkShapeGraphic Frame;
+        }
 
         public static GaugeCluster BuildCluster(Transform canvasRoot, UIThemeSO theme, HudGaugeStyleSO styleAsset)
         {
@@ -35,16 +81,26 @@ namespace P1.UI
             var rootGo = new GameObject("SpecialGaugeCluster", typeof(RectTransform));
             var root = (RectTransform)rootGo.transform;
             root.SetParent(canvasRoot, false);
-            Stretch(root);
+            root.anchorMin = root.anchorMax = new Vector2(0.5f, 0f);
+            root.pivot = new Vector2(0.5f, 0f);
+            root.sizeDelta = new Vector2(StripWidth, StripHeightDesktop);
+            root.anchoredPosition = new Vector2(0f, StripBottomYDesktop);
 
-            // 先关掉再装配：让 UIChunkyText / UISpringMotion 等组件的 Awake 在字段写好后运行
+            // 先关掉再装配：让两个 View 的 Awake / OnEnable 在字段写好后运行
             rootGo.SetActive(false);
+
+            RectTransform row = NewRect("MeterRow", root);
+            row.anchorMin = new Vector2(0f, 1f);
+            row.anchorMax = new Vector2(1f, 1f);
+            row.pivot = new Vector2(0.5f, 1f);
+            row.sizeDelta = new Vector2(-SideMargin * 2f, MeterRowHeight);
+            row.anchoredPosition = new Vector2(0f, -MeterRowTopInset);
 
             var cluster = new GaugeCluster
             {
                 Root = root,
-                Orb = BuildOrb(root, theme, style),
-                Tank = BuildTank(root, theme, style),
+                Tank = BuildInkMeter(row, theme, style),
+                Orb = BuildSpecialMeter(row, theme, style),
             };
 
             rootGo.SetActive(true);
@@ -52,351 +108,265 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 移动端：把右上角「墨水管 + 大招球」搬到中间底部，做成紧凑横排。
-        /// 位置经过验算：落在血条上方、左侧摇杆（中心 200,200，半径 170）右侧边界之外，
-        /// 且远离右下角操作按键，HUD 本身不拦截触控（sortingOrder 低于触控层）。
+        /// 移动端适配：键盘「Q 释放」提示交给触控大招键，仪表本身位置不变
+        /// （两条横向仪表本来就在屏幕中央、血条上方，不会压到左右触控区）。
         /// </summary>
         public static void ApplyMobileBottomLayout(InkTankView tank, LiquidOrbView orb)
         {
-            if (orb != null)
-            {
-                var orbRect = (RectTransform)orb.transform;
-                orbRect.anchorMin = orbRect.anchorMax = new Vector2(0.5f, 0f);
-                orbRect.pivot = new Vector2(0.5f, 0.5f);
-                orbRect.sizeDelta = new Vector2(84f, 84f);
-                orbRect.anchoredPosition = new Vector2(-75f, 108f);
-                orb.SetCompactBottomLayout(true);
-            }
-
-            if (tank != null)
-            {
-                var tankRect = (RectTransform)tank.transform;
-                tankRect.anchorMin = tankRect.anchorMax = new Vector2(0.5f, 0f);
-                tankRect.pivot = new Vector2(0.5f, 0.5f);
-                tankRect.sizeDelta = new Vector2(36f, 116f);
-                tankRect.anchoredPosition = new Vector2(-4f, 116f);
-                tank.SetCompactBottomLayout(true);
-            }
+            if (tank != null) tank.SetCompactBottomLayout(true);
+            if (orb != null) orb.SetCompactBottomLayout(true);
         }
 
-        private static LiquidOrbView BuildOrb(RectTransform parent, UIThemeSO theme, HudGaugeStyleSO style)
+        // ── 墨水条 ─────────────────────────────────────────────────────────
+
+        private static InkTankView BuildInkMeter(RectTransform row, UIThemeSO theme, HudGaugeStyleSO style)
         {
             UIThemeSO themeResolved = UIThemeSO.Resolve(theme);
 
-            var orbGo = new GameObject("LiquidOrb", typeof(RectTransform));
-            var orbRect = (RectTransform)orbGo.transform;
-            orbRect.SetParent(parent, false);
-            orbRect.anchorMin = orbRect.anchorMax = new Vector2(1f, 1f);
-            orbRect.pivot = new Vector2(0.5f, 0.5f);
-            orbRect.sizeDelta = Vector2.one * style.orbSize;
-            orbRect.anchoredPosition = style.orbAnchoredPosition;
+            RectTransform group = NewRect("InkTank", row);
+            group.anchorMin = group.anchorMax = new Vector2(0f, 0.5f);
+            group.pivot = new Vector2(0f, 0.5f);
+            group.sizeDelta = new Vector2(GroupWidth, MeterRowHeight);
+            group.anchoredPosition = Vector2.zero;
 
-            // Pulse 层：满能时整簇缩放震颤，不影响外层锚点
-            RectTransform pulse = NewRect("Pulse", orbRect);
-            Stretch(pulse);
-
-            // 0) 满能放射动作线（漫画 POW! 能量感）
-            RectTransform linesRect = NewRect("ActionLines", pulse);
-            Stretch(linesRect, -32f);
-            var actionLines = linesRect.gameObject.AddComponent<ComicActionLinesGraphic>();
-            actionLines.raycastTarget = false;
-            actionLines.RayCount = 20;
-            actionLines.Alpha = 0f;
-            actionLines.color = ComicStyle.Yellow;
-
-            // 1) 金色旋转光环（球体外围）
-            RectTransform haloRect = NewRect("ReadyHalo", pulse);
-            Stretch(haloRect);
-            var halo = haloRect.gameObject.AddComponent<UIRotatingRingGraphic>();
-            halo.raycastTarget = false;
-            halo.Configure(1.18f, 5f, style.haloDashCount, style.haloSpinDegreesPerSecond, themeResolved.readyGold);
-
-            // 2) 满能爆闪（冲击波 + 射线）
-            RectTransform burstRect = NewRect("ReadyBurst", pulse);
-            Stretch(burstRect);
-            var burst = burstRect.gameObject.AddComponent<UIBurstGraphic>();
-            burst.raycastTarget = false;
-            burst.Configure(style.burstDuration, style.burstRayCount, themeResolved.readyGold);
-
-            // 3) 球体底：漫画气泡，粗墨边 6px + 硬阴影 (6,-6) + 半调网点
-            RectTransform bodyRect = NewRect("Body", pulse);
-            Stretch(bodyRect);
-            UIInkShapeGraphic bodyShape = bodyRect.gameObject.AddComponent<UIInkShapeGraphic>();
-            bodyShape.raycastTarget = false;
-            bodyShape.Shape = UIInkShape.Blob;
-            bodyShape.BorderWidth = ComicStyle.Border;
-            bodyShape.BorderColor = ComicStyle.Ink;
-            bodyShape.HardShadow = true;
-            bodyShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
-            bodyShape.ShadowColor = ComicStyle.Ink;
-            bodyShape.Halftone = true;
-            bodyShape.HalftoneAlpha = 0.14f;
-            bodyShape.GlossAlpha = 0f;
-            bodyShape.DrawGloss = false;
-            bodyShape.InnerRimAlpha = 0f;
-            bodyShape.color = themeResolved.panelColor;
-
-            // 4) 球内液体
-            RectTransform liquidRect = NewRect("Liquid", pulse);
-            Stretch(liquidRect, 10f);
-            var liquid = liquidRect.gameObject.AddComponent<UILiquidFillGraphic>();
-            liquid.raycastTarget = false;
-            liquid.Configure(UILiquidClipShape.Circle, 0f, 0f,
-                new Color(1f, 1f, 1f, 0.6f),
-                style.orbWaveAmplitude, style.orbWaveSpeed, style.orbWaveCycles,
-                style.orbColumns, style.orbBubbleCount, 0.030f,
-                style.orbFillSpring, 0f);
-
-            // 4.5) 球心大招技能图标：深墨硬阴影 + 白色矢量主图标
-            RectTransform iconRoot = NewRect("SpecialIcon", pulse);
-            iconRoot.anchorMin = iconRoot.anchorMax = new Vector2(0.5f, 0.5f);
-            iconRoot.pivot = new Vector2(0.5f, 0.5f);
-            iconRoot.sizeDelta = Vector2.one * style.specialIconSize;
-            iconRoot.anchoredPosition = new Vector2(0f, style.specialIconOffsetY);
-
-            Image iconShadow = CreateIconImage("Shadow", iconRoot, ComicStyle.Ink,
-                new Vector2(2.5f, -2.5f));
-            Image icon = CreateIconImage("Glyph", iconRoot, Color.white, Vector2.zero);
-            Sprite initIcon = UIIconLibrary.Get("special_slam") ?? style.GetSpecialIcon(SpecialKind.Slam);
-            icon.sprite = initIcon;
-            iconShadow.sprite = initIcon;
-            icon.enabled = initIcon != null;
-            iconShadow.enabled = initIcon != null;
-
-            // 5) 漫画外环
-            RectTransform rimRect = NewRect("Rim", pulse);
-            Stretch(rimRect, 6f);
-            UIInkShapeGraphic rimShape = rimRect.gameObject.AddComponent<UIInkShapeGraphic>();
-            rimShape.raycastTarget = false;
-            rimShape.Shape = UIInkShape.Blob;
-            rimShape.BorderWidth = 2f;
-            rimShape.BorderColor = ComicStyle.Ink;
-            rimShape.GlossAlpha = 0f;
-            rimShape.DrawGloss = false;
-            rimShape.InnerRimAlpha = 0f;
-            rimShape.color = new Color(1f, 1f, 1f, 0f);
-
-            // 6) 充能百分比
-            TMP_Text percent = CreateChunkyTmp("Percent", orbRect, themeResolved, style.percentFontSize, "0%");
-            var percentRect = (RectTransform)percent.transform;
-            percentRect.anchorMin = new Vector2(0.5f, 0f);
-            percentRect.anchorMax = new Vector2(0.5f, 0f);
-            percentRect.pivot = new Vector2(0.5f, 0f);
-            percentRect.sizeDelta = new Vector2(84f, 26f);
-            percentRect.anchoredPosition = new Vector2(0f, 7f);
-
-            // 7) 满能按键提示（漫画纸面气泡，朝上指尾）
-            RectTransform hintRect = NewRect("ReadyHint", orbRect);
-            hintRect.anchorMin = hintRect.anchorMax = new Vector2(0.5f, 0.5f);
-            hintRect.pivot = new Vector2(0.5f, 1f);
-            hintRect.sizeDelta = style.readyHintSize;
-            hintRect.anchoredPosition = new Vector2(0f, style.readyHintOffsetY);
-
-            UIInkShapeGraphic hintPill = hintRect.gameObject.AddComponent<UIInkShapeGraphic>();
-            hintPill.raycastTarget = false;
-            hintPill.Shape = UIInkShape.SpeechBubble;
-            hintPill.CornerRadius = ComicStyle.CornerBubble;
-            hintPill.SpeechTail = true;
-            hintPill.TailSize = new Vector2(16f, 14f);
-            hintPill.TailAngle = 90f; // 尖角朝向上方大招球
-            hintPill.BorderWidth = ComicStyle.BorderThin;
-            hintPill.BorderColor = ComicStyle.Ink;
-            hintPill.HardShadow = true;
-            hintPill.ShadowOffset = new Vector2(3f, -3f);
-            hintPill.ShadowColor = ComicStyle.Ink;
-            hintPill.color = ComicStyle.Paper;
-
-            Text hintLabel = CreateLegacyText("HintLabel", hintRect, Mathf.Max(16f, style.hintFontSize),
-                style.readyHintText, TextAnchor.MiddleCenter, ComicStyle.Ink);
-            Stretch((RectTransform)hintLabel.transform, 4f, 8f, 2f, 2f);
-
-            var hintMotion = hintRect.gameObject.AddComponent<UISpringMotion>();
-            hintMotion.SetTheme(theme);
-
-            var view = orbGo.AddComponent<LiquidOrbView>();
-            view.Configure(theme, style, liquid, bodyShape, rimShape, pulse, percent,
-                halo, burst, hintRect, hintPill, hintLabel, hintMotion,
-                style.readyHintText, style.readyHintKey);
-            view.ConfigureSpecialIcon(iconRoot, icon, iconShadow);
-
-            return view;
-        }
-
-        private static InkTankView BuildTank(RectTransform parent, UIThemeSO theme, HudGaugeStyleSO style)
-        {
-            UIThemeSO themeResolved = UIThemeSO.Resolve(theme);
-
-            var tankGo = new GameObject("InkTank", typeof(RectTransform));
-            var tankRect = (RectTransform)tankGo.transform;
-            tankRect.SetParent(parent, false);
-            tankRect.anchorMin = tankRect.anchorMax = new Vector2(1f, 1f);
-            tankRect.pivot = new Vector2(0.5f, 0.5f);
-            tankRect.sizeDelta = style.tankSize;
-            tankRect.anchoredPosition = style.tankAnchoredPosition;
-
-            float halfW = style.tankSize.x * 0.5f;
-            float halfH = style.tankSize.y * 0.5f;
-            float corner = Mathf.Min(18f, halfW - 2f);
-
-            // 1) 低墨告警外发光（画在最底层，比罐体略大）
-            RectTransform glowRect = NewRect("WarningGlow", tankRect);
-            Stretch(glowRect, -7f);
-            UIInkShapeGraphic warningGlow = glowRect.gameObject.AddComponent<UIInkShapeGraphic>();
+            // 1) 低墨告警红光：垫在轨道后方，平时完全透明
+            RectTransform glowRect = NewRect("WarningGlow", group);
+            PlaceLeft(glowRect, InkIconColumn - 3f, InkBarWidth + 6f, BarHeight + 6f);
+            var warningGlow = glowRect.gameObject.AddComponent<UIInkShapeGraphic>();
             warningGlow.raycastTarget = false;
-            ApplyRectStyle(warningGlow, corner + 5f, borderWidth: 0f,
-                fill: new Color(themeResolved.dangerRed.r, themeResolved.dangerRed.g, themeResolved.dangerRed.b, 0f),
-                border: themeResolved.dangerRed, glossAlpha: 0f, innerRimAlpha: 0f);
+            warningGlow.Shape = UIInkShape.SharpRect;
+            warningGlow.CornerRadius = ComicStyle.CornerSharp;
+            warningGlow.BorderWidth = 0f;
+            warningGlow.HardShadow = false;
+            warningGlow.Halftone = false;
+            warningGlow.GlossAlpha = 0f;
+            warningGlow.InnerRimAlpha = 0f;
+            warningGlow.color = new Color(ComicStyle.Red.r, ComicStyle.Red.g, ComicStyle.Red.b, 0f);
 
-            // 2) 罐体底（实心纸面：投影只在这一层开，阴影被自己的填充盖住，只露外侧一圈）
-            RectTransform bodyRect = NewRect("Body", tankRect);
-            Stretch(bodyRect);
-            UIInkShapeGraphic bodyShape = bodyRect.gameObject.AddComponent<UIInkShapeGraphic>();
-            bodyShape.raycastTarget = false;
-            ApplyRectStyle(bodyShape, corner, borderWidth: 0f, fill: themeResolved.panelColor,
-                border: themeResolved.outlineColor, glossAlpha: 0f, innerRimAlpha: 0f, hardShadow: true);
+            // 2) 图标（墨滴）：白色矢量，读作「墨水」，比中文字省一行高度
+            Image icon = CreateIcon("InkIcon", group, "glyph_drop");
+            var iconRect = (RectTransform)icon.transform;
+            iconRect.anchorMin = iconRect.anchorMax = new Vector2(0f, 0.5f);
+            iconRect.pivot = new Vector2(0.5f, 0.5f);
+            iconRect.sizeDelta = new Vector2(24f, 24f);
+            iconRect.anchoredPosition = new Vector2(InkIconColumn * 0.5f - 2f, 0f);
+            icon.color = ComicStyle.Paper;
 
-            // 3) 液面
-            const float liquidInset = 4f;
-            RectTransform liquidRect = NewRect("Liquid", tankRect);
-            Stretch(liquidRect, liquidInset);
-            var liquid = liquidRect.gameObject.AddComponent<UILiquidFillGraphic>();
-            liquid.raycastTarget = false;
-            liquid.Configure(UILiquidClipShape.RoundedRect, Mathf.Max(2f, corner - liquidInset), 0f,
-                new Color(1f, 1f, 1f, 0.55f),
-                style.tankWaveAmplitude, style.tankWaveSpeed, 1.1f,
-                style.tankColumns, style.tankBubbleCount, style.tankBubbleSize,
-                style.tankFillSpring, 1f);
+            // 3) 轨道 + 纯色填充 + 描边
+            BarParts bar = BuildBar(group, "InkBar", InkIconColumn, InkBarWidth,
+                InkTeamColorFilter.ResolveTeamColor(Team.Neutral, themeResolved));
 
-            // 4) 副武器耗墨刻度红线（细罐体上要够厚才看得清：深色衬底 + 3.4px 红线）
-            RectTransform marker = NewRect("BombThreshold", tankRect);
-            marker.anchorMin = marker.anchorMax = new Vector2(0.5f, 0f);
+            // 4) 副武器耗墨刻度：竖红线（横向条的刻度是竖线，不再是横线）
+            RectTransform marker = NewRect("BombThreshold", bar.Track);
+            marker.anchorMin = marker.anchorMax = new Vector2(0f, 0.5f);
             marker.pivot = new Vector2(0.5f, 0.5f);
-            marker.sizeDelta = new Vector2(style.tankSize.x - 2f, 8f);
+            marker.sizeDelta = new Vector2(3f, BarHeight);
+            marker.anchoredPosition = new Vector2(2f, 0f);
 
-            CreateImage("ThresholdBacking", marker,
-                new Color(themeResolved.outlineColor.r, themeResolved.outlineColor.g, themeResolved.outlineColor.b, 0.95f),
-                new Vector2(style.tankSize.x - 2f, 7f));
-            CreateImage("ThresholdLine", marker, themeResolved.dangerRed,
-                new Vector2(style.tankSize.x - 1f, 3.4f));
+            CreateFlatImage("ThresholdBacking", marker, ComicStyle.Ink, new Vector2(5f, BarHeight));
+            CreateFlatImage("ThresholdLine", marker, ComicStyle.Red, new Vector2(3f, BarHeight));
 
-            // 5) 外框（漫画粗墨边 6px，压住液体与刻度线）
-            //    这里坚决不能开 HardShadow：外框填充是透明的，而硬阴影是整块实心多边形，
-            //    会把罐内液面整片糊成墨黑（P13 实机截图里的"黑薯条"就是它）。
-            RectTransform frameRect = NewRect("Frame", tankRect);
-            Stretch(frameRect);
-            UIInkShapeGraphic frameShape = frameRect.gameObject.AddComponent<UIInkShapeGraphic>();
-            frameShape.raycastTarget = false;
-            ApplyRectStyle(frameShape, corner, borderWidth: ComicStyle.Border, fill: new Color(1f, 1f, 1f, 0f),
-                border: ComicStyle.Ink, glossAlpha: 0f, innerRimAlpha: 0f);
+            // 5) 百分比读数：右对齐固定列，数字变化不抖动
+            TMP_Text percent = CreateMeterPercent("Percent", group, theme, style);
 
-            // 6) 百分比读数（纸面标牌：纸白底 + 墨线 + 硬阴影）
-            RectTransform plateRect = NewRect("PercentPlate", tankRect);
-            plateRect.anchorMin = new Vector2(0.5f, 0f);
-            plateRect.anchorMax = new Vector2(0.5f, 0f);
-            plateRect.pivot = new Vector2(0.5f, 1f);
-            plateRect.sizeDelta = new Vector2(74f, 26f);
-            plateRect.anchoredPosition = new Vector2(0f, -4f);
-
-            var plateShape = plateRect.gameObject.AddComponent<UIInkShapeGraphic>();
-            plateShape.raycastTarget = false;
-            plateShape.Shape = UIInkShape.RoundedRect;
-            plateShape.CornerRadius = ComicStyle.CornerSharp;
-            plateShape.BorderWidth = 2.5f;
-            plateShape.BorderColor = ComicStyle.Ink;
-            plateShape.HardShadow = true;
-            plateShape.ShadowOffset = new Vector2(2f, -2f);
-            plateShape.ShadowColor = ComicStyle.Ink;
-            plateShape.color = ComicStyle.Paper;
-
-            Text percent = CreateLegacyText("Percent", plateRect, 16f,
-                "100%", TextAnchor.MiddleCenter, ComicStyle.Ink);
-            percent.fontStyle = FontStyle.Bold;
-            Stretch((RectTransform)percent.transform);
-
-            var view = tankGo.AddComponent<InkTankView>();
-            view.Configure(theme, style, liquid, marker, frameShape, bodyShape, warningGlow, percent,
-                liquidInset);
-            // 首帧 HudController 才会按 WeaponConfig 刷新；先用样式默认值落位，避免红线从 55% 跳一下
+            var view = group.gameObject.AddComponent<InkTankView>();
+            view.Configure(theme, style, bar.Fill, marker, bar.Frame, warningGlow, percent, 2f);
+            // 首帧 HudController 才会按 WeaponConfig 刷新；先用样式默认值落位，避免红线跳一下
             view.SetThreshold01(style.bombThreshold01);
 
             return view;
         }
 
-        private static void ApplyBlobStyle(UIInkShapeGraphic graphic, int seed, float borderWidth,
-            Color fill, Color border, float wobble, float glossAlpha, float innerRimAlpha)
-        {
-            var card = new UIInkCardStyle
-            {
-                shape = UIInkShape.Blob,
-                fillColor = fill,
-                borderColor = border,
-                borderWidth = borderWidth,
-                wobble = wobble,
-                glossAlpha = glossAlpha,
-                glossSlope = 0.35f,
-                glossCenter = 0.72f,
-                glossThickness = 0.18f,
-                innerRimAlpha = innerRimAlpha,
-            };
+        // ── 大招条 ─────────────────────────────────────────────────────────
 
-            graphic.Seed = seed;
-            graphic.ApplyStyle(card, fill);
+        private static LiquidOrbView BuildSpecialMeter(RectTransform row, UIThemeSO theme, HudGaugeStyleSO style)
+        {
+            RectTransform group = NewRect("LiquidOrb", row);
+            group.anchorMin = group.anchorMax = new Vector2(1f, 0.5f);
+            group.pivot = new Vector2(1f, 0.5f);
+            group.sizeDelta = new Vector2(GroupWidth, MeterRowHeight);
+            group.anchoredPosition = Vector2.zero;
+
+            // 1) 技能图标徽章：白方块 + 墨黑矢量图标；满能整块翻黄（几何风的「就绪」硬切）
+            RectTransform plateRect = NewRect("IconPlate", group);
+            PlaceLeft(plateRect, 0f, SpecialPlateSize, SpecialPlateSize);
+            var plate = plateRect.gameObject.AddComponent<UIInkShapeGraphic>();
+            plate.raycastTarget = false;
+            plate.Shape = UIInkShape.SharpRect;
+            plate.CornerRadius = ComicStyle.CornerSharp;
+            plate.BorderWidth = 0f;
+            plate.HardShadow = false;
+            plate.Halftone = false;
+            plate.GlossAlpha = 0f;
+            plate.InnerRimAlpha = 0f;
+            plate.color = ComicStyle.Paper;
+
+            // 2) 技能图标：白方块（满能翻黄）+ 墨黑矢量图标。
+            //    几何风不做旋转虚线环 / 放射爆闪——满能信号由「黄块 + 黄条 + Q 释放」三处硬切表达。
+            RectTransform iconRoot = NewRect("SpecialIcon", plateRect);
+            Stretch(iconRoot, 4f);
+            Image icon = CreateIconImage("Glyph", iconRoot, ComicStyle.Ink);
+
+            // 4) 轨道 + 纯色填充 + 描边
+            BarParts bar = BuildBar(group, "SpecialBar", SpecialIconColumn, SpecialBarWidth, ComicStyle.Yellow);
+
+            // 5) 百分比读数 / 满能按键提示共用右侧一列
+            TMP_Text percent = CreateMeterPercent("Percent", group, theme, style);
+
+            RectTransform hintRect = NewRect("ReadyHint", group);
+            hintRect.anchorMin = hintRect.anchorMax = new Vector2(1f, 0.5f);
+            hintRect.pivot = new Vector2(1f, 0.5f);
+            hintRect.sizeDelta = new Vector2(
+                Mathf.Clamp(style.readyHintSize.x, 60f, PercentColumn),
+                Mathf.Clamp(style.readyHintSize.y, 22f, MeterRowHeight));
+            hintRect.anchoredPosition = Vector2.zero;
+
+            var hintPill = hintRect.gameObject.AddComponent<UIInkShapeGraphic>();
+            hintPill.raycastTarget = false;
+            hintPill.Shape = UIInkShape.SharpRect;
+            hintPill.CornerRadius = ComicStyle.CornerSharp;
+            hintPill.SpeechTail = false;
+            hintPill.BorderWidth = ComicStyle.BorderThin;
+            hintPill.BorderColor = ComicStyle.Ink;
+            hintPill.HardShadow = false;
+            hintPill.ShadowOffset = Vector2.zero;
+            hintPill.Halftone = false;
+            hintPill.color = ComicStyle.Yellow;
+
+            float hintFontSize = UITypography.FontSnapped(16f);
+            TMP_Text hintLabel = CreateChunkyTmp("HintLabel", hintRect, theme, hintFontSize,
+                ReadyHintText(style), ComicStyle.Ink);
+            hintLabel.alignment = TextAlignmentOptions.Center;
+
+            var hintMotion = hintRect.gameObject.AddComponent<UISpringMotion>();
+            hintMotion.SetTheme(theme);
+
+            var view = group.gameObject.AddComponent<LiquidOrbView>();
+            view.Configure(theme, style, bar.Fill, percent, plate,
+                hintRect, hintPill, hintLabel, hintMotion, ReadyHintText(style));
+            view.ConfigureSpecialIcon(iconRoot, icon, null);
+
+            return view;
         }
 
-        private static void ApplyRectStyle(UIInkShapeGraphic graphic, float cornerRadius, float borderWidth,
-            Color fill, Color border, float glossAlpha, float innerRimAlpha, bool hardShadow = false)
+        /// <summary>
+        /// 按键提示文案：右侧读数列只有 92px，SO 里的「按 Q 释放」会溢出，
+        /// 这里压成「Q 释放」；没有按键名时退回原文。
+        /// </summary>
+        private static string ReadyHintText(HudGaugeStyleSO style)
         {
-            var card = new UIInkCardStyle
-            {
-                shape = UIInkShape.RoundedRect,
-                fillColor = fill,
-                borderColor = border,
-                borderWidth = borderWidth,
-                cornerRadius = cornerRadius,
-                wobble = 0f,
-                glossAlpha = glossAlpha,
-                glossSlope = 0.3f,
-                glossCenter = 0.74f,
-                glossThickness = 0.14f,
-                innerRimAlpha = innerRimAlpha,
-                // UIInkCardStyle.comicPanel 默认 true（整个矩形画一块实心墨色阴影）。
-                // 透明填充的描边层（外框、告警辉光）如果带这块阴影，内部会被整片盖成墨色，
-                // 所以这里默认关掉，只有实心面板才显式 opt-in。
-                comicPanel = false,
-            };
+            if (style == null) return "Q 释放";
 
-            graphic.ApplyStyle(card, fill);
+            string key = style.readyHintKey;
+            if (string.IsNullOrEmpty(key)) return style.readyHintText;
 
-            if (!hardShadow) return;
+            string text = style.readyHintText;
+            if (string.IsNullOrEmpty(text)) text = "释放";
 
-            // 阴影画在本图元自己的填充之下，只有偏移出去的一圈露在面板外。
-            graphic.HardShadow = true;
-            graphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
-            graphic.ShadowColor = ComicStyle.Ink;
+            int keyPosition = text.IndexOf(key, System.StringComparison.Ordinal);
+            if (keyPosition > 0) text = text.Substring(keyPosition);
+
+            return text;
         }
 
-        private static void ApplyPillStyle(UIInkShapeGraphic pill, UIThemeSO theme)
-        {
-            var card = new UIInkCardStyle
-            {
-                shape = UIInkShape.RoundedRect,
-                fillColor = theme.teamAColor,
-                borderColor = theme.outlineColor,
-                borderWidth = 3f,
-                cornerRadius = 16f,
-                wobble = 0f,
-                glossAlpha = 0.16f,
-                glossSlope = 0.3f,
-                glossCenter = 0.72f,
-                glossThickness = 0.2f,
-                innerRimAlpha = 0f,
-            };
+        // ── 共用构件 ────────────────────────────────────────────────────────
 
-            pill.ApplyStyle(card, theme.teamAColor);
+        private static BarParts BuildBar(Transform parent, string name, float left, float width, Color fillColor)
+        {
+            RectTransform track = NewRect(name, parent);
+            PlaceLeft(track, left, width, BarHeight);
+
+            var trackImage = track.gameObject.AddComponent<Image>();
+            trackImage.raycastTarget = false;
+            trackImage.color = new Color(ComicStyle.Paper.r, ComicStyle.Paper.g, ComicStyle.Paper.b, 0.16f);
+            UIFlatSprite.MakeFlat(trackImage);
+
+            RectTransform fillRect = NewRect("Fill", track);
+            Stretch(fillRect);
+            var fill = fillRect.gameObject.AddComponent<Image>();
+            fill.raycastTarget = false;
+            fill.color = fillColor;
+            UIFlatSprite.MakeFlat(fill, filled: true);
+            fill.fillAmount = 1f;
+
+            RectTransform frameRect = NewRect("Frame", parent);
+            PlaceLeft(frameRect, left, width, BarHeight);
+            var frame = frameRect.gameObject.AddComponent<UIInkShapeGraphic>();
+            frame.raycastTarget = false;
+            frame.Shape = UIInkShape.SharpRect;
+            frame.CornerRadius = ComicStyle.CornerSharp;
+            frame.BorderWidth = ComicStyle.BorderThin;
+            frame.BorderColor = ComicStyle.Paper;
+            frame.HardShadow = false;
+            frame.ShadowOffset = Vector2.zero;
+            frame.Halftone = false;
+            frame.GlossAlpha = 0f;
+            frame.DrawGloss = false;
+            frame.InnerRimAlpha = 0f;
+            frame.color = new Color(1f, 1f, 1f, 0f);
+
+            return new BarParts { Track = track, Fill = fill, Frame = frame };
+        }
+
+        private static TMP_Text CreateMeterPercent(string name, Transform parent, UIThemeSO theme,
+            HudGaugeStyleSO style)
+        {
+            float fontSize = UITypography.FontSnapped(Mathf.Clamp(style.percentFontSize, 20f, 26f));
+            TMP_Text label = CreateChunkyTmp(name, parent, theme, fontSize, "100%", ComicStyle.Paper);
+
+            var rect = label.rectTransform;
+            rect.anchorMin = rect.anchorMax = new Vector2(1f, 0.5f);
+            rect.pivot = new Vector2(1f, 0.5f);
+            rect.sizeDelta = new Vector2(PercentColumn, MeterRowHeight);
+            rect.anchoredPosition = Vector2.zero;
+            label.alignment = TextAlignmentOptions.Right;
+            return label;
+        }
+
+        /// <summary>左中锚定放置（横向仪表条的图标 / 轨道 / 描边共用一套坐标）。</summary>
+        private static void PlaceLeft(RectTransform rect, float left, float width, float height)
+        {
+            rect.anchorMin = rect.anchorMax = new Vector2(0f, 0.5f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.sizeDelta = new Vector2(width, height);
+            rect.anchoredPosition = new Vector2(left, 0f);
+        }
+
+        private static Image CreateFlatImage(string name, Transform parent, Color color, Vector2 size)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = size;
+            rect.anchoredPosition = Vector2.zero;
+
+            var image = go.AddComponent<Image>();
+            image.raycastTarget = false;
+            image.color = color;
+            UIFlatSprite.MakeFlat(image);
+            return image;
+        }
+
+        private static Image CreateIcon(string name, Transform parent, string iconName)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+
+            var image = go.AddComponent<Image>();
+            image.raycastTarget = false;
+            image.preserveAspect = true;
+
+            Sprite sprite = UIIconLibrary.Get(iconName);
+            image.sprite = sprite;
+            image.enabled = sprite != null;
+            return image;
         }
 
         private static TMP_Text CreateChunkyTmp(string name, Transform parent, UIThemeSO theme,
-            float fontSize, string text)
+            float fontSize, string text, Color? fill = null)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer));
             var rect = (RectTransform)go.transform;
@@ -411,70 +381,22 @@ namespace P1.UI
 
             var chunky = go.AddComponent<UIChunkyText>();
             chunky.Configure(theme, text, fontSize, displayFont: true, doubleLayered: false,
-                fill: theme.textPrimary, outlinedText: true);
+                fill: fill ?? ComicStyle.Paper, outlinedText: false);
 
             return tmp;
         }
 
-        private static Text CreateLegacyText(string name, Transform parent, float fontSize, string text,
-            TextAnchor anchor, Color color)
+        private static Image CreateIconImage(string name, Transform parent, Color color)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer));
             var rect = (RectTransform)go.transform;
             rect.SetParent(parent, false);
             Stretch(rect);
-
-            var label = go.AddComponent<Text>();
-            label.font = LegacyFont();
-            label.fontSize = Mathf.RoundToInt(fontSize);
-            label.text = text;
-            label.alignment = anchor;
-            label.color = color;
-            label.raycastTarget = false;
-            label.horizontalOverflow = HorizontalWrapMode.Overflow;
-            label.verticalOverflow = VerticalWrapMode.Overflow;
-            label.supportRichText = false;
-            return label;
-        }
-
-        private static Font LegacyFont()
-        {
-            if (_legacyFont == null)
-            {
-                _legacyFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            }
-
-            return _legacyFont;
-        }
-
-        private static Image CreateIconImage(string name, Transform parent, Color color, Vector2 offset)
-        {
-            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer));
-            var rect = (RectTransform)go.transform;
-            rect.SetParent(parent, false);
-            Stretch(rect);
-            rect.anchoredPosition = offset;
 
             var image = go.AddComponent<Image>();
             image.color = color;
             image.raycastTarget = false;
             image.preserveAspect = true;
-            return image;
-        }
-
-        private static Image CreateImage(string name, Transform parent, Color color, Vector2 size)
-        {
-            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer));
-            var rect = (RectTransform)go.transform;
-            rect.SetParent(parent, false);
-            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.sizeDelta = size;
-            rect.anchoredPosition = Vector2.zero;
-
-            var image = go.AddComponent<Image>();
-            image.color = color;
-            image.raycastTarget = false;
             return image;
         }
 

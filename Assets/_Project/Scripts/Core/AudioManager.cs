@@ -554,6 +554,45 @@ namespace P1.Core
             PlayRandom(inkHitGroundClips, 0.36f * volumeScale, 0.90f, 1.12f);
         }
 
+        /// <summary>墨点撞击音的最大可听距离（米）。8 人混战时远处 Bot 的落墨不该和脚下一样响。</summary>
+        private const float InkHitMaxDistance = 26f;
+
+        /// <summary>近处落墨的判定半径（米）：这个距离内不受全局 45ms 节流影响，保证自己的命中一定听得见。</summary>
+        private const float InkHitNearDistance = 6f;
+
+        /// <summary>
+        /// 按世界位置播放落墨音（P16）：距本地玩家越远越轻、超出 26m 直接不播；
+        /// 近处（≤6m）不受全局节流，避免自己的关键命中被远处 Bot 的落墨声挤掉。
+        /// 墨斑越大音高越低，读得出「这一下更重」。
+        /// </summary>
+        public void PlayInkHitGround(Vector3 worldPos, float volumeScale, float impactRadius = 0f)
+        {
+            float attenuation = 1f;
+            bool near = true;
+
+            P1.Player.PlayerController player = P1.Player.PlayerController.LocalPlayer;
+            if (player != null)
+            {
+                float distance = Vector3.Distance(worldPos, player.transform.position);
+                if (distance > InkHitMaxDistance)
+                    return;
+
+                attenuation = 1f - distance / InkHitMaxDistance;
+                attenuation *= attenuation;
+                near = distance <= InkHitNearDistance;
+            }
+
+            if (!near && Time.unscaledTime - _lastGroundHitTime < 0.045f)
+                return;
+
+            _lastGroundHitTime = Time.unscaledTime;
+
+            float size01 = Mathf.Clamp01((impactRadius - 0.3f) / 1.6f);
+            float volume = 0.36f * Mathf.Clamp01(volumeScale) * (0.25f + 0.9f * attenuation);
+            float pitchMin = Mathf.Lerp(1.10f, 0.90f, size01);
+            PlayRandom(inkHitGroundClips, volume, pitchMin, pitchMin + 0.16f);
+        }
+
         public void PlayHitEnemy()
         {
             PlayRandom(hitEnemyClips, 0.65f, 0.95f, 1.05f);

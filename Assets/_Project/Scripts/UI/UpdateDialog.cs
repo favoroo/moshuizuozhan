@@ -8,12 +8,12 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 应用内更新弹窗（P10 漫画风重构）：
-    /// - 820×620 纸面板 + 8px 墨线粗边框 + 漫画硬阴影 + 全屏网点蒙层；
-    /// - 标题对话气泡（庆科黄油体）；
-    /// - 220×72 粗边按钮：更新（黄底）、稍后（纸白）、跳转（蓝底）；
-    /// - 发布说明正文 20px、行距 1.2；
-    /// - 彻底修复中文字体方块字：所有文本统一经 UIThemeSO.ResolveFont 获取 CJK 字体资产。
+    /// 应用内更新弹窗（P14 几何大胆风 Geometric Bold 重构）：
+    /// - 840×640 直角黑白面板（SharpRect，0 圆角，6px 粗墨边）；
+    /// - 纯色直角标题条；
+    /// - Red 关键 CTA 按钮（立即更新），直角白底墨字次级按钮（稍后再说），蓝底直角按钮（浏览器下载）；
+    /// - 正文、版本号与发布说明字号 ≥22（移动端 ≥26，走 UITypography.FontSnapped）；
+    /// - 去除网点、半调、动作线与硬阴影。
     /// </summary>
     public class UpdateDialog : MonoBehaviour
     {
@@ -122,10 +122,8 @@ namespace P1.UI
             if (_sizeText != null) _sizeText.text = $"大小: {(string.IsNullOrEmpty(info.fileSizeText) ? "未知" : info.fileSizeText)}";
             if (_notesText != null) _notesText.text = string.IsNullOrEmpty(info.releaseNotes) ? "暂无更新说明" : info.releaseNotes;
 
-            // 重置滚动位置到顶部
             if (_scrollRect != null) _scrollRect.verticalNormalizedPosition = 1f;
 
-            // 隐藏进度条，显示默认按钮
             if (_progressBox != null) _progressBox.SetActive(false);
             if (_actionBtnText != null) _actionBtnText.text = "立 即 更 新";
             if (_actionBtn != null) _actionBtn.interactable = true;
@@ -142,10 +140,6 @@ namespace P1.UI
             if (_dialogRoot != null) _dialogRoot.SetActive(false);
         }
 
-        /// <summary>
-        /// 可用高度不足时整体等比缩小面板（与暂停面板同一套规则），
-        /// 避免 620px 面板在超宽屏/小窗口下溢出屏幕。
-        /// </summary>
         private void ApplyResponsivePanelScale()
         {
             if (_panelRect == null) return;
@@ -153,7 +147,7 @@ namespace P1.UI
             float canvasHeight = 1080f;
             float safeRatio = Screen.height > 0 ? Screen.safeArea.height / Screen.height : 1f;
             float availableHeight = canvasHeight * safeRatio;
-            const float targetHeight = 660f; // 620px 面板 + 留白
+            const float targetHeight = 680f;
 
             if (availableHeight < targetHeight && availableHeight > 100f)
             {
@@ -176,7 +170,6 @@ namespace P1.UI
 
             if (_currentInfo == null) return;
 
-            // 开始下载
             if (_progressBox != null) _progressBox.SetActive(true);
             if (_progressBarFill != null) _progressBarFill.fillAmount = 0f;
             if (_progressPercentText != null) _progressPercentText.text = "准备下载...";
@@ -237,7 +230,6 @@ namespace P1.UI
                 _actionBtnText.text = "立 即 安 装";
             }
 
-            // 自动触发一次安装
             UpdateManager.Instance.InstallApk(filePath);
         }
 
@@ -278,7 +270,6 @@ namespace P1.UI
 
             _raycaster = canvasGo.GetComponent<GraphicRaycaster>();
 
-            // 全屏根节点（顺带收进安全区：横屏刘海机上面板与按钮不被切）
             _dialogRoot = new GameObject("UpdateDialogRoot", typeof(RectTransform));
             _dialogRoot.transform.SetParent(canvasGo.transform, false);
             var rootRt = _dialogRoot.GetComponent<RectTransform>();
@@ -288,7 +279,7 @@ namespace P1.UI
             rootRt.offsetMax = Vector2.zero;
             _dialogRoot.AddComponent<SafeAreaFitter>();
 
-            // 1. 全屏黑色暗底半透明遮罩 (墨色 65%)
+            // 1. 全屏黑色暗底半透明遮罩 (墨色 70%，无网点)
             var overlayGo = new GameObject("DimOverlay", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
             overlayGo.transform.SetParent(_dialogRoot.transform, false);
             var overlayRt = overlayGo.GetComponent<RectTransform>();
@@ -297,44 +288,27 @@ namespace P1.UI
             overlayRt.offsetMin = Vector2.zero;
             overlayRt.offsetMax = Vector2.zero;
             var overlayImg = overlayGo.GetComponent<Image>();
-            overlayImg.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.65f);
+            overlayImg.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.70f);
             overlayImg.raycastTarget = true;
 
-            // 2. 全屏半调网点底
-            var halfGo = new GameObject("HalftoneBackdrop", typeof(RectTransform), typeof(CanvasRenderer), typeof(ComicHalftoneGraphic));
-            halfGo.transform.SetParent(_dialogRoot.transform, false);
-            var halfRt = halfGo.GetComponent<RectTransform>();
-            halfRt.anchorMin = Vector2.zero;
-            halfRt.anchorMax = Vector2.one;
-            halfRt.offsetMin = Vector2.zero;
-            halfRt.offsetMax = Vector2.zero;
-            var halfGraphic = halfGo.GetComponent<ComicHalftoneGraphic>();
-            halfGraphic.color = ComicStyle.Ink;
-            halfGraphic.Alpha = 0.08f;
-            halfGraphic.Spacing = 14f;
-            halfGraphic.raycastTarget = false;
-
-            // 3. 居中主面板 (820 × 620，纸面 + 8px 墨边 + 硬阴影 + 网点)
+            // 2. 居中主面板 (840 × 640，直角黑白面板 + 6px 墨边，无阴影无网点)
             var panelGo = new GameObject("MainPanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(UISpringMotion));
             panelGo.transform.SetParent(_dialogRoot.transform, false);
             var panelRt = panelGo.GetComponent<RectTransform>();
             panelRt.anchorMin = new Vector2(0.5f, 0.5f);
             panelRt.anchorMax = new Vector2(0.5f, 0.5f);
             panelRt.anchoredPosition = Vector2.zero;
-            panelRt.sizeDelta = new Vector2(820f, 620f);
+            panelRt.sizeDelta = new Vector2(840f, 640f);
             _panelRect = panelRt;
 
             var panelShape = panelGo.GetComponent<UIInkShapeGraphic>();
-            panelShape.Shape = UIInkShape.RoundedRect;
+            panelShape.Shape = UIInkShape.SharpRect; // 直角面板
             panelShape.CornerRadius = ComicStyle.CornerSharp;
-            panelShape.BorderWidth = ComicStyle.BorderHeavy; // 8px 墨边
+            panelShape.BorderWidth = ComicStyle.BorderHeavy;
             panelShape.BorderColor = ComicStyle.Ink;
             panelShape.color = ComicStyle.Paper;
-            panelShape.HardShadow = true;
-            panelShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
-            panelShape.ShadowColor = ComicStyle.Ink;
-            panelShape.Halftone = true;
-            panelShape.HalftoneAlpha = ComicStyle.HalftoneAlpha;
+            panelShape.HardShadow = false;
+            panelShape.Halftone = false;
             panelShape.GlossAlpha = 0f;
             panelShape.DrawGloss = false;
             panelShape.raycastTarget = true;
@@ -342,71 +316,68 @@ namespace P1.UI
             var panelMotion = panelGo.GetComponent<UISpringMotion>();
             panelMotion.SetTheme(Theme);
 
-            // 4. 标题对话气泡 (发 现 新 版 本)
-            var bubbleGo = new GameObject("TitleBubble", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-            bubbleGo.transform.SetParent(panelGo.transform, false);
-            var bubbleRt = bubbleGo.GetComponent<RectTransform>();
-            bubbleRt.anchorMin = new Vector2(0.5f, 1f);
-            bubbleRt.anchorMax = new Vector2(0.5f, 1f);
-            bubbleRt.anchoredPosition = new Vector2(0f, -48f);
-            bubbleRt.sizeDelta = new Vector2(380f, 64f);
+            // 3. 顶部直角标题块
+            var titleBoxGo = new GameObject("TitleBox", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            titleBoxGo.transform.SetParent(panelGo.transform, false);
+            var titleBoxRt = titleBoxGo.GetComponent<RectTransform>();
+            titleBoxRt.anchorMin = new Vector2(0.5f, 1f);
+            titleBoxRt.anchorMax = new Vector2(0.5f, 1f);
+            titleBoxRt.anchoredPosition = new Vector2(0f, -48f);
+            titleBoxRt.sizeDelta = new Vector2(420f, 64f);
 
-            var bubbleShape = bubbleGo.GetComponent<UIInkShapeGraphic>();
-            bubbleShape.Shape = UIInkShape.SpeechBubble;
-            bubbleShape.CornerRadius = 26f;
-            bubbleShape.BorderWidth = ComicStyle.Border;
-            bubbleShape.BorderColor = ComicStyle.Ink;
-            bubbleShape.color = ComicStyle.Paper;
-            bubbleShape.HardShadow = true;
-            bubbleShape.ShadowOffset = new Vector2(3f, -3f);
-            bubbleShape.ShadowColor = ComicStyle.Ink;
-            bubbleShape.SpeechTail = true;
-            bubbleShape.TailSize = new Vector2(22f, 16f);
-            bubbleShape.TailAngle = 270f;
-            bubbleShape.GlossAlpha = 0f;
-            bubbleShape.DrawGloss = false;
+            var titleBoxShape = titleBoxGo.GetComponent<UIInkShapeGraphic>();
+            titleBoxShape.Shape = UIInkShape.SharpRect;
+            titleBoxShape.CornerRadius = ComicStyle.CornerSharp;
+            titleBoxShape.BorderWidth = 0f;
+            titleBoxShape.color = ComicStyle.Ink;
+            titleBoxShape.HardShadow = false;
+            titleBoxShape.Halftone = false;
 
-            var titleText = CreateTextMesh("TitleText", bubbleGo.transform, "发 现 新 版 本", 34f, ComicStyle.Ink, isDisplay: true);
+            var titleText = CreateTextMesh("TitleText", titleBoxGo.transform, "发 现 新 版 本", UITypography.FontSnapped(32f), ComicStyle.Paper, isDisplay: true);
             var tRt = titleText.rectTransform;
             tRt.anchorMin = Vector2.zero;
             tRt.anchorMax = Vector2.one;
             tRt.offsetMin = Vector2.zero;
             tRt.offsetMax = Vector2.zero;
 
-            // 5. 版本与体积元信息
+            // 4. 版本与体积元信息 (字号 ≥22，移动端 ≥26)
             var metaGo = new GameObject("MetaRow", typeof(RectTransform));
             metaGo.transform.SetParent(panelGo.transform, false);
             var metaRt = metaGo.GetComponent<RectTransform>();
             metaRt.anchorMin = new Vector2(0.5f, 1f);
             metaRt.anchorMax = new Vector2(0.5f, 1f);
-            metaRt.anchoredPosition = new Vector2(0f, -100f);
-            metaRt.sizeDelta = new Vector2(720f, 32f);
+            metaRt.anchoredPosition = new Vector2(0f, -104f);
+            metaRt.sizeDelta = new Vector2(740f, 34f);
 
-            _verText = CreateTextMesh("VersionText", metaGo.transform, "新版本: v0.0.0", 22f, ComicStyle.Ink, isDisplay: false, TextAlignmentOptions.Left);
+            float metaFontSize = UITypography.FontSnapped(22f); // 桌面 22，移动端 28
+
+            _verText = CreateTextMesh("VersionText", metaGo.transform, "新版本: v0.0.0", metaFontSize, ComicStyle.Ink, isDisplay: false, TextAlignmentOptions.Left);
+            _verText.fontStyle = FontStyles.Bold;
             var verRt = _verText.rectTransform;
             verRt.anchorMin = new Vector2(0f, 0f);
             verRt.anchorMax = new Vector2(0.5f, 1f);
             verRt.offsetMin = Vector2.zero;
             verRt.offsetMax = Vector2.zero;
 
-            _sizeText = CreateTextMesh("SizeText", metaGo.transform, "大小: -- MB", 20f, ComicStyle.WithAlpha(ComicStyle.Ink, 0.7f), isDisplay: false, TextAlignmentOptions.Right);
+            _sizeText = CreateTextMesh("SizeText", metaGo.transform, "大小: -- MB", metaFontSize, ComicStyle.WithAlpha(ComicStyle.Ink, 0.70f), isDisplay: false, TextAlignmentOptions.Right);
+            _sizeText.fontStyle = FontStyles.Bold;
             var sizeRt = _sizeText.rectTransform;
             sizeRt.anchorMin = new Vector2(0.5f, 0f);
             sizeRt.anchorMax = new Vector2(1f, 1f);
             sizeRt.offsetMin = Vector2.zero;
             sizeRt.offsetMax = Vector2.zero;
 
-            // 6. 更新说明滚动视口 (发布说明正文 20px、行距 1.2)
+            // 5. 更新说明滚动视口 (发布说明正文字号 ≥22，移动端 ≥26)
             var scrollGo = new GameObject("NotesScrollView", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(ScrollRect));
             scrollGo.transform.SetParent(panelGo.transform, false);
             var scrollRt = scrollGo.GetComponent<RectTransform>();
             scrollRt.anchorMin = new Vector2(0.5f, 0.5f);
             scrollRt.anchorMax = new Vector2(0.5f, 0.5f);
-            scrollRt.anchoredPosition = new Vector2(0f, 30f);
-            scrollRt.sizeDelta = new Vector2(720f, 230f);
+            scrollRt.anchoredPosition = new Vector2(0f, 26f);
+            scrollRt.sizeDelta = new Vector2(740f, 230f);
 
             var scrollShape = scrollGo.GetComponent<UIInkShapeGraphic>();
-            scrollShape.Shape = UIInkShape.RoundedRect;
+            scrollShape.Shape = UIInkShape.SharpRect;
             scrollShape.CornerRadius = ComicStyle.CornerSharp;
             scrollShape.BorderWidth = ComicStyle.BorderThin;
             scrollShape.BorderColor = ComicStyle.Ink;
@@ -439,8 +410,8 @@ namespace P1.UI
             vlg.childForceExpandHeight = false;
             vlg.childForceExpandWidth = true;
 
-            _notesText = CreateTextMesh("NotesText", contentGo.transform, "更新日志...", 20f, ComicStyle.Ink, isDisplay: false, TextAlignmentOptions.TopLeft);
-            _notesText.lineSpacing = 20f; // 相当于 1.2 行距
+            _notesText = CreateTextMesh("NotesText", contentGo.transform, "更新日志...", UITypography.FontSnapped(22f), ComicStyle.Ink, isDisplay: false, TextAlignmentOptions.TopLeft);
+            _notesText.lineSpacing = 16f;
 
             _scrollRect = scrollGo.GetComponent<ScrollRect>();
             _scrollRect.content = contentRt;
@@ -450,16 +421,15 @@ namespace P1.UI
             _scrollRect.movementType = ScrollRect.MovementType.Clamped;
             _scrollRect.scrollSensitivity = 25f;
 
-            // 7. 下载进度条区域
+            // 6. 下载进度条区域
             _progressBox = new GameObject("ProgressBox", typeof(RectTransform));
             _progressBox.transform.SetParent(panelGo.transform, false);
             var progRt = _progressBox.GetComponent<RectTransform>();
             progRt.anchorMin = new Vector2(0.5f, 0.5f);
             progRt.anchorMax = new Vector2(0.5f, 0.5f);
-            progRt.anchoredPosition = new Vector2(0f, -135f);
-            progRt.sizeDelta = new Vector2(720f, 44f);
+            progRt.anchoredPosition = new Vector2(0f, -140f);
+            progRt.sizeDelta = new Vector2(740f, 44f);
 
-            // 进度条槽
             var barBgGo = new GameObject("ProgressBarBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             barBgGo.transform.SetParent(_progressBox.transform, false);
             var barBgRt = barBgGo.GetComponent<RectTransform>();
@@ -470,21 +440,20 @@ namespace P1.UI
             barBgRt.anchoredPosition = Vector2.zero;
 
             var barBgShape = barBgGo.GetComponent<UIInkShapeGraphic>();
-            barBgShape.Shape = UIInkShape.RoundedRect;
-            barBgShape.CornerRadius = 4f;
+            barBgShape.Shape = UIInkShape.SharpRect;
+            barBgShape.CornerRadius = ComicStyle.CornerSharp;
             barBgShape.BorderWidth = ComicStyle.BorderThin;
             barBgShape.BorderColor = ComicStyle.Ink;
             barBgShape.color = ComicStyle.PaperAlt;
             barBgShape.HardShadow = false;
 
-            // 进度填充条
             var fillArea = new GameObject("FillArea", typeof(RectTransform));
             fillArea.transform.SetParent(barBgGo.transform, false);
             var fillAreaRt = fillArea.GetComponent<RectTransform>();
             fillAreaRt.anchorMin = Vector2.zero;
             fillAreaRt.anchorMax = Vector2.one;
-            fillAreaRt.offsetMin = new Vector2(4f, 4f);
-            fillAreaRt.offsetMax = new Vector2(-4f, -4f);
+            fillAreaRt.offsetMin = new Vector2(3f, 3f);
+            fillAreaRt.offsetMax = new Vector2(-3f, -3f);
 
             var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
             fillGo.transform.SetParent(fillArea.transform, false);
@@ -500,55 +469,53 @@ namespace P1.UI
             _progressBarFill.color = ComicStyle.Green;
             _progressBarFill.fillAmount = 0f;
 
-            // 进度百分比与速率
-            _progressPercentText = CreateTextMesh("PercentLabel", _progressBox.transform, "准备下载...", 18f, ComicStyle.Ink, isDisplay: false, TextAlignmentOptions.Left);
+            _progressPercentText = CreateTextMesh("PercentLabel", _progressBox.transform, "准备下载...", UITypography.FontSnapped(20f), ComicStyle.Ink, isDisplay: false, TextAlignmentOptions.Left);
             var pRt = _progressPercentText.rectTransform;
             pRt.anchorMin = new Vector2(0f, 1f);
             pRt.anchorMax = new Vector2(0.5f, 1f);
             pRt.pivot = new Vector2(0f, 1f);
             pRt.anchoredPosition = new Vector2(0f, 0f);
-            pRt.sizeDelta = new Vector2(350f, 22f);
+            pRt.sizeDelta = new Vector2(360f, 22f);
 
-            _progressSpeedText = CreateTextMesh("SpeedLabel", _progressBox.transform, "", 18f, ComicStyle.WithAlpha(ComicStyle.Ink, 0.7f), isDisplay: false, TextAlignmentOptions.Right);
+            _progressSpeedText = CreateTextMesh("SpeedLabel", _progressBox.transform, "", UITypography.FontSnapped(20f), ComicStyle.WithAlpha(ComicStyle.Ink, 0.70f), isDisplay: false, TextAlignmentOptions.Right);
             var sRt = _progressSpeedText.rectTransform;
             sRt.anchorMin = new Vector2(0.5f, 1f);
             sRt.anchorMax = new Vector2(1f, 1f);
             sRt.pivot = new Vector2(1f, 1f);
             sRt.anchoredPosition = new Vector2(0f, 0f);
-            sRt.sizeDelta = new Vector2(350f, 22f);
+            sRt.sizeDelta = new Vector2(360f, 22f);
 
             _progressBox.SetActive(false);
 
-            // 8. 底部按钮栏：按钮 220×72（更新=黄，稍后=纸，跳转=蓝）
+            // 7. 底部直角按钮栏（按钮 230×72，字号 ≥22）
             var btnRowGo = new GameObject("ButtonRow", typeof(RectTransform));
             btnRowGo.transform.SetParent(panelGo.transform, false);
             var btnRowRt = btnRowGo.GetComponent<RectTransform>();
             btnRowRt.anchorMin = new Vector2(0.5f, 0f);
             btnRowRt.anchorMax = new Vector2(0.5f, 0f);
-            btnRowRt.anchoredPosition = new Vector2(0f, 52f);
-            btnRowRt.sizeDelta = new Vector2(720f, 72f);
+            btnRowRt.anchoredPosition = new Vector2(0f, 54f);
+            btnRowRt.sizeDelta = new Vector2(740f, 72f);
 
-            // 立即更新（黄底黑字）
-            _actionBtn = CreateComicButton(btnRowGo.transform, "ActionBtn", "立 即 更 新",
-                new Vector2(-248f, 0f), new Vector2(220f, 72f), ComicStyle.Yellow, ComicStyle.Ink, out _actionBtnText);
+            float btnFontSize = UITypography.FontSnapped(22f); // 桌面 22，移动端 28
+
+            // 立即更新（Red 强调色主按钮 + 白字）
+            _actionBtn = CreateGeometricButton(btnRowGo.transform, "ActionBtn", "立 即 更 新",
+                new Vector2(-252f, 0f), new Vector2(230f, 72f), ComicStyle.Red, ComicStyle.Paper, btnFontSize, out _actionBtnText);
             _actionBtn.onClick.AddListener(HandleActionClick);
 
-            // 稍后再说（纸白底黑字）
-            _cancelBtn = CreateComicButton(btnRowGo.transform, "CancelBtn", "稍 后 再 说",
-                new Vector2(0f, 0f), new Vector2(220f, 72f), ComicStyle.Paper, ComicStyle.Ink, out _cancelBtnText);
+            // 稍后再说（白底墨字直角方块）
+            _cancelBtn = CreateGeometricButton(btnRowGo.transform, "CancelBtn", "稍 后 再 说",
+                new Vector2(0f, 0f), new Vector2(230f, 72f), ComicStyle.Paper, ComicStyle.Ink, btnFontSize, out _cancelBtnText);
             _cancelBtn.onClick.AddListener(Hide);
 
-            // 浏览器下载（蓝底白字）
-            _browserBtn = CreateComicButton(btnRowGo.transform, "BrowserBtn", "浏览器下载",
-                new Vector2(248f, 0f), new Vector2(220f, 72f), ComicStyle.Blue, Color.white, out _browserBtnText);
+            // 浏览器下载（蓝底白字直角方块）
+            _browserBtn = CreateGeometricButton(btnRowGo.transform, "BrowserBtn", "浏览器下载",
+                new Vector2(252f, 0f), new Vector2(230f, 72f), ComicStyle.Blue, Color.white, btnFontSize, out _browserBtnText);
             _browserBtn.onClick.AddListener(HandleBrowserClick);
 
             _dialogRoot.SetActive(false);
         }
 
-        /// <summary>
-        /// 统一文本构造工厂：先通过 UIThemeSO.ResolveFont 解析对应字体，不设字体会导致方块字 □。
-        /// </summary>
         private TextMeshProUGUI CreateTextMesh(
             string name,
             Transform parent,
@@ -567,7 +534,6 @@ namespace P1.UI
             tmp.alignment = alignment;
             tmp.raycastTarget = false;
 
-            // 关键修复：统一通过 UIThemeSO.ResolveFont 解析 CJK 字体资产，不设字体就会出现方块字 □。
             UIThemeSO theme = Theme;
             TMP_FontAsset resolvedFont = theme.ResolveFont(isDisplay, text);
             if (resolvedFont == null)
@@ -577,7 +543,7 @@ namespace P1.UI
             return tmp;
         }
 
-        private Button CreateComicButton(
+        private Button CreateGeometricButton(
             Transform parent,
             string name,
             string label,
@@ -585,6 +551,7 @@ namespace P1.UI
             Vector2 size,
             Color bgColor,
             Color textColor,
+            float fontSize,
             out TextMeshProUGUI labelText)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(UIJellyButton));
@@ -597,14 +564,12 @@ namespace P1.UI
             rt.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.RoundedRect;
+            shape.Shape = UIInkShape.SharpRect; // 直角按钮
             shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = ComicStyle.Border;
             shape.BorderColor = ComicStyle.Ink;
             shape.color = bgColor;
-            shape.HardShadow = true;
-            shape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
-            shape.ShadowColor = ComicStyle.Ink;
+            shape.HardShadow = false;
             shape.Halftone = false;
             shape.GlossAlpha = 0f;
             shape.DrawGloss = false;
@@ -628,7 +593,7 @@ namespace P1.UI
             textRt.offsetMax = Vector2.zero;
 
             labelText = textGo.GetComponent<TextMeshProUGUI>();
-            labelText.fontSize = 22f;
+            labelText.fontSize = fontSize;
             labelText.fontStyle = FontStyles.Bold;
             labelText.alignment = TextAlignmentOptions.Center;
             labelText.color = textColor;

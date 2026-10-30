@@ -6,21 +6,23 @@ using UnityEngine;
 namespace P1.Editor
 {
     /// <summary>
-    /// 把漫画风 token 写进 ScriptableObject 资产（遵守「不手改 .asset YAML」的硬性规则）。
+    /// 把几何大胆风（Geometric Bold）token 写进 ScriptableObject 资产
+    /// （遵守「不手改 .asset YAML」的硬性规则）。
     ///
-    /// 用法：菜单 `P1/画风/漫画风/1. 应用漫画主题`。
+    /// 用法：菜单 `P1/画风/几何风/1. 应用几何主题`（旧路径 `P1/画风/漫画风/1` 保留为兼容别名）。
     /// 幂等：重复执行只会把值写成同一套，不会产生重复资产或孤儿材质。
     /// </summary>
     public static class ComicStyleInstaller
     {
-        const string k_LogTag = "[漫画主题]";
+        const string k_LogTag = "[几何主题]";
 
         const string ThemePath = "Assets/_Project/ScriptableObjects/UITheme.asset";
         const string GaugePath = "Assets/_Project/ScriptableObjects/HudGaugeStyle.asset";
         const string TmpFolder = "Assets/_Project/Art/Fonts/TMP/";
 
-        [MenuItem("P1/画风/漫画风/1. 应用漫画主题（UITheme + HUD 样式）", false, 2)]
-        public static void ApplyComicTheme()
+        [MenuItem("P1/画风/几何风/1. 应用几何主题（UITheme + HUD 样式）", false, 2)]
+        [MenuItem("P1/画风/漫画风/1. 应用几何主题（UITheme + HUD 样式）（旧路径）", false, 2)]
+        public static void ApplyGeometricTheme()
         {
             var theme = AssetDatabase.LoadAssetAtPath<UIThemeSO>(ThemePath);
             if (theme == null)
@@ -31,7 +33,7 @@ namespace P1.Editor
 
             var so = new SerializedObject(theme);
 
-            // ---------- 调色板 ----------
+            // ---------- 调色板（黑白 + 三原色强调） ----------
             SetColor(so, "outlineColor", ComicStyle.Ink);
             SetColor(so, "outlineSoftColor", Color.Lerp(ComicStyle.Ink, Color.white, 0.38f));
             SetColor(so, "deepShadowColor", ComicStyle.Ink);
@@ -52,27 +54,27 @@ namespace P1.Editor
             SetColor(so, "accentBlue", ComicStyle.Blue);
             SetColor(so, "accentGreen", ComicStyle.Green);
 
-            // ---------- 墨线与硬阴影 ----------
+            // ---------- 实线边框；阴影与网点全局禁用 ----------
             SetFloat(so, "inkBorderWidth", ComicStyle.Border);
             SetFloat(so, "inkBorderHeavyWidth", ComicStyle.BorderHeavy);
-            SetVector2(so, "hardShadowOffset", new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset));
-            SetBool(so, "halftoneOnMobile", true);
+            SetVector2(so, "hardShadowOffset", Vector2.zero);
+            SetBool(so, "halftoneOnMobile", false);
 
             SetFloat(so, "halftoneSpacing", ComicStyle.HalftoneSpacing);
             SetFloat(so, "halftoneDotRadius", ComicStyle.HalftoneDotRadius);
-            SetFloat(so, "halftoneAlpha", ComicStyle.HalftoneAlpha);
-            SetFloat(so, "halftoneHoverAlpha", ComicStyle.HalftoneHoverAlpha);
+            SetFloat(so, "halftoneAlpha", 0f);
+            SetFloat(so, "halftoneHoverAlpha", 0f);
 
-            // ---------- 动效：无回弹硬切 ----------
+            // ---------- 动效：≤100ms linear 硬切，无回弹 ----------
             SetFloat(so, "pressDuration", ComicStyle.PressDuration);
             SetFloat(so, "hoverDuration", ComicStyle.HoverDuration);
             SetFloat(so, "entranceDuration", ComicStyle.EntranceDuration);
             SetFloat(so, "hoverScale", ComicStyle.HoverScale);
-            SetFloat(so, "hoverTiltDegrees", ComicStyle.HoverTiltDegrees);
+            SetFloat(so, "hoverTiltDegrees", 0f);
             SetFloat(so, "pressScale", ComicStyle.PressScale);
-            SetFloat(so, "entranceFadeDuration", 0.1f);
+            SetFloat(so, "entranceFadeDuration", 0.12f);
 
-            // 阻尼比 1.0 = 临界阻尼，数学上不可能过冲；频率 16~20Hz 保证 80ms 内落定。
+            // 弹簧已不被 UISpringMotion 使用，但字段保留；写成临界阻尼防止旧代码回弹。
             SetSpring(so, "popSpring", 16f, 1f);
             SetSpring(so, "pressSpring", 20f, 1f);
             SetSpring(so, "followSpring", 14f, 1f);
@@ -81,17 +83,17 @@ namespace P1.Editor
             var easing = so.FindProperty("entranceEasing");
             if (easing != null)
             {
-                SetFloat(easing, "x1", 0.22f);
-                SetFloat(easing, "y1", 1f);
-                SetFloat(easing, "x2", 0.36f);
+                SetFloat(easing, "x1", 0f);
+                SetFloat(easing, "y1", 0f);
+                SetFloat(easing, "x2", 1f);
                 SetFloat(easing, "y2", 1f);
             }
 
-            // ---------- 文字：更细的描边 + 右下硬阴影 ----------
-            SetFloat(so, "chunkyOutlineWidth", 0.06f);
-            SetFloat(so, "chunkyInnerOutlineWidth", 0.05f);
-            SetFloat(so, "chunkyShadowOffsetY", 0.045f);
-            SetFloat(so, "chunkyShadowOffsetX", 0.03f);
+            // ---------- 文字：几何风不做硬阴影套色 ----------
+            SetFloat(so, "chunkyOutlineWidth", 0.04f);
+            SetFloat(so, "chunkyInnerOutlineWidth", 0f);
+            SetFloat(so, "chunkyShadowOffsetY", 0f);
+            SetFloat(so, "chunkyShadowOffsetX", 0f);
 
             // ---------- 字体 ----------
             SetObject(so, "displayFont", LoadFont("TitanOne-Regular SDF"));
@@ -100,9 +102,9 @@ namespace P1.Editor
             SetObject(so, "bodyCjkFont", LoadFont("MiSans-Semibold SDF"));
 
             // ---------- 卡片预设 ----------
-            ApplyCardPreset(so, "teamCard", teamTint: true, halftone: true);
-            ApplyCardPreset(so, "darkCard", teamTint: false, halftone: false);
-            ApplyCardPreset(so, "lightCard", teamTint: false, halftone: true);
+            ApplyCardPreset(so, "teamCard", ComicStyle.Paper, ComicStyle.Paper, teamTint: true);
+            ApplyCardPreset(so, "darkCard", ComicStyle.Ink, ComicStyle.Paper, teamTint: false);
+            ApplyCardPreset(so, "lightCard", ComicStyle.Paper, ComicStyle.Ink, teamTint: false);
 
             so.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(theme);
@@ -112,21 +114,22 @@ namespace P1.Editor
             AssetDatabase.Refresh();
 
             ReportContrast();
-            Debug.Log(k_LogTag + " 已应用：墨线 " + ComicStyle.Border + "px / 硬阴影 " +
-                      ComicStyle.ShadowOffset + "px / 动效 ≤100ms / 中文字体已接。");
+            Debug.Log(k_LogTag + " 已应用：直角 / 实线 " + ComicStyle.Border + "px / 无阴影无网点 / 动效 ≤100ms linear / 中文字体已接。");
         }
 
-        [MenuItem("P1/画风/漫画风/1b. 校验漫画 token 对比度", false, 3)]
+        [MenuItem("P1/画风/几何风/1b. 校验几何 token 对比度", false, 3)]
+        [MenuItem("P1/画风/漫画风/1b. 校验几何 token 对比度（旧路径）", false, 3)]
         public static void ReportContrast()
         {
             float inkOnPaper = ComicStyle.ContrastRatio(ComicStyle.Ink, ComicStyle.Paper);
             float paperOnInk = ComicStyle.ContrastRatio(ComicStyle.Paper, ComicStyle.Ink);
             float whiteOnRed = ComicStyle.ContrastRatio(Color.white, ComicStyle.Red);
             float inkOnYellow = ComicStyle.ContrastRatio(ComicStyle.Ink, ComicStyle.Yellow);
+            float inkOnBlue = ComicStyle.ContrastRatio(ComicStyle.Ink, ComicStyle.Blue);
 
             string line = string.Format(
-                "{0} 对比度：墨/纸 {1:F2}（≥4.5 AA）| 纸/墨 {2:F2} | 白/红 {3:F2} | 墨/黄 {4:F2}",
-                k_LogTag, inkOnPaper, paperOnInk, whiteOnRed, inkOnYellow);
+                "{0} 对比度：墨/纸 {1:F2}（≥4.5 AA）| 纸/墨 {2:F2} | 白/红 {3:F2} | 墨/黄 {4:F2} | 墨/蓝 {5:F2}",
+                k_LogTag, inkOnPaper, paperOnInk, whiteOnRed, inkOnYellow, inkOnBlue);
 
             if (inkOnPaper < 4.5f) Debug.LogError(line + " ⚠ 纸上正文不达 AA");
             else Debug.Log(line + " ✓");
@@ -142,14 +145,18 @@ namespace P1.Editor
             }
 
             var so = new SerializedObject(gauge);
-            SetVector2(so, "orbAnchoredPosition", new Vector2(-360f, -156f));
+            // 旧球形仪表遗留字段（P14-H 起 HUD 改成底部横向条，代码不再读取）：
+            // 仍写一遍是为了资产校验/差异对比稳定，不影响实机布局。
+            SetVector2(so, "orbAnchoredPosition", new Vector2(-130f, 150f));
             SetFloat(so, "orbSize", 156f);
-            SetVector2(so, "tankAnchoredPosition", new Vector2(-486f, -196f));
+            SetVector2(so, "tankAnchoredPosition", new Vector2(-250f, 180f));
             SetVector2(so, "tankSize", new Vector2(66f, 214f));
-            SetFloat(so, "percentFontSize", 22f);
-            SetFloat(so, "hintFontSize", 20f);
-            SetVector2(so, "readyHintSize", new Vector2(176f, 36f));
-            SetFloat(so, "specialIconSize", 48f);
+            // 横向仪表条的读数与提示：移动端字号由 UITypography 再放大，
+            // 这里给桌面基准（24 与条高 18 匹配，不再出现"数字比条还高"）。
+            SetFloat(so, "percentFontSize", 24f);
+            SetFloat(so, "hintFontSize", 16f);
+            SetVector2(so, "readyHintSize", new Vector2(92f, 26f));
+            SetFloat(so, "specialIconSize", 24f);
             so.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(gauge);
         }
@@ -161,7 +168,7 @@ namespace P1.Editor
             return font;
         }
 
-        static void ApplyCardPreset(SerializedObject so, string root, bool teamTint, bool halftone)
+        static void ApplyCardPreset(SerializedObject so, string root, Color fill, Color title, bool teamTint)
         {
             var p = so.FindProperty(root);
             if (p == null)
@@ -170,7 +177,9 @@ namespace P1.Editor
                 return;
             }
 
-            SetInt(p, "shape", (int)UIInkShape.RoundedRect);
+            SetInt(p, "shape", (int)UIInkShape.SharpRect);
+            SetColor(p, "fillColor", fill);
+            SetColor(p, "titleColor", title);
             SetBool(p, "fillUsesTeamColor", teamTint);
             SetColor(p, "borderColor", ComicStyle.Ink);
             SetFloat(p, "borderWidth", ComicStyle.Border);
@@ -178,11 +187,11 @@ namespace P1.Editor
             SetFloat(p, "wobble", 0f);
             SetFloat(p, "glossAlpha", 0f);
             SetFloat(p, "innerRimAlpha", 0f);
-            SetBool(p, "comicPanel", true);
-            SetBool(p, "halftone", halftone);
+            SetBool(p, "comicPanel", false);
+            SetBool(p, "halftone", false);
             SetBool(p, "speechTail", false);
-            SetVector2(p, "shadowOffset", new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset));
-            SetFloat(p, "shadowPadding", 8f);
+            SetVector2(p, "shadowOffset", Vector2.zero);
+            SetFloat(p, "shadowPadding", 0f);
             SetFloat(p, "contentPadding", 20f);
         }
 

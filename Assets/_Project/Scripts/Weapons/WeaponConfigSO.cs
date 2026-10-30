@@ -320,6 +320,26 @@ namespace P1.Weapons
         [Tooltip("释放后锁枪/锁定移动的投掷前摇（秒）")]
         public float stormThrowLockDuration = 0.35f;
 
+        [Header("射击手感：后坐力 / 镜头冲击 / 枪口 (P16)")]
+        [Tooltip("开火瞬间角色武器模型向后的位移（米）。0 = 使用武器类别默认值（见 WeaponFeelProfile）")]
+        public float recoilKickMeters = 0f;
+        [Tooltip("开火瞬间角色武器模型上抬角（度）。0 = 使用武器类别默认值")]
+        public float recoilPitchDegrees = 0f;
+        [Tooltip("开火瞬间镜头沿视轴后拉的冲击距离（米）：只移动相机位置，不改变瞄准方向")]
+        public float cameraKickMeters = 0f;
+        [Tooltip("开火瞬间镜头 Roll 冲击（度）：绕视轴滚转，不影响准星指向")]
+        public float cameraKickRollDegrees = 0f;
+        [Tooltip("开火瞬间 FOV 冲击（度）：短暂拉宽视野再回弹。0 = 使用武器类别默认值")]
+        public float cameraKickFovDegrees = 0f;
+        [Tooltip("枪口闪光尺寸倍率。0 = 使用武器类别默认值")]
+        public float muzzleFlashScale = 0f;
+        [Tooltip("弹丸视觉尺寸倍率（不改变碰撞与射程）。0 = 使用武器类别默认值")]
+        public float projectileVisualScale = 0f;
+        [Tooltip("弹丸沿途滴墨 / 落点涂地的视觉尺寸倍率。0 = 使用武器类别默认值")]
+        public float trailVisualScale = 0f;
+        [Tooltip("撞击地面/墙面时的涟漪强度倍率。0 = 使用武器类别默认值")]
+        public float impactRippleScale = 0f;
+
         private void OnValidate()
         {
             fireInterval = Mathf.Max(0.02f, fireInterval);
@@ -371,6 +391,17 @@ namespace P1.Weapons
             stormRainSplatRadiusMax = Mathf.Max(stormRainSplatRadiusMin, stormRainSplatRadiusMax);
             stormGrowTime = Mathf.Max(0.05f, stormGrowTime);
             stormFadeTime = Mathf.Max(0.05f, stormFadeTime);
+
+            // P16 射击手感：负值一律视为「未填写」，交给 WeaponFeelProfile 的类别默认值兜底
+            recoilKickMeters = Mathf.Max(0f, recoilKickMeters);
+            recoilPitchDegrees = Mathf.Max(0f, recoilPitchDegrees);
+            cameraKickMeters = Mathf.Max(0f, cameraKickMeters);
+            cameraKickRollDegrees = Mathf.Max(0f, cameraKickRollDegrees);
+            cameraKickFovDegrees = Mathf.Max(0f, cameraKickFovDegrees);
+            muzzleFlashScale = Mathf.Max(0f, muzzleFlashScale);
+            projectileVisualScale = Mathf.Max(0f, projectileVisualScale);
+            trailVisualScale = Mathf.Max(0f, trailVisualScale);
+            impactRippleScale = Mathf.Max(0f, impactRippleScale);
         }
 
 #if UNITY_EDITOR

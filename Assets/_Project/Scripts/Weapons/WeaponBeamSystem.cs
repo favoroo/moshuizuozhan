@@ -79,19 +79,25 @@ namespace P1.Weapons
                 impactNormal = worldNormal;
             }
 
-            if (InkSurfaceController.Instance != null)
+            // 朝天射击（光束没有命中任何世界几何且终点明显高于地面）时只保留光束与伤害，
+            // 不在地面凭空铺墨线：墨线是「打在地上」的结果，射进天空的墨应该直接消失。
+            bool paintsGround = hitWorld || end.y <= impactPoint.y + 2f;
+
+            if (paintsGround && InkSurfaceController.Instance != null)
             {
                 float step = Mathf.Max(0.2f, beam.PaintStep);
                 float lineRadius = Mathf.Max(0.05f, beam.PaintRadius);
                 for (float s = 1.0f; s < worldDistance - 0.2f; s += step)
                 {
                     Vector3 probe = origin + direction * s;
+                    // 墨线沿途只铺平滑主体、不刷涟漪：一条 27m 光束会经过 20+ 个采样点
                     painted += InkSurfaceController.Instance.PaintCircle(
-                        ProjectToGround(probe, ownerRoot), lineRadius, team);
+                        ProjectToGround(probe, ownerRoot), lineRadius, team, false, false);
                 }
 
                 float impactRadius = Mathf.Max(0.05f, beam.ImpactRadius);
-                painted += InkSurfaceController.Instance.PaintCircle(impactPoint, impactRadius, team);
+                // 终点保留完整装饰 + 一条冲击涟漪，读作「光束砸在地上的那一下」
+                painted += InkSurfaceController.Instance.PaintCircle(impactPoint, impactRadius, team, true, true);
 
                 if (hitWorld && worldCollider != null)
                 {
@@ -103,7 +109,10 @@ namespace P1.Weapons
                 }
             }
 
-            SpawnImpactVfx(impactPoint, impactNormal, team, Mathf.Max(0.05f, beam.ImpactRadius));
+            if (paintsGround)
+            {
+                SpawnImpactVfx(impactPoint, impactNormal, team, Mathf.Max(0.05f, beam.ImpactRadius));
+            }
 
             if (painted > 0)
                 onCellsPainted?.Invoke(painted);
@@ -169,7 +178,7 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayInkHitGround(1.1f);
+                AudioManager.Instance.PlayInkHitGround(point, 1.1f, radius);
             }
         }
 

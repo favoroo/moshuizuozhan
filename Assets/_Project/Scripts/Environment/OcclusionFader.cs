@@ -114,13 +114,13 @@ namespace P1.Environment
             _currentFocusWeight = Mathf.MoveTowards(_currentFocusWeight, _targetFocusWeight, fadeSpeed * deltaTime);
 
             // 当处于半透明/过渡态时刷新 MaterialPropertyBlock；
-            // 完全恢复不透明后把 MPB 清掉（shader 默认 _DitherAlpha=1），掩体重新回到 SRP Batcher 批处理。
+            // 完全恢复不透明后把本组键回写成默认值（不是清空 MPB！），掩体重新不透明。
             bool fullyOpaque = _currentAlpha >= 0.999f && _currentFocusWeight <= 0.001f;
             if (fullyOpaque)
             {
                 if (prevAlpha < 0.999f)
                 {
-                    ClearProperties();
+                    RestoreOpaqueProperties();
                 }
             }
             else
@@ -131,22 +131,42 @@ namespace P1.Environment
             _isOccludingThisFrame = false;
         }
 
-        private void ClearProperties()
+        /// <summary>
+        /// 恢复不透明：只把本组件负责的 5 个键回写成"完全不透明"的默认值。
+        ///
+        /// 关键点：绝不能用 <c>SetPropertyBlock(null)</c>。那会把渲染器的整块 MPB 清空，
+        /// 连同 InkSurfaceController 写进去的 <c>_InkTex</c> / <c>_InkMapOriginXZ</c> /
+        /// <c>_InkTexelSize</c> 一起抹掉（这些键只在高台/坡道/出生台"被遮挡过一次"之后才由
+        /// 本组件触发清除，于是那片表面回落到材质默认的黑贴图，覆盖率恒为 0 ——
+        /// 表现就是"高台和坡道永远喷不上油漆"）。同理还会抹掉 <c>InkWallSurface</c>
+        /// 挂在子节点 <c>InkFace_*</c> 上的单面墨迹贴图，导致墙面涂了也看不见。
+        ///
+        /// 回写默认值只多占 5 个 float/Vec 键，这 13 个渲染器本来就被墨水系统长期占着 MPB，
+        /// 从未进过 SRP Batcher，因此没有额外性能代价。
+        /// </summary>
+        private void RestoreOpaqueProperties()
         {
             if (_renderer == null) _renderer = GetComponent<Renderer>();
             if (_renderer != null)
             {
-                _renderer.SetPropertyBlock(null);
+                if (_propBlock == null) _propBlock = new MaterialPropertyBlock();
+                _renderer.GetPropertyBlock(_propBlock);
+                _propBlock.SetFloat(DitherAlphaProp, 1f);
+                _propBlock.SetFloat(FocusWeightProp, 0f);
+                _renderer.SetPropertyBlock(_propBlock);
             }
 
             if (_childRenderers != null)
             {
                 for (int i = 0; i < _childRenderers.Count; i++)
                 {
-                    if (_childRenderers[i] != null)
-                    {
-                        _childRenderers[i].SetPropertyBlock(null);
-                    }
+                    Renderer child = _childRenderers[i];
+                    if (child == null) continue;
+
+                    if (_propBlock == null) _propBlock = new MaterialPropertyBlock();
+                    child.GetPropertyBlock(_propBlock);
+                    _propBlock.SetFloat(DitherAlphaProp, 1f);
+                    child.SetPropertyBlock(_propBlock);
                 }
             }
         }
@@ -189,7 +209,7 @@ namespace P1.Environment
             _currentFocusWeight = 0.0f;
             _targetFocusWeight = 0.0f;
             _isOccludingThisFrame = false;
-            ClearProperties();
+            RestoreOpaqueProperties();
         }
     }
 }

@@ -127,6 +127,8 @@ namespace P1.UI
         public int ActiveDamageArcCount => _damageArcs.Count;
 
         private WeaponKind _lastKind = WeaponKind.Shooter;
+        private int _lastShotsFired = -1;
+        private float _shotPunch;
         private float _shooterWeight = 1f;
         private float _rollerWeight = 0f;
         private float _chargerWeight = 0f;
@@ -215,7 +217,7 @@ namespace P1.UI
 
         private void GenerateProceduralSprites()
         {
-            // 1. 圆点 Sprite (64x64)：墨黑实心 + 白色硬描边（保证在橙/蓝墨地上都可读）
+            // 1. 圆点 Sprite (64x64)：墨黑实心 + 白色硬描边（几何风纯色硬边，无柔光）
             Texture2D dotTex = new Texture2D(64, 64, TextureFormat.RGBA32, false) { name = "ReticleDotTex" };
             Color[] dotCols = new Color[64 * 64];
             for (int y = 0; y < 64; y++)
@@ -233,8 +235,7 @@ namespace P1.UI
                     }
                     else
                     {
-                        float alpha = Mathf.Clamp01((28.5f - dist) * 1.5f);
-                        dotCols[y * 64 + x] = new Color(1f, 1f, 1f, alpha);
+                        dotCols[y * 64 + x] = Color.clear;
                     }
                 }
             }
@@ -242,7 +243,7 @@ namespace P1.UI
             dotTex.Apply();
             _dotSprite = Sprite.Create(dotTex, new Rect(0, 0, 64, 64), new Vector2(0.5f, 0.5f));
 
-            // 2. 细圆环 Sprite (128x128)：墨黑实心环 + 白色双侧硬描边
+            // 2. 细圆环 Sprite (128x128)：墨黑实心环 + 白色双侧硬描边（几何风纯色硬边，无柔光）
             Texture2D ringTex = new Texture2D(128, 128, TextureFormat.RGBA32, false) { name = "ReticleRingTex" };
             Color[] ringCols = new Color[128 * 128];
             for (int y = 0; y < 128; y++)
@@ -261,8 +262,7 @@ namespace P1.UI
                     }
                     else
                     {
-                        float alpha = Mathf.Clamp01((6.5f - ringDiff) * 1.5f);
-                        ringCols[y * 128 + x] = new Color(1f, 1f, 1f, alpha);
+                        ringCols[y * 128 + x] = Color.clear;
                     }
                 }
             }
@@ -285,7 +285,7 @@ namespace P1.UI
             boxTex.Apply();
             _boxSprite = Sprite.Create(boxTex, new Rect(0, 0, 32, 32), new Vector2(0.5f, 0.5f));
 
-            // 4. 圆角胶囊贴图 (64x32)：墨黑底 + 白色硬描边
+            // 4. 纯色胶囊贴图 (64x32)：墨黑底 + 白色硬描边（几何风纯色硬边，无柔光）
             Texture2D pillTex = new Texture2D(64, 32, TextureFormat.RGBA32, false) { name = "ReticlePillTex" };
             Color[] pillCols = new Color[64 * 32];
             for (int y = 0; y < 32; y++)
@@ -305,8 +305,7 @@ namespace P1.UI
                     }
                     else
                     {
-                        float alpha = Mathf.Clamp01((17f - dist) * 1.5f);
-                        pillCols[y * 64 + x] = new Color(1f, 1f, 1f, alpha);
+                        pillCols[y * 64 + x] = Color.clear;
                     }
                 }
             }
@@ -314,7 +313,7 @@ namespace P1.UI
             pillTex.Apply();
             _pillSprite = Sprite.Create(pillTex, new Rect(0, 0, 64, 32), new Vector2(0.5f, 0.5f));
 
-            // 5. 受击方向弧贴图 (256x256)：屏幕正上方 ±26° 的厚环形扇面，外侧留一圈 3% 柔边
+            // 5. 受击方向弧贴图 (256x256)：纯色几何硬边扇面
             _arcSprite = GenerateArcSprite();
         }
 
@@ -338,13 +337,12 @@ namespace P1.UI
                     float angle = Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg;
                     float angleDelta = Mathf.Abs(Mathf.DeltaAngle(angle, 90f));
 
-                    float radial = Mathf.Min(
-                        Mathf.InverseLerp(inner01 - 0.02f, inner01 + 0.02f, radius01),
-                        Mathf.InverseLerp(1f, 0.965f, radius01));
-                    float angular = Mathf.InverseLerp(halfSpanDegrees + 3f, halfSpanDegrees - 1f, angleDelta);
+                    bool inRadius = radius01 >= inner01 && radius01 <= 0.98f;
+                    bool inAngle = angleDelta <= halfSpanDegrees;
 
-                    float alpha = Mathf.Clamp01(radial) * Mathf.Clamp01(angular);
-                    pixels[y * size + x] = new Color(1f, 1f, 1f, alpha);
+                    pixels[y * size + x] = (inRadius && inAngle)
+                        ? Color.white
+                        : Color.clear;
                 }
             }
 
@@ -552,7 +550,7 @@ namespace P1.UI
                 rt.anchorMin = new Vector2(0.5f, 0.5f);
                 rt.anchorMax = new Vector2(0.5f, 0.5f);
                 rt.pivot = new Vector2(0.5f, 0.5f);
-                rt.sizeDelta = new Vector2(3.5f, 13f);
+                rt.sizeDelta = new Vector2(4.5f, 15f);
                 rt.localRotation = Quaternion.Euler(0f, 0f, angles[i]);
                 float rad = angles[i] * Mathf.Deg2Rad;
                 rt.anchoredPosition = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad)) * 9f;
@@ -599,7 +597,7 @@ namespace P1.UI
                 if (_hitTicks[i] == null) continue;
                 _hitTicks[i].color = _hitMarkerColor;
                 if (_hitTickRects[i] != null)
-                    _hitTickRects[i].sizeDelta = fat ? new Vector2(5f, 16f) : new Vector2(3.5f, 12f);
+                    _hitTickRects[i].sizeDelta = fat ? new Vector2(6.5f, 20f) : new Vector2(4.5f, 15f);
             }
 
             if (_hitRing != null)
@@ -954,6 +952,14 @@ namespace P1.UI
             var weapon = player.Weapon;
             if (weapon == null) return;
 
+            // 开火弹跳（P16）：每打出一发，准星刻度短促外扩再回弹。
+            // 用 ShotsFired 增量检测，不新增事件订阅；滚筒推地每帧都在结算，排除掉避免持续抖动。
+            int shotsFired = weapon.ShotsFired;
+            if (_lastShotsFired >= 0 && shotsFired > _lastShotsFired && !weapon.IsRolling)
+                _shotPunch = Mathf.Min(1f, _shotPunch + 0.55f);
+            _lastShotsFired = shotsFired;
+            _shotPunch = Mathf.MoveTowards(_shotPunch, 0f, unscaledDt * 7f);
+
             WeaponKind kind = weapon.CurrentWeaponKind;
             _lastKind = kind;
             float dt = Time.deltaTime;
@@ -991,9 +997,9 @@ namespace P1.UI
                 if (!_shooterContainer.gameObject.activeSelf) _shooterContainer.gameObject.SetActive(true);
                 _shooterContainer.localScale = Vector3.one * _shooterWeight;
 
-                // 散布 Bloom: 1.2° ~ 5.5° 映射到 24px ~ 42px 刻度距离
+                // 散布 Bloom: 1.2° ~ 5.5° 映射到 24px ~ 42px 刻度距离；开火再叠一层短促外扩
                 float spreadDeg = weapon.CurrentSpreadDegrees;
-                float tickOffset = 24f + (spreadDeg - 1.2f) * 4.2f;
+                float tickOffset = 24f + (spreadDeg - 1.2f) * 4.2f + _shotPunch * 6f;
 
                 // 4 个刻度沿自身角度向外偏移
                 _shooterTicks[0].anchoredPosition = new Vector2(0f, tickOffset);
@@ -1007,6 +1013,7 @@ namespace P1.UI
 
                 Color tint = new Color(1f, 1f, 1f, _shooterWeight);
                 _shooterCenterDot.color = tint;
+                _shooterCenterDot.rectTransform.localScale = Vector3.one * (1f + _shotPunch * 0.35f);
                 _shooterRing.color = tint;
                 for (int i = 0; i < 4; i++) _shooterTickImages[i].color = tint;
             }

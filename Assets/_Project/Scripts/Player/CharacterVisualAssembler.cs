@@ -427,6 +427,10 @@ namespace P1.Player
                 partName.StartsWith("Blush") ||
                 partName == "Mouth" ||
                 partName.StartsWith("ChestInk") ||
+                // 短裤/腰带是 5mm/9mm 贴面薄壳，蛋体本身已投出相同轮廓；
+                // 重复投影只增加阴影 draw，并在细级联下放大自阴影噪声。
+                partName == "EggShorts" ||
+                partName == "EggWaistband" ||
                 partName == "TopCap" ||
                 partName == "ValveKnob" ||
                 partName == "BottomCap" ||

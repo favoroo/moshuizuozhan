@@ -79,9 +79,17 @@ Shader "P1/ToonOutline"
                 float depthD = LinearDepthAt(uvD);
                 float depthU = LinearDepthAt(uvU);
 
-                float depthEdge = max(max(abs(depthL - centerDepth), abs(depthR - centerDepth)),
-                                      max(abs(depthD - centerDepth), abs(depthU - centerDepth)));
-                float relativeDepthEdge = depthEdge / max(centerDepth, 0.5);
+                // 深度跳变用二阶差分（拉普拉斯）判定，而不是一阶差分。
+                // 一阶差分在掠射角下必然很大：一条 10m 长的走道、0.25m 厚的坡道侧沿只要
+                // 几乎平行于视线，相邻 1.6 texel 的深度差就能轻松超过 centerDepth 的 2%，
+                // 于是整片平滑表面被判成"边缘"并填成纯黑 —— 玩家看到的就是
+                // "有些物体面一直是黑色，也喷不了油漆"。
+                // 平滑平面在线性深度上是线性的，且左右/上下采样关于中心对称，
+                // 因此 2*center - L - R ≈ 0，掠射面不再误判；真实遮挡边缘是阶跃，
+                // 二阶差分与一阶同样显著，描边强度不变。
+                float laplacian = max(abs(centerDepth * 2.0 - depthL - depthR),
+                                      abs(centerDepth * 2.0 - depthD - depthU));
+                float relativeDepthEdge = laplacian / max(centerDepth, 0.5);
                 float edge = step(_DepthThreshold, relativeDepthEdge);
 
                 float3 normalC = SampleSceneNormals(uv);

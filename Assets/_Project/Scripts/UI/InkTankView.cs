@@ -1,17 +1,18 @@
 using P1.Core;
 using P1.Player;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace P1.UI
 {
     /// <summary>
-    /// 右上角竖向墨水计量管（P4-C）。
+    /// 底部横向墨水条（P14-H：由旧的右上角竖罐改成血条上方的横向纯色条）。
     ///
     /// 职责：
-    /// 1. 用 <see cref="UILiquidFillGraphic"/> 直观显示剩余墨水（液面带弹簧惯性与波浪）；
-    /// 2. 标注副武器（手雷）耗墨刻度红线，位置由 <see cref="SetThreshold01"/> 实时给入；
-    /// 3. 墨水低于阈值时罐身闪红并在 <see cref="Update"/> 里按间隔播放 low_ink 警报音。
+    /// 1. 用 <see cref="Image.fillAmount"/> 显示剩余墨水（纯色直角条，无渐变/无圆角/无波浪）；
+    /// 2. 标注副武器（手雷）耗墨刻度：横向条上的**竖红线**，位置由 <see cref="SetThreshold01"/> 实时给入；
+    /// 3. 墨水低于阈值时轨道描边与红光闪烁，并在 <see cref="Update"/> 里按间隔播放 low_ink 警报音。
     ///
     /// 所有数值来自 <see cref="HudGaugeStyleSO"/>，配色来自 <see cref="UIThemeSO"/> 与队伍墨色。
     /// </summary>
@@ -22,12 +23,11 @@ namespace P1.UI
 
         [SerializeField] private UIThemeSO theme;
         [SerializeField] private HudGaugeStyleSO style;
-        [SerializeField] private UILiquidFillGraphic liquid;
+        [SerializeField] private Image barFill;
         [SerializeField] private RectTransform thresholdMarker;
         [SerializeField] private UIInkShapeGraphic frameShape;
-        [SerializeField] private UIInkShapeGraphic bodyShape;
         [SerializeField] private UIInkShapeGraphic warningGlow;
-        [SerializeField] private Text percentLabel;
+        [SerializeField] private TMP_Text percentLabel;
         [SerializeField] private AudioSource warningSource;
 
         [Tooltip("留空则依次尝试 AudioManager.lowInkWarningClip 与编辑器内置路径")]
@@ -35,12 +35,7 @@ namespace P1.UI
 
         [SerializeField] private bool autoBindLocalPlayerTeam = true;
 
-        private float _thresholdInset = 4f;
-
-        private bool _layoutDefaultsCaptured;
-        private Vector2 _defaultPlateSize;
-        private Vector2 _defaultPlatePos;
-        private int _defaultPercentFontSize = 16;
+        private float _thresholdInset = 2f;
 
         private Team _team = Team.Neutral;
         private float _ink01 = 1f;
@@ -49,7 +44,6 @@ namespace P1.UI
         private float _blinkPhase;
         private float _nextWarningTime;
         private int _displayedPercent = -1;
-        private int _lastFrameAlarmStep = -1;
 
         private void Awake()
         {
@@ -83,19 +77,21 @@ namespace P1.UI
 
         public float Ink01 => _ink01;
 
-        /// <summary>手雷红线位置 0..1。</summary>
+        /// <summary>手雷刻度位置 0..1。</summary>
         public float Threshold01 => _threshold01;
 
+        /// <summary>横向条填充图（0..1 由 fillAmount 驱动）。</summary>
+        public Image BarFill => barFill;
+
         public void Configure(UIThemeSO themeAsset, HudGaugeStyleSO styleAsset,
-            UILiquidFillGraphic liquidGraphic, RectTransform marker, UIInkShapeGraphic frame,
-            UIInkShapeGraphic body, UIInkShapeGraphic warning, Text percent, float thresholdInset)
+            Image fill, RectTransform marker, UIInkShapeGraphic frame,
+            UIInkShapeGraphic warning, TMP_Text percent, float thresholdInset)
         {
             theme = themeAsset;
             style = styleAsset;
-            liquid = liquidGraphic;
+            barFill = fill;
             thresholdMarker = marker;
             frameShape = frame;
-            bodyShape = body;
             warningGlow = warning;
             percentLabel = percent;
             _thresholdInset = Mathf.Max(0f, thresholdInset);
@@ -122,11 +118,11 @@ namespace P1.UI
         {
             _ink01 = maxInk > 0.01f ? Mathf.Clamp01(currentInk / maxInk) : 0f;
 
-            if (liquid != null) liquid.SetFill(_ink01);
+            if (barFill != null) barFill.fillAmount = _ink01;
             ApplyPercent();
         }
 
-        /// <summary>手雷刻度红线：传入 0..1（一般 = bombInkCost / maxInk）。</summary>
+        /// <summary>手雷刻度：传入 0..1（一般 = bombInkCost / maxInk）。</summary>
         public void SetThreshold01(float threshold01)
         {
             float clamped = Mathf.Clamp01(threshold01);
@@ -136,7 +132,7 @@ namespace P1.UI
             ApplyThreshold();
         }
 
-        /// <summary>切换队伍墨色（液面用队伍色、浪冠用队伍亮色）。</summary>
+        /// <summary>切换队伍墨色（填充条跟随队伍色）。</summary>
         public void SetTeam(Team team)
         {
             _team = team;
@@ -149,42 +145,11 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 移动端紧凑布局：百分比标牌从罐底移到罐顶，收窄手雷刻度线以匹配窄罐体。
-        /// 桌面端不会调用；重复调用幂等。
+        /// 兼容入口（移动端布局会调用）：横向条本身位置/尺寸不随输入方式变化，
+        /// 这里只重算一次刻度，保证父级尺寸变化后红线仍在正确比例上。重复调用幂等。
         /// </summary>
         public void SetCompactBottomLayout(bool compact)
         {
-            RectTransform plate = percentLabel != null ? percentLabel.transform.parent as RectTransform : null;
-            if (plate != null)
-            {
-                if (!_layoutDefaultsCaptured)
-                {
-                    _layoutDefaultsCaptured = true;
-                    _defaultPlateSize = plate.sizeDelta;
-                    _defaultPlatePos = plate.anchoredPosition;
-                    _defaultPercentFontSize = percentLabel.fontSize;
-                }
-
-                plate.anchorMin = plate.anchorMax = new Vector2(0.5f, compact ? 1f : 0f);
-                plate.pivot = new Vector2(0.5f, compact ? 0f : 1f);
-                plate.sizeDelta = compact ? new Vector2(58f, 24f) : _defaultPlateSize;
-                plate.anchoredPosition = compact ? new Vector2(0f, 3f) : _defaultPlatePos;
-                percentLabel.fontSize = compact ? 14 : _defaultPercentFontSize;
-            }
-
-            if (thresholdMarker != null)
-            {
-                var root = (RectTransform)transform;
-                float width = root.rect.width;
-                if (width <= 1f) width = compact ? 36f : 54f;
-
-                thresholdMarker.sizeDelta = new Vector2(width - 2f, 8f);
-                var backing = thresholdMarker.Find("ThresholdBacking") as RectTransform;
-                if (backing != null) backing.sizeDelta = new Vector2(width - 2f, 7f);
-                var line = thresholdMarker.Find("ThresholdLine") as RectTransform;
-                if (line != null) line.sizeDelta = new Vector2(width - 1f, 3.4f);
-            }
-
             ApplyThreshold();
         }
 
@@ -275,34 +240,25 @@ namespace P1.UI
 
         private void UpdateWarningVisuals(HudGaugeStyleSO resolved)
         {
-            UIThemeSO themeResolved = UIThemeSO.Resolve(theme);
-
-            float blink = 0f;
+            bool blinkOn = false;
             if (_low)
             {
                 _blinkPhase += Time.unscaledDeltaTime * Mathf.Max(0.1f, resolved.warningBlinkHz);
-                blink = 0.5f + 0.5f * Mathf.Sin(_blinkPhase * Mathf.PI * 2f);
+                blinkOn = (Mathf.Sin(_blinkPhase * Mathf.PI * 2f) > 0f);
             }
 
             if (warningGlow != null)
             {
-                Color red = ComicStyle.Red;
-                warningGlow.color = new Color(red.r, red.g, red.b, blink * resolved.warningGlowAlpha);
+                // 纯色块：亮 = 实红，灭 = 全透明（硬切，不做淡入淡出）
+                warningGlow.color = blinkOn
+                    ? new Color(ComicStyle.Red.r, ComicStyle.Red.g, ComicStyle.Red.b, resolved.warningGlowAlpha)
+                    : Color.clear;
             }
 
             if (frameShape != null)
             {
-                int step = _low ? Mathf.RoundToInt((0.25f + blink * 0.75f) * 4f) : 0;
-                if (step != _lastFrameAlarmStep)
-                {
-                    _lastFrameAlarmStep = step;
-                    Color normal = ComicStyle.Ink;
-                    Color alarm = ComicStyle.Red;
-                    frameShape.BorderColor = _low
-                        ? Color.Lerp(normal, alarm, step / 4f)
-                        : normal;
-                    frameShape.BorderWidth = ComicStyle.Border;
-                }
+                frameShape.BorderColor = blinkOn ? ComicStyle.Red : ComicStyle.Paper;
+                frameShape.BorderWidth = ComicStyle.BorderThin;
             }
         }
 
@@ -310,32 +266,34 @@ namespace P1.UI
         {
             UIThemeSO themeResolved = UIThemeSO.Resolve(theme);
 
-            if (liquid != null)
+            if (barFill != null)
             {
                 Color ink = InkTeamColorFilter.ResolveTeamColor(_team, theme);
-                Color light = themeResolved.GetTeamLight(_team);
-                liquid.color = new Color(ink.r, ink.g, ink.b, 1f);
-
-                // 浪冠是独立颜色字段，无法被 Graphic.color 自动染色，这里同步一次
-                liquid.SetCrestColor(new Color(light.r, light.g, light.b, 0.55f));
-            }
-
-            if (bodyShape != null)
-            {
-                Color panel = themeResolved.panelColor;
-                bodyShape.color = new Color(panel.r, panel.g, panel.b, panel.a);
+                barFill.color = new Color(ink.r, ink.g, ink.b, 1f);
             }
 
             if (frameShape != null)
             {
-                frameShape.BorderColor = ComicStyle.Ink;
-                frameShape.BorderWidth = ComicStyle.Border;
-                // 外框只是 6px 描边、填充全透明；UIInkShapeGraphic 的硬阴影是整块实心多边形，
-                // 一开就会把罐内液面整片盖成墨黑（实机"黑薯条"的成因）。
+                frameShape.Shape = UIInkShape.SharpRect;
+                frameShape.CornerRadius = ComicStyle.CornerSharp;
+                frameShape.BorderColor = ComicStyle.Paper;
+                frameShape.BorderWidth = ComicStyle.BorderThin;
+                // 描边层填充全透明：UIInkShapeGraphic 的实心阴影一开就会把整条盖成墨黑。
                 frameShape.HardShadow = false;
                 frameShape.GlossAlpha = 0f;
                 frameShape.DrawGloss = false;
                 frameShape.InnerRimAlpha = 0f;
+            }
+
+            if (percentLabel != null)
+            {
+                percentLabel.color = ComicStyle.Paper;
+            }
+
+            // 队伍色解析失败时退回主题默认墨色，避免白条看不见
+            if (barFill != null && barFill.color.a < 0.01f)
+            {
+                barFill.color = themeResolved.teamAColor;
             }
         }
 
@@ -343,13 +301,14 @@ namespace P1.UI
         {
             if (thresholdMarker == null) return;
 
-            RectTransform root = (RectTransform)transform;
-            float height = root.rect.height;
-            if (height <= 1f) height = 180f;
+            RectTransform bar = barFill != null ? barFill.rectTransform : (RectTransform)transform;
+            float width = bar.rect.width;
+            if (width <= 1f) width = 294f;
 
-            float usable = Mathf.Max(1f, height - _thresholdInset * 2f);
-            float y = _thresholdInset + HudGaugeMath.ThresholdOffset(usable, _threshold01);
-            thresholdMarker.anchoredPosition = new Vector2(0f, y);
+            float inset = Mathf.Max(0f, _thresholdInset);
+            float usable = Mathf.Max(1f, width - inset * 2f);
+            float x = inset + HudGaugeMath.ThresholdOffset(usable, _threshold01);
+            thresholdMarker.anchoredPosition = new Vector2(x, 0f);
         }
 
         private void ApplyPercent(bool force = false)

@@ -3,22 +3,26 @@ using UnityEngine;
 
 namespace P1.Weapons
 {
-    /// <summary>一帧的瞄准上下文：地面点供弹道反解与蓄力狙墨线使用。</summary>
+    /// <summary>
+    /// 一帧的瞄准上下文。<see cref="Direction"/> 是**含俯仰**的 3D 瞄准方向（相机前向），
+    /// <see cref="GroundPoint"/> 是准星射线命中的世界点（地面 / 墙面 / 敌人，朝天时是 70m 处的空中点）。
+    /// 武器按「枪口 → 命中点」求实际弹道，因此抬头能打天上、低头能打脚下、对墙能涂墙。
+    /// </summary>
     public struct WeaponAim
     {
         public Vector3 Direction;
         public Vector3 GroundPoint;
         public bool HasGroundPoint;
 
+        /// <summary>枪口到命中点小于该距离时不做“指向命中点”修正，直接用瞄准方向，避免近距离病态角度。</summary>
+        public const float MinAimPointDistance = 0.6f;
+
         public static WeaponAim FromDirection(Vector3 direction)
         {
-            Vector3 flat = new Vector3(direction.x, 0f, direction.z);
-            if (flat.sqrMagnitude < 0.0001f)
-                flat = Vector3.forward;
-            flat.Normalize();
+            Vector3 dir = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.forward;
             return new WeaponAim
             {
-                Direction = flat,
+                Direction = dir,
                 GroundPoint = Vector3.zero,
                 HasGroundPoint = false
             };
@@ -32,7 +36,7 @@ namespace P1.Weapons
             return aim;
         }
 
-        /// <summary>水平瞄准方向；无效时退回世界正前方。</summary>
+        /// <summary>水平瞄准方向；无效时退回世界正前方。用于角色朝向、滚筒滚地与偏航扇面。</summary>
         public Vector3 FlatDirection
         {
             get
@@ -40,6 +44,41 @@ namespace P1.Weapons
                 Vector3 flat = new Vector3(Direction.x, 0f, Direction.z);
                 return flat.sqrMagnitude > 0.0001f ? flat.normalized : Vector3.forward;
             }
+        }
+
+        /// <summary>
+        /// 枪口 → 准星命中点的 3D 单位方向（对齐 INKWAVE 的 <c>_aimFrom</c>）：
+        /// 命中点过近或在枪口后方（贴墙/贴脸）时回退到相机瞄准方向。
+        /// </summary>
+        public Vector3 GetShotDirection(Vector3 muzzle)
+        {
+            if (!HasGroundPoint)
+                return Direction;
+
+            Vector3 toTarget = GroundPoint - muzzle;
+            float distance = toTarget.magnitude;
+            if (distance < MinAimPointDistance)
+                return Direction;
+
+            toTarget /= distance;
+            return Vector3.Dot(toTarget, Direction) < 0f ? Direction : toTarget;
+        }
+
+        /// <summary>
+        /// 本次射击的 3D 目标点：命中点可用时直接取它（含墙面与空中点），
+        /// 否则沿瞄准方向取最大射程处，保证永远有一个合法目标。
+        /// </summary>
+        public Vector3 GetShotTarget(Vector3 muzzle, float maxRange)
+        {
+            if (HasGroundPoint)
+            {
+                Vector3 toTarget = GroundPoint - muzzle;
+                float distance = toTarget.magnitude;
+                if (distance >= MinAimPointDistance && Vector3.Dot(toTarget, Direction) >= 0f)
+                    return GroundPoint;
+            }
+
+            return muzzle + Direction * Mathf.Max(0.1f, maxRange);
         }
     }
 

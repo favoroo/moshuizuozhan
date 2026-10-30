@@ -49,12 +49,11 @@ namespace P1.Weapons
             float splashMin = Config != null ? Config.blasterSplashDamageMin : 30f;
 
             Vector3 muzzle = host.MuzzlePosition;
-            Vector3 flatAim = aim.FlatDirection;
+            Vector3 aimDir = aim.GetShotDirection(muzzle);
 
-            // 水平瞄准平直飞行，微小偏航散布
-            float yawSpread = SpreadDegrees;
-            float yawOffset = Random.Range(-yawSpread, yawSpread);
-            Vector3 shotDir = Quaternion.Euler(0f, yawOffset, 0f) * flatAim;
+            // 沿「枪口 → 准星命中点」平直飞行（重力为 0）：打地、打墙、打高处都由准星决定，
+            // 到最大射程或撞到东西时爆裂。散布是以弹道轴为中心的锥形。
+            Vector3 shotDir = InkBallistics.ApplySpread(aimDir, SpreadDegrees);
 
             host.SpawnShot(new WeaponShot
             {

@@ -19,6 +19,10 @@ namespace P1.Player
         private float _currentHealth = 100f;
         private float _respawnTimer;
         private float _hitFlashTimer;
+        private bool _externalInvulnerable;
+        private float _spawnProtectionRemaining;
+        private float _spawnBlinkTimer;
+        private bool _spawnBlinkOn;
         private Vector3 _initialSpawnPos;
         private Quaternion _initialSpawnRot;
         private CharacterController _cc;
@@ -36,7 +40,27 @@ namespace P1.Player
         public float MaxHealth => config != null ? config.maxHealth : 100f;
         public float Health01 => Mathf.Clamp01(_currentHealth / MaxHealth);
         public bool IsAlive { get; private set; } = true;
-        public bool IsInvulnerable { get; set; }
+
+        /// <summary>
+        /// 是否免疫伤害：外部（大招等）无敌与复活出生保护取并集。
+        /// setter 只控制外部无敌；出生保护由 <see cref="GrantSpawnProtection"/> 独立计时，
+        /// 因此 <c>IsInvulnerable = false</c> 不会误清除刚获得的复活保护。
+        /// </summary>
+        public bool IsInvulnerable
+        {
+            get => _externalInvulnerable || _spawnProtectionRemaining > 0f;
+            set => _externalInvulnerable = value;
+        }
+
+        /// <summary>复活后是否处于出生保护期。</summary>
+        public bool IsSpawnProtected => _spawnProtectionRemaining > 0f;
+
+        /// <summary>出生保护剩余秒数（HUD / 调试可读）。</summary>
+        public float SpawnProtectionRemaining => _spawnProtectionRemaining;
+
+        /// <summary>出生保护总时长（来自 PlayerConfigSO，默认 3s）。</summary>
+        public float SpawnProtectionDuration => config != null ? Mathf.Max(0f, config.respawnInvulnerabilitySeconds) : 3f;
+
         public float RespawnRemaining => _respawnTimer;
 
         /// <summary>挂载在该单位上的机动组件（懒缓存，null 结果也标记已查，避免逐帧重复查询）。</summary>
@@ -129,6 +153,10 @@ namespace P1.Player
         {
             IsAlive = true;
             IsInvulnerable = false;
+            // 出生保护只在"死亡后复活"路径授予；开局站位与重开比赛不白送保护（对齐 INKWAVE）。
+            _spawnProtectionRemaining = 0f;
+            _spawnBlinkTimer = 0f;
+            _spawnBlinkOn = false;
             _currentHealth = MaxHealth;
             _respawnTimer = 0f;
             _hitFlashTimer = 0f;
@@ -145,6 +173,20 @@ namespace P1.Player
             _lastAttacker = null;
             _lastWeaponCause = null;
             OnRespawned?.Invoke(this);
+        }
+
+        /// <summary>
+        /// 授予出生保护（秒）。复活路径调用；已在保护中时取较长的剩余时间。
+        /// 保护期间 <see cref="TakeDamage"/> 与敌方墨水灼烧均不结算，身体按 6Hz 闪白提示。
+        /// </summary>
+        public void GrantSpawnProtection(float seconds)
+        {
+            if (!IsAlive || seconds <= 0f)
+                return;
+
+            _spawnProtectionRemaining = Mathf.Max(_spawnProtectionRemaining, seconds);
+            _spawnBlinkTimer = 0f;
+            _spawnBlinkOn = false;
         }
 
         public void Heal(float amount)
@@ -242,6 +284,9 @@ namespace P1.Player
         private void Die(Team killerTeam)
         {
             IsAlive = false;
+            _externalInvulnerable = false;
+            _spawnProtectionRemaining = 0f;
+            _spawnBlinkOn = false;
             _respawnTimer = config != null ? config.respawnDelay : 4.0f;
             float deathSplatRadius = config != null ? config.deathExplosionSplatRadius : 1.8f;
 
@@ -283,18 +328,55 @@ namespace P1.Player
                 }
             }
 
+            if (_spawnProtectionRemaining > 0f)
+            {
+                _spawnProtectionRemaining = Mathf.Max(0f, _spawnProtectionRemaining - Time.deltaTime);
+                if (_spawnProtectionRemaining > 0f)
+                {
+                    // 6Hz 闪白提示（INKWAVE 用着色器呼吸闪代替实体护盾，这里复用受击闪白通道）
+                    _spawnBlinkTimer -= Time.deltaTime;
+                    if (_spawnBlinkTimer <= 0f)
+                    {
+                        _spawnBlinkTimer = 0.1f;
+                        _spawnBlinkOn = !_spawnBlinkOn;
+                        ApplyHitFlash(_spawnBlinkOn);
+                    }
+                }
+                else
+                {
+                    _spawnBlinkOn = false;
+                    if (_hitFlashTimer <= 0f)
+                    {
+                        ClearHitFlash();
+                    }
+                }
+            }
+
             if (!IsAlive)
             {
                 _respawnTimer -= Time.deltaTime;
                 if (_respawnTimer <= 0f)
                 {
                     ResetImmediately();
+                    GrantSpawnProtection(SpawnProtectionDuration);
+                    PlaySpawnProtectionVfx();
                     if (AudioManager.Instance != null && team == Team.TeamA)
                     {
                         AudioManager.Instance.PlayRespawn();
                     }
                 }
             }
+        }
+
+        /// <summary>复活瞬间在脚下放一圈队色扩散环，和身体闪白一起提示"出生保护中"。</summary>
+        private void PlaySpawnProtectionVfx()
+        {
+            if (VfxPool.Instance == null || InkSurfaceController.Instance == null)
+                return;
+
+            Color color = InkSurfaceController.Instance.GetTeamColor(team);
+            VfxPool.Instance.SpawnShockwaveRing(
+                transform.position + Vector3.up * 0.12f, color, 0.45f, 1.8f, 0.42f);
         }
 
         private void SetVisualsAndCollidersActive(bool active)

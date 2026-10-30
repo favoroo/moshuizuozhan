@@ -93,14 +93,29 @@ namespace P1.Weapons
             float tailDamage = Config != null ? Config.slosherTailDamage : 34f;
 
             Vector3 muzzle = host.MuzzlePosition;
-            Vector3 flatAim = aim.FlatDirection;
-            float baseYaw = Mathf.Atan2(flatAim.x, flatAim.z);
-            float basePitch = pitchDegrees * Mathf.Deg2Rad;
+            Vector3 target = aim.GetShotTarget(muzzle, maxRange);
+            Vector3 toTarget = target - muzzle;
+            float horizontal = new Vector2(toTarget.x, toTarget.z).magnitude;
+            float baseYaw = horizontal > 0.3f
+                ? Mathf.Atan2(toTarget.x, toTarget.z)
+                : Mathf.Atan2(aim.FlatDirection.x, aim.FlatDirection.z);
+
+            // 抛桶解算：近距离固定 18° 抬升、由初速控制落点；远目标 / 高台 / 朝天改用低伸弹道解，
+            // 仰角钳制到 [18°, 69°]，头滴始终砸在准星上，抬头还能越过掩体泼到高处。
+            InkBallistics.SolveLobLaunch(
+                muzzle,
+                target,
+                speed,
+                gravity,
+                maxRange,
+                pitchDegrees * Mathf.Deg2Rad,
+                out float basePitch,
+                out float launchSpeed);
 
             for (int i = 0; i < drops; i++)
             {
                 float k = drops > 1 ? i / (float)(drops - 1) : 0f;
-                float sp = speed * (1f - 0.18f * k);
+                float sp = launchSpeed * (1f - 0.18f * k);
                 float pt = basePitch - 0.04f * k;
                 float yawOffset = i == 0 ? 0f : (i % 2 == 1 ? 1f : -1f) * 0.025f * Mathf.Min(1f, i / 3f);
                 float yw = baseYaw + yawOffset;

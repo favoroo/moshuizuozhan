@@ -96,19 +96,19 @@ namespace P1.UI
 
             UIThemeSO resolved = UIThemeSO.Resolve(theme);
 
-            // 1. 漫画纸白画框 + 6px 墨边 + 硬阴影 (6,-6)
+            // 1. 直角黑边外框（SharpRect + 4px 墨边 + 纯纸白底 + 无阴影）
             if (frameGraphic == null)
             {
                 var bgGo = new GameObject("FrameBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
                 bgGo.transform.SetParent(transform, false);
                 Stretch((RectTransform)bgGo.transform);
                 frameGraphic = bgGo.GetComponent<UIInkShapeGraphic>();
-                frameGraphic.Shape = UIInkShape.RoundedRect;
+                frameGraphic.Shape = UIInkShape.SharpRect;
                 frameGraphic.CornerRadius = ComicStyle.CornerSharp;
                 frameGraphic.BorderWidth = ComicStyle.Border;
                 frameGraphic.BorderColor = ComicStyle.Ink;
-                frameGraphic.HardShadow = true;
-                frameGraphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+                frameGraphic.HardShadow = false;
+                frameGraphic.ShadowOffset = Vector2.zero;
                 frameGraphic.ShadowColor = ComicStyle.Ink;
                 frameGraphic.Halftone = false;
                 frameGraphic.GlossAlpha = 0f;
@@ -185,7 +185,7 @@ namespace P1.UI
                 aImg.raycastTarget = false;
             }
 
-            // 6. 右上角 MAP 胶囊角标（漫画黄底黑边）
+            // 6. 右上角 MAP 直角标牌（纯黄底墨边，标题字号 ≥18）
             if (mapBadge == null)
             {
                 var badgeGo = new GameObject("MapBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
@@ -194,16 +194,16 @@ namespace P1.UI
                 mapBadge.anchorMin = new Vector2(1f, 1f);
                 mapBadge.anchorMax = new Vector2(1f, 1f);
                 mapBadge.pivot = new Vector2(1f, 1f);
-                mapBadge.anchoredPosition = new Vector2(6f, 8f);
-                mapBadge.sizeDelta = new Vector2(50f, 22f);
+                mapBadge.anchoredPosition = new Vector2(4f, 6f);
+                mapBadge.sizeDelta = new Vector2(64f, 28f);
 
                 var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
-                badgeShape.Shape = UIInkShape.RoundedRect;
+                badgeShape.Shape = UIInkShape.SharpRect;
                 badgeShape.CornerRadius = ComicStyle.CornerSharp;
                 badgeShape.BorderWidth = ComicStyle.BorderThin;
                 badgeShape.BorderColor = ComicStyle.Ink;
-                badgeShape.HardShadow = true;
-                badgeShape.ShadowOffset = new Vector2(2.5f, -2.5f);
+                badgeShape.HardShadow = false;
+                badgeShape.ShadowOffset = Vector2.zero;
                 badgeShape.ShadowColor = ComicStyle.Ink;
                 badgeShape.color = ComicStyle.Yellow;
 
@@ -212,7 +212,7 @@ namespace P1.UI
                 Stretch((RectTransform)txtGo.transform);
                 var txt = txtGo.GetComponent<TextMeshProUGUI>();
                 txt.font = resolved.ResolveFont(true, "MAP");
-                txt.fontSize = 12f;
+                txt.fontSize = UITypography.FontSnapped(18f);
                 txt.fontStyle = FontStyles.Bold;
                 txt.alignment = TextAlignmentOptions.Center;
                 txt.color = ComicStyle.Ink;
@@ -220,7 +220,7 @@ namespace P1.UI
                 txt.raycastTarget = false;
             }
 
-            // 7. 角落黑色纸胶带条（三条小黑矩形，模拟纸面粘贴感）
+            // 7. 去掉胶带装饰
             BuildCornerTapes();
 
             BuildActorMarkerPools();
@@ -231,34 +231,13 @@ namespace P1.UI
 
         private void BuildCornerTapes()
         {
-            if (transform.Find("Tape_TL") != null) return;
-
-            // 左上胶带
-            CreateTape("Tape_TL", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 0f), 35f, new Vector2(30f, 10f));
-            // 右上胶带
-            CreateTape("Tape_TR", new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(0f, 0f), -35f, new Vector2(30f, 10f));
-            // 左下胶带
-            CreateTape("Tape_BL", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0f, 0f), -35f, new Vector2(28f, 10f));
-        }
-
-        private void CreateTape(string name, Vector2 anchor, Vector2 pivot, Vector2 pos, float rotation, Vector2 size)
-        {
-            var tapeGo = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-            tapeGo.transform.SetParent(transform, false);
-            var rt = tapeGo.GetComponent<RectTransform>();
-            rt.anchorMin = anchor;
-            rt.anchorMax = anchor;
-            rt.pivot = pivot;
-            rt.anchoredPosition = pos;
-            rt.sizeDelta = size;
-            rt.localRotation = Quaternion.Euler(0f, 0f, rotation);
-
-            var shape = tapeGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.RoundedRect;
-            shape.CornerRadius = 1.5f;
-            shape.BorderWidth = 0f;
-            shape.color = ComicStyle.Ink;
-            shape.raycastTarget = false;
+            // 几何大胆风：去除胶带装饰
+            string[] tapes = { "Tape_TL", "Tape_TR", "Tape_BL" };
+            for (int i = 0; i < tapes.Length; i++)
+            {
+                var t = transform.Find(tapes[i]);
+                if (t != null) Destroy(t.gameObject);
+            }
         }
 
         private void BuildActorMarkerPools()
@@ -537,7 +516,7 @@ namespace P1.UI
                 for (int x = 0; x < size; x++)
                 {
                     float d = Vector2.Distance(new Vector2(x, y), c);
-                    float a = Mathf.Clamp01((r - d) * 1.8f);
+                    float a = d <= r ? 1f : 0f;
                     cols[y * size + x] = new Color(1f, 1f, 1f, a);
                 }
             }
@@ -563,7 +542,7 @@ namespace P1.UI
                 {
                     float d = Vector2.Distance(new Vector2(x, y), c);
                     float diff = Mathf.Abs(d - r);
-                    float a = Mathf.Clamp01((3.5f - diff) * 1.2f);
+                    float a = diff <= 2.5f ? 1f : 0f;
                     cols[y * size + x] = new Color(1f, 1f, 1f, a);
                 }
             }

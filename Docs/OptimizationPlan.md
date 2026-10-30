@@ -659,7 +659,7 @@
        - 全新编写 URP 着色器 `P1/ObstacleDitherLit` 与升级 `P1/InkGround`、`P1/InkWall`，采用 4×4 Bayer 矩阵屏幕空间 Dither 剔除（写入深度，无 Alpha 排序穿帮，零性能开销）；
        - `OcclusionFader` 组件挂载在全部掩体、高台与集装箱上，支持平滑淡入淡出（默认目标透明度 0.35）；
        - `TopDownOcclusionManager` 每帧在 LateUpdate 从俯视相机向所有存活战斗人员（本地玩家、敌人、队友）投射双高度视线球体检测（SphereCast），遮挡时触发淡化，并在角色周围以 2.2m 半径投射焦点清晰轮廓（X-Ray reveal），走出掩体后平滑恢复 1.0 不透明；
-       - ShadowCaster 同步 Dither 剔除，防止角色在掩体后方被生硬全黑阴影笼罩。
+       - 阴影/法线 Pass 不再同步 Dither（2026-10-30 修正）：ShadowCaster 从光源视角渲染，屏幕空间网点会随相机逐帧滑动（Android 单级联硬阴影下尤其明显）；改为只有颜色 Pass 做网点淡出、阴影保持实体。详见下文「角色身上乱闪的影子修复」。
     3. **碰撞体与涂地阻挡联动**：
        - 所有不可涂色掩体在 `InkSurfaceController` 中自动 Bake 为 Blocked 单元，阻隔地面墨水；
        - 竖直立面均自动装配 `InkWallSurface`，支持 4 面涂墨与乌贼垂直爬墙；
@@ -1518,6 +1518,61 @@
     - 修复：`InkGridConfigSO` 新增 `atlasVisualMargin = 1.5m`，图集覆盖 43×59m，向 Shader 推送图集实际 Bounds，边界墙顶受墨恢复正常，玩法计分网格保持 40×56m 不变。
   - **验证汇总**：`compilationFailed: false`；EditMode 增至 **226/226 全通过**（新增 `ArenaGeometry_SpawnPads_ArePaintable_NotBlocked`、`ArenaGeometry_AllRamps_HaveOrientedPaintableSideFaces`、`ArenaGeometry_SouthBoundaryInkFaces_MatchVisibleWallHeight`、`InkWallOrientedTests`）；PlayMode 增至 **76/76 全通过**（新增 `DecorProp_SideFace_AcceptsInk`，涵盖道具侧面、手雷爆墨、武器弹丸与潜行攀爬）；实机截图 `Logs/verify_props.png`、`Logs/verify_spawnpad.png`、`Logs/verify_topdown.png`、`Logs/verify_ramp.png` 确认受墨饱满、背光面通透。
 
+- [x] **P14-F 墨迹绑定解耦 + 全场涂墨覆盖率保证 + 掠射面死黑修复（2026-10-30）**
+  - **背景**：用户再次反馈"图上这个位置还是不能涂色"（站在南坡道看中央/侧翼高台），
+    并指出"有一些物体面一直是黑色的"。
+  - **根因 1（高台/坡道/出生台永远喷不上墨）——MPB 争用**
+    - `InkSurfaceController.BindSurfaceMaterials()` 把 `_InkTex` / `_InkTexelSize` / `_InkMapOriginXZ`
+      写进 14 个台面的 `MaterialPropertyBlock`；其中 13 个（中央高台、8 条坡道、东西高台、2 个出生台地）
+      同时挂着 `OcclusionFader`，只有 `Ground_Main_40x56` 没有。
+    - 相机被台面挡一次再移开后，`OcclusionFader.ClearProperties()` 执行
+      `SetPropertyBlock(null)` —— **整块 MPB 被清空，墨迹绑定一并丢失**；
+      `UpdateDynamicMaterialProperties()` 之后只在"波纹脏"时补 `_InkRipples/_WetnessFactor`，
+      永不重补 `_InkTex`。`InkGround.shader` 的 ForwardLit 只认 per-material `_InkTex`，
+      被抹后回落到材质默认黑贴图 → 覆盖率恒 0。**这就是"主地面能涂、高台坡道永远涂不上"的全部原因。**
+    - 同根因还连带废掉所有 `InkFace_*` 立面（它们是 Fader 的子渲染器，`_InkTex` 同样被清空）。
+    - 修复三层：
+      1. `OcclusionFader` 删除 `ClearProperties()` 的 `SetPropertyBlock(null)`，改为
+         `RestoreOpaqueProperties()`：只把 `_DitherAlpha=1 / _FocusWeight=0` 回写进同一块 MPB，
+         别人的键原样保留（`ResetToOpaque()` 同路径）。
+      2. `InkGround.shader` ForwardLit 改为采样**全局** `_GlobalInkAtlasTex` /
+         `_GlobalInkMapOriginXZ` / `_GlobalInkTexelSize`（`InkSurfaceOverlay.hlsl` 已声明、
+         `InkSurfaceController` 每帧 `Shader.SetGlobal*` 推送），与 MPB 彻底解耦；
+         CBUFFER 布局一字未改，5 个 Pass 的 SRP Batcher 兼容性不变。
+      3. `InkSurfaceController.UpdateDynamicMaterialProperties()` 在波纹脏时一并回写墨迹绑定键
+         （`ReapplyInkBindingKeys`，与 `BindSurfaceMaterials` 共用同一份写入逻辑）；
+         `InkWallSurface.FlushDirty()` 在纹理上传后重设该面 MPB，立面也具备自愈能力。
+  - **根因 2（"有些物体面一直是黑色"）——全屏描边把掠射面整片填黑**
+    - `ToonOutline.shader` 的深度边缘用**一阶差分** `|邻域深度 − 中心深度| / 中心深度`，
+      阈值 `_DepthThreshold = 0.02`。一条 10m 长的走道、0.25m 厚的坡道侧沿只要几乎平行于视线，
+      相邻 1.6 texel 的深度差就远超 2%，**整片平滑表面被判成"边缘"并填成纯黑**
+      （实测 `(2,2,4)`，关掉该 Renderer Feature 后同一像素为 `(182,179,172)` 正常混凝土）。
+    - 修复：改用**二阶差分（拉普拉斯）** `max(|2c−L−R|, |2c−D−U|)`。
+      平滑平面在线性深度上是线性的且采样关于中心对称，拉普拉斯恒为 0；
+      真实遮挡是阶跃，二阶差分同样显著，描边强度与观感不变。
+  - **根因 3（南边界矮墙高处无处落墨）**
+    - 可见矮墙只有 0.55m，却把同一个 Collider 拉到 3m 高来防越界：朝矮墙上方开火时射线打在
+      隐形墙上、命中点落在 0.55m 墨面范围之外，什么都不发生。
+    - 修复：可见墙碰撞体恢复与网格等高的 0.55m；防越界改由墙体外侧独立的隐形
+      `Boundary_South_Blocker`（3m、无 Renderer、不建墨面）承担。
+  - **根因 4（缺乏"所有地方都能涂"的机制保证）**
+    - 新增运行时规则 `Ink/PaintCoverageAudit.cs`：竞技场里每个"有非 Trigger 碰撞体 + 有可视表面"
+      的对象，必须命中 顶面受墨着色器 / `InkWallSurface` / 白名单 / 界外远景 之一，否则记为违规。
+      编辑器菜单 `P1/关卡与地图/9. 涂地覆盖率审计` 输出 `Logs/paint_coverage_audit.txt`。
+    - `ArenaGeometryBuilder` 新增 `EnsurePaintableArena()` 兜底（对齐 INKWAVE 的
+      `paintable = b.paint && n.y > -0.5` 默认全开），构建末尾为漏装墨面的可视碰撞盒补 `InkWallSurface`。
+    - 崖壁底色去掉 `_CliffColor * 1.6` 的魔法数，改为向"压暗一档的地面色"过渡 55%，
+      并给垂直面补 `(1 - upness) * _ShadowTint * 0.55` 的环境保底，侧沿读作深灰而非黑边。
+  - **验证汇总**：`compilationFailed: false`；EditMode **250/250 全通过**
+    （新增 `InkBindingResilienceTests`（遮挡循环后 MPB 仍持墨迹贴图 / 立面贴图不被抹）、
+    `PaintCoverageAuditTests`（竞技场审计 0 违规 / 南墙碰撞体与墨面等高 + 独立 Blocker）、
+    `ToonOutlineRegressionTests`（禁止把深度边缘改回一阶差分））；
+    PlayMode **83/83 全通过**（新增 `ElevatedPlatform_KeepsInkBindingAndPaints_AfterOcclusionRestore`）；
+    场景重建后覆盖率审计 **73 个对象 / 0 违规 / 0 提示**；
+    截图 `Logs/verify_west_topdown.png`、`Logs/verify_center_topdown2.png` 确认高台顶面与花坛顶
+    正常受墨；`Logs/dbg_strip_fixed.png` 确认掠射面不再被描边填黑（像素由 `(2,2,4)` → `(182,179,172)`）。
+
+
 - **验证汇总**：`compilationFailed: false`；场景重建走 `P1/关卡与地图/场景视觉重构 (P7-B)`；
   场内碰撞体扫描只剩掩体 / 围栏 / 高台 / 角色胶囊（细杆件全部消失）；
   截图 `Logs/diag_after_top.png` / `diag_after_rail_south.png` / `diag_after_rail_north.png`
@@ -1568,6 +1623,21 @@
     `LiquidOrbView.SetCompactBottomLayout`：球心图标缩到 34、百分比字号 17，并隐藏移动端无意义的
     「按 Q 释放」键盘提示（大招键本身已有就绪提示）。桌面右上角原始参数保留，布局可重复调用幂等。
 
+- [x] **P15-F 按实机截图重排 4 指/3 指：左上射击、右上潜行、尺寸放大**
+  - 依据用户实机截图（2670×1200，Canvas 1.243 × DPI 1.035 ≈ 1.287）反算 1920 基准坐标：
+    左上「射击」中心 (271,699)、放大 1.7 倍；右上「潜行」(-360,750)、放大 1.7 倍、alpha 0.7；
+    右下射击大键内收到 (-260,164)；跳跃/手雷/大招留在默认拇指位（原 4 指的右上跳跃位取消）。
+  - 3 指沿用同一左上开火位与 1.7 倍尺寸，潜行仍在右下拇指区（3 指够不到右上角）。
+  - `MobileTouchUI.ApplyDefaultLeftFireLayout` 让手动开启「左开火键」时默认也是 1.7×DPI 与 0.8 alpha，
+    不会比预设小一圈；预设应用后仍以布局配置里的数值为准。
+  - **改动文件**：`UI/MobileLayoutPresets.cs`、`UI/MobileTouchUI.cs`、
+    `Tests/EditMode/MobileTouchUITests.cs`、`Tests/PlayMode/MobileLayoutCustomizerPlayTests.cs`。
+  - **验证**：`compilationFailed: false`；EditMode 233/233（新增
+    `MobileLayoutPresets_FourFinger_MatchesReferenceScreenshotLayout`）；PlayMode 81/81；
+    运行时截图 `Logs/verify_4finger_mobile.png`（2880×1362，编辑器 DPI 0.85）像素检测中心与配置一致：
+    左上开火 (318,541) / 右上潜行 (2458,479) / 右下射击 (2577,1168) / 跳跃 (2752,985) / 手雷 (2542,949)。
+  - **注意**：已有自定义布局会覆盖预设；需在「操作设置」里重新点一次「4指」才会写入新排布。
+
 - **改动文件**：`UI/MobileTouchUI.cs`、`UI/MobileLayoutCustomizer.cs`、`UI/MobileLayoutStorage.cs`、
   `UI/HudController.cs`、`UI/HudSpecialGaugeFactory.cs`、`UI/InkTankView.cs`、`UI/LiquidOrbView.cs`、
   `UI/MobileLayoutPresets.cs`（新增）、`Core/GameSettingsMath.cs`、`Core/GameSettingsService.cs`、
@@ -1575,14 +1645,382 @@
   `Tests/EditMode/MobileTouchUITests.cs`、`Tests/EditMode/GameSettingsTests.cs`、
   `Tests/PlayMode/MobileLayoutCustomizerPlayTests.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`。
 
-- **验证汇总**：`compilationFailed: false`；EditMode **232/232**（新增滑块映射、选中框无实心阴影、
-  BaseScale/Alpha 保持、三套方案无重叠/左开火显隐、编辑态标记、设置档位等用例）；
+- **验证汇总**：`compilationFailed: false`；EditMode **233/233**（新增滑块映射、选中框无实心阴影、
+  BaseScale/Alpha 保持、三套方案无重叠/左开火显隐、4 指截图反算布局、编辑态标记、设置档位等用例）；
   PlayMode **81/81**（新增缩放保存/按下回弹、Open 读档恢复、4 指方案保存、摇杆默认位置保持、
   底部中央仪表布局与 Q 提示隐藏）；
   截图 `Logs/ui_ops_final.png`（2 指默认高亮/辅助卡片）、`Logs/ui_layout_scale135.png`（135% 生效）、
   `Logs/ui_layout_3finger.png` + `Logs/ui_layout_3finger_left.png`（左开火可见）、
   `Logs/ui_pause_settings.png`（暂停设置入口）、`Logs/hud_bottom_center_touch.png` +
-  `Logs/hud_gauge_exact.png`（墨水罐/大招球位于底部中央，摇杆与按键无重叠）确认布局正常。
+  `Logs/hud_gauge_exact.png`（墨水罐/大招球位于底部中央，摇杆与按键无重叠）、
+  `Logs/verify_4finger_mobile.png`（4 指：左上射击/右上潜行放大后像素中心与配置一致）确认布局正常。
+
+### 瞄准与弹道 3D 化：抬头能真的打天上（P15-B，2026-10-30）
+
+- **问题**：准星抬到天上时弹丸仍然水平平射。根因是「瞄准方向被压平」贯穿整条链路：
+  `PlayerController.UpdateAimPoint` 把方向 `y=0`、`WeaponController.TryFireMainWeapon` 再压平一次、
+  `InkBallistics.SolveLaunchDirection` 在目标不可达时返回**纯水平** fallback；爆破枪写死零重力水平、
+  滚筒挥击/泼桶写死 18° 仰角、蓄力狙瞄准点带 +0.3m 偏移，全部忽略视角俯仰。
+- **对齐 INKWAVE 的做法**（`inkwave-aah-research/src/game/weapons.js`）：
+  `aimDir` = 含俯仰的相机前向；射击方向 = 「枪口 → 准星命中点」（距离 <0.6m 或反向时回退 `aimDir`）；
+  弹道只在能命中时反解仰角，**不可达时保持原 3D 方向**并把俯仰钳制到 ±72°；散布改为绕弹道轴的锥形。
+- **改动文件**：
+  - `Weapons/MainWeaponStrategy.cs`：`WeaponAim.Direction` 改为完整 3D；新增
+    `GetShotDirection(muzzle)` / `GetShotTarget(muzzle, maxRange)`，`FlatDirection` 仅保留给朝向与滚地。
+  - `Weapons/InkBallistics.cs`：不可达不再压平（`ClampPitch` 沿直接瞄准方向钳制 72°）；
+    新增 `ApplySpread`（锥形散布，垂直 0.55 压扁）与 `SolveLobLaunch`（泼桶 18° 基底 + 超距低伸解，clamp [18°, 69°]）。
+  - `Weapons/WeaponController.cs`：开火不再压平方向；蓄力狙激光线跟随真实弹道与蓄力射程；
+    `ResolveMuzzlePosition` 增加枪口重叠检测，贴墙时从胸口 +0.3m 补正（防子弹从墙里飞出）。
+  - `Weapons/Shooter|Dualies|Splatling|Blaster|Charger|Roller|Slosher*`：全部改按准星真实 3D 方向发射；
+    滚筒挥击仰角 = 18° + clamp(视角俯仰, -11.5°, +28.6°)；泼桶头滴贴准星。
+  - `Weapons/InkProjectilePool.cs`：射程耗尽仍在上升且离地 >1.5m 时不铺地面墨斑（朝天射击不再涂脚下）。
+  - `Player/PlayerController.cs`：`_aimDirection` = 相机 3D 前向（新增 `AimDirection` 只读属性）；
+    手柄摇杆推到边缘 0.16s 后偏航 ×1.55（INKWAVE 边缘加速）；辅助瞄准从「仅触屏」扩到「触屏 + 手柄」，
+    鼠标永不吸附；每帧把相机俯仰喂给角色视觉。
+  - `Player/CharacterVisualController.cs` + `Player/PlayerConfigSO.cs`：武器模型绕挂点承担全部瞄准俯仰，
+    胸腔只分担 18%（`aimPoseWeaponPitchWeight` / `aimPoseChestPitchWeight` / `aimPoseSmoothTime`），
+    角色保持直立；抬头时枪口跟着指向准星。
+  - `Tests/EditMode/InkBallisticsTests.cs`、`Tests/EditMode/WeaponStrategyTests.cs`、
+    `Tests/PlayMode/InkBallisticsPlayboxTests.cs`：新增/改写朝天、高台、锥形散布、抛桶落点与
+    「抬头后瞄准方向 + 武器姿态朝上」用例。
+- **验证**：`compilationFailed: false`；EditMode **244/244**；PlayMode **82/82**。
+  运行时日志：抬头 55° 后 `pitch=-49.0`、`aimDir=(0.000, 0.755, 0.656)`（y>0，不再压平），
+  `AimPoint` 落在 70m 外空中。
+- **向后兼容**：`TryFireMainWeapon` / `WeaponAim.FromDirection` / `SolveLaunchDirection` 签名全部保留，
+  旧调用（Bot、旧测试、无瞄准点重载）行为不变；`WeaponAim.Direction` 语义由「水平」升级为「含俯仰」，
+  需要水平向量的调用方统一改用 `FlatDirection`。
+
+### 角色身上乱闪的影子修复（Android 遮挡 dither，2026-10-30）
+
+- **现象**：Android 端靠近中央高台、斜坡、集装箱时，角色身上/脚下出现随移动乱闪的碎影；空旷地不明显。
+- **根因**：这些掩体挂了 `OcclusionFader`，激活时把 `_DitherAlpha`（1→0.35）与 `_FocusWeight`/`_FocusPos`
+  写进材质。`InkGround.shader` / `ObstacleDitherLit.shader` 的 **ShadowCaster** 也读取这些值，并用
+  `input.positionCS.xy` 做 4×4 Bayer discard。但 ShadowCaster 从光源视角渲染，`positionCS.xy` 是阴影图
+  像素坐标而非屏幕坐标；Android 的 1024/单级联/硬阴影会随相机每帧重新拟合，网点图案在投影体表面滑动，
+  `_FocusPos` 又跟随角色形成移动亮洞。硬阴影 + `P1ToonShadowTerm` 的 0.5 硬阈值把网点放大成逐帧明暗翻转。
+- **改动**：
+  - `Shaders/InkGround.shader`、`Shaders/ObstacleDitherLit.shader`：ShadowCaster 与 DepthNormals 去掉
+    dither 剔除（`return 0` / 实体法线）；ForwardLit 的屏幕空间网点淡出保持不变。阴影贴图与法线缓冲按
+    “掩体仍然存在”处理，避免跨空间 dither。
+  - `Player/CharacterVisualAssembler.cs`：`EggShorts` / `EggWaistband` 贴面薄壳不再投影（蛋体已投出相同
+    轮廓），8 个角色共省约 16 个阴影 draw。
+  - `Weapons/InkBombPool.cs`：手雷主球体关闭投影与接收阴影（环体已关闭），避免脉动圆影扫过角色。
+  - `Tests/EditMode/CharacterVisualTests.cs`：新增薄壳投影回归用例。
+- **验证**：`compilationFailed: false`；`tools/run_tests.sh fast` EditMode **250/250**、PlayMode UI **43/43**；
+  Mobile 画质档（`QualitySettings.SetQualityLevel(0)`）在西南集装箱遮挡场景截图
+  `Logs/shadow_after_mobile_wide.png` / `shadow_after_mobile_close_a/b.png`：掩体颜色仍为网点淡出，
+  角色/武器阴影为完整实体，无碎块游动。
+- **取舍**：掩体淡出时其阴影不再同步变淡，而是保持实体；这是消除光源空间 dither 逐帧滑动的必要取舍。
+  若后续需要阴影也渐隐，应改为世界空间锚定 dither（不带跟随角色的焦点洞），不要退回屏幕坐标。
+- **未做**：PC 端角色 shader 缺 `DepthNormals`（全屏描边/SSAO 的法线来源）与 PC `depthBias=0.1` 偏低，
+  与本次 Android 现象无关，留作后续独立任务。
+
+### 出生台可涂确认 + 复活 3 秒出生保护（对齐 INKWAVE，2026-10-30）
+
+- [x] **出生台可喷漆回归 + 人物复活 3s 无敌**
+  - **背景**：用户要求出生台也能被喷漆，且人物出生有 3 秒无敌，并参考 INKWAVE 的做法。
+  - **出生台可涂（确认已有能力 + 补回归）**：P14-E/P14-F 已把出生台从 `blockedColliders` 移出，
+    `SpawnPad.shader` 也会采样顶视墨迹图集；本轮在运行时实测确认：
+    `PaintSphereWithWalls(TeamA 出生台中心, 2.6m, TeamB)` → `changed=1822`、`InkAt(台面)=TeamB`、
+    覆盖率同步上升，俯拍截图 `Logs/padtest_top.png` 台面墨斑正常显示。
+    新增 PlayMode 回归 `SpawnPadTop_IsPaintable_AndCountsTowardCoverage` 防止后续误加回不可涂名单。
+  - **出生保护（新机制）**：
+    - `PlayerConfigSO` 新增 `respawnInvulnerabilitySeconds = 3.0f`（按硬性规则走 SO，不硬编码；
+      旧资产缺键时按字段默认值 3 生效，已用运行时读取确认）。
+    - `CombatantHealth.IsInvulnerable` 由自动属性改为「外部无敌 ∪ 出生保护」的只读并集；setter 仍只写外部标志，
+      向后兼容 Tidal Slam 每帧回写 true/false 的旧调用。新增 `GrantSpawnProtection()` /
+      `IsSpawnProtected` / `SpawnProtectionRemaining` / `SpawnProtectionDuration`。
+    - 只有「阵亡计时结束复活」路径授予保护；开局站位与重开比赛（`ResetImmediately`）不授予，
+      对齐 INKWAVE 在 match setup 里把 `invuln` 归零的做法。死亡/复位会清空计时。
+    - 保护期内 `TakeDamage` 与 `ApplyEnemyInkBurn` 都不结算；身体按 6Hz 闪白（复用受击闪白通道），
+      复活瞬间脚下放一圈队色扩散环作为提示。
+  - **验证**：`compilationFailed: false`；EditMode **255/255**（新增 `SpawnProtectionRulesTests` 4 条）；
+    PlayMode 定向 `SpawnProtectionPlayTests` **2/2**、`MotorLifecyclePlayTests` **3/3**、
+    `RosterStatePlayTests` **1/1**；运行时会话逐帧采样：击杀后 +4.56s 复活且剩余保护 2.45s、
+    +6.94s 剩 0.08s；保护期内 200 伤害与敌墨灼烧均不结算，保护结束后 30 伤害正常结算。
+    全量 PlayMode 因同工程另一 Agent 并发 `test cancel` / `stop` 多次中断，未取得完整套件结果。
+  - **改动文件**：`Player/PlayerConfigSO.cs`、`Player/CombatantHealth.cs`、
+    `Tests/EditMode/SpawnProtectionRulesTests.cs`、`Tests/PlayMode/SpawnProtectionPlayTests.cs`。
+
+### UI 几何大胆风整体重构（P14-G，2026-10-30）
+
+- [x] **全量 UI 推倒重做为几何大胆风（Geometric Bold）**
+  - **背景**：用户反馈"字体在移动端看不清、界面简陋没质感、布局/交互/动画都不合理"，要求整体重设计，
+    采用纯色大色块 + 扁平设计。
+  - **风格地基（保留类名与公开 API，调用方零改动）**：
+    - `ComicStyle`：新调色板（墨 #141414 / 纸 #FFFFFF / 红 #FF2E2E / 黄 #FFD400 / 蓝 #2456FF）、
+      直角 `CornerSharp=0`、胶囊 `CornerBubble=999`、阴影与网点 token 全部归零、动效 ≤100ms、新增字号阶梯常量。
+    - `UIInkShapeGraphic`：新增 `SharpRect` / `Pill` 形状；`ApplyComic/ApplyStyle` 强制直角、无网点、
+      无阴影、无高光；`PlayWobble` 改为 no-op。
+    - `UISpringMotion`：物理弹簧整体替换为 **timed lerp ≤100ms linear**，保留全部序列化字段与 API。
+    - `UIThemeSO` / `HudGaugeStyle.asset`：默认值与卡片预设改写（不手改 YAML，跑菜单 `P1/画风/几何风/1`）。
+    - 新增 `UITypography`：全项目字号统一出口，移动端 ×1.28 且正文下限 18（移动 20），
+      修复历史"移动端字号反而更小"的 bug（计时器 68、墨水罐 14、大招球 17）。
+  - **逐屏重设计**：主菜单（超大标题 + 错位色块 + 四角旋转几何）、结算页（VICTORY/DEFEAT 大牌 +
+    96/124px 覆盖率数字 + Red CTA）、暂停/设置（黑色直角面板 + 纯色方块滑条）、武器抽屉
+    （直角卡片 + 7 段方块属性条 + 墨底选中态）、HUD（大数字计时器/比分、直角仪表、黑底击杀卡、
+    纯色横幅）、移动端触控（纯色大色块按钮 + 字号放大 + 硬切按压）与布局编辑器。
+  - **验证时发现并修复的既有 bug**：
+    - 桌面端被 `MobileTouchUI.Start()` 无条件按移动布局处理（仪表簇跑到底部中间）→ 仅在真机/触屏模拟生效。
+    - 顶部比分百分比被 4v4 战况条头像压住 → `centerGap` 230→340（移动 360）。
+    - 结算页旧场景柱条容器 `ResultBarA/B` 未隐藏，在数字上留下两条黑条 → 构建几何结算页时隐藏。
+    - 桌面仪表簇与小地图/战况条重叠 → `orbAnchoredPosition(-300,-290)` / `tankAnchoredPosition(-420,-290)`。
+  - **验证**：`compilationFailed:false`；`tools/run_tests.sh ui` **43/43**、`play` **84/85**
+    （唯一失败为另一 Agent 在途的 `SpawnProtectionPlayTests` 时间敏感用例，两次失败断言不同，与 UI 无关）；
+    截图验收：`Logs/ui_geo_menu.png`（主菜单）、`ui_geo_hud6.png`（HUD）、`ui_geo_result3.png`（结算）、
+    `ui_geo_pause.png`（暂停）、`ui_geo_weapons3.png`（选枪）、`ui_geo_mobile.png`（触屏模拟）、
+    `ui_geo_settings.png`（设置）、`ui_geometric_gallery2.png`（样式画廊）。
+  - **改动文件**：`UI/Core/{ComicStyle,UIThemeSO,UIInkShapeGraphic,UISpringMotion,UITypography}.cs`、
+    `UI/{HudController,CenterTimerView,TopRosterBarView,RosterAvatarSlot,InkTankView,LiquidOrbView,
+    HudSpecialGaugeFactory,HudGaugeStyleSO,MinimapView,KillFeedView,KillCardView,MatchBannerView,
+    WeaponReticleUI,MatchFlowUI,MobileTouchUI,MobileLayoutCustomizer,MobileUiMetrics,MobileLayoutPresets,
+    UpdateDialog}.cs`、`UI/Menus/PauseMenuOverlay.cs`、`UI/WeaponSelect/{WeaponSelectView,WeaponCardView}.cs`、
+    `Editor/{ComicStyleInstaller,ComicGalleryBuilder}.cs`、`Docs/UI-GeometricBold.md`（新）、
+    `Docs/UI-ComicStyle.md`（重定向）、`tools/run_tests.sh`（bash 3.2 变量展开修复）。
+  - **向后兼容**：所有公开 API 签名保持；测试依赖的 `HitProxy` / `Content/Bg` / 预设坐标 /
+    `scale×0.96` / `alpha×0.55` / 面板宽度 <400 等断言全部保留。
+  - **未做**：`MobileUiPreviewTool` 只能在 Play 下反映真实 HUD（非 Play 时渲染的是旧场景序列化元素），
+    本轮未改该工具；`ComicHalftoneGraphic` / `ComicActionLinesGraphic` 仍保留文件（已无调用点，可后续删除）。
+
+### 场地设计评审：40×56 集装箱码头（P16，2026-10-30，只出报告）
+
+- **背景**：用户要求评审当前场地有没有设计不合理、需要优化的地方（参考 INKWAVE），目标是保障玩家体验。
+  本轮只交付评审报告 **`Docs/ArenaDesignReview.md`**（新），**不改任何代码 / 场景 / 资产**，
+  不重跑 P7-B 场景重构。以下为报告结论登记为待认领项，未开始实施。
+- **已确认的用户决策**：出生区保护**暂不做**（保留为已知风险）；不可达格**未来按角色半径自动剔除**
+  （只封闭"两侧皆 blocked 且缝宽 < 0.9m"的窄缝，不做全图 0.45m 腐蚀）；垂直层次**保持现状**
+  （1.1m 中央台 + 0.5m 女儿墙，不改 `ArenaGeometry_CentralPlatform_WithinHeightLimit` 的 ≤1.201m 断言）。
+
+- [ ] **P16-A 出生禁入圈（对齐 INKWAVE `spawnBarrier`）**
+  现状：全项目无敌方禁入；`BotController.cs:937-940` 主动奖励压向敌方半场，寻路不排除敌方出生区；
+  出生台 52 m²/队可涂且计分 → Bot 可偷家刷分（104 m² ≈ 全图 4.6%）并在复活后 3s 无敌结束时围杀。
+  建议：每队一个半径 5.5~6m 的 `SpawnZone`（`Environment/` 新组件），物理径向推出（`InkCharacterMotor`
+  新增重载入口，保持向后兼容）+ `BotController.PickPaintTarget` 过滤圈内候选（圈外留 2m 缓冲避免贴边抖动）。
+  领域锁：Environment / Player-Motor / AI-Nav。**不需要重建场景**。
+
+- [ ] **P16-B 越界回收（兜底）**
+  现状：出生后靠背 1.2m 可跳上 → 北边界墙 2.4m 再跳一次 → 翻出场地；场外无地板、无 kill plane、
+  无位置夹紧（grep 为空），2.4m 墙 `allowClimb=false` 爬不回来 = 软锁。南侧 0.55m 矮墙可站上去、
+  在墨网格外射击。建议：`MatchManager` 每 0.25s 检查 8 个角色，`|x| > 20.8 || |z| > 28.8 || y < -1`
+  → 拉回本队出生锚点（不判死、不清血量）。领域锁：Core。**不需要重建场景**。
+
+- [ ] **P16-C 掩体顶面计分口径统一**
+  现状：`CreateCover` 把 Collider 注册进 `blockedColliders` → 集装箱/挡墙顶面"涂了看得见、0 分"；
+  装饰实体道具（`ArenaDecorationBuilder.cs:550-586`）只建碰撞、**未注册 blocked** → 木箱/花坛顶面"涂了算分"。
+  同一种箱子两种结果，极易让玩家判定"刷漆无效"。建议统一为"实体掩体顶面不计分"（道具 Collider 也注册 blocked，
+  约 30~40 m² 退出分母），并给 `PaintCoverageAudit` 增加"材质采样顶视图集却在 blocked 名单里"的告警。
+  领域锁：Ink / Editor。**需要重跑 P7-B**（会重写并保存主场景）。
+
+- [ ] **P16-D 窄缝自动剔除（移植 `slotSides()` 思路）**
+  现状：中央台↔`CoverWall_00` 0.20m、`CoverWall_00`↔`Container_Mid_SW` 0.30m、
+  侧翼高台↔侧翼集装箱 0.65m → 角色直径 0.9m 过不去，但计入覆盖率分母（约 8.5 m² / 0.38% 永久涂不到）；
+  Bot 采样半径 0.386m 也会把 0.65m 判死 → 玩家与 Bot 可行走区不一致。建议在 `BakeBlockedColliders`
+  之后封闭"两侧皆 blocked 且缝宽 < 0.9m"的格子。**禁止**对全图做 0.45m 腐蚀（会误删可被溅射涂到的贴墙格）。
+  领域锁：Ink。**需要重跑 P7-B**。
+
+- [ ] **P16-E 场地几何调整（需重建场景）**
+  1. 出生后靠背（`z=±27`，1.2m）并入边界墙，消除翻越台阶（配合 P16-B）；
+  2. 南墙 0.55m → 2.4m，删掉 `Boundary_South_Blocker`，四面统一，消除"打空气"与南北不对称；
+  3. 侧翼集装箱内移 0.55m（`±17.5 → ±16.95`）：0.65m 死缝贴死，外走廊 1.4m → 1.95m；
+  4. 中路补 2 对错位低掩体（z≈±16.5 与 z≈±9.0，1.4~1.6m 高；避开 `Ramp_South` 底端 z=-9.9、x∈[-2.2,2.2] 的 4.4m 坡道口），
+     解决中路两段各 8.2m 无掩体、正对中央高台的问题；
+  5. `SpawnGate` 改成"每队 2 块 3m 挡墙 + 中间 7m 出口"（现实现用 `CreateCoverPair` 只生成了 1 块/队，
+     与注释不符）。
+  领域锁：Environment / Scaffolder（同一时间只允许一个 Agent 改）。**需要重跑 P7-B 并保存主场景**。
+
+- **复核方式**：见 `Docs/ArenaDesignReview.md` §6（Play Mode 下读 `Grid.PaintableCount`、把玩家放到靠背顶试跳、
+  `TryGetNearestWalkable` 反查死缝、集装箱顶/木箱顶各打一发比较 `GetCoveragePercent` 差值等）。
+  报告内标注「待实机确认」的两条（Bot 是否真进出生区、靠背顶能否真的站上北墙）应在 P16-A/B 开工前先复测。
+
+## 射击手感与涂地撞击反馈（P17，2026-10-30，参考 INKWAVE）
+
+> 目标：把「开火 → 弹丸飞行 → 撞地涂墨」这条主线补齐反馈，不改任何平衡数值（伤害 / 射程 / 弹速 / 耗墨 / 涂地半径）。
+> 结论先行：旧版真正缺的不是数值，而是**开枪瞬间没有任何反馈**（无枪口闪光、无镜头冲击）、**弹丸是一个不拉伸的球**、
+> 以及**一次撞击铺十几枚带刺墨斑、每枚都写一次涟漪**，导致 8 槽波纹缓冲被同一发子弹冲干净——地面涟漪等于不存在。
+
+- [x] **P17-A 开火瞬间反馈层（枪口 / 镜头 / 模型 / 准星）**
+  - 新增 `Resources/VfxAdditive.shader`（加法混合、无光照、程序化软边圆盘）：放在 Resources 下保证独立包不被 Shader Stripping 剔除；
+    `VfxPool` 用它重建冲击波环材质——旧版 `URP/Unlit` 是不透明材质，环的 `alpha = 1-t` 根本不生效，只能「变白→突然消失」。
+  - `VfxPool` 新增单个 Billboard ParticleSystem 承载全部枪口闪光 / 落点高光（一次 draw call、零 GC、`EmitParams` 逐发写位置/颜色/尺寸），
+    闪光 = 白热核心 + 沿射向甩出的短尾（0.055s 淡出）。
+  - `TopDownCameraFollow.AddShotPunch(distance, roll, fov)`：沿视轴后拉 + 绕视轴 Roll + FOV 短暂拉宽，指数回弹（真实时间）。
+    **三种偏移都不改变相机前向**，所以屏幕中心准星与弹道反解严格不受影响；后拉方向与中心射线共线，落点零漂移。
+  - `WeaponConfigSO` 新增手感字段（`recoilKickMeters` / `recoilPitchDegrees` / `cameraKickMeters` / `cameraKickRollDegrees` /
+    `cameraKickFovDegrees` / `muzzleFlashScale` / `projectileVisualScale` / `trailVisualScale` / `impactRippleScale`），
+    全部默认 0 = 使用 `WeaponFeelProfile` 的武器类别预设 → **旧 7 份 WeaponConfig 资产无需迁移、不改 YAML**。
+  - `WeaponFeelProfile` 预设：加特林/双枪后坐力压到最低（15/12 发每秒连发不抖），爆破枪/蓄力狙给足一次性重量感；
+    `CharacterVisualController` 武器模型后坐力改为读配置 + 随机 Yaw，连发不再像机械臂。
+  - 枪口闪光与镜头冲击共用节流（`fireInterval × 0.6`，0.045~0.3s）：滚筒挥击 9 滴、泼桶 8 滴只闪一次、推一次镜头。
+  - **改动文件**：`Weapons/WeaponConfigSO.cs`、`Weapons/WeaponFeelProfile.cs`（新增）、`Weapons/WeaponController.cs`、
+    `Core/VfxPool.cs`、`Player/TopDownCameraFollow.cs`、`Player/CharacterVisualController.cs`、
+    `UI/WeaponReticleUI.cs`（开火准星弹跳）、`Resources/VfxAdditive.shader`（新增）。
+
+- [x] **P17-B 弹丸本体手感（彗星网格 + 速度拉伸）**
+  - `InkProjectilePool` 的弹丸从 `CreatePrimitive(Sphere)` 改为**所有弹丸共享一份程序化彗星网格**（头部圆润、尾部锥形收细，+Z 为飞行方向），
+    池内仍是一颗弹丸一个 MeshRenderer → draw call 数量不变。
+  - 每帧按速度设置 `localScale = (w, w×0.82, w×stretch)`：21m/s 小枪约 1.5 倍、40m/s 加特林约 2.1 倍、15m/s 泼桶约 1.3 倍（上下限 0.9~2.6）。
+  - 出生 0.04s 内从 65% 弹到 100%（`WeaponFeelMath.SpawnPopScale`），读作「墨滴被枪口挤出来」。
+  - 视觉宽度/尾迹半径来自 `projectileVisualScale` / `trailVisualScale`，**碰撞半径与涂地半径不变**。
+
+- [x] **P17-C 撞地涂墨反馈（涟漪 / 墨斑 / 溅射 / 音效）**
+  - **涟漪去抖与合并**：`InkSurfaceController.PaintCircle` 新增 `(emitRipple, decorated)` 重载（旧 3 参签名行为不变）；
+    `TriggerRipple` 在 0.09s / 0.55m 内合并到已有槽位（取更大振幅），一次撞击只发**一条干净扩散的涟漪**；
+    `PaintStretchBlob` 的拖尾链与星状射线不再各自刷涟漪，改由撞击点统一触发，振幅按墨斑半径 × 武器手感倍率
+    （`WeaponFeelMath.ImpactRippleAmplitude`）。滚筒推地每帧十几枚圆斑、蓄力狙 27m 光束 20+ 采样点、
+    风暴云每秒十几滴雨、沿途滴墨全部改为「只铺平滑主体、不刷涟漪」，8 槽缓冲终于能完整播完一条波。
+  - **墨斑不再带刺**：`InkSplatAtlas.AddSplat(..., decorated)` + 着色器新增 `PlainKind = 5`（`P1InkSplatKindShape` 返回 0 射线/0 卫星）；
+    一次撞击只有主瓣保留完整有机装饰（射线+卫星），拖尾链/射线/雨点只铺平滑 wobble 主体 →
+    视觉从「十几枚带刺斑点」变成「一枚大墨斑 + 一道被拉长的尾巴」，同时省掉大量 SDF 填充率。
+  - **溅射有方向**：`VfxPool.SpawnInkImpact` 新增入射方向重载，卫星墨珠除绕法线径向扩散外沿弹丸水平来向偏置；
+    主溅射 ParticleSystem 的半球发射器改为对齐表面法线（旧版打墙也朝世界 +Y 喷）；墨珠沿速度方向拉伸。
+  - **本地命中高光**：本地玩家自己的弹丸撞击额外叠一枚加法混合软圆盘（0.08s），8 人混战里一眼确认「这发是我打的」。
+  - **落墨音重做**：新增 `PlayInkHitGround(Vector3, volumeScale, impactRadius)` 重载——距本地玩家越远越轻、>26m 不播、
+    近处（≤6m）不受全局 45ms 节流；墨斑越大音高越低。弹丸/爆破枪/光束/手雷/大招全部改为按位置播放（旧 `PlayInkHitGround(float)` 保留）。
+  - **改动文件**：`Ink/InkSurfaceController.cs`、`Ink/InkSplatAtlas.cs`、`Shaders/InkSurfaceOverlay.hlsl`、
+    `Weapons/InkProjectilePool.cs`、`Weapons/WeaponRollSystem.cs`、`Weapons/WeaponBeamSystem.cs`、
+    `Weapons/InkStormCloudPool.cs`、`Weapons/WeaponBlasterSystem.cs`、`Weapons/InkBombPool.cs`、`Core/AudioManager.cs`。
+
+- **验证**：`compilationFailed: false`；EditMode **262/262**（新增 `WeaponFeelTests` 7 条：预设强弱顺序 / 配置覆盖 / 空配置兜底 /
+  速度拉伸单调与钳制 / 出生弹跳 / 涟漪振幅 / 涟漪合并窗口）；PlayMode 全量 **83/85**（UI 子集 **43/43** 全绿）。
+  两轮全量运行的失败集合不同且均与本任务无关：`RosterStatePlayTests`（金环强度）来自**另一 Agent 并发修改**
+  `RosterAvatarSlot.cs`——diff 显示删除了 `specialReadyRing.Intensity` 的 MoveTowards 斜坡，第二轮已自行恢复通过；
+  `MotorLifecyclePlayTests`（敌墨 DOT）单独复跑 **3/3** 通过；`ReticlePlayModeTests` 的失败日志是另一 Agent
+  在 Play Mode 期间调用 `ProjectScaffolder` 场景重构菜单；`SpawnProtectionPlayTests` 为并发占用下的计时抖动。
+  实机 Play 校验：小枪单发 `kick=0.0350m`、`fovKick=0.55°`、枪口闪光粒子已发射、卫星墨珠 21 个存活、
+  图集 `TotalSplatCount` 正常增长；截图 `Logs/feel_muzzle.png` / `Logs/feel_burst.png`。
+- **未做/后续**：本轮不动任何平衡数值；若追求 INKWAVE 级别的水感，后续可单独开任务做「湿润高光脉冲」与
+  「涟漪通道 8→12/16」——后者会线性增加地面片元的波浪循环开销，移动端需先跑 Profiler 采样。
+
+- [x] **P17-D 射程尽头真实下坠（朝天射击不再凭空消失）**
+  - **根因**：旧实现按「沿弹道总路程 ≥ MaxRange」判定结束，射程一到立即回收；朝天开枪时弹丸还在上升段就被销毁，
+    永远走不到抛物线顶点，更不会落地。旧版还用 `flyingIntoSky` 补丁跳过地面墨斑，表现为「墨滴飞进天空直接消失」。
+  - **改法**：射程判定改为**水平距离**（与 `InkBallistics` 的水平射程解算、`SolvedDirection_ClampsToMaxRange` 测试契约一致）；
+    射程耗尽且仍悬空时进入自由落体——抹掉剩余上升速度、保留 25% 前冲惯性并按 3.5/s 快速衰减，
+    继续重力积分 + SphereCast，真正撞到地面 / 墙面 / 敌人才落墨。
+  - **表现**：落滴只铺一枚圆形墨斑（0.85× 常规爆斑半径，不做方向拉伸，避免垂直落滴长出水平尾巴），
+    保留落点涟漪 / 溅射粒子 / 落墨音；自由落体阶段不再沿途滴墨（墨滴已失去拖尾能量）。
+  - **兜底**：落体 5s 超时或 y < -30 静默回收；重力为 0 的直线墨弹在射程尽头直接回收；爆破枪「到射程空爆」逻辑不变。
+    小枪 60° 朝天：约 1.4s 后落在 7.2m 水平射程外约 0.8m 处（前冲惯性），不再是 0.35s 凭空消失。
+  - **改动文件**：`Weapons/InkProjectilePool.cs`、`Tests/PlayMode/InkBallisticsPlayboxTests.cs`。
+  - **验证**：`compilationFailed:false`；EditMode **262/262**；PlayMode 全量 **86/86**
+    （新增 `SkyShot_FallsBackAndPaintsOnTheGround`：零散布 + 关闭沿线滴墨后朝天 60° 开火，
+    断言 2.2s 内墨滴在 6.5~9.5m 扇区落墨）。
+
+### 对局 HUD 实机验收后的二轮修正（P14-G2，2026-10-30）
+
+- [x] **用户实机截图反馈的 8 处观感问题全部修正**
+  - 比分百分比从"飘在天空里的队伍色小字"改为**直接嵌进队伍色块内的大数字**（黑字，橙底 7.7 / 蓝底 4.6 对比度均过 AA）；
+    比分条从 280×28 放大到 420×44，计时器黑块下移避让。
+  - 4v4 头像：去掉 8 个同时旋转的金色光环，改为**右上角 14×14 纯黄就绪方块**（旋转环保留组件但强度恒 0）。
+  - 墨水罐 + 大招球从"右侧空中"移到**右下角**（不挡准星与战场），桌面锚点改 `(1,0)`；
+    移动端仍由 `ApplyMobileBottomLayout` 压到底部中间。
+  - 大招球：去掉 Body/Rim 双层黑圈（只剩一圈 4px），液体白边 10→5px；
+    百分比从圆内挤出改为**球下黑底白字标牌**（修复 `ApplyTeamColors` 把黑字涂在黑板上的隐形 bug）。
+  - 墨水罐百分比标牌统一为黑底白字；球/罐标签风格一致。
+  - 底部状态条：大白板 + 绿条 → **黑底白字信息条**（白 8px 血条在上、操作提示在下），并下移到屏幕内
+    （原 760×106 @y=64 会溢出屏幕底边）；操作提示换成短文案避免截断。
+  - 同步修正血条颜色走 `ComicStyle.Green/Red` token；`RosterStatePlayTests` 的就绪断言改为检查黄色角标。
+  - **验证**：`compilationFailed:false`；`tools/run_tests.sh ui` **43/43**；实机截图 `Logs/ui_geo_hudE.png`
+    （比分/计时器/头像角标/右下仪表/底部信息条）。
+
+### 底部仪表改横向条 + 生命条纯平化（P14-H，2026-10-30）
+
+- [x] **用户反馈两处**：生命条"两边有渐变 / 两头尖尖，不是扁平"；移动端左右下角有触摸键，
+  弹药 / 大招挂在两侧会被手指盖住，要求挪到中间、血条正上方并做成横向。
+- **生命条**：场景烘焙的是内置九宫格 `UISprite`（`Image.Type.Filled`），拉到 18px 高会露出圆角与边缘发灰，
+  实机看起来就是"两头尖尖 + 中间渐变"。改为新建 `Scripts/UI/Core/UIFlatSprite.cs`（1×1 白图）+ `Filled/Horizontal`，
+  轨道纸白 16%、填充纯绿 → 真正的直角纯色条。
+  - 坑：`Image.sprite == null` 时 Unity 走 Simple 分支，`fillAmount` 直接失效，所以不能靠"清空 sprite"去圆角。
+- **仪表**：删除右上角竖墨罐 + 大招球，改成底部黑底信息条里的**两条横向纯色条**（`HudSpecialGaugeFactory` 重写）：
+  - 墨水条：24px 墨滴图标 + 294×18 队伍色条 + 92px 右对齐百分比；手雷耗墨刻度从横线改为**竖红线**（2px 墨底 + 3px 红）。
+  - 大招条：28px 技能徽章（纸白方块 + 墨黑矢量图标）+ 294×18 充能条 + 百分比；
+    充能中条与徽章为纸白，满能时徽章 / 条 / 「Q 释放」三处**硬切变黄**；
+    删除旋转虚线环、放射爆闪与呼吸缩放（几何风不做漫画式特效，实测旋转环在 28px 徽章上像"齿轮"）。
+  - `InkTankView` / `LiquidOrbView` 保留类名与公开 API（SetInk / SetThreshold01 / SetCharge / IsReady /
+    ReadyBurstCount …），内部从波浪液体网格改为 `Image.fillAmount`；
+    低墨告警（红光 + 描边闪红 + 警报音 + 迟滞）、满能计数、技能图标切换全部原样保留。
+- **面板**：底部信息条 940×104（移动端 940×76）黑底 + 4px 白边，三行 = 仪表 / 血条 / 键鼠提示；
+  面板与仪表条统一**底边锚定**（anchor/pivot `(0.5,0)`），由 `HudController.ApplyBottomPanelLayout()` 一处写入。
+  修掉"面板是中心轴心、仪表是底边轴心"导致的仪表飘在黑条外面（第一版截图 `Logs/ui_geo_hudG.png` 复现）。
+- **移动端**：仪表已在屏幕中央（左右各留 490px 给摇杆与操作键），只需隐藏「Q 释放」并收矮面板；
+  新增 `HudController.GaugeRoot` 供测试读取，`MobileTouchUITests` 的"面板 < 400px"断言改为
+  940 宽度 + 中央布局 + 移动端高度断言。
+- **测试**：`HudSpecialGaugePlayTests` 改为断言横向填充块、竖刻度右移、满能黄徽章 /「Q 释放」节点显隐；
+  `tools/run_tests.sh ui` **43/43** 全绿。
+- **实机截图**：`Logs/ui_geo_hudJ.png`（常态 97% / 0%）、`Logs/ui_geo_hudK_ready.png`（满能黄条 + Q 释放）、
+  `Logs/ui_geo_hudK_mobile.png`（移动布局，隐藏键鼠提示、保留百分比）。
+
+### 首页与武器整备移动端重做（P14-I，2026-10-30）
+
+- [x] **用户反馈**：首页 + 武器栏"在移动端一看就会很小"；武器栏里弹出的武器图标"一个直愣愣的方块，好丑"；
+  要求把首页重新做、合理一点、好看一点。
+- **根因**：整块菜单只按桌面 1920 比例排，移动端仅字号 ×1.28、盒子/布局不变（手机物理尺寸只有显示器零头）；
+  首页内容还没进 SafeArea；武器卡图标是 84px 墨色**方块** + 白色剪影；抽屉控件宽度在手机上也没有放大。
+- **版面表**：新增 `Scripts/UI/MenuLayoutMath.cs`（`Home / LoadoutCard / Drawer` 三套度量，纯逻辑可单测），
+  移动端显式给大盒子：
+  - 首页：标题 132（×1.28→168）、开赛按钮 820×200（桌面 520×144）、次级按钮 300×96（桌面 224×64）；
+  - 整备卡：680×176、色盘 128（桌面 380×112 / 80）；
+  - 抽屉：82% 参考宽度（1574，桌面 620）；卡片 759×236 双列网格（桌面 592×164 单列）；色盘 132；名字 30（×1.28→38）。
+- **首页**：`MatchFlowUI.EnsureReadyVisuals()` 重排——内容全部搬进 `MenuSafeArea`（`SafeAreaFitter`），
+  背景装饰留全屏层；左上模式标签 + 黄色短杠 + Hero 大标题（改用 MiSans-Semibold：Heavy 在 100px+
+  会把「墨」这种密笔字糊成实心黑块）+ 红色拉丁副标题 + 规格行；右下黄色超大 CTA（左侧墨色竖条 + TMP 中文粗体标签，
+  旧 Legacy Text 的 bold 对中文无效）；次级按钮右对齐在 CTA 上方；左下留给整备卡，版本号落在其上方。
+- **武器整备入口**：删掉 176×72 的纯黄方块页签，改成左下**整备卡**：圆形队伍色盘 + 当前武器图标 +
+  「武器整备 / 喷射小枪 · 更换」两行 + 黄色箭头块；抽屉展开时隐藏，收起时恢复；选枪后实时刷新图标与名字。
+- **武器卡**：图标从黑方块改为**正圆色盘**（队伍色填充 + 4px 墨边 + 白色剪影；选中态描边翻纸白），
+  编号方块只在桌面显示（手机没有 1~7 键）；移动端双列网格、`ScrollRect` 触控滚动；
+  移动端属性串压缩（`10.0/s → 10/s`、去掉「(架枪15/s)」括号）避免 759px 卡面溢出。
+- **顺手修掉的真缺陷**：
+  1. `WeaponSelectBootstrap` 只在 `AfterSceneLoad` 找一次 MatchManager，某些进入 Play 的时序下找不到 →
+     整个武器栏 + 整备入口不出现。改为先建主机、每 0.5s 重试直到接管。
+  2. 场景里 `MatchFlowUI.uiTheme` 是空引用 → 首页字体一直走 TMP 全局 fallback（大标题糊、字体不对）。
+     补 `EnsureTheme()`：运行时资源库 → 编辑器 AssetDatabase 兜底（与武器栏同一路径）。
+  3. TMP `overflowMode = Truncate` 会按行高做**纵向截断**：34px 高的标题框放 28 号字会把整段字符全丢掉
+     （`textInfo.characterCount = 0`）。所有紧凑文字改 `Overflow + NoWrap`，宽度由版面表控制。
+- **测试**：新增 `Tests/EditMode/MenuLayoutMathTests.cs`（6 条：移动端 CTA/卡片/色盘/触控目标必须更大、
+  双列卡不超抽屉宽、整备卡与 CTA 在 1920 下不重叠）；PlayMode 新增
+  `WeaponSelectView_LoadoutCard_ReplacesFlatTab_AndShowsCurrentWeapon`、
+  `MatchFlowUI_ReadyHome_PutsContentInSafeAreaWithLargeCta`。
+  `tools/run_tests.sh fast` EditMode **268/268** + PlayMode UI **45/45**；全量 PlayMode **87/88**
+  （唯一失败是既有的 `SpawnProtection.Respawn_GrantsThreeSecondSpawnProtection` 计时抖动，与 UI 无关，外部跑同样偶发）。
+- **实机截图**：`Logs/home_v11_desktop.png`、`Logs/drawer_v9_desktop.png`、
+  `Logs/home_mobile_v3.png`、`Logs/drawer_mobile_v2.png`（移动端用编辑器触屏模拟）。
+
+### 开局出生视角被墙顶管线遮挡修复（2026-10-30）
+
+- **现象**：开局 READY / 倒计时阶段，镜头整屏被一条灰蓝色横杆填满，看不到角色与场地（TeamA 出生点尤其明显）。
+- **根因**：`ArenaLayoutV2` 在 `z=±27.9`、`y=2.05` 放了一对 14m 长的墙顶 `PipeRun`，正好横跨出生点正后方；
+  第三人称相机在出生点的落点是 `y≈2.14 / z≈±27.98`，吊臂末端与管身重叠（实测遮挡三角面距相机仅 3~11cm）。
+  细装饰网格按设计不带 Collider，`TopDownCameraFollow.ResolveBoomDistance` 的球体扫掠检测不到它，镜头直接卡进管身。
+  另外南侧边界墙在 P5-B 后只有 0.55m 高，这条管线本身也是悬空的。
+- **修复**：`ArenaLayoutV2.BuildProps()` 不再在出生区放墙顶管线（保留西/东侧墙 `x=±19.85, z=-6~+6` 的管线）；
+  执行 `P1/关卡与地图/场景视觉重构：集装箱码头 (P7-B)` 重建装饰网格，`arena_decor_metal_thin` 顶点 3784 → 3000。
+- **验证**：`compilationFailed: false`；出生相机位姿下的网格射线最近命中 `Ground_Main_40x56`（20.17m），
+  出生区管线三角面 0（修复前 212），侧墙管线 444 面保留；编辑模式离屏渲染 `Logs/spawn_verify.png` 视野干净。
+- **影响面**：纯装饰数据，无 Collider / 涂地 / 寻路影响；场景与 `WeaponConfig.asset`（P17 新字段默认值序列化）随重建保存。
+
+### 物品表面墨色不统一修复：顶部发黄 / 背光面纯黑（2026-10-30）
+
+- **现象**（实机留底 `Logs/probe_baseline2.png` → 修复后 `Logs/probe2.png` / `Logs/live_game2.png`）：同一队色在场地里三种观感——地面鲜艳，
+  集装箱 / 木箱顶面发土黄（实测 TeamA 顶面 `255,186,74` vs 地面 `255,112,15`），
+  背光面的墨（含竖墙、箱体阴影面）塌成纯黑（实测 `20,8,0` / `0,7,69`）。
+- **根因 1（顶面发黄）**：`ApplyTopInkOverlay` 读全局队色 `_GlobalTeamAColor/_GlobalTeamBColor`，
+  而 `Shader.SetGlobalColor` 与材质 `Color` 属性不同，**不做 sRGB→Linear 转换**。
+  线性工程里 `(1.0, 0.44, 0.06)` 被当成线性值直接输出，橙被抬高成土黄、蓝被抬成浅天蓝。
+- **根因 2（背光纯黑）**：`InkWall.shader` 用 `toonTint = lerp(_ShadowTint, 1, band)` 把墨色乘上暗色阴影 tint
+  （`_ShadowTint` 线性约 `0.13/0.17/0.34`），背光面 `band=0` 时墨色×0.13 ≈ 黑；
+  地面/顶面管线用的是 `diffuseLight = lerp(0.72, 1.0, ...)` 的"亮度下限"模型，两边模型不一致。
+- **修复**：
+  1. `Ink/InkSurfaceController.BindSurfaceMaterials`：向 shader 推全局队色前按 `QualitySettings.activeColorSpace`
+     做 `.linear` 转换，顶面墨与地面/墙面同源同值；
+  2. `Shaders/InkWall.shader`：墙墨改用与地面、顶面完全一致的明暗模型
+     `diffuseLight = lerp(0.72, 1.0, band * shadowTerm)` + `_GlobalInkGlow` 胶质内发光，
+     删除 `_ShadowTint` 乘法（属性保留在材质上以便回退）。
+- **验证**：`compilationFailed: false`；主相机 `ScreenCapture` 像素实测——集装箱顶面 `255,114,15`、
+  受光南墙 `255,114,15`、背光北墙 `236,103,13`、地面 `255,117,16`，四者同色系，无纯黑；
+  全屏近黑像素（原 22,941 个）实机对局采样为 0。
+- **影响面**：仅墨色着色与全局属性推送；玩法网格、覆盖率、APIs 未改动；
+  `tools/run_tests.sh fast` EditMode 262/262、PlayMode UI 1/1 通过。
 
 ## 5. 验收标准与风控纪律
 

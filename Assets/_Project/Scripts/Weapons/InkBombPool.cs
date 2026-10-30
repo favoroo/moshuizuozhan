@@ -247,7 +247,7 @@ namespace P1.Weapons
             if (AudioManager.Instance != null)
             {
                 AudioManager.Instance.PlayBombExplode();
-                AudioManager.Instance.PlayInkHitGround(1.5f);
+                AudioManager.Instance.PlayInkHitGround(b.LandingPos, 1.5f, b.SplatRadius);
             }
 
             if (TopDownCameraFollow.Instance != null)
@@ -284,6 +284,9 @@ namespace P1.Weapons
             if (col != null) Destroy(col);
             var bombMr = bombGo.GetComponent<MeshRenderer>();
             bombMr.sharedMaterial = _sharedMat;
+            // 手雷球体每帧缩放脉动，投影会在地面/角色身上扫出闪烁圆影；环体已关闭，本体一并关闭。
+            bombMr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            bombMr.receiveShadows = false;
             bombGo.SetActive(false);
 
             var outerGo = new GameObject($"BombOuterRing_{idx:00}");

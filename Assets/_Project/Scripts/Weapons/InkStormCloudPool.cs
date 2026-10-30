@@ -396,7 +396,8 @@ namespace P1.Weapons
                 {
                     float paintRadius = Random.Range(node.RainRadiusMin, node.RainRadiusMax);
                     // 风暴云涂地计入涂地覆盖率，但不返还大招能量：雨点数量太多，返还会造成「一云接一云」的自循环。
-                    InkSurfaceController.Instance.PaintCircle(hit.point, paintRadius, node.Team);
+                    // 雨点只铺平滑主体：一秒十几滴雨，每滴都刷涟漪会把 8 槽缓冲彻底冲散。
+                    InkSurfaceController.Instance.PaintCircle(hit.point, paintRadius, node.Team, false, false);
                 }
             }
 
@@ -410,6 +411,10 @@ namespace P1.Weapons
                 {
                     node.SplashTimer = 0.14f;
                     VfxPool.Instance.SpawnInkSplat(lastHit, node.PuffColor, 0.42f, 3);
+                    if (InkSurfaceController.Instance != null)
+                    {
+                        InkSurfaceController.Instance.TriggerRipple(lastHit, 0.04f, 0.35f, 3.2f, 0.7f);
+                    }
                 }
             }
 

@@ -9,13 +9,13 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 移动端按键自定义布局编辑器（漫画风重绘 P10）：
+    /// 移动端按键自定义布局编辑器（几何大胆风 Geometric Bold P14）：
     /// 1. 进入编辑模式后游戏自动暂停，退出时严格还原进入前的 Time.timeScale；
     /// 2. 根节点全屏背板 raycastTarget=false，杜绝吞掉按键 PointerDown；
     /// 3. 为每个可配置按键挂载透明命中代理层，并在编辑态解开摇杆 blocksRaycasts 阻断；
     /// 4. 坐标拖拽采用 (startPos + delta) 增量运算，并按父级 SafeArea 尺寸做 Clamp（留出半宽半高边距）；
-    /// 5. 选中项展示 4px 墨色边框与实时读数角标「X,Y · 缩放 1.0」；
-    /// 6. 面板采用漫画纸面 + 8px 墨边 + 硬阴影 + 网点底纹；提供 220x72 标签式保存/重置按钮与 72x72 关闭按钮；
+    /// 5. 选中项展示 2px 黑白描边 + 四角方块几何标记与实时读数角标；
+    /// 6. 面板采用直角黑底白字纯色大色块（无阴影无网点），字号整体放大（标题≥24/移动≥30，标签读数≥22/移动≥26）；
     /// 7. 额外提供 2/3/4 指方案、左开火键、开火转视角、固定摇杆与辅助瞄准档位，手动编辑会把方案标记为自定义。
     /// </summary>
     public class MobileLayoutCustomizer : MonoBehaviour
@@ -152,70 +152,70 @@ namespace P1.UI
 
             // 1. 全屏半透明暗色背景遮罩（必须 raycastTarget = false，绝不能吞底层射线）
             var bgImg = gameObject.AddComponent<Image>();
-            bgImg.color = new Color(0.04f, 0.06f, 0.10f, 0.55f);
+            bgImg.color = new Color(0.04f, 0.04f, 0.06f, 0.70f);
             bgImg.raycastTarget = false; // 【关键修复 1】：背板不拦截射线
 
-            // 2. 顶部控制栏（漫画纸面 + 6px 墨边 + 硬阴影）
+            // 2. 顶部控制栏（几何大胆风：直角纯黑底 + 4px 纸白实线边框）
             var topBar = CreateComicPanel(transform, "TopBar",
                 new Vector2(0f, 1f), new Vector2(1f, 1f),
                 new Vector2(0f, -48f), new Vector2(0f, 96f),
-                ComicStyle.Paper, ComicStyle.Border, false);
+                ComicStyle.Ink, ComicStyle.Border, false);
 
-            var titleText = CreateTextMesh("Title", topBar.transform, "操 作 与 按 键 设 置", 26f, ComicStyle.Ink,
+            var titleText = CreateTextMesh("Title", topBar.transform, "操作与按键设置", UITypography.FontSnapped(26f), ComicStyle.Paper,
                 theme.ResolveFont(true, "操作与按键设置"), TextAlignmentOptions.Left);
             var titleRt = titleText.rectTransform;
             titleRt.anchorMin = new Vector2(0f, 0.5f);
             titleRt.anchorMax = new Vector2(0f, 0.5f);
             titleRt.pivot = new Vector2(0f, 0.5f);
-            titleRt.anchoredPosition = new Vector2(28f, 12f);
-            titleRt.sizeDelta = new Vector2(400f, 34f);
+            titleRt.anchoredPosition = new Vector2(28f, 14f);
+            titleRt.sizeDelta = new Vector2(400f, 36f);
 
-            var subText = CreateTextMesh("Subtitle", topBar.transform, "点选按键拖动/缩放 · 切换方案会覆盖当前位置 · 调整后点保存", 15f, ComicStyle.Darken(ComicStyle.Ink, -0.4f),
+            var subText = CreateTextMesh("Subtitle", topBar.transform, "点选按键拖动/缩放 · 切换方案会覆盖当前位置 · 调整后点保存", UITypography.FontSnapped(18f), ComicStyle.PaperAlt,
                 theme.ResolveFont(false, "点选按键拖动缩放切换方案会覆盖当前位置"), TextAlignmentOptions.Left);
             var subRt = subText.rectTransform;
             subRt.anchorMin = new Vector2(0f, 0.5f);
             subRt.anchorMax = new Vector2(0f, 0.5f);
             subRt.pivot = new Vector2(0f, 0.5f);
             subRt.anchoredPosition = new Vector2(28f, -20f);
-            subRt.sizeDelta = new Vector2(480f, 26f);
+            subRt.sizeDelta = new Vector2(560f, 28f);
 
             // 控制栏右侧三键：恢复默认 (220x72)、保存完成 (220x72)、关闭 (72x72)
-            CreateComicButton(topBar.transform, "ResetBtn", "恢 复 默 认",
-                new Vector2(-540f, 0f), new Vector2(220f, 72f),
-                ComicStyle.PaperAlt, ComicStyle.Ink, 20f, () => ResetToDefault());
+            CreateComicButton(topBar.transform, "ResetBtn", "恢复默认",
+                new Vector2(-550f, 0f), new Vector2(220f, 72f),
+                ComicStyle.PaperAlt, ComicStyle.Ink, UITypography.FontSnapped(22f), () => ResetToDefault());
 
-            CreateComicButton(topBar.transform, "SaveBtn", "保 存 完 成",
-                new Vector2(-300f, 0f), new Vector2(220f, 72f),
-                ComicStyle.Green, ComicStyle.Ink, 22f, () => Close(save: true));
+            CreateComicButton(topBar.transform, "SaveBtn", "保存完成",
+                new Vector2(-310f, 0f), new Vector2(220f, 72f),
+                ComicStyle.Green, ComicStyle.Ink, UITypography.FontSnapped(22f), () => Close(save: true));
 
             CreateComicButton(topBar.transform, "CloseBtn", "X",
-                new Vector2(-60f, 0f), new Vector2(72f, 72f),
-                ComicStyle.Red, ComicStyle.Paper, 28f, () => Close(save: false));
+                new Vector2(-70f, 0f), new Vector2(72f, 72f),
+                ComicStyle.Red, ComicStyle.Paper, UITypography.FontSnapped(28f), () => Close(save: false));
 
-            // 3. 浮动属性调节卡片（中上部：纸面 + 8px 墨边 + 硬阴影 + 网点）
+            // 3. 浮动属性调节卡片（中上部：直角纯黑底 + 4px 白边，无阴影无网点）
             _inspectorCard = CreateComicPanel(transform, "InspectorCard",
                 new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -165f), new Vector2(660f, 110f),
-                ComicStyle.Paper, ComicStyle.BorderHeavy, true);
+                new Vector2(0f, -170f), new Vector2(800f, 120f),
+                ComicStyle.Ink, ComicStyle.Border, false);
 
-            _inspectorTitle = CreateTextMesh("InspectorTitle", _inspectorCard, "请点击任意按键开始调整", 20f, ComicStyle.Ink,
+            _inspectorTitle = CreateTextMesh("InspectorTitle", _inspectorCard, "请点击任意按键开始调整", UITypography.FontSnapped(24f), ComicStyle.Paper,
                 theme.ResolveFont(true, "请点击任意按键开始调整"), TextAlignmentOptions.Left);
             var inspTitleRt = _inspectorTitle.rectTransform;
             inspTitleRt.anchorMin = new Vector2(0f, 0.5f);
             inspTitleRt.anchorMax = new Vector2(0f, 0.5f);
             inspTitleRt.pivot = new Vector2(0f, 0.5f);
-            inspTitleRt.anchoredPosition = new Vector2(24f, 30f);
-            inspTitleRt.sizeDelta = new Vector2(400f, 30f);
+            inspTitleRt.anchoredPosition = new Vector2(24f, 32f);
+            inspTitleRt.sizeDelta = new Vector2(500f, 34f);
 
             // 大小调节 Slider
-            var scaleLabel = CreateTextMesh("ScaleLabel", _inspectorCard, "大小:", 17f, ComicStyle.Ink,
+            var scaleLabel = CreateTextMesh("ScaleLabel", _inspectorCard, "大小:", UITypography.FontSnapped(22f), ComicStyle.Paper,
                 theme.ResolveFont(false, "大小:"), TextAlignmentOptions.Left);
             var scaleLabelRt = scaleLabel.rectTransform;
             scaleLabelRt.anchorMin = new Vector2(0f, 0.5f);
             scaleLabelRt.anchorMax = new Vector2(0f, 0.5f);
             scaleLabelRt.pivot = new Vector2(0f, 0.5f);
-            scaleLabelRt.anchoredPosition = new Vector2(24f, -15f);
-            scaleLabelRt.sizeDelta = new Vector2(55f, 26f);
+            scaleLabelRt.anchoredPosition = new Vector2(24f, -16f);
+            scaleLabelRt.sizeDelta = new Vector2(70f, 32f);
 
             var scaleSliderGo = new GameObject("ScaleSlider", typeof(RectTransform));
             scaleSliderGo.transform.SetParent(_inspectorCard, false);
@@ -223,30 +223,30 @@ namespace P1.UI
             scaleRt.anchorMin = new Vector2(0f, 0.5f);
             scaleRt.anchorMax = new Vector2(0f, 0.5f);
             scaleRt.pivot = new Vector2(0f, 0.5f);
-            scaleRt.anchoredPosition = new Vector2(80f, -15f);
-            scaleRt.sizeDelta = new Vector2(170f, 24f);
+            scaleRt.anchoredPosition = new Vector2(100f, -16f);
+            scaleRt.sizeDelta = new Vector2(180f, 26f);
 
             _scaleSlider = TouchSlider.Create(scaleSliderGo, MobileLayoutConfig.MinScale, MobileLayoutConfig.MaxScale, 1.0f);
             _scaleSlider.OnValueChanged += OnScaleSliderChanged;
 
-            _scaleValueText = CreateTextMesh("ScaleValue", _inspectorCard, "100%", 17f, ComicStyle.Ink,
+            _scaleValueText = CreateTextMesh("ScaleValue", _inspectorCard, "100%", UITypography.FontSnapped(22f), ComicStyle.Yellow,
                 theme.ResolveFont(false, "100%"), TextAlignmentOptions.Left);
             var scaleValRt = _scaleValueText.rectTransform;
             scaleValRt.anchorMin = new Vector2(0f, 0.5f);
             scaleValRt.anchorMax = new Vector2(0f, 0.5f);
             scaleValRt.pivot = new Vector2(0f, 0.5f);
-            scaleValRt.anchoredPosition = new Vector2(258f, -15f);
-            scaleValRt.sizeDelta = new Vector2(60f, 26f);
+            scaleValRt.anchoredPosition = new Vector2(290f, -16f);
+            scaleValRt.sizeDelta = new Vector2(80f, 32f);
 
             // 透明度调节 Slider
-            var alphaLabel = CreateTextMesh("AlphaLabel", _inspectorCard, "透明度:", 17f, ComicStyle.Ink,
+            var alphaLabel = CreateTextMesh("AlphaLabel", _inspectorCard, "透明度:", UITypography.FontSnapped(22f), ComicStyle.Paper,
                 theme.ResolveFont(false, "透明度:"), TextAlignmentOptions.Left);
             var alphaLabelRt = alphaLabel.rectTransform;
             alphaLabelRt.anchorMin = new Vector2(0f, 0.5f);
             alphaLabelRt.anchorMax = new Vector2(0f, 0.5f);
             alphaLabelRt.pivot = new Vector2(0f, 0.5f);
-            alphaLabelRt.anchoredPosition = new Vector2(330f, -15f);
-            alphaLabelRt.sizeDelta = new Vector2(70f, 26f);
+            alphaLabelRt.anchoredPosition = new Vector2(380f, -16f);
+            alphaLabelRt.sizeDelta = new Vector2(95f, 32f);
 
             var alphaSliderGo = new GameObject("AlphaSlider", typeof(RectTransform));
             alphaSliderGo.transform.SetParent(_inspectorCard, false);
@@ -254,25 +254,25 @@ namespace P1.UI
             alphaRt.anchorMin = new Vector2(0f, 0.5f);
             alphaRt.anchorMax = new Vector2(0f, 0.5f);
             alphaRt.pivot = new Vector2(0f, 0.5f);
-            alphaRt.anchoredPosition = new Vector2(405f, -15f);
-            alphaRt.sizeDelta = new Vector2(160f, 24f);
+            alphaRt.anchoredPosition = new Vector2(485f, -16f);
+            alphaRt.sizeDelta = new Vector2(180f, 26f);
 
             _alphaSlider = TouchSlider.Create(alphaSliderGo, MobileLayoutConfig.MinAlpha, MobileLayoutConfig.MaxAlpha, 1.0f);
             _alphaSlider.OnValueChanged += OnAlphaSliderChanged;
 
-            _alphaValueText = CreateTextMesh("AlphaValue", _inspectorCard, "90%", 17f, ComicStyle.Ink,
+            _alphaValueText = CreateTextMesh("AlphaValue", _inspectorCard, "90%", UITypography.FontSnapped(22f), ComicStyle.Yellow,
                 theme.ResolveFont(false, "90%"), TextAlignmentOptions.Left);
             var alphaValRt = _alphaValueText.rectTransform;
             alphaValRt.anchorMin = new Vector2(0f, 0.5f);
             alphaValRt.anchorMax = new Vector2(0f, 0.5f);
             alphaValRt.pivot = new Vector2(0f, 0.5f);
-            alphaValRt.anchoredPosition = new Vector2(575f, -15f);
-            alphaValRt.sizeDelta = new Vector2(60f, 26f);
+            alphaValRt.anchoredPosition = new Vector2(675f, -16f);
+            alphaValRt.sizeDelta = new Vector2(80f, 32f);
 
             // 4. 方案与辅助设置卡片（2/3/4 指、左开火、开火转视角、固定摇杆、辅助瞄准）
             BuildAuxCard(theme);
 
-            // 5. 选中项 4px 墨色边框 + 实时读数角标
+            // 5. 选中项 2px 纯黑描边 + 四角方块几何标记 + 实时读数角标
             BuildSelectionVisual(transform);
         }
 
@@ -284,27 +284,27 @@ namespace P1.UI
         {
             var card = CreateComicPanel(transform, "AuxCard",
                 new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -300f), new Vector2(760f, 150f),
-                ComicStyle.Paper, ComicStyle.Border, true);
+                new Vector2(0f, -315f), new Vector2(860f, 160f),
+                ComicStyle.Ink, ComicStyle.Border, false);
 
             var font = theme.ResolveFont(false, "方案与辅助辅助瞄准关弱中强");
-            var title = CreateTextMesh("AuxTitle", card, "方案与辅助（3/4 指）", 18f, ComicStyle.Ink,
+            var title = CreateTextMesh("AuxTitle", card, "方案与辅助（3/4 指）", UITypography.FontSnapped(24f), ComicStyle.Paper,
                 theme.ResolveFont(true, "方案与辅助指"), TextAlignmentOptions.Left);
             var titleRt = title.rectTransform;
             titleRt.anchorMin = new Vector2(0f, 0.5f);
             titleRt.anchorMax = new Vector2(0f, 0.5f);
             titleRt.pivot = new Vector2(0f, 0.5f);
-            titleRt.anchoredPosition = new Vector2(24f, 52f);
-            titleRt.sizeDelta = new Vector2(420f, 24f);
+            titleRt.anchoredPosition = new Vector2(24f, 54f);
+            titleRt.sizeDelta = new Vector2(500f, 32f);
 
             // Row 1: 方案 + 左开火
-            var presetLabel = CreateTextMesh("PresetLabel", card, "方案:", 16f, ComicStyle.Ink, font, TextAlignmentOptions.Left);
+            var presetLabel = CreateTextMesh("PresetLabel", card, "方案:", UITypography.FontSnapped(22f), ComicStyle.Paper, font, TextAlignmentOptions.Left);
             var presetLabelRt = presetLabel.rectTransform;
             presetLabelRt.anchorMin = new Vector2(0f, 0.5f);
             presetLabelRt.anchorMax = new Vector2(0f, 0.5f);
             presetLabelRt.pivot = new Vector2(0f, 0.5f);
             presetLabelRt.anchoredPosition = new Vector2(24f, 18f);
-            presetLabelRt.sizeDelta = new Vector2(60f, 36f);
+            presetLabelRt.sizeDelta = new Vector2(70f, 38f);
 
             var presetValues = new[] { MobileLayoutPreset.TwoFinger, MobileLayoutPreset.ThreeFinger, MobileLayoutPreset.FourFinger };
             for (int i = 0; i < presetValues.Length; i++)
@@ -312,41 +312,41 @@ namespace P1.UI
                 int index = i;
                 var preset = presetValues[i];
                 var btn = CreateAuxButton(card, $"Preset_{preset}", MobileLayoutPresets.GetLabel(preset),
-                    new Vector2(90f + i * 124f, 18f), new Vector2(116f, 40f), 16f, font,
+                    new Vector2(100f + i * 105f, 18f), new Vector2(95f, 42f), UITypography.FontSnapped(22f), font,
                     () => ApplyPreset(presetValues[index]));
                 _presetShapes[i] = btn.GetComponentInChildren<UIInkShapeGraphic>();
                 _presetTexts[i] = btn.GetComponentInChildren<TextMeshProUGUI>();
             }
 
             _leftFireToggle = CreateAuxButton(card, "LeftFireToggle", "左开火键：关",
-                new Vector2(470f, 18f), new Vector2(160f, 40f), 16f, font, ToggleLeftFire);
+                new Vector2(430f, 18f), new Vector2(190f, 42f), UITypography.FontSnapped(22f), font, ToggleLeftFire);
             _leftFireShape = _leftFireToggle.GetComponentInChildren<UIInkShapeGraphic>();
             _leftFireText = _leftFireToggle.GetComponentInChildren<TextMeshProUGUI>();
 
             // Row 2: 开火转视角 / 固定摇杆 / 辅助瞄准
             _fireRotateToggle = CreateAuxButton(card, "FireRotateToggle", "开火转视角：开",
-                new Vector2(24f, -24f), new Vector2(156f, 40f), 16f, font, ToggleFireRotate);
+                new Vector2(24f, -34f), new Vector2(195f, 42f), UITypography.FontSnapped(22f), font, ToggleFireRotate);
             _fireRotateShape = _fireRotateToggle.GetComponentInChildren<UIInkShapeGraphic>();
             _fireRotateText = _fireRotateToggle.GetComponentInChildren<TextMeshProUGUI>();
 
             _fixedJoystickToggle = CreateAuxButton(card, "FixedJoystickToggle", "固定摇杆：关",
-                new Vector2(190f, -24f), new Vector2(156f, 40f), 16f, font, ToggleFixedJoystick);
+                new Vector2(230f, -34f), new Vector2(180f, 42f), UITypography.FontSnapped(22f), font, ToggleFixedJoystick);
             _fixedJoystickShape = _fixedJoystickToggle.GetComponentInChildren<UIInkShapeGraphic>();
             _fixedJoystickText = _fixedJoystickToggle.GetComponentInChildren<TextMeshProUGUI>();
 
-            var aimLabel = CreateTextMesh("AimLabel", card, "辅助瞄准:", 16f, ComicStyle.Ink, font, TextAlignmentOptions.Left);
+            var aimLabel = CreateTextMesh("AimLabel", card, "辅助瞄准:", UITypography.FontSnapped(22f), ComicStyle.Paper, font, TextAlignmentOptions.Left);
             var aimLabelRt = aimLabel.rectTransform;
             aimLabelRt.anchorMin = new Vector2(0f, 0.5f);
             aimLabelRt.anchorMax = new Vector2(0f, 0.5f);
             aimLabelRt.pivot = new Vector2(0f, 0.5f);
-            aimLabelRt.anchoredPosition = new Vector2(356f, -24f);
-            aimLabelRt.sizeDelta = new Vector2(80f, 36f);
+            aimLabelRt.anchoredPosition = new Vector2(425f, -34f);
+            aimLabelRt.sizeDelta = new Vector2(110f, 38f);
 
             for (int level = 0; level <= 3; level++)
             {
                 int captured = level;
                 var btn = CreateAuxButton(card, $"AimLevel_{level}", GameSettingsMath.GetAimAssistLevelLabel(level),
-                    new Vector2(440f + level * 66f, -24f), new Vector2(60f, 40f), 16f, font,
+                    new Vector2(545f + level * 72f, -34f), new Vector2(65f, 42f), UITypography.FontSnapped(22f), font,
                     () => SetAimAssistLevel(captured));
                 _aimLevelButtons[level] = btn;
                 _aimLevelShapes[level] = btn.GetComponentInChildren<UIInkShapeGraphic>();
@@ -378,7 +378,7 @@ namespace P1.UI
             visualRt.offsetMax = Vector2.zero;
 
             var shape = visualGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.RoundedRect;
+            shape.Shape = UIInkShape.SharpRect;
             shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = ComicStyle.BorderThin;
             shape.BorderColor = ComicStyle.Ink;
@@ -386,11 +386,12 @@ namespace P1.UI
             shape.GlossAlpha = 0f;
             shape.WobbleAmplitude = 0f;
             shape.HardShadow = false;
+            shape.ShadowOffset = Vector2.zero;
+            shape.Halftone = false;
             shape.raycastTarget = true;
 
             var btn = go.GetComponent<Button>();
             btn.targetGraphic = shape;
-            // UGUI 默认 ColorTint 会在按下/选中时乘颜色，曾把按钮压成灰黑；这里统一关掉。
             btn.transition = Selectable.Transition.None;
             btn.onClick.AddListener(() => onClick?.Invoke());
 
@@ -412,18 +413,25 @@ namespace P1.UI
             _selectionHighlight.sizeDelta = new Vector2(160f, 160f);
 
             var shape = selGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.RoundedRect;
-            shape.CornerRadius = 12f;
-            shape.BorderWidth = 4f; // 4px 墨色边框
+            shape.Shape = UIInkShape.SharpRect;
+            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.BorderWidth = 2f; // 纯黑白 2px 描边
             shape.BorderColor = ComicStyle.Ink;
             shape.color = Color.clear;
             shape.GlossAlpha = 0f;
             shape.WobbleAmplitude = 0f;
-            // 选中框只画 4px 墨边，绝不能开硬阴影：硬阴影是整块实心墨色多边形，
-            // 透明填充不会擦除它，会把当前选中的按键整个盖成黑色（P13-D-3 墨罐同源问题）。
+            // 选中框只画 2px 墨边，绝不能开硬阴影：硬阴影是整块实心墨色多边形，
+            // 透明填充不会擦除它，会把当前选中的按键整个盖成黑色（测试断言）。
             shape.HardShadow = false;
             shape.ShadowOffset = Vector2.zero;
+            shape.Halftone = false;
             shape.raycastTarget = false;
+
+            // 几何大胆风：四角方块标记
+            CreateCornerMarker(selGo.transform, "CornerTL", new Vector2(0f, 1f));
+            CreateCornerMarker(selGo.transform, "CornerTR", new Vector2(1f, 1f));
+            CreateCornerMarker(selGo.transform, "CornerBL", new Vector2(0f, 0f));
+            CreateCornerMarker(selGo.transform, "CornerBR", new Vector2(1f, 0f));
 
             // 实时读数角标（位于边框顶部正上方）
             var badgeGo = new GameObject("ReadoutBadge", typeof(RectTransform), typeof(UIInkShapeGraphic));
@@ -432,20 +440,23 @@ namespace P1.UI
             _readoutBadge.anchorMin = new Vector2(0.5f, 1f);
             _readoutBadge.anchorMax = new Vector2(0.5f, 1f);
             _readoutBadge.pivot = new Vector2(0.5f, 0f);
-            _readoutBadge.anchoredPosition = new Vector2(0f, 8f);
-            _readoutBadge.sizeDelta = new Vector2(170f, 32f);
+            _readoutBadge.anchoredPosition = new Vector2(0f, 10f);
+            _readoutBadge.sizeDelta = new Vector2(200f, 36f);
 
             var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
-            badgeShape.Shape = UIInkShape.RoundedRect;
-            badgeShape.CornerRadius = 6f;
-            badgeShape.BorderWidth = 3f;
+            badgeShape.Shape = UIInkShape.SharpRect;
+            badgeShape.CornerRadius = ComicStyle.CornerSharp;
+            badgeShape.BorderWidth = 2f;
             badgeShape.BorderColor = ComicStyle.Ink;
             badgeShape.color = ComicStyle.Paper;
-            badgeShape.HardShadow = true;
-            badgeShape.ShadowOffset = new Vector2(2f, -2f);
+            badgeShape.GlossAlpha = 0f;
+            badgeShape.WobbleAmplitude = 0f;
+            badgeShape.HardShadow = false;
+            badgeShape.ShadowOffset = Vector2.zero;
+            badgeShape.Halftone = false;
             badgeShape.raycastTarget = false;
 
-            _readoutText = CreateTextMesh("Text", badgeGo.transform, "X: 0, Y: 0 · 1.0x", 15f, ComicStyle.Ink,
+            _readoutText = CreateTextMesh("Text", badgeGo.transform, "X: 0, Y: 0 · 1.0x", UITypography.FontSnapped(18f), ComicStyle.Ink,
                 null, TextAlignmentOptions.Center);
             var textRt = _readoutText.rectTransform;
             textRt.anchorMin = Vector2.zero;
@@ -454,6 +465,21 @@ namespace P1.UI
             textRt.offsetMax = Vector2.zero;
 
             selGo.SetActive(false);
+        }
+
+        private static void CreateCornerMarker(Transform parent, string name, Vector2 anchor)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(parent, false);
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = anchor;
+            rt.anchorMax = anchor;
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = new Vector2(8f, 8f);
+            var img = go.GetComponent<Image>();
+            img.color = ComicStyle.Ink;
+            img.raycastTarget = false;
         }
 
         private void OnEnable()
@@ -1010,16 +1036,16 @@ namespace P1.UI
             rt.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.RoundedRect;
-            shape.CornerRadius = 8f;
+            shape.Shape = UIInkShape.SharpRect;
+            shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = borderWidth;
-            shape.BorderColor = ComicStyle.Ink;
+            shape.BorderColor = (fillColor == ComicStyle.Ink) ? ComicStyle.Paper : ComicStyle.Ink;
             shape.color = fillColor;
             shape.GlossAlpha = 0f;
             shape.WobbleAmplitude = 0f;
-            shape.HardShadow = true;
-            shape.ShadowOffset = new Vector2(6f, -6f);
-            shape.Halftone = halftone;
+            shape.HardShadow = false;
+            shape.ShadowOffset = Vector2.zero;
+            shape.Halftone = false;
             shape.raycastTarget = true;
 
             return rt;
@@ -1072,22 +1098,28 @@ namespace P1.UI
             visualRt.offsetMax = Vector2.zero;
 
             var shape = visualGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.RoundedRect;
+            shape.Shape = UIInkShape.SharpRect;
             shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = ComicStyle.Border;
             shape.BorderColor = ComicStyle.Ink;
             shape.color = fillColor;
             shape.GlossAlpha = 0f;
             shape.WobbleAmplitude = 0f;
-            shape.HardShadow = true;
-            shape.ShadowOffset = new Vector2(5f, -5f);
+            shape.HardShadow = false;
+            shape.ShadowOffset = Vector2.zero;
             shape.ShadowColor = ComicStyle.Ink;
             shape.Halftone = false;
             shape.raycastTarget = true;
 
             var btn = go.GetComponent<Button>();
             btn.targetGraphic = shape;
-            btn.transition = Selectable.Transition.None;
+            var colors = btn.colors;
+            colors.normalColor = fillColor;
+            colors.highlightedColor = ComicStyle.PaperAlt;
+            colors.pressedColor = ComicStyle.Yellow;
+            colors.selectedColor = fillColor;
+            colors.fadeDuration = ComicStyle.PressDuration;
+            btn.colors = colors;
             btn.onClick.AddListener(() => onClick?.Invoke());
 
             var theme = UIThemeSO.Resolve(null);
@@ -1167,7 +1199,7 @@ namespace P1.UI
         }
     }
 
-    /// <summary>漫画风轻量触控滑动条组件。</summary>
+    /// <summary>几何大胆风轻量触控滑动条组件（纯色方块轨道 + 方形把手）。</summary>
     public class TouchSlider : MonoBehaviour, IPointerDownHandler, IDragHandler
     {
         public event Action<float> OnValueChanged;
@@ -1188,12 +1220,12 @@ namespace P1.UI
 
             slider._rectTransform = go.GetComponent<RectTransform>();
 
-            // 滑轨底色（带 2px 墨线）
+            // 纯色方块滑轨底色（直角黑底）
             var bgImg = go.AddComponent<Image>();
-            bgImg.color = new Color(0.12f, 0.14f, 0.18f, 0.95f);
+            bgImg.color = ComicStyle.Ink;
             bgImg.raycastTarget = true;
 
-            // 填充条（漫画强调黄）
+            // 亮黄纯色块填充条
             var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(Image));
             fillGo.transform.SetParent(go.transform, false);
             var fillRt = fillGo.GetComponent<RectTransform>();
@@ -1206,11 +1238,11 @@ namespace P1.UI
             slider._fillImage.color = ComicStyle.Yellow;
             slider._fillImage.raycastTarget = false;
 
-            // 把手（20x30 纸面白底 + 2px 墨边）
+            // 方形把手（24x36 纯白实心方形方块）
             var handleGo = new GameObject("Handle", typeof(RectTransform), typeof(Image));
             handleGo.transform.SetParent(go.transform, false);
             var handleRt = handleGo.GetComponent<RectTransform>();
-            handleRt.sizeDelta = new Vector2(20f, 32f);
+            handleRt.sizeDelta = new Vector2(24f, 36f);
             handleRt.anchorMin = new Vector2(0f, 0.5f);
             handleRt.anchorMax = new Vector2(0f, 0.5f);
 

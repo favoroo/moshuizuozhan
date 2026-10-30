@@ -752,6 +752,118 @@ namespace P1.Tests
             Assert.That(host.Shots.Count, Is.InRange(14, 17), $"半蓄力释放约 15 发，实际 {host.Shots.Count}");
         }
 
+        // ------------------------------------------------------------------ 3D 瞄准（朝天射击）
+
+        [Test]
+        public void Shooter_AimingAtSky_FiresUpward()
+        {
+            WeaponConfigSO config = CreateConfig(WeaponKind.Shooter);
+            var host = new FakeHost { Config = config, CurrentInk = 1000f };
+            var strategy = new ShooterWeaponStrategy(config);
+            WeaponAim aim = SkyAim(60f);
+
+            Assert.IsTrue(strategy.OnTriggerHeld(aim, 1f / 60f, host));
+            Assert.AreEqual(1, host.Shots.Count);
+
+            float pitch = PitchDegrees(host.Shots[0].Direction);
+            Assert.Greater(pitch, 50f, "准星对着 60° 天空时弹丸必须向上飞，而不是水平平射");
+            Assert.LessOrEqual(pitch, InkBallistics.MaxLaunchPitchDegrees + 0.5f);
+        }
+
+        [Test]
+        public void Blaster_AimingAtSky_FiresUpward()
+        {
+            var config = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            _createdConfigs.Add(config);
+            WeaponConfigSO.ApplyBlasterSpec(config);
+
+            var host = new FakeHost { Config = config, CurrentInk = 100f };
+            var strategy = new BlasterWeaponStrategy(config);
+            WeaponAim aim = SkyAim(45f);
+
+            Assert.IsTrue(strategy.OnTriggerHeld(aim, 1f / 60f, host));
+            Assert.AreEqual(0f, host.Shots[0].Gravity, 0.0001f);
+            Assert.Greater(PitchDegrees(host.Shots[0].Direction), 35f, "爆破枪也必须朝准星方向飞出");
+        }
+
+        [Test]
+        public void Charger_AimingAtSky_FiresBeamUpward()
+        {
+            WeaponConfigSO config = CreateConfig(WeaponKind.Charger);
+            var host = new FakeHost { Config = config, CurrentInk = 100f };
+            var strategy = new ChargerWeaponStrategy(config);
+            WeaponAim aim = SkyAim(50f);
+
+            strategy.OnTriggerHeld(aim, 1f / 60f, host);
+            strategy.Tick(1.0f, true, aim, host);
+            strategy.Tick(1f / 60f, false, aim, host);
+
+            Assert.AreEqual(1, host.Beams.Count);
+            Assert.Greater(PitchDegrees(host.Beams[0].Direction), 40f, "蓄力狙朝天应打出一道朝上的光柱");
+        }
+
+        [Test]
+        public void Roller_Flick_AimPitchRaisesTheFan()
+        {
+            WeaponConfigSO config = CreateConfig(WeaponKind.Roller);
+
+            float flatPitch = AverageFlickPitch(config, 0f);
+            float upPitch = AverageFlickPitch(config, 25f);
+
+            Assert.Greater(upPitch, flatPitch + 10f, "抬头挥击应把墨浪抬高");
+            Assert.LessOrEqual(upPitch, 18f + 28.6f + 1f, "抬升量应被限制在 +28.6° 以内");
+        }
+
+        [Test]
+        public void Slosher_AimingAtHighTarget_RaisesTheLob()
+        {
+            WeaponConfigSO config = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            _createdConfigs.Add(config);
+            WeaponConfigSO.ApplySlosherSpec(config);
+
+            var host = new FakeHost { Config = config, CurrentInk = 100f };
+            var strategy = new SlosherWeaponStrategy(config);
+            WeaponAim aim = WeaponAim.FromDirection(Vector3.forward, new Vector3(0f, 1.5f, 7f));
+
+            strategy.OnTriggerHeld(aim, 1f / 60f, host);
+            strategy.Tick(0.2f, true, aim, host);
+
+            Assert.IsNotEmpty(host.Shots, "泼桶应抛出墨滴");
+            Assert.Greater(PitchDegrees(host.Shots[0].Direction), 18.1f, "高目标应抬高抛射仰角");
+        }
+
+        private float AverageFlickPitch(WeaponConfigSO config, float aimPitchDegrees)
+        {
+            var host = new FakeHost { Config = config, CurrentInk = 100f, TriggerHeldLastFrame = false };
+            var strategy = new RollerWeaponStrategy(config);
+
+            float pitchRad = aimPitchDegrees * Mathf.Deg2Rad;
+            Vector3 dir = new Vector3(0f, Mathf.Sin(pitchRad), Mathf.Cos(pitchRad));
+            WeaponAim aim = WeaponAim.FromDirection(dir, new Vector3(0f, 0f, 6f));
+
+            strategy.OnTriggerHeld(aim, 1f / 60f, host);
+            strategy.Tick(0.25f, true, aim, host);
+
+            Assert.IsNotEmpty(host.Shots, "挥击应产生墨滴");
+            float sum = 0f;
+            for (int i = 0; i < host.Shots.Count; i++)
+                sum += PitchDegrees(host.Shots[i].Direction);
+            return sum / host.Shots.Count;
+        }
+
+        private static WeaponAim SkyAim(float pitchUpDegrees)
+        {
+            float rad = pitchUpDegrees * Mathf.Deg2Rad;
+            Vector3 dir = new Vector3(0f, Mathf.Sin(rad), Mathf.Cos(rad));
+            Vector3 muzzle = new Vector3(0f, 0.8f, 0f);
+            return WeaponAim.FromDirection(dir, muzzle + dir * 70f);
+        }
+
+        private static float PitchDegrees(Vector3 direction)
+        {
+            return Mathf.Atan2(direction.y, new Vector2(direction.x, direction.z).magnitude) * Mathf.Rad2Deg;
+        }
+
         // ------------------------------------------------------------------ helpers
 
         private WeaponConfigSO CreateConfig(WeaponKind kind)

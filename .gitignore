@@ -78,3 +78,7 @@ crashlytics-build.properties
 
 # Unity PlayMode 测试自动生成的临时场景（每次跑测试会重建）
 /[Aa]ssets/InitTestScene*
+
+# 误落在 Assets 下的开发期截图（Unity 会当资源导入，不入库）
+/[Aa]ssets/[Ll]ogs/
+/[Aa]ssets/[Ll]ogs.meta

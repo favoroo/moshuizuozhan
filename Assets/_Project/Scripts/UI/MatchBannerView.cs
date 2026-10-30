@@ -85,7 +85,7 @@ namespace P1.UI
                 springMotion = rootGo.GetComponent<UISpringMotion>();
                 springMotion.SetTheme(resolved);
 
-                // 动作线
+                // 几何风禁用动作线与爆破光环
                 var linesGo = new GameObject("ActionLines", typeof(RectTransform), typeof(CanvasRenderer), typeof(ComicActionLinesGraphic));
                 linesGo.transform.SetParent(bannerRoot, false);
                 Stretch((RectTransform)linesGo.transform, -80f);
@@ -94,36 +94,37 @@ namespace P1.UI
                 actionLinesGraphic.Alpha = 0f;
                 actionLinesGraphic.color = ComicStyle.Yellow;
                 actionLinesGraphic.raycastTarget = false;
+                linesGo.SetActive(false);
 
-                // 爆破光环
                 var burstGo = new GameObject("Burst", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIBurstGraphic));
                 burstGo.transform.SetParent(bannerRoot, false);
                 Stretch((RectTransform)burstGo.transform, -30f);
                 burstGraphic = burstGo.GetComponent<UIBurstGraphic>();
                 burstGraphic.Configure(0.7f, 12, ComicStyle.Yellow);
                 burstGraphic.raycastTarget = false;
+                burstGo.SetActive(false);
 
-                // 漫画爆点背景（8px 粗墨边 + 实心硬阴影 + 半调网点）
+                // 几何风直角横向纯色块（直角 SharpRect + 6px 墨边 + 无阴影 + 无网点）
                 var splatGo = new GameObject("SplatBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
                 splatGo.transform.SetParent(bannerRoot, false);
                 Stretch((RectTransform)splatGo.transform);
                 bannerSplatBg = splatGo.GetComponent<UIInkShapeGraphic>();
-                bannerSplatBg.Shape = UIInkShape.RoundedRect;
+                bannerSplatBg.Shape = UIInkShape.SharpRect;
                 bannerSplatBg.CornerRadius = ComicStyle.CornerSharp;
                 bannerSplatBg.BorderWidth = ComicStyle.BorderHeavy;
                 bannerSplatBg.BorderColor = ComicStyle.Ink;
-                bannerSplatBg.HardShadow = true;
-                bannerSplatBg.ShadowOffset = new Vector2(8f, -8f);
+                bannerSplatBg.HardShadow = false;
+                bannerSplatBg.ShadowOffset = Vector2.zero;
                 bannerSplatBg.ShadowColor = ComicStyle.Ink;
-                bannerSplatBg.Halftone = true;
-                bannerSplatBg.HalftoneAlpha = 0.14f;
+                bannerSplatBg.Halftone = false;
+                bannerSplatBg.HalftoneAlpha = 0f;
                 bannerSplatBg.GlossAlpha = 0f;
                 bannerSplatBg.DrawGloss = false;
                 bannerSplatBg.InnerRimAlpha = 0f;
                 bannerSplatBg.color = ComicStyle.Yellow;
                 bannerSplatBg.raycastTarget = false;
 
-                // 主标题文字
+                // 主标题超大文字
                 var mainTextGo = new GameObject("MainText", typeof(RectTransform), typeof(TextMeshProUGUI));
                 mainTextGo.transform.SetParent(bannerRoot, false);
                 var mtRect = mainTextGo.GetComponent<RectTransform>();
@@ -134,7 +135,7 @@ namespace P1.UI
 
                 bannerMainText = mainTextGo.GetComponent<TextMeshProUGUI>();
                 if (titanOneFont != null) bannerMainText.font = titanOneFont;
-                bannerMainText.fontSize = 120f;
+                bannerMainText.fontSize = UITypography.FontSnapped(140f);
                 bannerMainText.fontStyle = FontStyles.Bold;
                 bannerMainText.alignment = TextAlignmentOptions.Center;
                 bannerMainText.color = ComicStyle.Ink;
@@ -152,7 +153,7 @@ namespace P1.UI
 
                 bannerSubText = subTextGo.GetComponent<TextMeshProUGUI>();
                 if (titanOneFont != null) bannerSubText.font = titanOneFont;
-                bannerSubText.fontSize = 24f;
+                bannerSubText.fontSize = UITypography.FontSnapped(24f);
                 bannerSubText.fontStyle = FontStyles.Bold;
                 bannerSubText.alignment = TextAlignmentOptions.Center;
                 bannerSubText.color = ComicStyle.Ink;
@@ -207,27 +208,21 @@ namespace P1.UI
 
                 if (bannerMainText != null)
                 {
-                    bannerMainText.fontSize = 140f;
+                    bannerMainText.fontSize = UITypography.FontSnapped(140f);
                     bannerMainText.text = number.ToString();
                     bannerMainText.color = ComicStyle.Ink;
                 }
 
                 if (bannerSubText != null)
                 {
+                    bannerSubText.fontSize = UITypography.FontSnapped(24f);
                     bannerSubText.text = "READY...";
                     bannerSubText.color = ComicStyle.Ink;
                 }
 
                 if (actionLinesGraphic != null)
                 {
-                    actionLinesGraphic.Alpha = 0.22f;
-                    actionLinesGraphic.color = ComicStyle.Yellow;
-                }
-
-                if (burstGraphic != null)
-                {
-                    burstGraphic.Configure(0.5f, 8, ComicStyle.Yellow);
-                    burstGraphic.Play();
+                    actionLinesGraphic.Alpha = 0f;
                 }
 
                 bannerRoot.gameObject.SetActive(true);
@@ -252,7 +247,7 @@ namespace P1.UI
             _activeTimer = 1.35f;
 
             bannerRoot.anchoredPosition = new Vector2(0f, 60f);
-            bannerRoot.localRotation = Quaternion.Euler(0f, 0f, -4f);
+            bannerRoot.localRotation = Quaternion.identity;
             bannerRoot.sizeDelta = new Vector2(720f, 280f);
 
             if (bannerSplatBg != null)
@@ -262,27 +257,21 @@ namespace P1.UI
 
             if (bannerMainText != null)
             {
-                bannerMainText.fontSize = 150f;
+                bannerMainText.fontSize = UITypography.FontSnapped(140f);
                 bannerMainText.text = "GO!";
                 bannerMainText.color = ComicStyle.Ink;
             }
 
             if (bannerSubText != null)
             {
+                bannerSubText.fontSize = UITypography.FontSnapped(24f);
                 bannerSubText.text = "TURF RIOT START!";
                 bannerSubText.color = ComicStyle.Ink;
             }
 
             if (actionLinesGraphic != null)
             {
-                actionLinesGraphic.Alpha = 0.35f;
-                actionLinesGraphic.color = ComicStyle.Yellow;
-            }
-
-            if (burstGraphic != null)
-            {
-                burstGraphic.Configure(0.9f, 16, ComicStyle.Yellow);
-                burstGraphic.Play();
+                actionLinesGraphic.Alpha = 0f;
             }
 
             bannerRoot.gameObject.SetActive(true);
@@ -302,7 +291,7 @@ namespace P1.UI
             _activeTimer = 2.5f;
 
             bannerRoot.anchoredPosition = new Vector2(0f, 120f);
-            bannerRoot.localRotation = Quaternion.Euler(0f, 0f, -2f);
+            bannerRoot.localRotation = Quaternion.identity;
             bannerRoot.sizeDelta = new Vector2(620f, 110f);
 
             if (bannerSplatBg != null)
@@ -312,21 +301,21 @@ namespace P1.UI
 
             if (bannerMainText != null)
             {
-                bannerMainText.fontSize = 46f;
+                bannerMainText.fontSize = UITypography.FontSnapped(52f);
                 bannerMainText.text = "1:00 LEFT!";
                 bannerMainText.color = ComicStyle.Paper;
             }
 
             if (bannerSubText != null)
             {
-                bannerSubText.text = "决 战 时 刻 · 加 速 涂 地 !";
-                bannerSubText.color = ComicStyle.Yellow;
+                bannerSubText.fontSize = UITypography.FontSnapped(22f);
+                bannerSubText.text = "FINAL MINUTE · TURF NOW!";
+                bannerSubText.color = ComicStyle.Paper;
             }
 
             if (actionLinesGraphic != null)
             {
-                actionLinesGraphic.Alpha = 0.25f;
-                actionLinesGraphic.color = ComicStyle.Red;
+                actionLinesGraphic.Alpha = 0f;
             }
 
             bannerRoot.gameObject.SetActive(true);
@@ -346,37 +335,31 @@ namespace P1.UI
             _activeTimer = 2.4f;
 
             bannerRoot.anchoredPosition = new Vector2(0f, 60f);
-            bannerRoot.localRotation = Quaternion.Euler(0f, 0f, -4f);
+            bannerRoot.localRotation = Quaternion.identity;
             bannerRoot.sizeDelta = new Vector2(760f, 260f);
 
             if (bannerSplatBg != null)
             {
-                bannerSplatBg.color = ComicStyle.Red;
+                bannerSplatBg.color = ComicStyle.Ink;
             }
 
             if (bannerMainText != null)
             {
-                bannerMainText.fontSize = 135f;
+                bannerMainText.fontSize = UITypography.FontSnapped(140f);
                 bannerMainText.text = "FINISH!";
-                bannerMainText.color = ComicStyle.Yellow;
+                bannerMainText.color = ComicStyle.Paper;
             }
 
             if (bannerSubText != null)
             {
+                bannerSubText.fontSize = UITypography.FontSnapped(24f);
                 bannerSubText.text = "TIME'S UP!";
-                bannerSubText.color = ComicStyle.Paper;
+                bannerSubText.color = ComicStyle.Yellow;
             }
 
             if (actionLinesGraphic != null)
             {
-                actionLinesGraphic.Alpha = 0.35f;
-                actionLinesGraphic.color = ComicStyle.Yellow;
-            }
-
-            if (burstGraphic != null)
-            {
-                burstGraphic.Configure(1.2f, 18, ComicStyle.Yellow);
-                burstGraphic.Play();
+                actionLinesGraphic.Alpha = 0f;
             }
 
             bannerRoot.gameObject.SetActive(true);

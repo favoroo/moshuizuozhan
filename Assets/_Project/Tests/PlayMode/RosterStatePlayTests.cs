@@ -136,7 +136,7 @@ namespace P1.Tests
             Assert.AreEqual(AvatarSlotState.NormalAlive,
                 TopRosterMath.DetermineSlotState(isAlive: true, isSpecialReady: false));
 
-            // 存活 + 大招就绪 → 金色光环强度上升
+            // 存活 + 大招就绪 → 几何风改为右上角黄色方块角标点亮（旋转金环已禁用）
             var targetWeapon = victim.GetComponent<WeaponController>();
             Assert.IsNotNull(targetWeapon, "队员应挂载 WeaponController");
             targetWeapon.AddSpecialPoints(500);
@@ -145,10 +145,14 @@ namespace P1.Tests
             yield return new WaitForSeconds(0.6f);
 
             Transform specialRing = targetSlot.transform.Find("SpecialReadyRing");
-            Assert.IsNotNull(specialRing, "槽位应包含 SpecialReadyRing");
+            Assert.IsNotNull(specialRing, "槽位应包含 SpecialReadyRing（保留兼容）");
             var ringGraphic = specialRing.GetComponent<UIRotatingRingGraphic>();
             Assert.IsNotNull(ringGraphic);
-            Assert.Greater(ringGraphic.Intensity, 0.5f, "大招就绪时金色旋转光环应点亮");
+            Assert.AreEqual(0f, ringGraphic.Intensity, 0.01f, "几何风不再使用旋转金环");
+
+            Transform specialPip = targetSlot.transform.Find("SpecialReadyPip");
+            Assert.IsNotNull(specialPip, "槽位应包含 SpecialReadyPip 角标");
+            Assert.IsTrue(specialPip.gameObject.activeSelf, "大招就绪时黄色方块角标应显示");
             Assert.AreEqual(AvatarSlotState.SpecialReady,
                 TopRosterMath.DetermineSlotState(isAlive: true, isSpecialReady: true));
         }

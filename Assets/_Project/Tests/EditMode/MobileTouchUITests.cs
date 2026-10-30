@@ -195,7 +195,7 @@ namespace P1.Tests
         }
 
         [Test]
-        public void HudController_ApplyMobileLayout_HidesPcHintAndShrinksBottomPanel()
+        public void HudController_ApplyMobileLayout_HidesPcHintAndSlimsBottomPanel()
         {
             var canvasGo = new GameObject("TestCanvas", typeof(RectTransform), typeof(Canvas), typeof(HudController));
             var hud = canvasGo.GetComponent<HudController>();
@@ -223,9 +223,16 @@ namespace P1.Tests
             hud.ApplyMobileLayout();
 
             Assert.IsFalse(hintGo.activeSelf, "PC WASD 提示文字必须在移动端被隐藏");
-            Assert.IsFalse(inkBg.activeSelf, "与右上角重复的旧墨水条必须在移动端被隐藏");
-            Assert.IsFalse(specBg.activeSelf, "与右上角重复的旧大招条必须在移动端被隐藏");
-            Assert.Less(panelRt.sizeDelta.x, 400f, "底部面板宽度必须收敛到 400px 以内避免遮挡左右触控区");
+            Assert.IsFalse(inkBg.activeSelf, "与横向墨水条重复的旧墨水条必须在移动端被隐藏");
+            Assert.IsFalse(specBg.activeSelf, "与横向大招条重复的旧大招条必须在移动端被隐藏");
+
+            // P14-H：底部信息条改成「屏幕中央、血条上方」的横向仪表条，
+            // 宽 940 居中后左右各留 490px 给摇杆与操作键，因此不能再收窄成 360。
+            Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripWidth, panelRt.sizeDelta.x, 0.01f,
+                "底部信息条宽度应固定在屏幕中央 940px");
+            Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripHeightMobile, panelRt.sizeDelta.y, 0.01f,
+                "移动端底部信息条应隐藏键盘提示行后收矮");
+            Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripBottomYMobile, panelRt.anchoredPosition.y, 0.01f);
 
             Object.DestroyImmediate(canvasGo);
         }
@@ -542,6 +549,48 @@ namespace P1.Tests
                     }
                 }
             }
+        }
+
+        [Test]
+        public void MobileLayoutPresets_FourFinger_MatchesReferenceScreenshotLayout()
+        {
+            // 参考实机截图（2670x1200，Canvas 1.243 × DPI 1.035 ≈ 1.287）反算出的 1920 基准坐标：
+            // 左上角射击 (271,699) 放大 1.7 倍 / 右上角潜行 (-360,750) 放大 1.7 倍 /
+            // 右下射击大键内收到 (-260,164)，跳跃/手雷/大招保持右拇指默认位。
+            var four = MobileLayoutPresets.Build(MobileLayoutPreset.FourFinger, 1f);
+
+            var leftFire = four.Find("LeftFire");
+            Assert.IsNotNull(leftFire);
+            Assert.AreEqual(271f, leftFire.anchoredPosition.x, 0.01f);
+            Assert.AreEqual(699f, leftFire.anchoredPosition.y, 0.01f);
+            Assert.AreEqual(MobileLayoutPresets.TopActionScale, leftFire.scale, 1e-4f);
+            Assert.AreEqual(MobileLayoutPresets.LeftFireAlpha, leftFire.alpha, 1e-4f);
+
+            var swim = four.Find("Swim");
+            Assert.IsNotNull(swim);
+            Assert.AreEqual(-360f, swim.anchoredPosition.x, 0.01f);
+            Assert.AreEqual(750f, swim.anchoredPosition.y, 0.01f);
+            Assert.AreEqual(MobileLayoutPresets.TopActionScale, swim.scale, 1e-4f);
+            Assert.AreEqual(MobileLayoutPresets.SwimAlpha, swim.alpha, 1e-4f);
+
+            var fire = four.Find("Fire");
+            Assert.IsNotNull(fire);
+            Assert.AreEqual(-260f, fire.anchoredPosition.x, 0.01f);
+            Assert.AreEqual(164f, fire.anchoredPosition.y, 0.01f);
+
+            var jump = four.Find("Jump");
+            Assert.IsNotNull(jump);
+            Assert.AreEqual(-108f, jump.anchoredPosition.x, 0.01f, "4 指不再把跳跃移到最上方，右拇指仍可点按");
+            Assert.AreEqual(320f, jump.anchoredPosition.y, 0.01f);
+
+            // 3 指沿用同一左上角开火位，但潜行键仍留在右下拇指区。
+            var three = MobileLayoutPresets.Build(MobileLayoutPreset.ThreeFinger, 1f);
+            Assert.AreEqual(271f, three.Find("LeftFire").anchoredPosition.x, 0.01f);
+            Assert.AreEqual(699f, three.Find("LeftFire").anchoredPosition.y, 0.01f);
+            Assert.AreEqual(MobileLayoutPresets.TopActionScale, three.Find("LeftFire").scale, 1e-4f);
+            Assert.AreEqual(-320f, three.Find("Swim").anchoredPosition.x, 0.01f);
+            Assert.AreEqual(100f, three.Find("Swim").anchoredPosition.y, 0.01f);
+            Assert.AreEqual(1f, three.Find("Swim").scale, 1e-4f);
         }
 
         [Test]

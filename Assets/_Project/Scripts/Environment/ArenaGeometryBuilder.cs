@@ -216,18 +216,15 @@ namespace P1.Environment
             AddInkWallSurface(terraceB, inkCfg, inkWallMat, true);
 
             // 8. 四周边界围墙（可涂墨留痕，禁止攀爬越界）
+            // 南墙：可见网格只有 0.55m 高，因此碰撞体与墨面都按 0.55m 建。
+            // 历史写法把同一个 Collider 拉到 3m 高来防越界，结果朝矮墙上方开火时射线打在
+            // 隐形墙上、命中点落在墨面范围之外 —— 玩家看到的就是"打南墙什么都不发生"。
+            // 现在防越界改由墙体外部独立的隐形 Blocker 承担，可见墙面保持网格等高。
             var southWall = CreateBox(arenaRoot.transform, "Boundary_South", new Vector3(0f, 0.275f, -ArenaLayoutV2.BoundaryZ), new Vector3(42f, 0.55f, 1f), boundaryMat);
-            var southCol = southWall.GetComponent<BoxCollider>();
-            if (southCol != null)
-            {
-                // southWall 自身 localScale 已为 (42, 0.55, 1)，collider 本地 size 为 (1, 5.45, 1) 即对应世界尺寸 (42m, 3.0m, 1m)
-                southCol.center = new Vector3(0f, 2.227f, 0f);
-                southCol.size = new Vector3(1f, 5.454f, 1f);
-            }
-            // 墨面按可见网格（0.55m 高）建：碰撞体为了拦住越界玩家被拉高到 3m，
-            // 若按 Collider AABB 建面，墨水会飘在矮墙上方 2.45m 的空中。
             AddOrientedInkWallSurface(southWall, inkCfg, inkWallMat, false,
                 new Vector3(0f, 0.275f, -ArenaLayoutV2.BoundaryZ), new Vector3(42f, 0.55f, 1f));
+            CreateInvisibleBlocker(arenaRoot.transform, "Boundary_South_Blocker",
+                new Vector3(0f, 1.5f, -ArenaLayoutV2.BoundaryZ - 1f), new Vector3(42f, 3f, 1f));
 
             var northWall = CreateBox(arenaRoot.transform, "Boundary_North", new Vector3(0f, 1.2f, ArenaLayoutV2.BoundaryZ), new Vector3(42f, 2.4f, 1f), boundaryMat);
             AddInkWallSurface(northWall, inkCfg, inkWallMat, false);
@@ -251,6 +248,9 @@ namespace P1.Environment
             spawnAnchorGo.transform.SetParent(arenaRoot.transform, false);
             spawnAnchorGo.transform.position = new Vector3(0f, 0.2f, -ArenaLayoutV2.SpawnAnchorZ);
             teamASpawnAnchor = spawnAnchorGo.transform;
+
+            // 9.5 覆盖率兜底：把漏装墨面的可视碰撞盒补全（默认全部可涂）
+            EnsurePaintableArena(arenaRoot, inkCfg, inkWallMat);
 
             return arenaRoot;
         }
@@ -305,6 +305,69 @@ namespace P1.Environment
             }
             return go;
         }
+
+        /// <summary>
+        /// 创建只有碰撞、没有渲染的隐形拦截体（例如南边界矮墙外侧的防越界墙）。
+        /// 它不产生任何可视表面，因此不装配墨面、也不参与涂地计分。
+        /// </summary>
+        public static GameObject CreateInvisibleBlocker(Transform parent, string name, Vector3 pos, Vector3 scale)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            go.transform.localScale = scale;
+            go.isStatic = true;
+
+            var col = go.AddComponent<BoxCollider>();
+            col.size = Vector3.one;
+            return go;
+        }
+
+        /// <summary>
+        /// 涂墨覆盖率兜底（对齐 INKWAVE 的 "paintable 默认全部可涂"）：
+        /// 竞技场里每个"有 Renderer 又有非 Trigger BoxCollider"的盒子都必须有墨面，
+        /// 否则子弹打上去只会退化成涂命中点下方的地面 —— 表现就是"这里喷不上油漆"。
+        /// 已经显式装配过（含斜坡的朝向盒）的对象会被跳过，因此是纯增量。
+        /// </summary>
+        public static int EnsurePaintableArena(GameObject arenaRoot, InkGridConfigSO inkCfg, Material inkWallMat)
+        {
+            if (arenaRoot == null || (inkCfg != null && !inkCfg.enableWallInk))
+                return 0;
+
+            int added = 0;
+            var colliders = arenaRoot.GetComponentsInChildren<BoxCollider>(false);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                BoxCollider col = colliders[i];
+                if (col == null || col.isTrigger)
+                    continue;
+
+                GameObject go = col.gameObject;
+
+                // 白名单：地板本体顶面走图集，0.5m 侧沿整圈都在界外看不到
+                if (NonPaintableArenaObjects.Contains(go.name))
+                    continue;
+
+                // 没有任何可视表面（纯拦截体）不需要墨面
+                if (go.GetComponent<Renderer>() == null)
+                    continue;
+
+                // 已经装配过墨面（自身或祖先）
+                if (go.GetComponent<InkWallSurface>() != null || go.GetComponentInParent<InkWallSurface>() != null)
+                    continue;
+
+                AddInkWallSurface(go, inkCfg, inkWallMat);
+                added++;
+            }
+            return added;
+        }
+
+        /// <summary>不需要（或不该）自动补墨面的竞技场对象名单。</summary>
+        private static readonly HashSet<string> NonPaintableArenaObjects = new HashSet<string>
+        {
+            "Ground_Main_40x56",
+            "Ground_Main_40x40",
+        };
 
         public static GameObject CreateCover(
             Transform parent,

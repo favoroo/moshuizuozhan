@@ -286,12 +286,27 @@ namespace P1.Tests
 
             var jump = loaded.Find("Jump");
             Assert.IsNotNull(jump);
-            Assert.AreEqual(-135f, jump.anchoredPosition.x, 1f, "4 指方案跳跃键应移到右上");
-            Assert.AreEqual(500f, jump.anchoredPosition.y, 1f, "4 指方案跳跃键应移到右上");
+            Assert.AreEqual(-108f, jump.anchoredPosition.x, 1f, "4 指方案跳跃键仍留在右拇指默认位");
+            Assert.AreEqual(320f, jump.anchoredPosition.y, 1f);
+
+            var swim = loaded.Find("Swim");
+            Assert.IsNotNull(swim);
+            Assert.AreEqual(-360f, swim.anchoredPosition.x, 1f, "4 指方案潜行键应移到右上角");
+            Assert.AreEqual(750f, swim.anchoredPosition.y, 1f);
+            Assert.AreEqual(1.7f, swim.scale, 0.01f, "右上角潜行键按截图放大");
+            Assert.AreEqual(0.7f, swim.alpha, 0.01f);
+
+            var fire = loaded.Find("Fire");
+            Assert.IsNotNull(fire);
+            Assert.AreEqual(-260f, fire.anchoredPosition.x, 1f, "4 指方案射击大键应向左收");
+            Assert.AreEqual(164f, fire.anchoredPosition.y, 1f);
 
             var leftFire = loaded.Find("LeftFire");
             Assert.IsNotNull(leftFire, "4 指方案必须包含左开火键位置");
-            Assert.AreEqual(190f, leftFire.anchoredPosition.x, 1f);
+            Assert.AreEqual(271f, leftFire.anchoredPosition.x, 1f, "左开火键应放在左上角");
+            Assert.AreEqual(699f, leftFire.anchoredPosition.y, 1f);
+            Assert.AreEqual(1.7f, leftFire.scale, 0.01f, "左上角开火键按截图放大");
+            Assert.AreEqual(0.8f, leftFire.alpha, 0.01f);
 
             rig.customizer.Close(save: false);
         }

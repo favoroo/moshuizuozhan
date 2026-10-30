@@ -37,68 +37,70 @@ namespace P1.Tests
             yield return null;
             yield return null;
 
-            Assert.IsNotNull(hud.LiquidOrb, "HudController 应自动装配大招液体球");
-            Assert.IsNotNull(hud.InkTank, "HudController 应自动装配墨水计量管");
+            Assert.IsNotNull(hud.LiquidOrb, "HudController 应自动装配大招条");
+            Assert.IsNotNull(hud.InkTank, "HudController 应自动装配墨水条");
             Assert.AreEqual(1, root.GetComponentsInChildren<LiquidOrbView>(true).Length,
-                "只应生成一个大招球，不允许重复装配");
+                "只应生成一个大招条，不允许重复装配");
             Assert.AreEqual(1, root.GetComponentsInChildren<InkTankView>(true).Length,
-                "只应生成一个墨水管，不允许重复装配");
+                "只应生成一个墨水条，不允许重复装配");
 
-            Assert.IsNotNull(hud.LiquidOrb.GetComponentInChildren<UILiquidFillGraphic>(true),
-                "大招球内部应有波浪液体网格");
-            Assert.IsNotNull(hud.InkTank.GetComponentInChildren<UILiquidFillGraphic>(true),
-                "墨水管内部应有波浪液体网格");
+            AssertFilledBar(hud.LiquidOrb.transform, "大招条内部应有横向填充块");
+            AssertFilledBar(hud.InkTank.transform, "墨水条内部应有横向填充块");
 
             Object.Destroy(root);
             yield return null;
         }
 
+        /// <summary>横向仪表用 Image.Filled（水平方向）做纯色填充，取代旧的波浪液体网格。</summary>
+        private static void AssertFilledBar(Transform root, string message)
+        {
+            Image[] images = root.GetComponentsInChildren<Image>(true);
+            for (int i = 0; i < images.Length; i++)
+            {
+                Image image = images[i];
+                if (image.type == Image.Type.Filled && image.fillMethod == Image.FillMethod.Horizontal)
+                {
+                    return;
+                }
+            }
+
+            Assert.Fail(message);
+        }
+
         [UnityTest]
-        public IEnumerator LiquidOrb_BurstsHaloAndHintWhenReady()
+        public IEnumerator LiquidOrb_TurnsYellowAndShowsKeyHintWhenReady()
         {
             GameObject root = CreateCanvas();
             var cluster = HudSpecialGaugeFactory.BuildCluster(root.transform, null, null);
             LiquidOrbView orb = cluster.Orb;
-            Assert.IsNotNull(orb, "工厂应返回大招球视图");
-
-            var halo = orb.GetComponentInChildren<UIRotatingRingGraphic>(true);
-            var burst = orb.GetComponentInChildren<UIBurstGraphic>(true);
-            Assert.IsNotNull(halo, "满能光环应存在于球体外围");
-            Assert.IsNotNull(burst, "满能爆闪应存在");
+            Assert.IsNotNull(orb, "工厂应返回大招条视图");
 
             orb.SetCharge(0.35f, false);
             yield return null;
             Assert.IsFalse(orb.IsReady);
-            Assert.AreEqual(0, orb.ReadyBurstCount, "未满能不应爆发");
+            Assert.AreEqual(0, orb.ReadyBurstCount, "未满能不应触发就绪");
+            Assert.AreEqual(0.35f, orb.BarFill.fillAmount, 0.01f, "充能条应跟随充能比例");
+            Assert.AreEqual(ComicStyle.Paper, orb.IconPlate.color, "未满能徽章应为纸白");
 
             orb.SetCharge(1f, true);
+            yield return null;
             Assert.IsTrue(orb.IsReady, "满能后 IsReady 应为 true");
-            Assert.AreEqual(1, orb.ReadyBurstCount, "满能瞬间应爆发一次");
-            Assert.IsTrue(burst.IsPlaying, "满能瞬间冲击波应在播放");
+            Assert.AreEqual(1, orb.ReadyBurstCount, "进入满能应计数一次");
+            Assert.AreEqual(1f, orb.BarFill.fillAmount, 0.01f, "满能条应铺满");
+            Assert.AreEqual(ComicStyle.Yellow, orb.IconPlate.color, "满能徽章应翻黄");
 
-            // 等光环强度弹簧升起
-            float elapsed = 0f;
-            while (elapsed < 0.4f)
-            {
-                elapsed += Time.unscaledDeltaTime;
-                yield return null;
-            }
+            Transform readyHint = orb.transform.Find("ReadyHint");
+            Assert.IsNotNull(readyHint, "大招条应包含满能按键提示节点");
+            Assert.IsTrue(readyHint.gameObject.activeSelf, "桌面端满能应显示「Q 释放」提示");
+            Assert.IsFalse(orb.transform.Find("Percent").gameObject.activeSelf, "满能时百分比让位给按键提示");
 
-            Assert.IsTrue(halo.gameObject.activeSelf, "满能后金色光环应显示");
-            Assert.Greater(halo.Intensity, 0.2f, "光环强度应升起来");
-
-            // 掉回未满能：提示与光环应回落
+            // 掉回未满能：提示收起、百分比回来、徽章恢复纸白
             orb.SetCharge(0f, false);
+            yield return null;
             Assert.IsFalse(orb.IsReady);
-
-            elapsed = 0f;
-            while (elapsed < 1.2f)
-            {
-                elapsed += Time.unscaledDeltaTime;
-                yield return null;
-            }
-
-            Assert.Less(halo.Intensity, 0.1f, "释放/清零后光环应熄灭");
+            Assert.IsFalse(readyHint.gameObject.activeSelf, "释放后提示应隐藏");
+            Assert.IsTrue(orb.transform.Find("Percent").gameObject.activeSelf, "释放后百分比应回来");
+            Assert.AreEqual(ComicStyle.Paper, orb.IconPlate.color, "释放后徽章恢复纸白");
 
             Object.Destroy(root);
             yield return null;
@@ -172,24 +174,24 @@ namespace P1.Tests
                 if (child.name == "BombThreshold") marker = child;
             }
 
-            Assert.IsNotNull(marker, "墨水管应有副武器刻度线节点");
+            Assert.IsNotNull(marker, "墨水条应有副武器刻度线节点");
 
             tank.SetThreshold01(0.55f);
             yield return null;
-            float at55 = marker.anchoredPosition.y;
+            float at55 = marker.anchoredPosition.x;
 
             tank.SetThreshold01(0.7f);
             yield return null;
-            float at70 = marker.anchoredPosition.y;
+            float at70 = marker.anchoredPosition.x;
 
-            Assert.Greater(at70, at55, "刻度线高度应随阈值上升");
+            Assert.Greater(at70, at55, "横向条的竖刻度线应随阈值右移");
 
             Object.Destroy(root);
             yield return null;
         }
 
         [UnityTest]
-        public IEnumerator MobileLayout_MovesGaugesToBottomCenter_AndHidesKeyboardHint()
+        public IEnumerator MobileLayout_KeepsGaugesCenteredAboveHealthBar_AndHidesKeyboardHint()
         {
             GameObject root = CreateCanvas();
             var hud = root.AddComponent<HudController>();
@@ -197,35 +199,41 @@ namespace P1.Tests
             yield return null;
             yield return null;
 
-            Assert.IsNotNull(hud.LiquidOrb, "大招球应自动装配");
-            Assert.IsNotNull(hud.InkTank, "墨水罐应自动装配");
+            Assert.IsNotNull(hud.LiquidOrb, "大招条应自动装配");
+            Assert.IsNotNull(hud.InkTank, "墨水条应自动装配");
+            Assert.IsNotNull(hud.GaugeRoot, "仪表条应有独立根节点，才能与底部面板同步移动");
 
             hud.ApplyMobileLayout();
             yield return null;
 
-            var orbRect = (RectTransform)hud.LiquidOrb.transform;
-            Assert.AreEqual(0.5f, orbRect.anchorMin.x, 1e-4f, "移动端大招球应锚定屏幕水平中心");
-            Assert.AreEqual(0f, orbRect.anchorMin.y, 1e-4f, "移动端大招球应锚定屏幕底部");
-            Assert.AreEqual(84f, orbRect.sizeDelta.x, 0.01f, "移动端大招球应使用紧凑尺寸");
-            Assert.AreEqual(-75f, orbRect.anchoredPosition.x, 0.01f);
+            RectTransform gaugeRoot = hud.GaugeRoot;
+            Assert.AreEqual(0.5f, gaugeRoot.anchorMin.x, 1e-4f, "移动端仪表条应锚定屏幕水平中心");
+            Assert.AreEqual(0f, gaugeRoot.anchorMin.y, 1e-4f, "移动端仪表条应锚定屏幕底部");
+            Assert.AreEqual(HudSpecialGaugeFactory.StripWidth, gaugeRoot.sizeDelta.x, 0.01f,
+                "仪表条应与底部信息条同宽");
+            Assert.AreEqual(HudSpecialGaugeFactory.StripHeightMobile, gaugeRoot.sizeDelta.y, 0.01f,
+                "移动端底部信息条应收矮（隐藏键盘提示行）");
+            Assert.AreEqual(HudSpecialGaugeFactory.StripBottomYMobile, gaugeRoot.anchoredPosition.y, 0.01f);
+            Assert.Less(gaugeRoot.sizeDelta.x, 1120f,
+                "仪表条必须留在屏幕中央，不能伸进左右触控按键区");
 
-            var tankRect = (RectTransform)hud.InkTank.transform;
-            Assert.AreEqual(0.5f, tankRect.anchorMin.x, 1e-4f, "移动端墨水罐应锚定屏幕水平中心");
-            Assert.AreEqual(0f, tankRect.anchorMin.y, 1e-4f, "移动端墨水罐应锚定屏幕底部");
-            Assert.AreEqual(36f, tankRect.sizeDelta.x, 0.01f, "移动端墨水罐应使用窄罐体");
-            Assert.AreEqual(116f, tankRect.sizeDelta.y, 0.01f);
+            // 墨水条 / 大招条必须在同一行、血条正上方
+            Assert.AreEqual(gaugeRoot.Find("MeterRow"), hud.InkTank.transform.parent,
+                "墨水条应挂在仪表行里");
+            Assert.AreEqual(gaugeRoot.Find("MeterRow"), hud.LiquidOrb.transform.parent,
+                "大招条应与墨水条同一行");
 
             // 满能时移动端不应弹出「按 Q 释放」，大招键本身已有就绪提示
             hud.LiquidOrb.SetCharge(1f, true);
             yield return null;
-            Transform readyHint = orbRect.Find("ReadyHint");
-            Assert.IsNotNull(readyHint, "大招球应包含满能提示节点");
+            Transform readyHint = hud.LiquidOrb.transform.Find("ReadyHint");
+            Assert.IsNotNull(readyHint, "大招条应包含满能提示节点");
             Assert.IsFalse(readyHint.gameObject.activeSelf, "移动端必须隐藏键盘 Q 提示");
 
             // 重复应用布局必须幂等（分辨率/安全区变化会重复调用）
             hud.ApplyMobileLayout();
-            Assert.AreEqual(84f, orbRect.sizeDelta.x, 0.01f);
-            Assert.AreEqual(36f, tankRect.sizeDelta.x, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.StripHeightMobile, gaugeRoot.sizeDelta.y, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.StripBottomYMobile, gaugeRoot.anchoredPosition.y, 0.01f);
 
             Object.Destroy(root);
             yield return null;

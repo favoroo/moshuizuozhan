@@ -131,6 +131,13 @@ namespace P1.Player
         // 开火后坐力脉冲
         private float _recoilZ;
         private float _recoilPitch;
+        private float _recoilYaw;
+
+        // 瞄准俯仰姿态：相机俯仰（正 = 低头）→ 武器挂点承担全部仰角，胸腔只分担一小部分
+        private float _aimPitchTarget;
+        private float _aimPitchCurrent;
+        private float _aimPitchVelocity;
+        private readonly Dictionary<GameObject, Quaternion> _weaponModelBaseRots = new Dictionary<GameObject, Quaternion>();
 
         // 实例独立随机眨眼
         private float _nextBlinkTime = 2.0f;
@@ -374,6 +381,7 @@ namespace P1.Player
         {
             _weaponMap.Clear();
             _muzzleMap.Clear();
+            _weaponModelBaseRots.Clear();
 
             if (weaponShooter != null) _weaponMap[WeaponKind.Shooter] = weaponShooter;
             if (weaponRoller != null) _weaponMap[WeaponKind.Roller] = weaponRoller;
@@ -434,9 +442,14 @@ namespace P1.Player
 
         private void HandleWeaponFired()
         {
-            // 触发后坐力脉冲
-            _recoilZ = -0.045f;
-            _recoilPitch = 3.8f;
+            // 触发后坐力脉冲：幅度按当前武器手感配置（P16），并加入轻微随机 Yaw，
+            // 否则连发时每一发都沿完全相同的轨迹回弹，看起来像机械臂而不是手中武器。
+            WeaponConfigSO config = _weaponController != null ? _weaponController.Config : null;
+            WeaponFeelParams feel = WeaponFeelProfile.Resolve(config);
+
+            _recoilZ = -feel.RecoilKickMeters;
+            _recoilPitch = feel.RecoilPitchDegrees + UnityEngine.Random.Range(-0.6f, 0.6f);
+            _recoilYaw = UnityEngine.Random.Range(-0.9f, 0.9f);
         }
 
         public void EquipWeaponKind(WeaponKind kind)
@@ -491,6 +504,7 @@ namespace P1.Player
             if (dt <= 0f) return;
 
             UpdateFormMorph(dt);
+            UpdateAimPose(dt);
 
             if (_swimTransition01 < 0.99f)
             {
@@ -720,7 +734,12 @@ namespace P1.Player
                 squash.localScale = Vector3.Scale(_defaultBodySquashScale, new Vector3(sxz, sy, sxz));
             }
 
-            float finalPitch = _currentPitch + airPitch;
+            // 瞄准俯仰只让胸腔分担一小部分（默认 18%），角色保持直立：抬头不会整只人后仰
+            PlayerConfigSO poseConfig = _motor != null ? _motor.Config : null;
+            float chestAimWeight = poseConfig != null
+                ? Mathf.Clamp01(poseConfig.aimPoseChestPitchWeight)
+                : 0.18f;
+            float finalPitch = _currentPitch + airPitch + _aimPitchCurrent * chestAimWeight;
             float finalRoll = _currentRoll + rock;
             if (chestTransform != null)
             {
@@ -799,6 +818,44 @@ namespace P1.Player
         }
 
         /// <summary>
+        /// 由 PlayerController 每帧写入相机俯仰（度，正 = 低头俯视）。
+        /// 武器模型绕挂点整体俯仰（承担全部仰角），胸腔按配置权重分担，角色始终保持直立 ——
+        /// 对齐 INKWAVE 的「武器挂点吃满瞄准俯仰、脊柱/胸腔只分担 10~18%」解耦做法。
+        /// </summary>
+        public void SetAimPitch(float pitchDegrees)
+        {
+            if (float.IsNaN(pitchDegrees) || float.IsInfinity(pitchDegrees))
+                return;
+
+            _aimPitchTarget = Mathf.Clamp(pitchDegrees, -80f, 80f);
+        }
+
+        /// <summary>
+        /// 瞄准俯仰姿态：平滑相机俯仰并写回当前武器模型根节点（绕握把挂点旋转，枪口随之指向准星方向）。
+        /// </summary>
+        private void UpdateAimPose(float dt)
+        {
+            PlayerConfigSO config = _motor != null ? _motor.Config : null;
+
+            float smoothTime = config != null ? Mathf.Max(0.01f, config.aimPoseSmoothTime) : 0.07f;
+            _aimPitchCurrent = Mathf.SmoothDamp(
+                _aimPitchCurrent, _aimPitchTarget, ref _aimPitchVelocity, smoothTime, 720f, dt);
+
+            if (!_weaponMap.TryGetValue(_currentWeaponKind, out GameObject model) || model == null)
+                return;
+
+            Transform modelTransform = model.transform;
+            if (!_weaponModelBaseRots.TryGetValue(model, out Quaternion baseRot))
+            {
+                baseRot = modelTransform.localRotation;
+                _weaponModelBaseRots[model] = baseRot;
+            }
+
+            float weight = config != null ? Mathf.Clamp01(config.aimPoseWeaponPitchWeight) : 1f;
+            modelTransform.localRotation = baseRot * Quaternion.Euler(_aimPitchCurrent * weight, 0f, 0f);
+        }
+
+        /// <summary>
         /// 开火后坐力抖动与平滑阻尼回弹
         /// </summary>
         private void UpdateRecoilKick(float dt)
@@ -807,9 +864,10 @@ namespace P1.Player
 
             _recoilZ = Mathf.MoveTowards(_recoilZ, 0f, dt * 0.35f);
             _recoilPitch = Mathf.MoveTowards(_recoilPitch, 0f, dt * 28f);
+            _recoilYaw = Mathf.MoveTowards(_recoilYaw, 0f, dt * 22f);
 
             weaponRoot.transform.localPosition = _weaponRootBasePos + new Vector3(0f, 0f, _recoilZ);
-            weaponRoot.transform.localRotation = Quaternion.Euler(-_recoilPitch, 0f, 0f);
+            weaponRoot.transform.localRotation = Quaternion.Euler(-_recoilPitch, _recoilYaw, 0f);
         }
 
         /// <summary>

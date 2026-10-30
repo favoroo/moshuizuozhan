@@ -3,28 +3,34 @@ using UnityEngine.UI;
 
 namespace P1.UI
 {
-    /// <summary>墨滴形状类型。</summary>
+    /// <summary>几何形状类型（几何大胆风：直角矩形 / 胶囊 / 正圆为全部词汇）。</summary>
     public enum UIInkShape
     {
-        /// <summary>椭圆墨滴：边缘带有机起伏，适合卡片、计时器、大招球背景。</summary>
+        /// <summary>椭圆/正圆：几何风只当作 circle 用（wobble 已归零），适合头像、大招球、装饰圆。</summary>
         Blob = 0,
 
-        /// <summary>圆角矩形：适合面板、按钮、战况条。</summary>
+        /// <summary>圆角矩形：兼容保留；几何风请用 <see cref="SharpRect"/>。</summary>
         RoundedRect = 1,
 
-        /// <summary>对话气泡：大圆角 + 尖角尾，漫画风信息块专用。</summary>
+        /// <summary>对话气泡：兼容保留；几何风已禁用气泡尾巴。</summary>
         SpeechBubble = 2,
+
+        /// <summary>直角矩形（rounded-none）：几何风的面板、按钮、色块标准形状。</summary>
+        SharpRect = 3,
+
+        /// <summary>全圆角胶囊（rounded-full）：Tag、进度条、状态徽章。</summary>
+        Pill = 4,
     }
 
     /// <summary>
-    /// 纯网格绘制的墨滴 / 圆角面板 / 对话气泡底图（P4-A 基类，P10 扩展漫画风）。
+    /// 纯网格绘制的直角矩形 / 胶囊 / 正圆 / 圆角面板底图（P4-A 基类，P14 几何大胆风）。
     ///
-    /// 一个 UI 元素即可同时画出：硬边偏移阴影、填充色、半调网点、Chunky 黑边、对话气泡尖角。
+    /// 一个 UI 元素即可同时画出：填充色、实线粗边框、可选偏移阴影（几何风已归零）。
     /// 不依赖任何 Sprite / 材质资产，因此 HUD / 菜单 / 移动端都能直接复用；
     /// 颜色由 <see cref="Graphic.color"/> 控制，正好交给 InkTeamColorFilter 自动染色。
     ///
-    /// 漫画模式（comicPanel=true）会关掉旧 Inkwave 的斜切高光与内沿墨光，
-    /// 换成「实心墨色硬阴影 + 网点」这套印刷语言。旧字段全部保留，老调用方无需改签名。
+    /// 几何风默认：直角、4px 实线边框、无网点、无渐变高光、无硬阴影、无 wobble。
+    /// 旧字段全部保留，老调用方无需改签名。
     /// </summary>
     [AddComponentMenu("P1/UI/Ink Shape Graphic")]
     public class UIInkShapeGraphic : MaskableGraphic
@@ -32,35 +38,35 @@ namespace P1.UI
         private const int MaxRingPoints = 128;
 
         [Header("形状")]
-        [SerializeField] private UIInkShape shape = UIInkShape.Blob;
+        [SerializeField] private UIInkShape shape = UIInkShape.SharpRect;
 
         [Tooltip("周向分段数；圆角矩形会均分到 4 个圆角")]
         [SerializeField, Range(12, 128)] private int segments = 64;
 
-        [Tooltip("墨滴边缘起伏幅度（0 = 规整椭圆）")]
-        [SerializeField, Range(0f, 0.25f)] private float wobbleAmplitude = 0.055f;
+        [Tooltip("墨滴边缘起伏幅度（几何风固定 0 = 规整圆）")]
+        [SerializeField, Range(0f, 0.25f)] private float wobbleAmplitude = 0f;
 
         [Tooltip("起伏相位的随机种子，不同数值得到不同墨形")]
         [SerializeField] private int seed = 7;
 
         [SerializeField] private Vector2 squash = Vector2.one;
 
-        [SerializeField, Range(0f, 128f)] private float cornerRadius = 28f;
+        [SerializeField, Range(0f, 128f)] private float cornerRadius = 0f;
 
-        [Header("描边 · Chunky Outline")]
-        [SerializeField, Range(0f, 64f)] private float borderWidth = 6f;
+        [Header("描边 · 实线粗边")]
+        [SerializeField, Range(0f, 64f)] private float borderWidth = 4f;
 
-        [SerializeField] private Color borderColor = new Color(0.082f, 0.071f, 0.110f, 1f);
+        [SerializeField] private Color borderColor = new Color(0.078f, 0.078f, 0.078f, 1f);
 
-        [Tooltip("内沿白色墨光的透明度（果冻质感的关键）")]
-        [SerializeField, Range(0f, 1f)] private float innerRimAlpha = 0.10f;
+        [Tooltip("内沿白色墨光透明度（几何风禁用，保持 0）")]
+        [SerializeField, Range(0f, 1f)] private float innerRimAlpha = 0f;
 
         [SerializeField, Range(0f, 8f)] private float innerRimWidth = 2f;
 
-        [Header("斜切高光")]
-        [SerializeField] private bool drawGloss = true;
+        [Header("斜切高光（几何风禁用）")]
+        [SerializeField] private bool drawGloss;
 
-        [SerializeField, Range(0f, 1f)] private float glossAlpha = 0.18f;
+        [SerializeField, Range(0f, 1f)] private float glossAlpha = 0f;
 
         [Tooltip("高光斜带的斜率（圆角矩形）/ 倾斜角（墨滴）")]
         [SerializeField, Range(-1f, 1f)] private float glossSlope = 0.30f;
@@ -69,25 +75,25 @@ namespace P1.UI
 
         [SerializeField, Range(0f, 0.6f)] private float glossThickness = 0.16f;
 
-        [Header("硬边偏移阴影 · 印刷感（P10）")]
-        [Tooltip("漫画风核心：实心墨色阴影，不做模糊。悬停缩到 3px，按下归零")]
+        [Header("硬边偏移阴影 · 几何风禁用（偏移归零）")]
+        [Tooltip("几何风禁止阴影：保持 false；即使打开，ShadowOffset 为 0 也不会绘制")]
         [SerializeField] private bool hardShadow;
 
-        [SerializeField] private Vector2 shadowOffset = new Vector2(6f, -6f);
+        [SerializeField] private Vector2 shadowOffset = Vector2.zero;
 
-        [SerializeField] private Color shadowColor = new Color(0.102f, 0.102f, 0.102f, 1f);
+        [SerializeField] private Color shadowColor = new Color(0.078f, 0.078f, 0.078f, 1f);
 
         [Tooltip("外扩留白：保证偏移阴影不会被 Rect 裁掉")]
-        [SerializeField, Range(0f, 32f)] private float shadowPadding = 8f;
+        [SerializeField, Range(0f, 32f)] private float shadowPadding = 0f;
 
-        [Header("半调网点（P10）")]
+        [Header("半调网点（漫画风遗留，几何风禁用）")]
         [SerializeField] private bool halftone;
 
         [SerializeField, Range(4f, 24f)] private float halftoneSpacing = 8f;
 
         [SerializeField, Range(0.5f, 4f)] private float halftoneDotRadius = 1.3f;
 
-        [SerializeField, Range(0f, 1f)] private float halftoneAlpha = 0.14f;
+        [SerializeField, Range(0f, 1f)] private float halftoneAlpha = 0f;
 
         [SerializeField, Range(0f, 90f)] private float halftoneAngle = 0f;
 
@@ -204,20 +210,19 @@ namespace P1.UI
             borderWidth = style.borderWidth;
             borderColor = style.borderColor;
             cornerRadius = style.cornerRadius;
-            wobbleAmplitude = style.wobble;
-            glossAlpha = style.glossAlpha;
-            glossSlope = style.glossSlope;
-            glossCenter = style.glossCenter;
-            glossThickness = style.glossThickness;
-            innerRimAlpha = style.innerRimAlpha;
-            drawGloss = glossAlpha > 0.001f;
+            wobbleAmplitude = 0f;
+            glossAlpha = 0f;
+            drawGloss = false;
+            innerRimAlpha = 0f;
 
-            hardShadow = style.comicPanel;
-            shadowOffset = style.shadowOffset;
-            shadowPadding = style.shadowPadding;
+            // 几何大胆风全局禁用阴影与网点（与主题资产里的旧值无关，代码层兜底）。
+            hardShadow = false;
+            shadowOffset = Vector2.zero;
+            shadowPadding = 0f;
             shadowColor = style.borderColor;
-            halftone = style.halftone;
-            speechTail = style.speechTail;
+            halftone = false;
+            halftoneAlpha = 0f;
+            speechTail = false;
 
             color = fill;
             Refresh();
@@ -381,27 +386,30 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 一键套漫画观感：粗墨边 + 硬阴影 + 可选网点 + 关掉渐变高光/内沿。
+        /// 一键套几何大胆风观感：直角 + 实线粗边 + 关掉高光/内沿/网点/阴影。
         /// 供主题安装器与各屏快速换肤用；不传参数时取 ComicStyle 的静态 token。
+        /// （方法名沿用旧名，调用方零改动。）
         /// </summary>
         public void ApplyComic(Color fill, bool dots = true, float border = ComicStyle.Border,
             Vector2? offset = null)
         {
-            shape = shape == UIInkShape.Blob ? UIInkShape.RoundedRect : shape;
+            if (shape == UIInkShape.SpeechBubble) shape = UIInkShape.SharpRect;
+            if (shape == UIInkShape.RoundedRect) shape = UIInkShape.SharpRect;
             borderWidth = border;
             borderColor = ComicStyle.Ink;
-            cornerRadius = Mathf.Min(cornerRadius, ComicStyle.CornerSharp + 1f);
+            cornerRadius = shape == UIInkShape.Pill ? ComicStyle.CornerBubble : ComicStyle.CornerSharp;
             wobbleAmplitude = 0f;
             glossAlpha = 0f;
             drawGloss = false;
             innerRimAlpha = 0f;
-            hardShadow = true;
-            shadowOffset = offset ?? new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            // 几何风禁止阴影：恒关，offset 参数保留兼容。
+            hardShadow = false;
+            shadowOffset = offset ?? Vector2.zero;
             shadowColor = ComicStyle.Ink;
-            halftone = dots;
-            halftoneSpacing = ComicStyle.HalftoneSpacing;
-            halftoneDotRadius = ComicStyle.HalftoneDotRadius;
-            halftoneAlpha = ComicStyle.HalftoneAlpha;
+            // 几何风禁止网点：恒关，dots 参数保留兼容。
+            halftone = false;
+            halftoneAlpha = 0f;
+            speechTail = false;
             color = fill;
             Refresh();
         }
@@ -412,15 +420,12 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 墨汁晃动：叠加一段衰减正弦，让边缘「果冻般」抖一下。
-        /// 只在动画期间每帧重建网格，静止时零开销。
+        /// 墨汁晃动（漫画风遗留）：几何大胆风禁止有机摆动，此接口保留仅供旧调用方编译，
+        /// 不再产生任何动画。
         /// </summary>
         public void PlayWobble(float amplitude = 0.09f, float duration = 0.42f)
         {
-            _wobbleStrength = Mathf.Clamp(amplitude, 0f, 0.25f);
-            _wobbleDuration = Mathf.Max(0.05f, duration);
-            _wobbleTimer = _wobbleDuration;
-            Refresh();
+            // no-op：几何风只做形状硬切，不做边缘摆动。
         }
 
         private void Update()
@@ -461,8 +466,12 @@ namespace P1.UI
             _phase3 = Phase(3);
 
             float effectiveRadius = isBubble
-                ? Mathf.Max(cornerRadius, ComicStyle.CornerBubble)
-                : cornerRadius;
+                ? Mathf.Max(cornerRadius, Mathf.Min(rect.width, rect.height) * 0.5f)
+                : shape == UIInkShape.SharpRect
+                    ? 0f
+                    : shape == UIInkShape.Pill
+                        ? Mathf.Min(rect.width, rect.height) * 0.5f
+                        : cornerRadius;
 
             float minHalf = Mathf.Min(rect.width, rect.height) * 0.5f;
             float border = Mathf.Clamp(borderWidth, 0f, Mathf.Max(0f, minHalf - 1f));

@@ -19,6 +19,9 @@ namespace P1.Core
 
         private Material _sharedParticleMat;
         private Material _sharedRingMat;
+        private Material _flashMat;
+        private Texture2D _flashTex;
+        private ParticleSystem _shotFlashPs;
         private Mesh _discMesh;
         private Mesh _dropletMesh;
 
@@ -77,6 +80,12 @@ namespace P1.Core
             DestroyObject(_sharedRingMat);
             _sharedRingMat = null;
 
+            DestroyObject(_flashMat);
+            _flashMat = null;
+
+            DestroyObject(_flashTex);
+            _flashTex = null;
+
             DestroyObject(_discMesh);
             _discMesh = null;
         }
@@ -115,9 +124,26 @@ namespace P1.Core
                 unlitShader = Shader.Find("Sprites/Default");
 
             _sharedParticleMat = new Material(unlitShader) { name = "VfxInkParticleMat" };
-            _sharedRingMat = new Material(unlitShader) { name = "VfxRingMat" };
+
+            // 冲击环改用加法混合：旧版 URP/Unlit 是不透明材质，环的 alpha 淡出根本不生效，
+            // 只能靠「变白→突然消失」收尾；加法混合后 1-t 的 alpha 才会真的让冲击波淡掉。
+            Shader additiveShader = Shader.Find("P1/VfxAdditive");
+            if (additiveShader == null)
+                additiveShader = Shader.Find("Sprites/Default");
+            _sharedRingMat = new Material(additiveShader) { name = "VfxRingMat" };
+            if (_sharedRingMat.HasProperty("_MainTex"))
+                _sharedRingMat.SetTexture("_MainTex", Texture2D.whiteTexture);
+
+            _flashTex = BuildRadialFlashTexture(64);
+            _flashMat = new Material(additiveShader) { name = "VfxShotFlashMat" };
+            if (_flashMat.HasProperty("_MainTex"))
+                _flashMat.SetTexture("_MainTex", _flashTex);
+            if (_flashMat.HasProperty("_Color"))
+                _flashMat.SetColor("_Color", Color.white);
+
             _discMesh = BuildRingMesh(32, 0.84f, 1.0f);
             _dropletMesh = Resources.GetBuiltinResource<Mesh>("Sphere.fbx");
+            _shotFlashPs = CreateShotFlashSystem();
 
             for (int i = 0; i < 20; i++)
             {
@@ -158,12 +184,120 @@ namespace P1.Core
         /// </summary>
         public void SpawnInkImpact(Vector3 worldPos, Vector3 normal, Color color, float radius = 0.9f, int satelliteCount = 4)
         {
+            SpawnInkImpact(worldPos, normal, color, radius, satelliteCount, Vector3.zero, false);
+        }
+
+        /// <summary>
+        /// 带入射方向的撞击反馈（P16）：溅射液滴朝「弹丸来向」偏置，读得出这一发是从哪边打来的；
+        /// <paramref name="highlight"/> 为 true 时（本地玩家自己的命中）额外叠一枚短促高光，
+        /// 让玩家在 8 人混战里一眼确认「这一下是我打的」。
+        /// </summary>
+        public void SpawnInkImpact(
+            Vector3 worldPos,
+            Vector3 normal,
+            Color color,
+            float radius,
+            int satelliteCount,
+            Vector3 incomingDirection,
+            bool highlight)
+        {
             int burstCount = Mathf.Clamp(Mathf.RoundToInt(6f + radius * 5f), 6, 20);
-            SpawnInkSplat(worldPos, color, radius, burstCount);
-            SpawnSatelliteDroplets(worldPos, normal, color, radius, satelliteCount);
+            SpawnInkSplatAligned(worldPos, normal, color, radius, burstCount);
+            SpawnSatelliteDroplets(worldPos, normal, color, radius, satelliteCount, incomingDirection);
+
+            if (highlight)
+                SpawnImpactFlash(worldPos, normal, color, radius);
+        }
+
+        /// <summary>
+        /// 枪口闪光：白热核心 + 沿射向甩出的短尾，0.06s 内淡出。
+        /// 用单个 ParticleSystem 承载全部枪口闪光（一次 draw call），零 GC。
+        /// </summary>
+        public void SpawnShotFlash(Vector3 worldPos, Vector3 direction, Color color, float scale = 1f)
+        {
+            if (_shotFlashPs == null)
+                return;
+
+            Vector3 dir = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.forward;
+            float size = 0.30f * Mathf.Max(0.1f, scale);
+            Color core = Color.Lerp(color, Color.white, 0.62f);
+
+            var emit = new ParticleSystem.EmitParams
+            {
+                position = worldPos + dir * 0.03f,
+                velocity = dir * 1.2f,
+                startColor = core,
+                startSize = size,
+                startLifetime = 0.055f,
+                rotation = Random.Range(0f, 360f)
+            };
+            _shotFlashPs.Emit(emit, 1);
+
+            // 沿射向的第二枚更小、更快，形成「喷出去」的方向感
+            emit.position = worldPos + dir * 0.12f;
+            emit.velocity = dir * 3.2f;
+            emit.startColor = new Color(core.r, core.g, core.b, 0.65f);
+            emit.startSize = size * 0.62f;
+            emit.startLifetime = 0.045f;
+            _shotFlashPs.Emit(emit, 1);
+        }
+
+        /// <summary>落点高光：短暂加法混合的软圆盘，只给本地玩家的命中用，避免全屏闪光污染。</summary>
+        public void SpawnImpactFlash(Vector3 worldPos, Vector3 normal, Color color, float radius)
+        {
+            if (_shotFlashPs == null)
+                return;
+
+            Vector3 up = normal.sqrMagnitude > 0.0001f ? normal.normalized : Vector3.up;
+            var emit = new ParticleSystem.EmitParams
+            {
+                position = worldPos + up * 0.04f,
+                velocity = Vector3.zero,
+                startColor = new Color(color.r, color.g, color.b, 0.55f),
+                startSize = Mathf.Clamp(radius * 1.9f, 0.4f, 3.2f),
+                startLifetime = 0.08f,
+                rotation = Random.Range(0f, 360f)
+            };
+            _shotFlashPs.Emit(emit, 1);
+        }
+
+        private void SpawnInkSplatAligned(Vector3 worldPos, Vector3 normal, Color color, float radius, int burstCount)
+        {
+            if (_splatParticles.Count == 0)
+                return;
+
+            ParticleSystem ps = _splatParticles.Dequeue();
+            _splatParticles.Enqueue(ps);
+
+            Vector3 up = normal.sqrMagnitude > 0.0001f ? normal.normalized : Vector3.up;
+            ps.transform.position = worldPos + up * 0.08f;
+            // 半球发射器对齐表面法线：打在立面上时墨滴应向外溅，而不是统一朝世界 +Y 喷。
+            ps.transform.rotation = Quaternion.FromToRotation(Vector3.up, up);
+
+            var main = ps.main;
+            main.startColor = color;
+            main.startSize = new ParticleSystem.MinMaxCurve(0.10f * radius, 0.24f * radius);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(1.8f * radius, 4.5f * radius);
+
+            ps.Emit(burstCount);
         }
 
         private void SpawnSatelliteDroplets(Vector3 worldPos, Vector3 normal, Color color, float radius, int count)
+        {
+            SpawnSatelliteDroplets(worldPos, normal, color, radius, count, Vector3.zero);
+        }
+
+        /// <summary>
+        /// 卫星墨珠：除绕法线的径向扩散外，还会朝弹丸水平来向偏置。
+        /// 打在斜坡/墙面上时，液滴会沿来向继续「甩」出去，而不是均匀八爪鱼式乱喷。
+        /// </summary>
+        private void SpawnSatelliteDroplets(
+            Vector3 worldPos,
+            Vector3 normal,
+            Color color,
+            float radius,
+            int count,
+            Vector3 incomingDirection)
         {
             if (count <= 0)
                 return;
@@ -175,6 +309,11 @@ namespace P1.Core
             tangentA.Normalize();
             Vector3 tangentB = Vector3.Cross(up, tangentA);
 
+            Vector3 forward = Vector3.ProjectOnPlane(incomingDirection, up);
+            bool hasForward = forward.sqrMagnitude > 0.0001f;
+            if (hasForward)
+                forward.Normalize();
+
             float sizeScale = Mathf.Clamp(radius * 1.2f, 0.7f, 1.6f);
 
             for (int i = 0; i < count && _dropletPool.Count > 0; i++)
@@ -185,13 +324,16 @@ namespace P1.Core
 
                 float angle = Random.value * Mathf.PI * 2f;
                 Vector3 outward = tangentA * Mathf.Cos(angle) + tangentB * Mathf.Sin(angle);
-                Vector3 launchDir = (outward * Random.Range(0.35f, 0.9f) + up * Random.Range(0.75f, 1.35f)).normalized;
+                Vector3 radial = outward * Random.Range(0.35f, 0.9f);
+                Vector3 bias = hasForward ? forward * Random.Range(0.35f, 0.85f) : Vector3.zero;
+                Vector3 launchDir = (radial + bias + up * Random.Range(0.75f, 1.35f)).normalized;
                 droplet.Velocity = launchDir * (Random.Range(2.6f, 4.6f) * sizeScale);
                 droplet.Gravity = Random.Range(16f, 22f);
                 droplet.Elapsed = 0f;
                 droplet.Lifetime = Random.Range(0.32f, 0.62f);
                 droplet.BaseScale = Random.Range(0.045f, 0.085f) * sizeScale;
                 droplet.StretchY = 1f;
+                droplet.Transform.rotation = Quaternion.LookRotation(launchDir);
                 droplet.Transform.localScale = Vector3.one * droplet.BaseScale;
 
                 droplet.PropBlock.SetColor(BaseColorProp, color);
@@ -334,10 +476,18 @@ namespace P1.Core
                 droplet.Velocity.y -= droplet.Gravity * dt;
                 droplet.Transform.position += droplet.Velocity * dt;
 
-                // 末段收缩，读作“墨珠落地后被地面吸收”
+                // 墨珠沿速度方向拉伸：高速飞行的滴墨读作「水线」，落地前再整体收缩，
+                // 而不是一颗颗匀速平移的小球（那是弹球，不是墨水）。
+                Vector3 velocity = droplet.Velocity;
+                float speed = velocity.magnitude;
+                float stretch = Mathf.Max(droplet.StretchY, Mathf.Clamp(1f + speed * 0.10f, 1f, 3.4f));
+                float width = 1f / Mathf.Sqrt(stretch);
+
                 float t = droplet.Elapsed / droplet.Lifetime;
                 float scale = droplet.BaseScale * Mathf.Max(0.12f, 1f - t * t);
-                droplet.Transform.localScale = new Vector3(scale, scale * droplet.StretchY, scale);
+                if (speed > 0.05f)
+                    droplet.Transform.rotation = Quaternion.LookRotation(velocity / speed);
+                droplet.Transform.localScale = new Vector3(scale * width, scale * width, scale * stretch);
 
                 _activeDroplets[i] = droplet;
             }
@@ -354,6 +504,92 @@ namespace P1.Core
             ring.PropBlock.SetColor(BaseColorProp, c);
             ring.PropBlock.SetColor(ColorProp, c);
             ring.Renderer.SetPropertyBlock(ring.PropBlock);
+        }
+
+        /// <summary>
+        /// 枪口闪光 / 落点高光共用的单个 Billboard ParticleSystem：
+        /// 一次 draw call 承载全部闪光，比每个闪光一个 MeshRenderer 省得多。
+        /// </summary>
+        private ParticleSystem CreateShotFlashSystem()
+        {
+            var go = new GameObject("ShotFlashPS");
+            go.transform.SetParent(transform, false);
+
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+            var main = ps.main;
+            main.playOnAwake = false;
+            main.loop = false;
+            main.duration = 1f;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.startLifetime = 0.06f;
+            main.startSpeed = 0f;
+            main.startSize = 0.3f;
+            main.startColor = Color.white;
+            main.gravityModifier = 0f;
+            main.maxParticles = 64;
+
+            var emission = ps.emission;
+            emission.enabled = false;
+
+            var shape = ps.shape;
+            shape.enabled = false;
+
+            // 生命周期内淡出 + 轻微收缩：加法混合下就是「闪一下就没」
+            var colorOverLifetime = ps.colorOverLifetime;
+            colorOverLifetime.enabled = true;
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+                new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(0f, 1f) });
+            colorOverLifetime.color = new ParticleSystem.MinMaxGradient(gradient);
+
+            var sizeOverLifetime = ps.sizeOverLifetime;
+            sizeOverLifetime.enabled = true;
+            sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 1f, 1f, 0.62f));
+
+            var psr = go.GetComponent<ParticleSystemRenderer>();
+            psr.renderMode = ParticleSystemRenderMode.Billboard;
+            psr.sharedMaterial = _flashMat;
+            psr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            psr.receiveShadows = false;
+            psr.sortingFudge = -50f;
+
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            return ps;
+        }
+
+        /// <summary>程序化软边圆盘贴图：中心亮、边缘透明，枪口闪光与落点高光共用。</summary>
+        private static Texture2D BuildRadialFlashTexture(int size)
+        {
+            size = Mathf.Clamp(size, 16, 256);
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false, true)
+            {
+                name = "VfxRadialFlash",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+
+            var pixels = new Color32[size * size];
+            float inv = 1f / Mathf.Max(1, size - 1);
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float u = x * inv * 2f - 1f;
+                    float v = y * inv * 2f - 1f;
+                    float d = Mathf.Sqrt(u * u + v * v);
+                    float a = Mathf.Clamp01(1f - d);
+                    a = a * a * (3f - 2f * a); // smoothstep：软边，不出现硬圆盘
+                    a *= a;                    // 中心更亮，外圈更快衰减
+                    pixels[y * size + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(a * 255f));
+                }
+            }
+
+            tex.SetPixels32(pixels);
+            tex.Apply(false, true);
+            return tex;
         }
 
         private ParticleSystem CreateSplatParticleSystem(int idx)

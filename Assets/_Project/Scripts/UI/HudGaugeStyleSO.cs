@@ -4,23 +4,30 @@ using UnityEngine;
 namespace P1.UI
 {
     /// <summary>
-    /// 右上角「墨水计量管 + 大招液体球」的全部可调参数（P4-C）。
+    /// HUD 仪表条配置（P14-H 起：墨水量 + 大招充能 = 血条上方两条横向纯色条）。
     ///
     /// 与 <see cref="UIThemeSO"/> 的分工：
-    /// <see cref="UIThemeSO"/> 管配色（队伍墨色 / readyGold / dangerRed / 字体 / 弹簧），
-    /// 本资产只管这一簇 HUD 的几何、阈值、波浪与节拍。组件忘记拖资产时会退回
-    /// <see cref="Fallback"/>，因此代码与测试不依赖是否生成过 .asset。
+    /// <see cref="UIThemeSO"/> 管配色（队伍墨色 / 字体 / 弹簧），本资产管几何、阈值与节拍。
+    ///
+    /// 当前实际读取：`lowInkThreshold01` / `lowInkHysteresis` / `bombThreshold01` /
+    /// `warningBlinkHz` / `warningRepeatInterval` / `lowInkWarningVolume` / `warningGlowAlpha` /
+    /// `percentFontSize` / `readyHintText` / `readyHintKey` / `readyHintDelay` / `readyHintSize` /
+    /// `slamIcon` / `stormIcon`。
+    ///
+    /// 遗留字段（`orb*` / `tank*` / 波浪 / 气泡 / halo / burst / readyPulse / specialIconOffsetY）
+    /// 属于旧的右上角竖墨罐 + 大招球，代码不再读取；保留只为资产兼容与旧场景反序列化不报错。
+    /// 组件忘记拖资产时会退回 <see cref="Fallback"/>，因此代码与测试不依赖是否生成过 .asset。
     /// </summary>
     [CreateAssetMenu(fileName = "HudGaugeStyle", menuName = "P1/UI HUD Gauge Style", order = 31)]
     public class HudGaugeStyleSO : ScriptableObject
     {
-        [Header("布局（锚点=右上角，单位=1920×1080 参考分辨率像素）")]
+        [Header("遗留：旧右上角仪表布局（P14-H 后不再读取）")]
         [Tooltip("大招球中心相对右上角的偏移；默认放在小地图左侧，避免与 P4-D 的小地图重叠")]
-        public Vector2 orbAnchoredPosition = new Vector2(-330f, -132f);
+        public Vector2 orbAnchoredPosition = new Vector2(-130f, 150f);
 
         public float orbSize = 124f;
 
-        public Vector2 tankAnchoredPosition = new Vector2(-429f, -170f);
+        public Vector2 tankAnchoredPosition = new Vector2(-250f, 180f);
 
         public Vector2 tankSize = new Vector2(54f, 180f);
 
@@ -112,9 +119,9 @@ namespace P1.UI
         public float specialIconOffsetY = 6f;
 
         [Header("文字")]
-        public float percentFontSize = 20f;
+        public float percentFontSize = 28f;
 
-        public float hintFontSize = 18f;
+        public float hintFontSize = 22f;
 
         [Header("弹簧")]
         [Tooltip("墨水管液面追随手感：几乎不过冲，读数稳")]

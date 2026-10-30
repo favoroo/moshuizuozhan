@@ -128,3 +128,12 @@ MonoBehaviour:
   stormGrowTime: 0.5
   stormFadeTime: 0.6
   stormThrowLockDuration: 0.35
+  recoilKickMeters: 0
+  recoilPitchDegrees: 0
+  cameraKickMeters: 0
+  cameraKickRollDegrees: 0
+  cameraKickFovDegrees: 0
+  muzzleFlashScale: 0
+  projectileVisualScale: 0
+  trailVisualScale: 0
+  impactRippleScale: 0

@@ -60,8 +60,16 @@ namespace P1.Weapons
                 for (int c = 0; c < across; c++)
                 {
                     float offset = across == 1 ? 0f : Mathf.Lerp(-halfSpan, halfSpan, c / (float)(across - 1));
-                    changed += InkSurfaceController.Instance.PaintCircle(center + right * offset, radius, team);
+                    // 推地每帧要铺十几枚圆斑：中间印记只画平滑主体、不各自刷涟漪，
+                    // 否则 8 槽波纹缓冲会被一条墨带瞬间冲干净（旧实现里地面涟漪等于没有）。
+                    changed += InkSurfaceController.Instance.PaintCircle(center + right * offset, radius, team, false, false);
                 }
+            }
+
+            // 整条墨带只在扫过处发一条合并涟漪
+            if (changed > 0)
+            {
+                InkSurfaceController.Instance.TriggerRipple(to + forward * 0.2f, 0.045f, 0.34f, 3.4f, 0.9f);
             }
 
             // 滚筒推抵墙面时同时给接触立面下沿涂上墨水

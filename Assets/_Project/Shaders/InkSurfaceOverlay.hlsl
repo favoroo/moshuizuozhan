@@ -89,7 +89,9 @@ float4 P1InkSplatKindShape(float k)
     if (k < 1.5) return float4(3.0, 5.0, 5.0, 0.0);    // 拖尾滴墨
     if (k < 2.5) return float4(5.0, 7.0, 8.0, 0.0);    // 单发喷点
     if (k < 3.5) return float4(7.0, 9.0, 10.0, 0.0);   // 爆斑
-    return float4(10.0, 12.0, 14.0, 0.0);              // 炸弹 / 大招
+    if (k < 4.5) return float4(10.0, 12.0, 14.0, 0.0); // 炸弹 / 大招
+    if (k < 5.5) return float4(0.0, 0.0, 0.0, 0.0);    // 平滑尾迹 (InkSplatAtlas.PlainKind)：无射线 / 卫星
+    return float4(10.0, 12.0, 14.0, 0.0);              // 兜底
 }
 
 // 墨斑最终形态的 SDF（等价旧实现 tn=1.6 饱和态：主体满半径、射线全长、卫星全落、细雾全出）

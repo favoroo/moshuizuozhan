@@ -46,6 +46,16 @@ namespace P1.Ink
 
         private static readonly float[] KindReach = { 1.9f, 2.3f, 2.5f, 2.7f, 2.75f };
 
+        /// <summary>
+        /// 「平滑尾迹」种类：只有主体 wobble 轮廓，不画射线与卫星墨滴。
+        /// 用于一次撞击里铺出的中间墨斑（拖尾链、沿途滴墨），否则每枚都带 7~10 根刺，
+        /// 连续射击会把地面涂成一团带刺的噪点，也白白浪费填充率。
+        /// </summary>
+        public const float PlainKind = 5f;
+
+        /// <summary>平滑尾迹的面片覆盖倍数：只要包住 wobble 最大外扩 1.59R。</summary>
+        public const float PlainReach = 1.75f;
+
         private static readonly int InkMapSizeId = Shader.PropertyToID("_InkMapSize");
         private static readonly int InkTexelMetersId = Shader.PropertyToID("_InkTexelMeters");
         private static readonly int InkYFlipId = Shader.PropertyToID("_InkYFlip");
@@ -246,10 +256,20 @@ namespace P1.Ink
         /// </summary>
         public void AddSplat(Vector2 centerXZ, float radius, Team team)
         {
+            AddSplat(centerXZ, radius, team, true);
+        }
+
+        /// <summary>
+        /// 记录一次落墨。<paramref name="decorated"/> = false 时只画平滑主体（无射线 / 卫星），
+        /// 供拖尾链与连续弹幕的中间印记使用；战斗主墨斑仍走默认的完整装饰。
+        /// </summary>
+        public void AddSplat(Vector2 centerXZ, float radius, Team team, bool decorated)
+        {
             if (_disposed || !_shaderReady || radius <= 0.001f || team == Team.Neutral)
                 return;
 
-            float kind = ClassifyKind(radius);
+            float kind = decorated ? ClassifyKind(radius) : PlainKind;
+            float reach = decorated ? KindReach[(int)kind] : PlainReach;
             float birth = Time.time;
             var splat = new Splat
             {
@@ -258,7 +278,7 @@ namespace P1.Ink
                 Team = team == Team.TeamB ? 1f : 0f,
                 Seed = MakeSeed(centerXZ, radius),
                 Kind = kind,
-                Reach = KindReach[(int)kind],
+                Reach = reach,
                 BirthTime = birth
             };
 

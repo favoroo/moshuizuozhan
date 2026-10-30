@@ -1,6 +1,7 @@
 using System.Collections;
 using NUnit.Framework;
 using P1.Core;
+using P1.Environment;
 using P1.Ink;
 using P1.Player;
 using UnityEngine;
@@ -194,6 +195,62 @@ namespace P1.Tests
             int changed = propWall.PaintAtWorld(point, Vector3.forward, 0.4f, Team.TeamA);
             Assert.Greater(changed, 0, "射击装饰木箱/花坛的侧面应能落墨");
             Assert.AreEqual(Team.TeamA, propWall.InkAtWorld(point, Vector3.forward), "命中面应变为 TeamA 墨");
+        }
+
+        /// <summary>
+        /// 回归"高台/坡道永远喷不上油漆"：这些表面都挂了 OcclusionFader，
+        /// 恢复不透明时曾用 SetPropertyBlock(null) 把墨迹图集绑定整块抹掉，
+        /// 于是相机穿过它们一次之后，那片台面就再也显示不出墨迹。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator ElevatedPlatform_KeepsInkBindingAndPaints_AfterOcclusionRestore()
+        {
+            yield return LoadPlaybox();
+
+            GameObject platform = GameObject.Find("HighGround_West");
+            Assert.IsNotNull(platform, "场景里应存在 HighGround_West 高台");
+
+            var renderer = platform.GetComponent<Renderer>();
+            Assert.IsNotNull(renderer, "高台应有 Renderer");
+
+            var fader = platform.GetComponent<OcclusionFader>();
+            Assert.IsNotNull(fader, "高台应挂载 OcclusionFader（这是本 bug 的触发条件）");
+
+            // 走一遍"被遮挡 → 恢复不透明"的完整路径（历史实现就是在这里清空 MPB）
+            fader.MarkOccluded(platform.transform.position);
+            for (int i = 0; i < 8; i++)
+            {
+                fader.MarkOccluded(platform.transform.position);
+                fader.EvaluateStep(0.08f);
+                yield return null;
+            }
+            Assert.Less(fader.CurrentAlpha, 0.99f, "应已淡出");
+
+            fader.ResetToOpaque();
+            yield return null;
+
+            var block = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(block);
+            Assert.IsTrue(renderer.HasPropertyBlock(), "恢复不透明后高台应仍持有 MaterialPropertyBlock");
+            Assert.IsNotNull(block.GetTexture(Shader.PropertyToID("_InkTex")),
+                "恢复不透明不得抹掉墨迹图集绑定，否则该台面永远喷不上油漆");
+
+            // 台面本身必须仍然可涂：玩法网格与图集都要接受落墨
+            var ink = InkSurfaceController.Instance;
+            Assert.IsNotNull(ink, "场景里应存在 InkSurfaceController");
+            Vector3 topCenter = platform.transform.position + Vector3.up * 0.46f;
+
+            int splatsBefore = ink.SplatAtlas != null ? ink.SplatAtlas.TotalSplatCount : 0;
+            int changed = ink.PaintCircle(topCenter, 2.0f, Team.TeamA);
+            yield return null;
+
+            Assert.Greater(changed, 0, "高台顶面应能落墨（玩法网格）");
+            Assert.AreEqual(Team.TeamA, ink.InkAt(topCenter), "高台顶面应记为 TeamA 墨");
+            if (ink.SplatAtlas != null)
+            {
+                Assert.Greater(ink.SplatAtlas.TotalSplatCount, splatsBefore,
+                    "落墨应同时进入 GPU 墨迹图集（视觉层）");
+            }
         }
     }
 }

@@ -33,6 +33,11 @@ namespace P1.Player
         private Vector3 _aimPoint;
         private Vector3 _aimGroundPoint;
         private Vector3 _aimDirection = Vector3.forward;
+        private Vector3 _aimDirectionFlat = Vector3.forward;
+
+        // 视角输入来源跟踪：辅助瞄准只在触屏/手柄驱动时生效，鼠标永不吸附
+        private bool _lastLookWasGamepad;
+        private float _gamepadEdgeTime;
         private Transform _reticleTransform;
         private MeshRenderer _reticleRenderer;
         private Mesh _reticleMesh;
@@ -70,6 +75,9 @@ namespace P1.Player
         /// <summary>屏幕中心射线命中的 3D 世界点（可能是地面、墙面或敌人身体）。</summary>
         public Vector3 AimPoint => _aimPoint;
 
+        /// <summary>含俯仰的 3D 瞄准方向（相机前向）；武器按它与 <see cref="AimPoint"/> 求实际弹道。</summary>
+        public Vector3 AimDirection => _aimDirection;
+
         /// <summary>瞄准点向下的地面投影；小地图朝向、手雷落点与风暴大招使用。</summary>
         public Vector3 AimGroundPoint => _aimGroundPoint;
 
@@ -90,6 +98,7 @@ namespace P1.Player
             MovementAudioDriver.EnsureDriver(gameObject);
 
             _aimDirection = transform.forward;
+            _aimDirectionFlat = transform.forward;
             _aimPoint = transform.position + Vector3.up * AimChestHeight + transform.forward * 6f;
             _aimGroundPoint = transform.position + transform.forward * 5f;
             BuildGroundReticle();
@@ -217,6 +226,13 @@ namespace P1.Player
             // 4. 屏幕中心射线瞄准（手雷瞄准时额外保留地面落点）
             UpdateAimPoint();
 
+            // 4.1 枪口与身体姿态跟随视角俯仰：抬头时枪口指天，胸腔只分担一小部分，身体保持直立
+            CharacterVisualController visual = _motor != null ? _motor.VisualController : null;
+            if (visual != null && TopDownCameraFollow.Instance != null)
+            {
+                visual.SetAimPitch(TopDownCameraFollow.Instance.PitchDegrees);
+            }
+
             // 5. 形态仲裁：最后一次按下的键决定形态，射击与潜行可随时互切
             bool wantsBombIntent = executeBombThrow || _isAimingBomb;
             bool swimAvailable = _motor.IsInOwnInk || _motor.IsSwimming || _motor.IsTouchingOwnInkWall;
@@ -321,22 +337,41 @@ namespace P1.Player
             float pitchDelta = 0f;
 
             // 桌面鼠标：仅在指针锁定时读取，避免暂停/选枪时误转视角
+            bool mouseActive = false;
             if (!touchDriven && Cursor.lockState == CursorLockMode.Locked && Mouse.current != null)
             {
                 Vector2 mouseDelta = Vector2.ClampMagnitude(Mouse.current.delta.ReadValue(), 150f);
-                yawDelta += mouseDelta.x * MouseLookDegreesPerPixel * mouseSensitivity;
-                pitchDelta += -mouseDelta.y * MouseLookDegreesPerPixel * mouseSensitivity * invertSign;
+                if (mouseDelta.sqrMagnitude > 0.01f)
+                {
+                    mouseActive = true;
+                    yawDelta += mouseDelta.x * MouseLookDegreesPerPixel * mouseSensitivity;
+                    pitchDelta += -mouseDelta.y * MouseLookDegreesPerPixel * mouseSensitivity * invertSign;
+                }
             }
 
-            // 手柄右摇杆：按住持续转向
+            if (mouseActive || touchDriven)
+                _lastLookWasGamepad = false;
+
+            // 手柄右摇杆：按住持续转向；推到边缘 0.16s 后偏航加速到 1.55x（对齐 INKWAVE 的快速 180° 手感）
             Gamepad gamepad = Gamepad.current;
             if (gamepad != null)
             {
                 Vector2 stick = gamepad.rightStick.ReadValue();
-                if (stick.sqrMagnitude > GamepadLookDeadZone * GamepadLookDeadZone)
+                float magnitude = stick.magnitude;
+                if (magnitude > GamepadLookDeadZone)
                 {
-                    yawDelta += stick.x * GamepadLookYawPerSecond * mouseSensitivity * Time.deltaTime;
+                    _gamepadEdgeTime = magnitude > 0.93f
+                        ? Mathf.Min(0.5f, _gamepadEdgeTime + Time.deltaTime)
+                        : Mathf.Max(0f, _gamepadEdgeTime - Time.deltaTime * 3f);
+                    float edgeBoost = 1f + 0.55f * Mathf.Clamp01((_gamepadEdgeTime - 0.16f) / 0.3f);
+
+                    yawDelta += stick.x * GamepadLookYawPerSecond * mouseSensitivity * edgeBoost * Time.deltaTime;
                     pitchDelta += -stick.y * GamepadLookPitchPerSecond * mouseSensitivity * Time.deltaTime * invertSign;
+                    _lastLookWasGamepad = true;
+                }
+                else
+                {
+                    _gamepadEdgeTime = Mathf.Max(0f, _gamepadEdgeTime - Time.deltaTime * 3f);
                 }
             }
 
@@ -386,8 +421,9 @@ namespace P1.Player
             if (cameraFollow == null || camera == null)
             {
                 _aimDirection = transform.forward;
+                _aimDirectionFlat = transform.forward;
                 _aimPoint = transform.position + Vector3.up * AimChestHeight + _aimDirection * 6f;
-                _aimGroundPoint = ProjectGroundPoint(_aimPoint, _aimDirection);
+                _aimGroundPoint = ProjectGroundPoint(_aimPoint, _aimDirectionFlat);
                 return;
             }
 
@@ -416,30 +452,36 @@ namespace P1.Player
                 }
             }
 
-            if (IsTouchDriven())
-            {
-                TryApplyMobileAimAssist(origin, forward, ref hitPoint);
-            }
+            TryApplyAimAssist(origin, forward, ref hitPoint);
 
             _aimPoint = hitPoint;
 
-            Vector3 flatAim = hitPoint - transform.position;
-            flatAim.y = 0f;
-            _aimDirection = flatAim.sqrMagnitude > 0.0001f
+            // 3D 瞄准方向 = 相机前向（含俯仰）。武器再按「枪口 → 准星命中点」自行求解弹道，
+            // 因此把准星抬到天上时，弹丸会真的朝天上飞，而不是被压平水平射出。
+            _aimDirection = forward.sqrMagnitude > 0.0001f
+                ? forward.normalized
+                : cameraFollow.PlanarForward;
+
+            // 水平方向只服务于角色朝向、地面投影与小地图（俯仰不参与朝向）
+            Vector3 flatAim = new Vector3(_aimDirection.x, 0f, _aimDirection.z);
+            _aimDirectionFlat = flatAim.sqrMagnitude > 0.0001f
                 ? flatAim.normalized
                 : cameraFollow.PlanarForward;
 
-            _aimGroundPoint = ProjectGroundPoint(hitPoint, _aimDirection);
+            _aimGroundPoint = ProjectGroundPoint(hitPoint, _aimDirectionFlat);
         }
 
         /// <summary>
-        /// 移动端轻量辅助瞄准（对齐 GamePlan「Android 一定角度内吸附最近敌人」）：
+        /// 轻量辅助瞄准（对齐 GamePlan「Android 一定角度内吸附最近敌人」）：
         /// 档位 0 关闭；弱/中/强分别使用 0.5m / 0.8m / 1.2m 吸附半径。
-        /// 只在屏幕中心射线附近、且在武器射程内、Linecast 无遮挡时把瞄准点吸附到敌人胸口；
-        /// 桌面不启用，不做自动锁定。
+        /// 只在屏幕中心射线附近、且在武器射程内、Linecast 无遮挡时把瞄准点吸附到敌人胸口。
+        /// 仅对触屏与手柄生效（与 INKWAVE 一致：手柄开、鼠标关），鼠标永远不做自动锁定。
         /// </summary>
-        private void TryApplyMobileAimAssist(Vector3 origin, Vector3 forward, ref Vector3 hitPoint)
+        private void TryApplyAimAssist(Vector3 origin, Vector3 forward, ref Vector3 hitPoint)
         {
+            if (!IsTouchDriven() && !_lastLookWasGamepad)
+                return;
+
             int aimAssistLevel = GameSettingsService.AimAssistLevel;
             if (aimAssistLevel <= GameSettingsMath.MinAimAssistLevel)
                 return;

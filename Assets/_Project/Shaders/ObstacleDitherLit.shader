@@ -325,25 +325,11 @@ Shader "P1/ObstacleDitherLit"
 
             half4 ShadowPassFragment(Varyings input) : SV_Target
             {
-                // 当遮挡淡化激活时，阴影也进行 Dither 剔除，防止角色被遮挡时处于生硬的全黑投影下
-                float effectiveAlpha = _DitherAlpha;
-                if (_FocusWeight > 0.001)
-                {
-                    float d = length(input.positionWS.xz - _FocusPos.xz);
-                    float focusFade = saturate(d / max(0.1, _FocusRadius));
-                    effectiveAlpha = lerp(_FocusMinAlpha, _DitherAlpha, focusFade);
-                }
-
-                if (effectiveAlpha < 0.999)
-                {
-                    float2 screenPixel = input.positionCS.xy;
-                    int bx = int(fmod(screenPixel.x, 4.0));
-                    int by = int(fmod(screenPixel.y, 4.0));
-                    if (_BayerMatrix4x4[by][bx] >= effectiveAlpha)
-                    {
-                        discard;
-                    }
-                }
+                // 阴影 Pass 不做网点剔除：这里从光源视角渲染阴影贴图，
+                // input.positionCS.xy 是阴影图像素坐标，而不是屏幕像素坐标。
+                // 单级联/硬阴影（Android）下图案会随相机每帧重新拟合而滑动，
+                // 角色身上就会看到乱闪的碎影。遮挡淡化只作用于颜色 Pass，
+                // 阴影保持实体，物理上掩体仍然存在。
                 return 0;
             }
             ENDHLSL
@@ -429,26 +415,8 @@ Shader "P1/ObstacleDitherLit"
 
             half4 DepthNormalsFragment(DepthNormalsVaryings input) : SV_Target
             {
-                // 俯视角网点半透明遮挡剔除 (Screen-Door Dither Occlusion)
-                float effectiveAlpha = _DitherAlpha;
-                if (_FocusWeight > 0.001)
-                {
-                    float d = length(input.positionWS.xz - _FocusPos.xz);
-                    float focusFade = saturate(d / max(0.1, _FocusRadius));
-                    effectiveAlpha = lerp(_FocusMinAlpha, _DitherAlpha, focusFade);
-                }
-
-                if (effectiveAlpha < 0.999)
-                {
-                    float2 screenPixel = input.positionCS.xy;
-                    int bx = int(fmod(screenPixel.x, 4.0));
-                    int by = int(fmod(screenPixel.y, 4.0));
-                    if (_BayerMatrix4x4[by][bx] >= effectiveAlpha)
-                    {
-                        discard;
-                    }
-                }
-
+                // 法线缓冲不做网点剔除：遮挡物在几何上仍然存在，保持实体法线
+                // 可避免 PC 全屏描边在网点孔洞上误描黑边；Android 无此 Pass 消费者。
                 float3 normalWS = normalize(input.normalWS);
             #if defined(_GBUFFER_NORMALS_OCT)
                 float2 octNormalWS = PackNormalOctQuadEncode(normalWS);

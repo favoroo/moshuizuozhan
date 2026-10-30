@@ -9,14 +9,14 @@ using UnityEngine.UI;
 namespace P1.Editor
 {
     /// <summary>
-    /// 漫画样式画廊：把全部 UI 基元摆在一屏里，供截图验收与后续回归。
+    /// 几何大胆风样式画廊：把全部 UI 基元摆在一屏里，供截图验收与后续回归。
     ///
     /// 为什么需要它：项目 UI 全是代码拼装的，agent 看不见画面；
     /// 每次改 <see cref="UIInkShapeGraphic"/> 的网格或字体 fallback，
-    /// 必须先在这张「样张」上确认硬阴影、网点、气泡尾、中文渲染都正常，
+    /// 必须先在这张「样张」上确认直角、纯色块、粗体字、中文渲染都正常，
     /// 再去改真实界面，避免在 HUD 里大海捞针。
     ///
-    /// 菜单：P1/画风/漫画风/2. 生成样式画廊场景
+    /// 菜单：P1/画风/几何风/2. 生成样式画廊场景
     /// 产物：Assets/_Project/Scenes/ComicGallery.unity（可重复生成）
     /// </summary>
     public static class ComicGalleryBuilder
@@ -24,19 +24,20 @@ namespace P1.Editor
         const string k_ScenePath = "Assets/_Project/Scenes/ComicGallery.unity";
         const string k_ThemePath = "Assets/_Project/ScriptableObjects/UITheme.asset";
 
-        [MenuItem("P1/画风/漫画风/2. 生成样式画廊场景", false, 4)]
+        [MenuItem("P1/画风/几何风/2. 生成样式画廊场景", false, 4)]
+        [MenuItem("P1/画风/漫画风/2. 生成样式画廊场景（旧路径）", false, 4)]
         public static void BuildGalleryScene()
         {
             if (EditorApplication.isPlaying)
             {
-                Debug.LogError("[漫画画廊] 请先退出 Play 模式，再生成画廊场景。");
+                Debug.LogError("[几何画廊] 请先退出 Play 模式，再生成画廊场景。");
                 return;
             }
 
             var theme = AssetDatabase.LoadAssetAtPath<UIThemeSO>(k_ThemePath);
             if (theme == null)
             {
-                Debug.LogError("[漫画画廊] 找不到 UITheme.asset");
+                Debug.LogError("[几何画廊] 找不到 UITheme.asset");
                 return;
             }
 
@@ -45,7 +46,7 @@ namespace P1.Editor
             var camGo = new GameObject("GalleryCamera", typeof(Camera));
             var cam = camGo.GetComponent<Camera>();
             cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = ComicStyle.PaperAlt;
+            cam.backgroundColor = ComicStyle.Paper;
             cam.orthographic = true;
 
             var canvasGo = new GameObject("GalleryCanvas",
@@ -59,82 +60,81 @@ namespace P1.Editor
             scaler.referenceResolution = new Vector2(1920f, 1080f);
             scaler.matchWidthOrHeight = 0.5f;
 
-            // 纸面 + 网点
             var paper = CreateImage("Paper", canvasGo.transform, ComicStyle.Paper);
             Stretch(paper.rectTransform);
 
-            var halftoneGo = new GameObject("Halftone",
-                typeof(RectTransform), typeof(CanvasRenderer), typeof(ComicHalftoneGraphic));
-            halftoneGo.transform.SetParent(canvasGo.transform, false);
-            Stretch((RectTransform)halftoneGo.transform);
-            var halftone = halftoneGo.GetComponent<ComicHalftoneGraphic>();
-            halftone.color = ComicStyle.Ink;
-            halftone.Alpha = 0.06f;
-            halftone.raycastTarget = false;
+            // 左侧超大标题（不对称构图）+ 旋转几何装饰
+            CreateText(canvasGo.transform, "Title", "GEOMETRIC", 110f,
+                new Vector2(-550f, 420f), new Vector2(700f, 130f), theme, display: true,
+                fill: ComicStyle.Ink, align: TextAlignmentOptions.Left);
+            CreateText(canvasGo.transform, "TitleCjk", "几何大胆风", 56f,
+                new Vector2(-760f, 330f), new Vector2(520f, 70f), theme, display: true,
+                fill: ComicStyle.Ink, align: TextAlignmentOptions.Left);
+            CreateText(canvasGo.transform, "Subtitle", "BOLD BLOCKS / SHARP CORNERS / BIG TYPE / NO SHADOW",
+                20f, new Vector2(-470f, 268f), new Vector2(820f, 34f), theme, display: false,
+                fill: ComicStyle.Ink, align: TextAlignmentOptions.Left);
 
-            // 标题
-            CreateChunkyText(canvasGo.transform, "Title", "漫画风格 · COMIC STYLE", 64f,
-                new Vector2(0f, 440f), new Vector2(1400f, 100f), theme, display: true,
+            CreateRotatedBlock(canvasGo.transform, "DecorRedCircle", new Vector2(700f, 420f),
+                new Vector2(150f, 150f), ComicStyle.Red, 0f, circle: true);
+            CreateRotatedBlock(canvasGo.transform, "DecorInkSquare", new Vector2(860f, 300f),
+                new Vector2(120f, 120f), ComicStyle.Ink, 45f);
+            CreateRotatedBlock(canvasGo.transform, "DecorBlueBar", new Vector2(610f, 300f),
+                new Vector2(180f, 56f), ComicStyle.Blue, -15f);
+
+            // ---- 第一排：纯色块面板 ----
+            CreateBlock(canvasGo.transform, "PaperPanel", new Vector2(-640f, 150f), new Vector2(300f, 180f),
+                ComicStyle.Paper, ComicStyle.Ink, "纸面 PANEL", theme);
+            CreateBlock(canvasGo.transform, "InkPanel", new Vector2(-300f, 150f), new Vector2(300f, 180f),
+                ComicStyle.Ink, ComicStyle.Paper, "墨黑 INK", theme);
+            CreateBlock(canvasGo.transform, "RedPanel", new Vector2(40f, 150f), new Vector2(300f, 180f),
+                ComicStyle.Red, ComicStyle.Paper, "强调 RED", theme);
+            CreateBlock(canvasGo.transform, "BluePanel", new Vector2(380f, 150f), new Vector2(300f, 180f),
+                ComicStyle.Blue, ComicStyle.Paper, "信息 BLUE", theme);
+
+            // ---- 第二排：形状基元（直角 / 胶囊 / 正圆 / 旋转方块） ----
+            CreateShape(canvasGo.transform, "ShapeSharp", new Vector2(-640f, -60f), new Vector2(300f, 140f),
+                UIInkShape.SharpRect, ComicStyle.Paper, ComicStyle.Ink, "直角 SHARP", theme);
+            CreateShape(canvasGo.transform, "ShapePill", new Vector2(-300f, -60f), new Vector2(300f, 140f),
+                UIInkShape.Pill, ComicStyle.Ink, ComicStyle.Paper, "胶囊 PILL", theme);
+            CreateShape(canvasGo.transform, "ShapeCircle", new Vector2(40f, -60f), new Vector2(140f, 140f),
+                UIInkShape.Blob, ComicStyle.Yellow, ComicStyle.Ink, "正圆", theme);
+            CreateShape(canvasGo.transform, "ShapeTeam", new Vector2(380f, -60f), new Vector2(300f, 140f),
+                UIInkShape.SharpRect, theme.teamAColor, ComicStyle.Ink, "队伍色 TEAM", theme);
+
+            // ---- 第三排：按钮三态 ----
+            CreateButtonSample(canvasGo.transform, new Vector2(-640f, -260f), "普通 NORMAL", ComicStyle.Paper,
+                ComicStyle.Ink, theme);
+            CreateButtonSample(canvasGo.transform, new Vector2(-330f, -260f), "悬停 HOVER", ComicStyle.Red,
+                ComicStyle.Paper, theme);
+            CreateButtonSample(canvasGo.transform, new Vector2(-20f, -260f), "按下 PRESS", ComicStyle.Ink,
+                ComicStyle.Paper, theme, pressed: true);
+
+            // ---- 字号阶梯 + 数字即设计 ----
+            CreateText(canvasGo.transform, "TypeHero", "02:00", 132f, new Vector2(520f, -250f),
+                new Vector2(560f, 150f), theme, display: true, fill: ComicStyle.Ink,
+                align: TextAlignmentOptions.Center);
+            CreateText(canvasGo.transform, "TypeH1", "H1 判定 VICTORY", 60f, new Vector2(520f, -350f),
+                new Vector2(560f, 70f), theme, display: true, fill: ComicStyle.Red,
+                align: TextAlignmentOptions.Center);
+            CreateText(canvasGo.transform, "TypeH2", "H2 标题：墨水作战", 40f, new Vector2(520f, -415f),
+                new Vector2(560f, 50f), theme, display: true, fill: ComicStyle.Ink,
+                align: TextAlignmentOptions.Center);
+            CreateText(canvasGo.transform, "TypeBody", "正文 22：主音量 / 屏幕震动 / 触控灵敏度", 22f,
+                new Vector2(520f, -465f), new Vector2(620f, 34f), theme, display: false, fill: ComicStyle.Ink,
+                align: TextAlignmentOptions.Center);
+            CreateText(canvasGo.transform, "TypeSmall", "小字 18：最低可读字号，不允许更小", 18f,
+                new Vector2(520f, -505f), new Vector2(620f, 28f), theme, display: false,
                 fill: ComicStyle.Ink, align: TextAlignmentOptions.Center);
 
-            CreateText(canvasGo.transform, "Subtitle", "PAPER / INK / HALFTONE / HARD SHADOW / BUBBLE",
-                22f, new Vector2(0f, 372f), new Vector2(1400f, 40f), theme, display: false,
-                fill: ComicStyle.Ink, align: TextAlignmentOptions.Center);
-
-            // ---- 第一排：三种面板 ----
-            CreatePanel(canvasGo.transform, "PaperPanel", new Vector2(-560f, 180f), new Vector2(420f, 260f),
-                ComicStyle.Paper, ComicStyle.Ink, halftoneDots: true, tail: false, theme: theme,
-                caption: "纸面面板 PANEL");
-            CreatePanel(canvasGo.transform, "InkPanel", new Vector2(0f, 180f), new Vector2(420f, 260f),
-                ComicStyle.Ink, ComicStyle.Paper, halftoneDots: true, tail: false, theme: theme,
-                caption: "墨黑面板 INK");
-            CreatePanel(canvasGo.transform, "TeamPanel", new Vector2(560f, 180f), new Vector2(420f, 260f),
-                theme.teamAColor, Color.white, halftoneDots: true, tail: false, theme: theme,
-                caption: "队伍色 TEAM");
-
-            // ---- 第二排：对话气泡（四个方向） ----
-            CreatePanel(canvasGo.transform, "BubbleDown", new Vector2(-680f, -120f), new Vector2(360f, 180f),
-                ComicStyle.Paper, ComicStyle.Ink, halftoneDots: false, tail: true, theme: theme,
-                caption: "对话气泡 · 下", tailAngle: 270f);
-            CreatePanel(canvasGo.transform, "BubbleLeft", new Vector2(-250f, -120f), new Vector2(360f, 180f),
-                ComicStyle.Yellow, ComicStyle.Ink, halftoneDots: true, tail: true, theme: theme,
-                caption: "对话气泡 · 左", tailAngle: 180f);
-            CreatePanel(canvasGo.transform, "BubbleRight", new Vector2(180f, -120f), new Vector2(360f, 180f),
-                ComicStyle.Blue, Color.white, halftoneDots: false, tail: true, theme: theme,
-                caption: "对话气泡 · 右", tailAngle: 0f);
-            CreatePanel(canvasGo.transform, "BubbleUp", new Vector2(610f, -120f), new Vector2(360f, 180f),
-                ComicStyle.Red, Color.white, halftoneDots: false, tail: true, theme: theme,
-                caption: "对话气泡 · 上", tailAngle: 90f);
-
-            // ---- 第三排：动作线 + 按钮三态 ----
-            var burstRoot = new GameObject("ActionLines",
-                typeof(RectTransform), typeof(CanvasRenderer), typeof(ComicActionLinesGraphic));
-            burstRoot.transform.SetParent(canvasGo.transform, false);
-            var burstRect = (RectTransform)burstRoot.transform;
-            burstRect.sizeDelta = new Vector2(300f, 300f);
-            burstRect.anchoredPosition = new Vector2(-640f, -360f);
-            var lines = burstRoot.GetComponent<ComicActionLinesGraphic>();
-            lines.color = ComicStyle.Red;
-            lines.Alpha = 0.28f;
-            lines.raycastTarget = false;
-
-            CreateBadge(canvasGo.transform, new Vector2(-740f, -330f), "NEW!", ComicStyle.Yellow);
-            CreateBadge(canvasGo.transform, new Vector2(-540f, -390f), "POW!", ComicStyle.Red);
-
-            CreateButtonSample(canvasGo.transform, new Vector2(-160f, -360f), "普通 NORMAL", ComicStyle.Paper, theme);
-            CreateButtonSample(canvasGo.transform, new Vector2(140f, -360f), "悬停 HOVER", ComicStyle.Yellow, theme);
-            CreateButtonSample(canvasGo.transform, new Vector2(440f, -360f), "按下 PRESS", ComicStyle.Paper, theme,
-                pressed: true);
-
-            // 字体样张
-            CreateText(canvasGo.transform, "FontCjkDisplay", "庆科黄油体 · 大招就绪", 40f,
-                new Vector2(560f, -300f), new Vector2(520f, 60f), theme, display: true, fill: ComicStyle.Ink,
+            // 覆盖率大数字（结算页语言）
+            CreateText(canvasGo.transform, "PercentA", "52.8%", 84f, new Vector2(-560f, -450f),
+                new Vector2(360f, 100f), theme, display: true, fill: ComicStyle.Ink,
                 align: TextAlignmentOptions.Center);
-            CreateText(canvasGo.transform, "FontCjkBody", "快乐体正文：主音量 / 屏幕震动 / 触控灵敏度", 24f,
-                new Vector2(560f, -375f), new Vector2(560f, 40f), theme, display: false, fill: ComicStyle.Ink,
+            CreateText(canvasGo.transform, "PercentB", "47.2%", 84f, new Vector2(-40f, -450f),
+                new Vector2(360f, 100f), theme, display: true, fill: ComicStyle.Ink,
                 align: TextAlignmentOptions.Center);
-            CreateText(canvasGo.transform, "FontDigits", "02:00  100%", 48f,
-                new Vector2(560f, -450f), new Vector2(520f, 60f), theme, display: true, fill: ComicStyle.Ink,
+            CreateText(canvasGo.transform, "VsLabel", "VS", 30f, new Vector2(-300f, -450f),
+                new Vector2(120f, 60f), theme, display: true, fill: ComicStyle.Red,
                 align: TextAlignmentOptions.Center);
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -142,7 +142,7 @@ namespace P1.Editor
             EditorSceneManager.SaveScene(scene, k_ScenePath);
             AssetDatabase.Refresh();
 
-            Debug.Log("[漫画画廊] 已生成 " + k_ScenePath + "（进 Play 后截图验收）");
+            Debug.Log("[几何画廊] 已生成 " + k_ScenePath + "（进 Play 后截图验收）");
         }
 
         // ---------- 构件 ----------
@@ -157,9 +157,32 @@ namespace P1.Editor
             return img;
         }
 
-        static void CreatePanel(Transform parent, string name, Vector2 pos, Vector2 size, Color fill,
-            Color textColor, bool halftoneDots, bool tail, UIThemeSO theme, string caption,
-            float tailAngle = 270f)
+        static void CreateRotatedBlock(Transform parent, string name, Vector2 pos, Vector2 size,
+            Color fill, float rotation, bool circle = false)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(UIInkShapeGraphic));
+            go.transform.SetParent(parent, false);
+            var rect = (RectTransform)go.transform;
+            rect.sizeDelta = size;
+            rect.anchoredPosition = pos;
+            rect.localRotation = Quaternion.Euler(0f, 0f, rotation);
+
+            var shape = go.GetComponent<UIInkShapeGraphic>();
+            shape.Shape = circle ? UIInkShape.Blob : UIInkShape.SharpRect;
+            shape.ApplyComic(fill, false);
+            shape.WobbleAmplitude = 0f;
+            shape.raycastTarget = false;
+        }
+
+        static void CreateBlock(Transform parent, string name, Vector2 pos, Vector2 size, Color fill,
+            Color textColor, string caption, UIThemeSO theme)
+        {
+            CreateShape(parent, name, pos, size, UIInkShape.SharpRect, fill, textColor, caption, theme);
+        }
+
+        static void CreateShape(Transform parent, string name, Vector2 pos, Vector2 size,
+            UIInkShape shapeKind, Color fill, Color textColor, string caption, UIThemeSO theme)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             go.transform.SetParent(parent, false);
@@ -168,58 +191,34 @@ namespace P1.Editor
             rect.anchoredPosition = pos;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = tail ? UIInkShape.SpeechBubble : UIInkShape.RoundedRect;
-            shape.ApplyComic(fill, halftoneDots);
-            shape.CornerRadius = tail ? ComicStyle.CornerBubble : ComicStyle.CornerSharp;
-            shape.SpeechTail = tail;
-            shape.TailAngle = tailAngle;
+            shape.Shape = shapeKind;
+            shape.ApplyComic(fill, false);
             shape.raycastTarget = false;
 
-            CreateText(go.transform, "Caption", caption, 30f, new Vector2(0f, 0f), size * 0.72f,
+            float captionSize = Mathf.Min(size.x, size.y) < 180f ? 20f : 26f;
+            CreateText(go.transform, "Caption", caption, captionSize, Vector2.zero, size * 0.8f,
                 theme, display: false, fill: textColor, align: TextAlignmentOptions.Center);
         }
 
-        static void CreateButtonSample(Transform parent, Vector2 pos, string label, Color fill, UIThemeSO theme,
-            bool pressed = false)
+        static void CreateButtonSample(Transform parent, Vector2 pos, string label, Color fill, Color textColor,
+            UIThemeSO theme, bool pressed = false)
         {
             var go = new GameObject("Btn_" + label.Replace(" ", ""),
                 typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(Button));
             go.transform.SetParent(parent, false);
             var rect = (RectTransform)go.transform;
-            rect.sizeDelta = new Vector2(240f, 96f);
-            rect.anchoredPosition = pos;
+            rect.sizeDelta = new Vector2(250f, 96f);
+            rect.anchoredPosition = pos + (pressed ? new Vector2(0f, ComicStyle.PressOffsetY) : Vector2.zero);
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.ApplyComic(fill, true);
-            shape.Shape = UIInkShape.RoundedRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
-            shape.HardShadow = !pressed;
-            shape.ShadowOffset = pressed
-                ? Vector2.zero
-                : new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
-            shape.HalftoneAlpha = pressed ? ComicStyle.HalftoneHoverAlpha : ComicStyle.HalftoneAlpha;
+            shape.Shape = UIInkShape.SharpRect;
+            shape.ApplyComic(fill, false);
+            shape.BorderWidth = ComicStyle.Border;
+            shape.BorderColor = ComicStyle.Ink;
 
-            CreateChunkyText(go.transform, "Label", label, 26f, Vector2.zero, new Vector2(220f, 70f),
-                theme, display: false, fill: ComicStyle.Ink, align: TextAlignmentOptions.Center);
-        }
-
-        static void CreateBadge(Transform parent, Vector2 pos, string text, Color fill)
-        {
-            var go = new GameObject("Badge_" + text, typeof(RectTransform), typeof(CanvasRenderer),
-                typeof(UIInkShapeGraphic), typeof(ComicBadge));
-            go.transform.SetParent(parent, false);
-            var rect = (RectTransform)go.transform;
-            rect.sizeDelta = new Vector2(150f, 54f);
-            rect.anchoredPosition = pos;
-
-            var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.ApplyComic(fill, false, ComicStyle.Border, new Vector2(5f, -5f));
-            shape.Shape = UIInkShape.SpeechBubble;
-            shape.CornerRadius = 14f;
-
-            var label = CreateText(go.transform, "Label", text, 26f, Vector2.zero, new Vector2(140f, 44f),
-                null, display: true, fill: ComicStyle.Ink, align: TextAlignmentOptions.Center);
-            label.fontStyle = FontStyles.Bold;
+            CreateText(go.transform, "Label", label, 26f, Vector2.zero, new Vector2(230f, 70f),
+                theme, display: false, fill: textColor, align: TextAlignmentOptions.Center)
+                .fontStyle = FontStyles.Bold;
         }
 
         static TextMeshProUGUI CreateText(Transform parent, string name, string text, float size,
@@ -237,6 +236,7 @@ namespace P1.Editor
             tmp.fontSize = size;
             tmp.color = fill;
             tmp.alignment = align;
+            tmp.fontStyle = display ? FontStyles.Bold : FontStyles.Normal;
             tmp.textWrappingMode = TextWrappingModes.NoWrap;
             tmp.raycastTarget = false;
 
@@ -247,14 +247,6 @@ namespace P1.Editor
             }
 
             return tmp;
-        }
-
-        static void CreateChunkyText(Transform parent, string name, string text, float size,
-            Vector2 pos, Vector2 box, UIThemeSO theme, bool display, Color fill, TextAlignmentOptions align)
-        {
-            var tmp = CreateText(parent, name, text, size, pos, box, theme, display, fill, align);
-            var chunky = tmp.gameObject.AddComponent<UIChunkyText>();
-            chunky.Configure(theme, text, size, display, true, fill, true);
         }
 
         static void Stretch(RectTransform rect)

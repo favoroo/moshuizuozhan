@@ -120,16 +120,9 @@ namespace P1.Weapons
                 : Mathf.Lerp(damageMin, damageMax * 0.62f, charge);
 
             Vector3 muzzle = host.MuzzlePosition;
-            Vector3 flatAim = aim.FlatDirection;
 
-            // 瞄准地面点：光束带一点俯角射向准星，raycast 会在地面处精确截断并铺出墨线。
-            Vector3 direction = flatAim;
-            if (aim.HasGroundPoint)
-            {
-                Vector3 toTarget = aim.GroundPoint + Vector3.up * 0.3f - muzzle;
-                if (toTarget.sqrMagnitude > 0.0001f)
-                    direction = toTarget.normalized;
-            }
+            // 沿「枪口 → 准星命中点」发射：抬头就是一条朝天的光束，对墙就在墙面截断并铺墨线。
+            Vector3 direction = aim.GetShotDirection(muzzle);
 
             float lineRadius = Config != null ? Mathf.Max(0.05f, Config.chargeLineRadius) : 0.55f;
             float impactRadius = Config != null ? Mathf.Max(0.05f, Config.chargeImpactRadius) : 1.2f;

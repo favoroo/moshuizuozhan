@@ -155,7 +155,11 @@ namespace P1.Weapons
             Vector3 flatAim = aim.FlatDirection;
             float baseYaw = Mathf.Atan2(flatAim.x, flatAim.z) * Mathf.Rad2Deg;
             Vector3 origin = host.Position + Vector3.up * 1.15f + flatAim * 0.55f;
-            float pitch = pitchDegrees * Mathf.Deg2Rad;
+
+            // 挥击仰角跟随视角（对齐 INKWAVE）：低头最多压低 11.5°，抬头最多抬高 28.6°，
+            // 因此抬头挥击能把墨浪甩到高台/掩体上方，低头则贴着地面铺。
+            float aimPitch = Mathf.Atan2(aim.Direction.y, new Vector2(aim.Direction.x, aim.Direction.z).magnitude);
+            float pitch = pitchDegrees * Mathf.Deg2Rad + Mathf.Clamp(aimPitch, -0.2f, 0.5f);
 
             for (int i = 0; i < drops; i++)
             {

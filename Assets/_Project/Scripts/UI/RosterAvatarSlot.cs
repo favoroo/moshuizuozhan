@@ -26,6 +26,9 @@ namespace P1.UI
         [SerializeField] private Image deathIcon;
         [SerializeField] private UIProgressRingGraphic progressRing;
         [SerializeField] private UIRotatingRingGraphic specialReadyRing;
+
+        [Tooltip("几何风就绪角标（右上角纯黄方块）")]
+        [SerializeField] private UIInkShapeGraphic specialReadyPip;
         [SerializeField] private TMP_Text countdownText;
         [SerializeField] private RectTransform countdownBadge;
         [SerializeField] private Image youIndicatorArrow;
@@ -195,10 +198,10 @@ namespace P1.UI
             UIThemeSO resolvedTheme = UIThemeSO.Resolve(theme);
             Color teamColor = resolvedTheme.GetTeamColor(team);
 
-            // 背景底色与形状：存活队伍色，阵亡态红底
+            // 背景底色与形状：存活为队色纯色块，阵亡为黑底纯色块
             if (backgroundBlob != null)
             {
-                backgroundBlob.color = isAlive ? teamColor : ComicStyle.Red;
+                backgroundBlob.color = isAlive ? teamColor : ComicStyle.Ink;
             }
 
             // 乌贼图标三态与兜底（绝不留白块）
@@ -227,7 +230,7 @@ namespace P1.UI
                 }
             }
 
-            // 阵亡 X 标（黑 X）与兜底
+            // 阵亡 X 标（纯 Red 红 X）与兜底
             if (deathIcon != null)
             {
                 deathIcon.gameObject.SetActive(!isAlive);
@@ -236,7 +239,7 @@ namespace P1.UI
                     if (deathIcon.sprite != null)
                     {
                         deathIcon.enabled = true;
-                        deathIcon.color = ComicStyle.Ink;
+                        deathIcon.color = ComicStyle.Red;
                         if (fallbackDeath != null) fallbackDeath.SetActive(false);
                     }
                     else
@@ -251,7 +254,7 @@ namespace P1.UI
                 }
             }
 
-            // 阵亡进度环与角标（5px 加粗环）
+            // 阵亡进度环与角标（5px 加粗环，红字红环）
             if (progressRing != null)
             {
                 if (!isAlive && remaining > 0f)
@@ -259,7 +262,7 @@ namespace P1.UI
                     progressRing.gameObject.SetActive(true);
                     float fill = Mathf.Clamp01(1f - (remaining / Mathf.Max(0.1f, duration)));
                     progressRing.Progress = fill;
-                    progressRing.ProgressColor = ComicStyle.Yellow;
+                    progressRing.ProgressColor = ComicStyle.Red;
                 }
                 else
                 {
@@ -268,7 +271,7 @@ namespace P1.UI
                 }
             }
 
-            // 倒计时文字角标
+            // 倒计时文字角标（红字）
             if (countdownBadge != null)
             {
                 countdownBadge.gameObject.SetActive(!isAlive && remaining > 0f);
@@ -278,6 +281,7 @@ namespace P1.UI
             {
                 if (!isAlive)
                 {
+                    countdownText.color = ComicStyle.Red;
                     int secs = Mathf.CeilToInt(Mathf.Max(0f, remaining));
                     if (secs != _lastDisplayedSecs)
                     {
@@ -291,15 +295,16 @@ namespace P1.UI
                 }
             }
 
-            // 大招金光环
-            if (specialReadyRing != null)
+            // 大招就绪：几何风不再用旋转金环，改为右上角黄色方块硬切显示
+            if (specialReadyRing != null) specialReadyRing.Intensity = 0f;
+            if (specialReadyPip == null)
             {
-                float targetIntensity = isSpecialReady ? 1f : 0f;
-                specialReadyRing.Intensity = Mathf.MoveTowards(specialReadyRing.Intensity, targetIntensity, Time.unscaledDeltaTime * 6f);
-                if (isSpecialReady)
-                {
-                    specialReadyRing.color = resolvedTheme != null ? resolvedTheme.readyGold : GoldRingColor;
-                }
+                var pip = transform.Find("SpecialReadyPip");
+                if (pip != null) specialReadyPip = pip.GetComponent<UIInkShapeGraphic>();
+            }
+            if (specialReadyPip != null && specialReadyPip.gameObject.activeSelf != isSpecialReady)
+            {
+                specialReadyPip.gameObject.SetActive(isSpecialReady);
             }
 
             // 「YOU」角标显示
@@ -311,25 +316,28 @@ namespace P1.UI
 
         private void OnRespawned()
         {
+            // 几何大胆风：纯色硬切，去掉描边弹跳与果冻弹簧
             if (springMotion != null)
             {
-                springMotion.PlayIn(0f);
+                springMotion.SnapHome();
             }
         }
 
         private void OnKilled()
         {
+            // 几何大胆风：纯色硬切，去掉描边弹跳
             if (springMotion != null)
             {
-                springMotion.Punch(0.08f);
+                springMotion.SnapHome();
             }
         }
 
         private void OnSpecialReadyTriggered()
         {
+            // 几何大胆风：纯色硬切，去掉描边弹跳
             if (springMotion != null)
             {
-                springMotion.Punch(0.08f);
+                springMotion.SnapHome();
             }
         }
 
@@ -367,6 +375,7 @@ namespace P1.UI
                 if (progressRing != null) progressRing.gameObject.SetActive(false);
                 if (countdownBadge != null) countdownBadge.gameObject.SetActive(false);
                 if (specialReadyRing != null) specialReadyRing.Intensity = 0f;
+                if (specialReadyPip != null) specialReadyPip.gameObject.SetActive(false);
                 if (youBadge != null) youBadge.SetActive(isLocalPlayer);
             }
         }

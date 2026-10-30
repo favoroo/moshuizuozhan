@@ -59,7 +59,7 @@ preflight() {
             say "✓ 编译干净"
             return 0
         fi
-        say "… 编辑器正在重载/编译（$state），等待 5s"
+        say "… 编辑器正在重载/编译（${state}），等待 5s"
         sleep 5
     done
     say "✗ 编译状态 60s 内未就绪（先跑 unity status 确认编辑器活着）"
@@ -170,7 +170,7 @@ case "$MODE" in
         [ $rc -eq 0 ] && { run_with_retry PlayMode "$UI_CATEGORY" 240 category; rc=$?; }
         ;;
     *)
-        say "未知预设：$MODE（可用：fast | edit | play | ui | all）"
+        say "未知预设：${MODE}（可用：fast | edit | play | ui | all）"
         exit 64
         ;;
 esac

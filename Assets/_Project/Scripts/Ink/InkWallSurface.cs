@@ -503,8 +503,34 @@ namespace P1.Ink
         {
             for (int i = 0; i < _faces.Count; i++)
             {
-                _faces[i].UploadIfDirty();
+                InkWallFace face = _faces[i];
+                if (!face.UploadIfDirty())
+                    continue;
+
+                // 自愈：这次上传后重新把该面的墨迹贴图绑回渲染器。
+                // BuildFaceVisual 只在创建时设过一次 MPB；历史上 OcclusionFader 恢复不透明时
+                // 会 SetPropertyBlock(null) 把这唯一的绑定抹掉，导致墙体已经涂上墨却完全看不见。
+                // 仅在真正发生上传（该面被打过墨）时重绑，空闲帧零开销。
+                RebindFaceTexture(i, face);
             }
+        }
+
+        /// <summary>把某张立面的墨迹贴图重新写进对应渲染器的 MaterialPropertyBlock。</summary>
+        private void RebindFaceTexture(int index, InkWallFace face)
+        {
+            if (index < 0 || index >= _faceRenderers.Count)
+                return;
+
+            Renderer target = _faceRenderers[index];
+            if (target == null || face == null || face.Texture == null)
+                return;
+
+            if (_propBlock == null)
+                _propBlock = new MaterialPropertyBlock();
+
+            target.GetPropertyBlock(_propBlock);
+            _propBlock.SetTexture(InkTexProp, face.Texture);
+            target.SetPropertyBlock(_propBlock);
         }
 
         private InkWallFace FindFace(Vector3 worldNormal)

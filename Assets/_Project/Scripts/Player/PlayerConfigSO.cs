@@ -65,6 +65,8 @@ namespace P1.Player
 
         [Header("死亡与复活")]
         public float respawnDelay = 4.0f;
+        [Tooltip("复活后的出生保护时长（秒）。期间免疫伤害与敌方墨水灼烧；开局站位与重开比赛不享受，0 = 关闭")]
+        public float respawnInvulnerabilitySeconds = 3.0f;
         public float deathExplosionSplatRadius = 1.8f;
 
         [Header("击杀打击反馈 / Game Feel (P6-A)")]
@@ -80,5 +82,13 @@ namespace P1.Player
         public float localHitTraumaMin = 0.3f;
         [Tooltip("自身受击时的最高 Camera Trauma（满额 100 伤害时取该值）")]
         public float localHitTraumaMax = 1.0f;
+
+        [Header("瞄准姿态 (Aim Pose)")]
+        [Tooltip("武器模型承担相机俯仰的权重：1 = 完全跟随准星，枪口指向瞄准点")]
+        public float aimPoseWeaponPitchWeight = 1f;
+        [Tooltip("胸腔分担相机俯仰的权重：0.18 = 只轻微前倾，身体保持直立（对齐 Inkwave）")]
+        public float aimPoseChestPitchWeight = 0.18f;
+        [Tooltip("瞄准姿态平滑时间（秒）：太小会跟手但抖，太大会有延迟感")]
+        public float aimPoseSmoothTime = 0.07f;
     }
 }

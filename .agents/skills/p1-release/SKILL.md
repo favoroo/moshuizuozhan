@@ -68,8 +68,11 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
 ⑤ 向用户汇报发布验证清单（含两端 URL、APK 附件状态与 SHA-256）
 ```
 
-- `build` 阶段：校验版本一致性 → 自动选择构建通道（GUI 编辑器在跑 → Pipeline；否则 batchmode）→ **校验 APK 包内 versionName/versionCode** → SHA-256 → 原子写 `build/release-meta.json`（含 git HEAD 与 dirty 标记）。
-- `publish` 阶段：等待构建元数据就绪 → 预检（工作树干净、tag 若已存在必须与 HEAD 一致）→ 重算 SHA-256 与包内版本 → 校验 PlayerSettings 版本 → 创建 annotated tag → **并行**推送双端 → **并行**创建双端 Release → **并行**上传 APK（同名旧附件按体积替换）→ 幂等可重试 → 双端验证（附件状态 + 体积）→ 自动清理双端老版本附件（GitHub 最近 10 个 / Gitee 最近 3 个）。
+- `build` 阶段：校验版本一致性 → **编辑器版本预检**（GUI 编辑器在跑时先确认已通过 Domain Reload 加载目标 `APP_VERSION`，否则自动触发 Refresh 并等待；不通过就拒绝构建，避免打出一个旧版本的包白等一整轮）→ 自动选择构建通道（GUI 编辑器在跑 → Pipeline；否则 batchmode）→ **校验 APK 包内 versionName/versionCode** → SHA-256 → 原子写 `build/release-meta.json`（含 git HEAD 与 dirty 标记）。
+- `publish` 阶段：等待构建元数据就绪 → 预检（工作树干净、tag 若已存在必须与 HEAD 一致）→ 重算 SHA-256 与包内版本 → 校验 PlayerSettings 版本 → 创建 annotated tag → **先并行推送 tag（秒级，Release 只依赖 tag）** → **并行**做两件事：推送分支（可能是几十 MB 的大提交）与「创建双端 Release + 上传 APK」→ 幂等可重试 → 双端验证（附件状态 + 体积）→ 自动清理双端老版本附件（GitHub 最近 10 个 / Gitee 最近 3 个）。
+- **静默期有心跳**：`git push`、APK 上传、编辑器内构建这些数分钟无输出的步骤，每 15–20 秒打一行 `… 仍在进行 (Ns)`，用来区分「正在传输」和「已经挂死」。
+- **网络瞬时错误自动重试**：`git push` 与 APK 上传遇到 `SSL_ERROR_SYSCALL` / `Connection reset` / `RPC failed` 等会退避重试（3 次）；上传重试前先查附件，已成功则直接复用，不会重复上传。
+- **Gitee 308 重定向已处理**：`http_json` 显式跟随 3xx（保留 method/headers/data），Gitee 上传偶发的 308 不再被误判为失败。
 
 ### 2. 令牌获取（严禁写入任何仓库文件）
 
@@ -131,8 +134,12 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
 |----|----|----|
 | `unity build` 日志出现 `ExitDontLaunchBugReporter ... return code 1` | GUI 编辑器占用 `Temp/UnityLockfile`，batchmode 起不来 | `build` 现在会自动检测并改走 Pipeline；若仍失败，确认 Unity 版本与项目一致，或在编辑器内用菜单 `P1/构建/9` 出包后再跑 `build` 复用（会自动校验版本） |
 | 构建期间 `unity command ...` 全部 504 | 编辑器主线程被同步构建占满 | 正常现象，等待构建结束；不要 kill 编辑器 |
-| `未找到与目标版本一致的 APK 产物` | 复用的 APK 是旧版本（固定名 `InkTurfDemo.apk`） | 重新构建；确认 `GameVersion.cs` 与 PlayerSettings 已同步 |
+| `未找到与目标版本一致的 APK 产物`（但构建明明"成功"了） | 改了 `GameVersion.cs` 后编辑器还没 Domain Reload，菜单构建读到的是**旧常量**，于是打出一个旧版本的包 | 已由 `build` 的编辑器版本预检拦截（会先触发 Refresh 并等待加载目标版本）。若仍出现，手动跑一次 `script.eval` 读 `GameVersion.APP_VERSION` 确认，再 `AssetDatabase.Refresh()` 后重建 |
 | `APK 版本不符: 包内 X ... 期望 Y` | 同上，或构建中途失败留下了旧包 | 用 `build --force` 重建 |
+| Gitee 上传报 `失败(308)` / `Gitee 上传 APK 失败(308): None` | Gitee 附件上传偶发返回 308 重定向，Python 3.9 的 `urlopen` 默认不跟随 | 已修复：`http_json` 显式跟随 3xx 并保留 method/body。若仍失败，脚本会退避重试 3 次；重试前会先查附件避免重复上传 |
+| `Gitee 老版本附件清理跳过: 'id'` | Gitee `release.assets` 只有 `name/url`，没有附件 id，旧代码直接读 `asset["id"]` 抛 KeyError | 已修复：改为查 `/attach_files` 拿到真实附件 id 再删 |
+| `git push` 报 `SSL_ERROR_SYSCALL` / `RPC failed` | GitHub 直连网络抖动 | 已内置重试（3 次退避）。仍失败时先确认网络/代理，再单独 `git push origin main vX.Y.Z` |
+| 发布过程长时间无输出，像卡死 | 大提交推送（几十 MB）与 55 MB APK 上传，实测可达 5–10 分钟 | 现在每 15–20 秒打印 `… 仍在进行 (Ns)` 心跳；看到心跳说明在传，不是挂死 |
 | `未找到 aapt2/aapt` 警告 | 未安装 Android build-tools 或 SDK 路径未识别 | 安装 build-tools 或设置 `ANDROID_HOME`；脚本会退化用文件名 + 时间戳校验 |
 | `tag vX.Y.Z 已存在但指向 ... 与当前 HEAD 不一致` | 复用了旧 tag，却提交了新代码 | 递增版本号后重新发布，禁止覆盖旧 tag |
 | 构建日志写「APK 大小 808 MB」但 `build/` 里只有 42 MB | 那是 Unity `summary.totalSize`（未压缩总大小） | 以 `build` 脚本输出的实际文件大小为准 |

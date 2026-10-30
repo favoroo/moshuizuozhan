@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -64,6 +65,37 @@ def run(cmd: list, **kw) -> subprocess.CompletedProcess:
     kw.setdefault('capture_output', True)
     kw.setdefault('text', True)
     return subprocess.run(cmd, **kw)
+
+
+class heartbeat:
+    """长任务心跳：让等待中的步骤每隔 N 秒输出一行，避免"卡住"错觉。
+
+    git push / APK 上传动辄 5-10 分钟且 subprocess 与 urllib 都不产生日志，
+    静默期里用户无法区分"正在传输"和"已经挂死"。
+    """
+
+    def __init__(self, label: str, interval: float = 15.0):
+        self.label = label
+        self.interval = interval
+        self._stop = threading.Event()
+        self._thread = None
+        self._started = 0.0
+
+    def __enter__(self):
+        self._started = time.time()
+
+        def _loop():
+            while not self._stop.wait(self.interval):
+                log(f'  … {self.label} 仍在进行 ({(time.time() - self._started):.0f}s)')
+
+        self._thread = threading.Thread(target=_loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1)
 
 
 # ---------------------------------------------------------------- 通用 HTTP
@@ -328,6 +360,50 @@ def editor_is_running() -> bool:
     return 'ready' in out and str(REPO_ROOT) in out
 
 
+def editor_loaded_version(timeout: int = 20) -> str | None:
+    """查询 GUI 编辑器当前加载的 GameVersion.APP_VERSION。
+
+    改了 GameVersion.cs 后编辑器需要 Domain Reload 才会加载新常量；若在重载完成前
+    触发菜单构建，Unity 会沿用旧版本号打出一个"旧版本"的包（实测白跑约 200 秒）。
+    """
+    try:
+        r = run([UNITY_CLI, 'command', '--timeout', str(timeout), 'script.eval',
+                 '--code', 'return P1.Core.GameVersion.APP_VERSION;'], timeout=timeout + 10)
+        out = (r.stdout or '') + (r.stderr or '')
+        m = re.search(r'"result"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+)"', out)
+        return m.group(1) if m else None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+def ensure_editor_version(target_ver: str, timeout: int = 60) -> None:
+    """构建前确认编辑器已加载目标版本；必要时触发 Refresh 并等待重载完成。"""
+    if not editor_is_running():
+        return
+    deadline = time.time() + timeout
+    triggered = False
+    while time.time() < deadline:
+        loaded = editor_loaded_version()
+        if loaded == target_ver:
+            log(f'编辑器已加载目标版本 {target_ver}')
+            return
+        if loaded is None:
+            log('⚠ 无法读取编辑器版本（Pipeline 未就绪），跳过版本预检')
+            return
+        if not triggered:
+            log(f'编辑器仍加载旧版本 {loaded}（期望 {target_ver}），触发资源刷新等待重载...')
+            try:
+                run([UNITY_CLI, 'command', '--timeout', '20', 'script.eval',
+                     '--code', 'UnityEditor.AssetDatabase.Refresh(); return "refresh";'],
+                    timeout=30)
+            except subprocess.TimeoutExpired:
+                pass
+            triggered = True
+        time.sleep(3)
+    die(f'编辑器等待 {timeout}s 后仍未加载目标版本 {target_ver}。\n'
+        '  请确认 GameVersion.cs 已保存、编译无错误（script.recompile_status），再重跑 build。')
+
+
 def wait_for_editor_build(log_path: Path, log_offset: int, timeout: int = 1200) -> bool:
     """轮询编辑器日志的新增内容，等待菜单构建结束。
 
@@ -407,13 +483,16 @@ def cmd_build(args) -> None:
         if editor_is_running() and not args.batchmode:
             # GUI 编辑器持有工程锁，batchmode 必然启动失败；改走 Pipeline 触发同一构建方法
             log('检测到 GUI 编辑器正在运行，改用 Pipeline 菜单构建（避开工程锁）...')
+            # 先确认编辑器已重载到目标版本，否则会打出一个旧版本的包并白等一次完整构建
+            ensure_editor_version(target_ver)
             log(f'菜单: {ANDROID_BUILD_MENU}')
             editor_log = REPO_ROOT / 'Logs' / 'Editor.log'
             log_offset = editor_log.stat().st_size if editor_log.exists() else 0
             try:
-                r = run([UNITY_CLI, 'command', '--timeout', str(args.build_timeout),
-                         'editor', 'invoke_menu', '--path', ANDROID_BUILD_MENU],
-                        timeout=args.build_timeout + 60)
+                with heartbeat('Unity 编辑器内构建'):
+                    r = run([UNITY_CLI, 'command', '--timeout', str(args.build_timeout),
+                             'editor', 'invoke_menu', '--path', ANDROID_BUILD_MENU],
+                            timeout=args.build_timeout + 60)
                 out = (r.stdout or '') + (r.stderr or '')
                 if 'No command named' in out or 'Command Not Found' in out:
                     die(f'Pipeline 不可用，无法在编辑器内构建:\n{out[-1000:]}')
@@ -587,7 +666,7 @@ def current_branch() -> str:
 
 
 def git_push(remote: str, branch: str, tag: str) -> None:
-    r = run(['git', 'push', remote, branch, tag])
+    r = run(['git', 'push', remote, branch, tag], timeout=900)
     if r.returncode != 0:
         if 'already exists' in r.stderr or 'up-to-date' in r.stderr:
             log(f'git push {remote}: {branch} / {tag} 已同步，视为成功')
@@ -595,13 +674,63 @@ def git_push(remote: str, branch: str, tag: str) -> None:
         raise RuntimeError(f'git push {remote} 失败: {r.stderr[-500:]}')
 
 
-def push_both(branch: str, tag: str) -> None:
-    log('并行推送分支+标签到 origin(GitHub) / gitee(Gitee)...')
+def git_push_ref(remote: str, ref: str, attempts: int = 3) -> None:
+    """推送单个 ref，对网络类瞬时错误重试。
+
+    GitHub 直连偶发 SSL_ERROR_SYSCALL / connection reset；单次失败不代表推送内容有问题，
+    重试通常几秒内成功（实测首次失败后重试一次即完成）。
+    """
+    last_err = ''
+    for attempt in range(attempts):
+        r = run(['git', 'push', remote, ref], timeout=900)
+        if r.returncode == 0:
+            log(f'git push {remote} {ref} 完成')
+            return
+        err = (r.stderr or '') + (r.stdout or '')
+        if 'already exists' in err or 'up-to-date' in err:
+            log(f'git push {remote} {ref}: 已同步，视为成功')
+            return
+        last_err = err[-500:]
+        transient = any(k in err for k in (
+            'SSL_ERROR_SYSCALL', 'Connection reset', 'Could not resolve',
+            'Failed to connect', 'RPC failed', 'early EOF', 'timed out'))
+        if not transient or attempt == attempts - 1:
+            raise RuntimeError(f'git push {remote} {ref} 失败: {last_err}')
+        wait = 3 * (attempt + 1)
+        log(f'git push {remote} {ref} 遇到瞬时网络错误，{wait}s 后重试 '
+            f'({attempt + 1}/{attempts}): {err.strip().splitlines()[-1][:160] if err.strip() else ""}')
+        time.sleep(wait)
+
+
+def push_tags_both(tag: str) -> None:
+    """只推 tag：对象小、秒级完成，双端 Release 创建只依赖 tag 已存在于远端。"""
+    log('并行推送标签到 origin(GitHub) / gitee(Gitee)...')
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-        futs = {ex.submit(git_push, rm, branch, tag): rm for rm in ('origin', 'gitee')}
+        futs = {ex.submit(git_push_ref, rm, tag): rm for rm in ('origin', 'gitee')}
         for f in concurrent.futures.as_completed(futs):
             f.result()
-            log(f'git push {futs[f]} 完成 ({branch} + {tag})')
+            log(f'git push {futs[f]} 完成 ({tag})')
+
+
+def push_branch_both(branch: str) -> None:
+    """推分支：可能是大提交（几十 MB），耗时数分钟，可与 APK 上传并行。"""
+    log('并行推送分支到 origin(GitHub) / gitee(Gitee)...')
+    with heartbeat('git push 分支双端'):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            futs = {ex.submit(git_push_ref, rm, branch): rm for rm in ('origin', 'gitee')}
+            for f in concurrent.futures.as_completed(futs):
+                f.result()
+                log(f'git push {futs[f]} 完成 ({branch})')
+
+
+def push_both(branch: str, tag: str) -> None:
+    log('并行推送分支+标签到 origin(GitHub) / gitee(Gitee)...')
+    with heartbeat('git push 双端'):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            futs = {ex.submit(git_push, rm, branch, tag): rm for rm in ('origin', 'gitee')}
+            for f in concurrent.futures.as_completed(futs):
+                f.result()
+                log(f'git push {futs[f]} 完成 ({branch} + {tag})')
 
 
 def gh_headers(token: str) -> dict:
@@ -681,65 +810,80 @@ def upload_apks(release_ids: dict, apk_path: Path, apk_name: str, tokens: dict) 
     file_bytes = apk_path.read_bytes()
 
     def upload_gh():
-        # 预先检查是否有旧同名附件
-        st_chk, d_rel = http_json(f'{GITHUB_API}/releases/{release_ids["gh"]}', headers=gh_headers(tokens['gh']))
-        if st_chk == 200 and d_rel:
-            for item in d_rel.get('assets', []):
-                if item.get('name') == apk_name:
+        # 上传可能耗时数分钟；失败后重试前先查附件，已成功则直接复用（幂等）
+        for attempt in range(3):
+            # 预先检查是否有旧同名附件
+            st_chk, d_rel = http_json(f'{GITHUB_API}/releases/{release_ids["gh"]}', headers=gh_headers(tokens['gh']))
+            if st_chk == 200 and d_rel:
+                for item in d_rel.get('assets', []):
+                    if item.get('name') != apk_name:
+                        continue
                     if item.get('size') == len(file_bytes):
                         log(f'GitHub 附件已存在且体积一致 ({len(file_bytes)} 字节)，跳过上传')
                         return
-                    else:
-                        log(f'GitHub 存在旧附件 ({item.get("size")} 字节)，正在删除替换...')
-                        http_json(f'{GITHUB_API}/releases/assets/{item["id"]}', method='DELETE', headers=gh_headers(tokens['gh']))
-                        break
+                    log(f'GitHub 存在旧附件 ({item.get("size")} 字节)，正在删除替换...')
+                    http_json(f'{GITHUB_API}/releases/assets/{item["id"]}', method='DELETE',
+                              headers=gh_headers(tokens['gh']))
+                    break
 
-        st, d = http_json(
-            f'https://uploads.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}'
-            f'/releases/{release_ids["gh"]}/assets?'
-            f'{urllib.parse.urlencode({"name": apk_name})}',
-            'POST',
-            headers={**gh_headers(tokens['gh']), 'Content-Type': 'application/octet-stream'},
-            data=file_bytes, timeout=600)
-        if st != 201 or not d:
-            raise RuntimeError(f'GitHub 上传 APK 失败({st}): {d}')
-        log(f"GitHub 上传完成: {d['name']} ({d['size']} 字节)")
+            st, d = http_json(
+                f'https://uploads.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}'
+                f'/releases/{release_ids["gh"]}/assets?'
+                f'{urllib.parse.urlencode({"name": apk_name})}',
+                'POST',
+                headers={**gh_headers(tokens['gh']), 'Content-Type': 'application/octet-stream'},
+                data=file_bytes, timeout=600)
+            if st == 201 and d:
+                log(f"GitHub 上传完成: {d['name']} ({d['size']} 字节)")
+                return
+            if attempt == 2:
+                raise RuntimeError(f'GitHub 上传 APK 失败({st}): {d}')
+            wait = 5 * (attempt + 1)
+            log(f'GitHub 上传失败({st})，{wait}s 后重试 ({attempt + 1}/3)')
+            time.sleep(wait)
 
     def upload_gitee():
-        # 先查已挂附件：同名同体积跳过；同名不同体积删除后重传
-        st_list, d_list = http_json(
-            f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files'
-            f'?access_token={tokens["gitee"]}')
-        if st_list == 200 and isinstance(d_list, list):
-            for item in d_list:
-                if item.get('name') != apk_name:
-                    continue
-                if item.get('size') == len(file_bytes):
-                    log(f'Gitee 附件已存在且体积一致 ({len(file_bytes)} 字节)，跳过上传')
-                    return
-                log(f'Gitee 存在同名旧附件 ({item.get("size")} 字节)，删除后重传...')
-                http_json(f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files/{item["id"]}'
-                          f'?access_token={tokens["gitee"]}', method='DELETE')
-                break
+        # 同 GitHub：失败后重试前先查附件，已成功则直接复用（幂等）
+        for attempt in range(3):
+            st_list, d_list = http_json(
+                f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files'
+                f'?access_token={tokens["gitee"]}')
+            if st_list == 200 and isinstance(d_list, list):
+                for item in d_list:
+                    if item.get('name') != apk_name:
+                        continue
+                    if item.get('size') == len(file_bytes):
+                        log(f'Gitee 附件已存在且体积一致 ({len(file_bytes)} 字节)，跳过上传')
+                        return
+                    log(f'Gitee 存在同名旧附件 ({item.get("size")} 字节)，删除后重传...')
+                    http_json(f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files/{item["id"]}'
+                              f'?access_token={tokens["gitee"]}', method='DELETE')
+                    break
 
-        body, ctype = multipart_body({'name': apk_name}, 'file', apk_name, file_bytes)
-        st, d = http_json(
-            f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files',
-            'POST', headers={'Authorization': f"token {tokens['gitee']}",
-                             'Content-Type': ctype},
-            data=body, timeout=600)
-        if st not in (200, 201) or not d:
+            body, ctype = multipart_body({'name': apk_name}, 'file', apk_name, file_bytes)
+            st, d = http_json(
+                f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files',
+                'POST', headers={'Authorization': f"token {tokens['gitee']}",
+                                 'Content-Type': ctype},
+                data=body, timeout=600)
+            if st in (200, 201) and d:
+                log(f'Gitee 上传完成: {apk_name}')
+                return
             if st == 400 and 'already exists' in str(d):
                 log('Gitee 附件已存在（接口返回），跳过重复上传')
                 return
-            raise RuntimeError(f'Gitee 上传 APK 失败({st}): {d}')
-        log(f"Gitee 上传完成: {apk_name}")
+            if attempt == 2:
+                raise RuntimeError(f'Gitee 上传 APK 失败({st}): {d}')
+            wait = 5 * (attempt + 1)
+            log(f'Gitee 上传失败({st})，{wait}s 后重试 ({attempt + 1}/3)')
+            time.sleep(wait)
 
     log(f'并行上传 APK ({apk_name}, {len(file_bytes)} 字节)...')
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-        f1, f2 = ex.submit(upload_gh), ex.submit(upload_gitee)
-        f1.result()
-        f2.result()
+    with heartbeat(f'APK 上传 {len(file_bytes) / 1024 / 1024:.1f} MB', interval=20):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            f1, f2 = ex.submit(upload_gh), ex.submit(upload_gitee)
+            f1.result()
+            f2.result()
 
 
 def verify_releases(tag: str, apk_name: str, tokens: dict, expected_size: int | None = None) -> None:
@@ -870,12 +1014,16 @@ def cmd_publish(args) -> None:
     preflight(tag, tokens)
 
     branch = current_branch()
-    push_both(branch, tag)
+    # 标签对象极小，秒级推完即可让双端创建 Release；分支提交可能几十 MB，
+    # 与 Release 创建 + APK 上传并行，避免串行等待数分钟。
+    push_tags_both(tag)
 
     rel_name = f'墨水作战 {tag}'
-    rel_ids = create_release(tag, rel_name, notes, tokens)
-
-    upload_apks(rel_ids, apk_path, meta['apk_name'], tokens)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        branch_fut = ex.submit(push_branch_both, branch)
+        rel_ids = create_release(tag, rel_name, notes, tokens)
+        upload_apks(rel_ids, apk_path, meta['apk_name'], tokens)
+        branch_fut.result()
     verify_releases(tag, meta['apk_name'], tokens, expected_size=meta['size'])
 
     prune_old_assets(tokens, keep_gh=args.keep_gh, keep_gitee=args.keep_gitee)

@@ -218,13 +218,13 @@ namespace P1.UI
                 fill: new Color(themeResolved.dangerRed.r, themeResolved.dangerRed.g, themeResolved.dangerRed.b, 0f),
                 border: themeResolved.dangerRed, glossAlpha: 0f, innerRimAlpha: 0f);
 
-            // 2) 罐体底
+            // 2) 罐体底（实心纸面：投影只在这一层开，阴影被自己的填充盖住，只露外侧一圈）
             RectTransform bodyRect = NewRect("Body", tankRect);
             Stretch(bodyRect);
             UIInkShapeGraphic bodyShape = bodyRect.gameObject.AddComponent<UIInkShapeGraphic>();
             bodyShape.raycastTarget = false;
             ApplyRectStyle(bodyShape, corner, borderWidth: 0f, fill: themeResolved.panelColor,
-                border: themeResolved.outlineColor, glossAlpha: 0f, innerRimAlpha: 0f);
+                border: themeResolved.outlineColor, glossAlpha: 0f, innerRimAlpha: 0f, hardShadow: true);
 
             // 3) 液面
             const float liquidInset = 4f;
@@ -235,7 +235,7 @@ namespace P1.UI
             liquid.Configure(UILiquidClipShape.RoundedRect, Mathf.Max(2f, corner - liquidInset), 0f,
                 new Color(1f, 1f, 1f, 0.55f),
                 style.tankWaveAmplitude, style.tankWaveSpeed, 1.1f,
-                style.tankColumns, 0, 0.026f,
+                style.tankColumns, style.tankBubbleCount, style.tankBubbleSize,
                 style.tankFillSpring, 1f);
 
             // 4) 副武器耗墨刻度红线（细罐体上要够厚才看得清：深色衬底 + 3.4px 红线）
@@ -250,16 +250,15 @@ namespace P1.UI
             CreateImage("ThresholdLine", marker, themeResolved.dangerRed,
                 new Vector2(style.tankSize.x - 1f, 3.4f));
 
-            // 5) 外框（漫画粗墨边 6px + 硬阴影，压住液体与刻度线）
+            // 5) 外框（漫画粗墨边 6px，压住液体与刻度线）
+            //    这里坚决不能开 HardShadow：外框填充是透明的，而硬阴影是整块实心多边形，
+            //    会把罐内液面整片糊成墨黑（P13 实机截图里的"黑薯条"就是它）。
             RectTransform frameRect = NewRect("Frame", tankRect);
             Stretch(frameRect);
             UIInkShapeGraphic frameShape = frameRect.gameObject.AddComponent<UIInkShapeGraphic>();
             frameShape.raycastTarget = false;
             ApplyRectStyle(frameShape, corner, borderWidth: ComicStyle.Border, fill: new Color(1f, 1f, 1f, 0f),
                 border: ComicStyle.Ink, glossAlpha: 0f, innerRimAlpha: 0f);
-            frameShape.HardShadow = true;
-            frameShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
-            frameShape.ShadowColor = ComicStyle.Ink;
 
             // 6) 百分比读数（纸面标牌：纸白底 + 墨线 + 硬阴影）
             RectTransform plateRect = NewRect("PercentPlate", tankRect);
@@ -281,7 +280,7 @@ namespace P1.UI
             plateShape.color = ComicStyle.Paper;
 
             Text percent = CreateLegacyText("Percent", plateRect, 16f,
-                "100", TextAnchor.MiddleCenter, ComicStyle.Ink);
+                "100%", TextAnchor.MiddleCenter, ComicStyle.Ink);
             percent.fontStyle = FontStyle.Bold;
             Stretch((RectTransform)percent.transform);
 
@@ -316,7 +315,7 @@ namespace P1.UI
         }
 
         private static void ApplyRectStyle(UIInkShapeGraphic graphic, float cornerRadius, float borderWidth,
-            Color fill, Color border, float glossAlpha, float innerRimAlpha)
+            Color fill, Color border, float glossAlpha, float innerRimAlpha, bool hardShadow = false)
         {
             var card = new UIInkCardStyle
             {
@@ -331,9 +330,20 @@ namespace P1.UI
                 glossCenter = 0.74f,
                 glossThickness = 0.14f,
                 innerRimAlpha = innerRimAlpha,
+                // UIInkCardStyle.comicPanel 默认 true（整个矩形画一块实心墨色阴影）。
+                // 透明填充的描边层（外框、告警辉光）如果带这块阴影，内部会被整片盖成墨色，
+                // 所以这里默认关掉，只有实心面板才显式 opt-in。
+                comicPanel = false,
             };
 
             graphic.ApplyStyle(card, fill);
+
+            if (!hardShadow) return;
+
+            // 阴影画在本图元自己的填充之下，只有偏移出去的一圈露在面板外。
+            graphic.HardShadow = true;
+            graphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            graphic.ShadowColor = ComicStyle.Ink;
         }
 
         private static void ApplyPillStyle(UIInkShapeGraphic pill, UIThemeSO theme)

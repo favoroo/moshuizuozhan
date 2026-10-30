@@ -285,9 +285,9 @@ namespace P1.UI
             {
                 frameShape.BorderColor = ComicStyle.Ink;
                 frameShape.BorderWidth = ComicStyle.Border;
-                frameShape.HardShadow = true;
-                frameShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
-                frameShape.ShadowColor = ComicStyle.Ink;
+                // 外框只是 6px 描边、填充全透明；UIInkShapeGraphic 的硬阴影是整块实心多边形，
+                // 一开就会把罐内液面整片盖成墨黑（实机"黑薯条"的成因）。
+                frameShape.HardShadow = false;
                 frameShape.GlossAlpha = 0f;
                 frameShape.DrawGloss = false;
                 frameShape.InnerRimAlpha = 0f;
@@ -315,7 +315,7 @@ namespace P1.UI
             if (!force && percent == _displayedPercent) return;
 
             _displayedPercent = percent;
-            percentLabel.text = percent.ToString();
+            percentLabel.text = $"{percent}%";
         }
     }
 }

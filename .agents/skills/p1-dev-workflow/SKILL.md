@@ -117,6 +117,19 @@ grep -E "error CS|Compilation failed" Logs/compilecheck.log || echo "COMPILE OK"
 "$U" command test status
 ```
 
+**推荐直接用封装脚本 `tools/run_tests.sh`**（编译预检 + 清理残留运行 + 失败摘要，避免多 Agent
+并行时的三类误报：别人的编译中间态、卡在 running 的上一轮、埋在 JSON 里的失败信息）：
+
+```bash
+tools/run_tests.sh fast   # 默认：EditMode 全量 + PlayMode UI 子集（约 45s，改 UI 首选）
+tools/run_tests.sh edit   # 仅 EditMode 全量（约 20s）
+tools/run_tests.sh ui     # 仅 PlayMode UI 子集（[Category("UI")]，约 30s）
+tools/run_tests.sh play   # 仅 PlayMode 全量（约 80s）
+tools/run_tests.sh all    # EditMode + PlayMode 全量
+```
+
+新增 UI 相关 PlayMode 测试类时记得标 `[Category("UI")]`，否则不会进快车道。
+
 现有测试：
 
 - `Tests/EditMode/InkGridTests.cs`：涂色、互刷计数、不可涂格、重置。
@@ -129,6 +142,9 @@ grep -E "error CS|Compilation failed" Logs/compilecheck.log || echo "COMPILE OK"
 - **PlayMode 测试会把任何运行时 log error 判为失败**，是抓 `ParticleSystem` 等隐性问题最有效的手段。
 - 纯逻辑（墨水网格、覆盖率、FSM、数值）必须能 EditMode 无场景测试。
 - 场景测试里传送角色后，`CharacterController.isGrounded` 要到下一次 `Move` 才刷新，注意等待一帧。
+- **别用固定秒数等状态跳转**：用 `PlayModeTestKit.WaitForPhase` / `WaitUntil` 轮询；
+  倒计时、终局定格、复活、风暴云寿命这类纯计时等待用 `PlayModeTestKit.ShortenMatchTimers()` /
+  `WaitGameSecondsAccelerated()` 压缩（见 `Tests/PlayMode/PlayModeTestKit.cs`），断言仍按游戏内秒。
 
 ## 5. 多 Agent 并行防冲突（细则）
 

@@ -59,6 +59,7 @@ namespace P1.UI
         [SerializeField] private UIBurstGraphic victoryBurst;
 
         private RectTransform _contentRoot;
+        private GameObject _fullscreenUnderlay;
         private float _resultElapsed;
         private MatchManager.Phase _lastPhase = (MatchManager.Phase)(-1);
         private int _lastCountdownNumber = -1;
@@ -97,11 +98,23 @@ namespace P1.UI
             verdictText = verdict;
             restartButton = restart;
 
+            if (readyPanel != null)
+            {
+                var rt = (RectTransform)readyPanel.transform;
+                Stretch(rt);
+            }
+            if (resultPanel != null)
+            {
+                var rt = (RectTransform)resultPanel.transform;
+                Stretch(rt);
+            }
+
             EnsureBannerView();
         }
 
         private void Awake()
         {
+            EnsureFullscreenPaperUnderlay();
             EnsureSafeAreaRoot();
             EnsureBannerView();
             EnsureResultVisuals();
@@ -116,9 +129,32 @@ namespace P1.UI
         private Transform ContentRoot => _contentRoot != null ? (Transform)_contentRoot : transform;
 
         /// <summary>
-        /// 主菜单/结算画布原先完全没有安全区适配：横屏刘海机会切掉
-        /// 右上角墨渍装饰、右下角版本号与次级按钮行。
-        /// 运行时新建拉伸容器把既有面板整体搬进去，桌面端视觉零变化。
+        /// 全屏绝对不透明纸面底板：在 Ready 与 Result 阶段激活，
+        /// 100% 覆盖整个物理屏幕（不受 SafeArea 缩进影响），绝对遮蔽 3D 地图，彻底杜绝边缘漏景穿帮。
+        /// </summary>
+        private void EnsureFullscreenPaperUnderlay()
+        {
+            if (_fullscreenUnderlay != null) return;
+
+            UIThemeSO resolved = UIThemeSO.Resolve(uiTheme);
+            var underlayGo = new GameObject("FullscreenPaperUnderlay", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            underlayGo.transform.SetParent(transform, false);
+            underlayGo.transform.SetAsFirstSibling();
+
+            var rt = (RectTransform)underlayGo.transform;
+            Stretch(rt);
+
+            var img = underlayGo.GetComponent<Image>();
+            img.color = resolved.paperColor;
+            img.raycastTarget = false;
+
+            _fullscreenUnderlay = underlayGo;
+        }
+
+        /// <summary>
+        /// 主菜单/结算安全区容器：
+        /// 全屏背景（ReadyPanel / ResultPanel）保持全屏铺满，
+        /// 其他悬浮元素与横幅放入 SafeArea 容器，避免被横屏刘海或手势条切角。
         /// </summary>
         private void EnsureSafeAreaRoot()
         {
@@ -137,13 +173,28 @@ namespace P1.UI
             for (int i = transform.childCount - 1; i >= 0; i--)
             {
                 Transform child = transform.GetChild(i);
-                if (child != null && child != safeGo.transform)
+                if (child != null && child != safeGo.transform && child.gameObject != _fullscreenUnderlay)
                 {
+                    // 全屏背景面板（ReadyPanel 与 ResultPanel）必须覆盖整个物理屏幕，绝不受安全区收缩影响，避免边缘露出 3D 场景
+                    if (readyPanel != null && child.gameObject == readyPanel) continue;
+                    if (resultPanel != null && child.gameObject == resultPanel) continue;
                     child.SetParent(safeRt, false);
                 }
             }
 
             _contentRoot = safeRt;
+
+            // 确保 ReadyPanel 与 ResultPanel 保持全屏拉伸
+            if (readyPanel != null)
+            {
+                var rt = (RectTransform)readyPanel.transform;
+                Stretch(rt);
+            }
+            if (resultPanel != null)
+            {
+                var rt = (RectTransform)resultPanel.transform;
+                Stretch(rt);
+            }
         }
 
         /// <summary>
@@ -886,6 +937,12 @@ namespace P1.UI
         private void ApplyPhase(MatchManager match)
         {
             var phase = match.CurrentPhase;
+
+            if (_fullscreenUnderlay != null)
+            {
+                bool showUnderlay = phase == MatchManager.Phase.Ready || phase == MatchManager.Phase.Result;
+                _fullscreenUnderlay.SetActive(showUnderlay);
+            }
 
             if (readyPanel != null) readyPanel.SetActive(phase == MatchManager.Phase.Ready);
             if (resultPanel != null) resultPanel.SetActive(phase == MatchManager.Phase.Result);

@@ -51,6 +51,12 @@ namespace P1.UI
 
         public int tankColumns = 16;
 
+        [Tooltip("罐内上升气泡数量（0 = 关闭；窄罐体建议 1~2 颗，点缀即可）")]
+        [Range(0, 4)] public int tankBubbleCount = 2;
+
+        [Tooltip("罐内气泡半径（相对罐高的比例）")]
+        [Range(0.004f, 0.05f)] public float tankBubbleSize = 0.02f;
+
         [Header("大招液体球 · 动效")]
         [Range(0f, 0.2f)] public float orbWaveAmplitude = 0.045f;
 

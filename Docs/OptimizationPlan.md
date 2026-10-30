@@ -1379,6 +1379,97 @@
     `InkGround.shader` metal Pass 编译错误所致，与 UI 无关；首轮完整跑中的 2 项 Bot 用例失败亦确认为该 WIP 的编译中间态，单独复跑 2/2 通过）；
     运行时截图 `Logs/ui_verify_menu.png` / `ui_verify_ingame.png` / `ui_verify_mobile.png`：旧顶部面板已消失、移动端模拟下键位键位于暂停键正下方无重叠。
 
+### 测试提速与稳定性（P13-B，2026-10-30，Agent: UI-Review）
+
+- [x] **P13-B PlayMode 套件提速 36% + 测试运行器防误报**
+  - **新增 `Tests/PlayMode/PlayModeTestKit.cs`**：`ShortenMatchTimers()`（反射压缩 3s 倒计时 / 1.6s 终局定格，场景重载自动还原）、
+    `WaitForPhase()`（阶段轮询替代固定秒数）、`WaitGameSecondsAccelerated()`（临时 timeScale=8 等待游戏内秒，try/finally 必还原）。
+  - **用例改造**：MatchFlowTests（3 处 3.4–3.6s + 2.4s 固定等待 → 轮询）、BotAiPlayboxTests（倒计时 3s→0.4s）、
+    ZeroLogErrorGatePlayTests（倒计时压缩 + 风暴云临时配置 6.5s→2.0s，实测 30.9s→22.9s）、
+    SpecialWeaponsPlayTests（风暴云 6.5s→3.0s，7.3s→3.8s）、PhaseAPlayboxSmokeTests（倒计时）、
+    MotorLifecycle/RosterStatePlayTests（4.3s 复活等待 8 倍加速）。断言仍按游戏内秒，契约不变。
+  - **UI 快车道**：11 个 UI 相关 PlayMode 测试类打 `[Category("UI")]`（HUD/触控/菜单/选枪/计时器/结算/准星/打击反馈）。
+  - **新增 `tools/run_tests.sh`**：编译预检（域重载期间等待、编译失败直接指出 `error CS`）→ 清理卡在 running 的残留运行 →
+    轮询并打印失败用例首行原因；预设 `fast|ui|edit|play|all`。同步更新 `AGENTS.md` 与 `p1-dev-workflow` 技能。
+  - **验证**：编译干净；EditMode **219/219（1.9s 测试耗时 / 17s 含启动）**；PlayMode 全量 **72.8s（原 113.1s，−36%）**，
+    **70/73**（3 项 InkAtlasRender 失败为并行 Ink/Shader WIP 的 `InkGround.shader` metal Pass 编译错误，与测试改造无关）；
+    PlayMode UI 子集 **36 条 / 13.8s**，`tools/run_tests.sh fast` 全流程约 45s。
+
+### v0.1.3 线上故障热修：地面无墨迹 + 右下角操作按钮全部点不动（P13-C，2026-10-30）
+
+> 触发：v0.1.3 真机（Android 2670×1200 横屏）实测「地面完全没有喷墨」「右下角射击/手雷/跳跃/潜行/大招一个都点不动」。
+
+- [x] **P13-C-1 修复 `P1/InkGround` 写入 Pass 编译失败导致墨迹图集恒为空**
+  - 根因：`InkAtlasPaint` / `InkAtlasStamp` 两个 Pass 在 `CBUFFER_START(UnityPerMaterial)` 之前没有包含
+    URP `Core.hlsl`，Metal / GLES3 / Vulkan 全部报 `unrecognized identifier 'CBUFFER_START'`。
+    Pass 编译失败 → `CommandBuffer.DrawMesh` 不产生任何像素 → 墨迹图集恒为全透明。
+    CPU 墨格与覆盖率仍然正常（小地图有墨、比分照涨），所以极易被误判成玩法逻辑问题。
+  - 修复：两个 Pass 各补一行 `#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"`
+    （`Shaders/InkGround.shader`）。
+  - 验证：`ShaderUtil.GetShaderMessages` 0 条；运行时回读 2926×4096 图集 `maxA=255`、圆心像素
+    `RGBA(0, 0.98, 0.867, 1)`；此前因该错误转红的 3 条 `InkAtlasRenderPlayTests` 全部转绿（3/3）。
+  - 新增门禁：`Tests/EditMode/InkGroundShaderTests.cs`（两个写入 Pass 存在 + 无编译错误）。
+
+- [x] **P13-C-2 修复自定义键位 HitProxy 吞掉全部操作按钮的 PointerDown**
+  - 根因：`MobileLayoutCustomizer.RegisterItem` 给每个按键加了一个**常驻激活**的全尺寸透明 `HitProxy`
+    （挂 `LayoutDragProxy`，实现 `IPointerDownHandler`）。EventSystem 的 `ExecuteHierarchy` 在 HitProxy
+    上就命中处理器并停止冒泡，父节点的 `MobileActionButton` 永远收不到 `OnPointerDown` →
+    按钮无按压反馈、无开火 / 跳跃 / 手雷 / 大招。摇杆输入区未注册到自定义键位，所以摇杆仍可用，
+    故障表现恰好是「只有右下角按钮全废」。
+  - 修复：HitProxy 默认隐藏，仅 `Open()` 编辑期激活、`Close()` 立即收回
+    （`UI/MobileLayoutCustomizer.cs` + `MobileConfigurableItem.hitProxy`）。
+  - 验证：运行时射线 top 由 `HitProxy` 变为 `Bg`；按下后 `MobileActionButton.IsHeld=true`、
+    `TouchFireHeld=true`、`ShotsFired` 递增、地面墨迹正常铺开（截图 `Logs/ink_fixed_game.png`）。
+  - 新增门禁：`MobileLayoutCustomizer_HitProxy_MustStayInactiveOutsideEditing`（EditMode）。
+
+- **验证汇总**：`compilationFailed: false`；EditMode **222/222**（新增 3 条）；
+  `MobileLayoutCustomizerPlayTests` 3/3；`InkAtlasRenderPlayTests` 3/3。
+
+- **加固（同轮）**：`InkGround.shader` 的 `Properties` 块补上 `[HideInInspector] _InkMapSize / _InkTexelMeters /
+  _InkYFlip`（由 `InkSplatAtlas` 运行时写入）。实测原本靠 `Material.SetFloat/SetVector` 已能正确生效，
+  此处只是消除「默认值缺失导致 `_InkYFlip = 0` 把墨斑四边形压成零高度、图集静默变空」的隐患，
+  并给出非零兜底默认值；改后 shader 仍 0 编译消息、`InkAtlasRenderPlayTests` 仍 3/3。
+
+- **审计遗留（未改，交后续认领）**：
+  1. `UI/WeaponSelect/WeaponSelectView.cs` 的 Canvas `sortingOrder = 15` 低于触控层 `20`。当前因
+     `WeaponSelectBootstrap` 只在 `Ready` 显示、`MobileTouchUI` 在 `Ready` 隐藏，二者互斥，尚无实际故障；
+     但属于脆弱耦合，建议提到 25（低于暂停菜单 100）以防后续相位调整踩坑。
+  2. `UI/CenterTimerView.cs` 运行时创建的计分条 `bgBarGraphic/fillImageA/fillImageB` 未设
+     `raycastTarget = false`（HUD 层级在触控层之下，暂无用户可见影响）。
+  3. `Shaders/PropLit.shader` 的 ShadowCaster Pass 缺 `#pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW`
+     （与 `CharacterToon.shader` 不一致，点光源阴影分支不生效）。
+
+### 作战 HUD 视觉修整：键位入口 / 顶部阵容条 / 墨水罐（P13-D，2026-10-30）
+
+> 触发：v0.1.3 真机截图评审——左上角「键位」入口独占第二行、顶部 4v4 头像压住中央比分条、
+> 右上角墨水罐整根发黑（玩家描述为「全黑的薯条」）。
+
+- [x] **P13-D-1 「键位」入口移到暂停按钮右侧**
+  - `UI/MobileTouchUI.cs`：`SettingsLayoutBtn` 由 `(24,-124)`（暂停按钮正下方）改为 `(124,-36)`，
+    与 88×88 暂停按钮保持 12px 间距、垂直中心对齐（-68），不再占用第二行视野。
+
+- [x] **P13-D-2 顶部 4v4 阵容条外移，让出中央比分条**
+  - 根因：左右容器内边缘距屏幕中心只有 90px，中央比分条半宽 130px + 两侧百分比读数 78px，
+    被头像压掉两端再遮住读数。
+  - `UI/TopRosterBarView.cs`：容器锚点改为屏幕中心、内边缘固定 `CenterGap = 230px`
+    （A 组 pivot(1,0.5) 在 -230，B 组 pivot(0,0.5) 在 +230），根节点宽度 880 → 1200。
+    1920 参考宽度下两侧仍留 396px 边距，不与左上角按钮 / 右上角小地图冲突。
+
+- [x] **P13-D-3 墨水罐整根发黑 + 常驻红边**
+  - 根因：`UIInkShapeGraphic` 的硬阴影是**整块实心多边形**，而罐体外框（`Frame`）填充是全透明，
+    于是阴影把罐内液面整片盖成墨黑；`warningGlow` 又因 `UIInkCardStyle.comicPanel` 默认 `true`
+    白拿了一层 dangerRed 实心阴影，形成一圈常驻红边。
+  - `UI/HudSpecialGaugeFactory.cs`：`ApplyRectStyle` 默认 `comicPanel = false`，只有实心罐体底
+    显式 `hardShadow: true`；`Frame` / `WarningGlow` 不再带阴影。
+  - `UI/InkTankView.cs`：`ApplyTeamColors` 里 `frameShape.HardShadow` 由 `true` 改为 `false`
+    （否则 OnEnable/SetTheme 会把阴影重新打开）；百分比读数补 `%` 后缀。
+  - `UI/HudGaugeStyleSO.cs`：新增 `tankBubbleCount=2` / `tankBubbleSize=0.02`，罐内加两颗上升气泡。
+  - 验证：运行时读回 `Liquid=(1,0.44,0.06,1)`、`Frame.border=(0.10,0.10,0.10,1)`、`Frame.shadow=false`；
+    截图 `Logs/hud_after4.png` / `Logs/hud5_tl.png` 确认墨罐橙色液面、顶部比分条与百分比读数完整可见。
+
+- **验证汇总**：`compilationFailed: false`；EditMode **222/222**；PlayMode **73/75**
+  （2 条失败均为并行 WIP 的 `WeaponSelectPlayTests`，与本次改动无关）。
+
 ## 5. 验收标准与风控纪律
 
 1. **零外部破坏与回退机制**：

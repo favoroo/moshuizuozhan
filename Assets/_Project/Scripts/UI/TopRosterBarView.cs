@@ -35,6 +35,12 @@ namespace P1.UI
         private readonly List<CombatantHealth> _bindListA = new List<CombatantHealth>(4);
         private readonly List<CombatantHealth> _bindListB = new List<CombatantHealth>(4);
 
+        /// <summary>
+        /// 左右两队容器内边缘距屏幕中心的距离。
+        /// 中央比分条半宽 130 + 两侧百分比读数（约 78）≈ 208，取 230 让阵容条不再压住比分条。
+        /// </summary>
+        private const float CenterGap = 230f;
+
         public IReadOnlyList<RosterAvatarSlot> TeamASlots => teamASlots;
         public IReadOnlyList<RosterAvatarSlot> TeamBSlots => teamBSlots;
 
@@ -250,23 +256,23 @@ namespace P1.UI
             float spacing = 10f;
             float containerWidth = 4f * slotSize + 3f * spacing;
 
-            // 根节点锚定在顶部居中
+            // 根节点锚定在顶部居中（宽度只作容器参考；子容器按中心偏移排布，可越出根矩形）
             rootRect.anchorMin = new Vector2(0.5f, 1f);
             rootRect.anchorMax = new Vector2(0.5f, 1f);
             rootRect.pivot = new Vector2(0.5f, 1f);
             rootRect.anchoredPosition = new Vector2(0f, -8f);
-            rootRect.sizeDelta = new Vector2(880f, 84f);
+            rootRect.sizeDelta = new Vector2(1200f, 84f);
 
-            // 1. 左侧队伍 A 容器
+            // 1. 左侧队伍 A 容器（内边缘固定在中心左侧 CenterGap 处，整体向屏幕左侧外移）
             if (teamAContainer == null)
             {
                 var goA = new GameObject("SquadA_Container", typeof(RectTransform), typeof(HorizontalLayoutGroup));
                 goA.transform.SetParent(transform, false);
                 teamAContainer = goA.GetComponent<RectTransform>();
-                teamAContainer.anchorMin = new Vector2(0f, 0.5f);
-                teamAContainer.anchorMax = new Vector2(0f, 0.5f);
-                teamAContainer.pivot = new Vector2(0f, 0.5f);
-                teamAContainer.anchoredPosition = new Vector2(16f, 0f);
+                teamAContainer.anchorMin = new Vector2(0.5f, 0.5f);
+                teamAContainer.anchorMax = new Vector2(0.5f, 0.5f);
+                teamAContainer.pivot = new Vector2(1f, 0.5f);
+                teamAContainer.anchoredPosition = new Vector2(-CenterGap, 0f);
                 teamAContainer.sizeDelta = new Vector2(containerWidth, slotSize);
 
                 var layoutA = goA.GetComponent<HorizontalLayoutGroup>();
@@ -278,16 +284,16 @@ namespace P1.UI
                 layoutA.childForceExpandHeight = false;
             }
 
-            // 2. 右侧队伍 B 容器
+            // 2. 右侧队伍 B 容器（内边缘固定在中心右侧 CenterGap 处）
             if (teamBContainer == null)
             {
                 var goB = new GameObject("SquadB_Container", typeof(RectTransform), typeof(HorizontalLayoutGroup));
                 goB.transform.SetParent(transform, false);
                 teamBContainer = goB.GetComponent<RectTransform>();
-                teamBContainer.anchorMin = new Vector2(1f, 0.5f);
-                teamBContainer.anchorMax = new Vector2(1f, 0.5f);
-                teamBContainer.pivot = new Vector2(1f, 0.5f);
-                teamBContainer.anchoredPosition = new Vector2(-16f, 0f);
+                teamBContainer.anchorMin = new Vector2(0.5f, 0.5f);
+                teamBContainer.anchorMax = new Vector2(0.5f, 0.5f);
+                teamBContainer.pivot = new Vector2(0f, 0.5f);
+                teamBContainer.anchoredPosition = new Vector2(CenterGap, 0f);
                 teamBContainer.sizeDelta = new Vector2(containerWidth, slotSize);
 
                 var layoutB = goB.GetComponent<HorizontalLayoutGroup>();

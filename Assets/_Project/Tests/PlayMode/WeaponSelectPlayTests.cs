@@ -3,10 +3,13 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using P1.Core;
 using P1.Player;
+using P1.UI;
 using P1.UI.WeaponSelect;
 using P1.Weapons;
+using TMPro;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 
 namespace P1.Tests
 {
@@ -153,6 +156,83 @@ namespace P1.Tests
             int clampedPositive = WeaponSelectMath.ClampIndex(999);
             Assert.AreEqual(6, clampedPositive);
             Assert.AreEqual(WeaponKind.Splatling, WeaponSelectMath.IndexToKind(999));
+        }
+
+        [UnityTest]
+        [Category("UI")]
+        public IEnumerator WeaponSelectView_BackdropAndHeaderLayout_WorkCorrectly()
+        {
+            yield return null;
+            var view = WeaponSelectView.Instance;
+            Assert.IsNotNull(view, "场景中应已自动就绪 WeaponSelectView.Instance");
+            var viewGo = view.gameObject;
+
+            // 1. 验证标题排版与文字规范
+            var titleTrans = viewGo.transform.Find("SafeAreaContainer/DrawerPanel/Header/TitleBubble/Title");
+            Assert.IsNotNull(titleTrans, "应存在 TitleBubble/Title 节点");
+            var titleText = titleTrans.GetComponent<TextMeshProUGUI>();
+            Assert.IsNotNull(titleText, "应存在标题文本");
+            StringAssert.Contains("武器整备", titleText.text, "标题应包含中文武器整备");
+            StringAssert.Contains("ARSENAL", titleText.text, "标题应包含英文 ARSENAL");
+            Assert.AreEqual(TextWrappingModes.NoWrap, titleText.textWrappingMode, "标题必须禁止折行以防挤压重叠");
+
+            // 2. 初始抽屉默认收起，Backdrop 应处于非激活状态
+            var backdrop = viewGo.transform.Find("DrawerBackdrop");
+            Assert.IsNotNull(backdrop, "抽屉外部 Backdrop 应已创建");
+            Assert.IsFalse(backdrop.gameObject.activeSelf, "抽屉收起时 Backdrop 应隐藏");
+
+            // 3. 展开抽屉时 Backdrop 激活
+            view.SetDrawerOpen(true);
+            yield return null;
+            Assert.IsTrue(view.IsDrawerOpen, "抽屉应处于打开状态");
+            Assert.IsTrue(backdrop.gameObject.activeSelf, "抽屉打开时 Backdrop 应激活");
+
+            // 4. 点击 Backdrop 时抽屉收回
+            var backdropBtn = backdrop.GetComponent<Button>();
+            Assert.IsNotNull(backdropBtn, "Backdrop 上应挂载 Button 捕获外部点击");
+            backdropBtn.onClick.Invoke();
+            yield return null;
+            Assert.IsFalse(view.IsDrawerOpen, "点击 Backdrop 后抽屉必须自动收回");
+            Assert.IsFalse(backdrop.gameObject.activeSelf, "抽屉收回后 Backdrop 应隐藏");
+        }
+
+        [UnityTest]
+        [Category("UI")]
+        public IEnumerator MatchFlowUI_FullscreenPanelsAndUnderlay_FillScreen()
+        {
+            var flowGo = new GameObject("TestMatchFlowUI", typeof(RectTransform), typeof(Canvas), typeof(MatchFlowUI));
+            _createdObjects.Add(flowGo);
+            var flow = flowGo.GetComponent<MatchFlowUI>();
+
+            var readyPanel = new GameObject("ReadyPanel", typeof(RectTransform), typeof(Image));
+            readyPanel.transform.SetParent(flowGo.transform, false);
+
+            var resultPanel = new GameObject("ResultPanel", typeof(RectTransform), typeof(Image));
+            resultPanel.transform.SetParent(flowGo.transform, false);
+
+            flow.BindReferences(
+                readyPanel, null, null, null, null,
+                null, null,
+                resultPanel, null,
+                null, null, null, null, null, null);
+
+            yield return null;
+
+            // 1. 验证全屏纸面底板已创建且处于最底层
+            var underlay = flowGo.transform.Find("FullscreenPaperUnderlay");
+            Assert.IsNotNull(underlay, "必须存在 FullscreenPaperUnderlay 全屏纸面底板");
+            var underlayRt = underlay.GetComponent<RectTransform>();
+            Assert.AreEqual(Vector2.zero, underlayRt.anchorMin, "底板 anchorMin 必须为 0 铺满屏幕");
+            Assert.AreEqual(Vector2.one, underlayRt.anchorMax, "底板 anchorMax 必须为 1 铺满屏幕");
+
+            // 2. 验证 ReadyPanel 与 ResultPanel 保持全屏铺满，不被安全区收缩截断
+            var readyRt = (RectTransform)readyPanel.transform;
+            Assert.AreEqual(Vector2.zero, readyRt.anchorMin, "ReadyPanel 必须铺满全屏，anchorMin 为 0");
+            Assert.AreEqual(Vector2.one, readyRt.anchorMax, "ReadyPanel 必须铺满全屏，anchorMax 为 1");
+
+            var resultRt = (RectTransform)resultPanel.transform;
+            Assert.AreEqual(Vector2.zero, resultRt.anchorMin, "ResultPanel 必须铺满全屏，anchorMin 为 0");
+            Assert.AreEqual(Vector2.one, resultRt.anchorMax, "ResultPanel 必须铺满全屏，anchorMax 为 1");
         }
     }
 }

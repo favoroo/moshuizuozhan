@@ -30,6 +30,7 @@ namespace P1.UI.WeaponSelect
         private CanvasScaler _scaler;
         private GraphicRaycaster _raycaster;
         private RectTransform _safeAreaRoot;
+        private GameObject _backdropGo;
         private RectTransform _drawerRoot;
         private UIInkShapeGraphic _drawerBg;
 
@@ -147,6 +148,32 @@ namespace P1.UI.WeaponSelect
             _raycaster = GetComponent<GraphicRaycaster>();
             if (_raycaster == null) _raycaster = gameObject.AddComponent<GraphicRaycaster>();
 
+            // 1.5 全屏遮罩：抽屉打开时激活，点击抽屉外部任意区域自动收起抽屉
+            _backdropGo = new GameObject("DrawerBackdrop", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            _backdropGo.transform.SetParent(transform, false);
+            _backdropGo.transform.SetAsFirstSibling();
+            var backdropRt = _backdropGo.GetComponent<RectTransform>();
+            backdropRt.anchorMin = Vector2.zero;
+            backdropRt.anchorMax = Vector2.one;
+            backdropRt.offsetMin = Vector2.zero;
+            backdropRt.offsetMax = Vector2.zero;
+
+            var backdropImg = _backdropGo.GetComponent<Image>();
+            // 极低对比度漫画暗调遮罩（0.22f alpha）：既有层次感，又清晰透出主菜单内容
+            backdropImg.color = new Color(0.04f, 0.06f, 0.10f, 0.22f);
+            backdropImg.raycastTarget = true;
+
+            var backdropBtn = _backdropGo.GetComponent<Button>();
+            backdropBtn.transition = Selectable.Transition.None;
+            backdropBtn.onClick.AddListener(() =>
+            {
+                if (_isDrawerOpen)
+                {
+                    SetDrawerOpen(false);
+                }
+            });
+            _backdropGo.SetActive(_isDrawerOpen);
+
             // 2. Safe Area 容器
             var safeGo = new GameObject("SafeAreaContainer", typeof(RectTransform));
             safeGo.transform.SetParent(transform, false);
@@ -181,7 +208,7 @@ namespace P1.UI.WeaponSelect
             _drawerBg.DrawGloss = false;
             _drawerBg.raycastTarget = true;
 
-            // 4. 抽屉内 Header：标题对话气泡（庆科黄油体 32px）
+            // 4. 抽屉内 Header：漫画风标题卡片 + 收起按钮 + 操作提示副标题
             var headerGo = new GameObject("Header", typeof(RectTransform));
             headerGo.transform.SetParent(_drawerRoot, false);
             var headerRect = headerGo.GetComponent<RectTransform>();
@@ -189,78 +216,17 @@ namespace P1.UI.WeaponSelect
             headerRect.anchorMax = new Vector2(1f, 1f);
             headerRect.pivot = new Vector2(0.5f, 1f);
             headerRect.anchoredPosition = new Vector2(0f, -12f);
-            headerRect.sizeDelta = new Vector2(-28f, 76f);
+            headerRect.sizeDelta = new Vector2(-28f, 84f);
 
-            // 标题对话气泡底图
-            var bubbleGo = new GameObject("TitleBubble", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-            bubbleGo.transform.SetParent(headerGo.transform, false);
-            var bubbleRt = bubbleGo.GetComponent<RectTransform>();
-            bubbleRt.anchorMin = new Vector2(0f, 0.5f);
-            bubbleRt.anchorMax = new Vector2(0f, 0.5f);
-            bubbleRt.pivot = new Vector2(0f, 0.5f);
-            bubbleRt.anchoredPosition = new Vector2(8f, 10f);
-            bubbleRt.sizeDelta = new Vector2(360f, 52f);
-
-            var bubbleShape = bubbleGo.GetComponent<UIInkShapeGraphic>();
-            bubbleShape.Shape = UIInkShape.SpeechBubble;
-            bubbleShape.CornerRadius = 24f;
-            bubbleShape.BorderWidth = ComicStyle.BorderThin;
-            bubbleShape.BorderColor = ComicStyle.Ink;
-            bubbleShape.color = ComicStyle.Paper;
-            bubbleShape.HardShadow = true;
-            bubbleShape.ShadowOffset = new Vector2(3f, -3f);
-            bubbleShape.ShadowColor = ComicStyle.Ink;
-            bubbleShape.SpeechTail = true;
-            bubbleShape.TailSize = new Vector2(20f, 14f);
-            bubbleShape.TailAngle = 270f;
-            bubbleShape.GlossAlpha = 0f;
-            bubbleShape.DrawGloss = false;
-
-            var titleGo = new GameObject("Title", typeof(RectTransform), typeof(TextMeshProUGUI));
-            titleGo.transform.SetParent(bubbleGo.transform, false);
-            var titleRect = titleGo.GetComponent<RectTransform>();
-            titleRect.anchorMin = Vector2.zero;
-            titleRect.anchorMax = Vector2.one;
-            titleRect.offsetMin = new Vector2(12f, 0f);
-            titleRect.offsetMax = new Vector2(-12f, 0f);
-            _headerTitle = titleGo.GetComponent<TextMeshProUGUI>();
-            // 不设字体就会出现方块字：必须使用 theme.ResolveFont 解析 CJK 黄油体
-            _headerTitle.font = theme.ResolveFont(true, "武器整备 · ARSENAL");
-            _headerTitle.fontSize = 32f;
-            _headerTitle.fontStyle = FontStyles.Bold;
-            _headerTitle.alignment = TextAlignmentOptions.Center;
-            _headerTitle.color = ComicStyle.Ink;
-            _headerTitle.text = "武器整备 · ARSENAL";
-            _headerTitle.raycastTarget = false;
-
-            var subGo = new GameObject("Subtitle", typeof(RectTransform), typeof(TextMeshProUGUI));
-            subGo.transform.SetParent(headerGo.transform, false);
-            var subRect = subGo.GetComponent<RectTransform>();
-            subRect.anchorMin = new Vector2(0f, 0f);
-            subRect.anchorMax = new Vector2(1f, 0f);
-            subRect.pivot = new Vector2(0f, 0f);
-            subRect.anchoredPosition = new Vector2(12f, 4f);
-            subRect.sizeDelta = new Vector2(-80f, 22f);
-            _headerSubtitle = subGo.GetComponent<TextMeshProUGUI>();
-            // 触屏设备没有 1~7 键，文案换成点击说明
-            string subtitleText = touch
-                ? "选择本局出战武器 · 点击卡片切换"
-                : "选择本局出战武器 · 按 1~7 快速切换";
-            _headerSubtitle.font = theme.ResolveFont(false, subtitleText);
-            _headerSubtitle.fontSize = touch ? 18f : 16f;
-            _headerSubtitle.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.8f);
-            _headerSubtitle.text = subtitleText;
-            _headerSubtitle.raycastTarget = false;
-
-            // Header 内部收起小按钮
+            // 右侧收起小按钮（加大点击区：78×44，粗边框+硬阴影）
             var closeGo = new GameObject("CloseBtn", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(UIJellyButton));
             closeGo.transform.SetParent(headerGo.transform, false);
             var closeRect = closeGo.GetComponent<RectTransform>();
-            closeRect.anchorMin = new Vector2(1f, 0.5f);
-            closeRect.anchorMax = new Vector2(1f, 0.5f);
+            closeRect.anchorMin = new Vector2(1f, 1f);
+            closeRect.anchorMax = new Vector2(1f, 1f);
             closeRect.pivot = new Vector2(1f, 0.5f);
-            closeRect.anchoredPosition = new Vector2(0f, 6f);
-            closeRect.sizeDelta = new Vector2(64f, 42f);
+            closeRect.anchoredPosition = new Vector2(0f, -26f);
+            closeRect.sizeDelta = new Vector2(78f, 44f);
 
             var closeBg = closeGo.GetComponent<UIInkShapeGraphic>();
             closeBg.Shape = UIInkShape.RoundedRect;
@@ -281,7 +247,7 @@ namespace P1.UI.WeaponSelect
             var closeTxt = closeTextGo.GetComponent<TextMeshProUGUI>();
             closeTxt.font = theme.ResolveFont(false, "收起");
             closeTxt.alignment = TextAlignmentOptions.Center;
-            closeTxt.fontSize = Application.isMobilePlatform ? 19f : 16f;
+            closeTxt.fontSize = touch ? 20f : 17f;
             closeTxt.fontStyle = FontStyles.Bold;
             closeTxt.color = ComicStyle.Ink;
             closeTxt.text = "收起";
@@ -295,6 +261,69 @@ namespace P1.UI.WeaponSelect
             var closeJelly = closeGo.GetComponent<UIJellyButton>();
             closeJelly.Configure(theme, _closeButton, closeBg);
 
+            // 左侧标题徽章底卡：纯正漫画圆角块 + 墨线硬阴影，彻底杜绝折行重叠
+            var bubbleGo = new GameObject("TitleBubble", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            bubbleGo.transform.SetParent(headerGo.transform, false);
+            var bubbleRt = bubbleGo.GetComponent<RectTransform>();
+            bubbleRt.anchorMin = new Vector2(0f, 1f);
+            bubbleRt.anchorMax = new Vector2(0f, 1f);
+            bubbleRt.pivot = new Vector2(0f, 0.5f);
+            bubbleRt.anchoredPosition = new Vector2(6f, -26f);
+            // 宽度给足 430px（触屏 480px），单行从容展开
+            bubbleRt.sizeDelta = new Vector2(touch ? 480f : 430f, 48f);
+
+            var bubbleShape = bubbleGo.GetComponent<UIInkShapeGraphic>();
+            bubbleShape.Shape = UIInkShape.RoundedRect;
+            bubbleShape.CornerRadius = ComicStyle.CornerSharp;
+            bubbleShape.BorderWidth = ComicStyle.BorderThin;
+            bubbleShape.BorderColor = ComicStyle.Ink;
+            bubbleShape.color = ComicStyle.Paper;
+            bubbleShape.HardShadow = true;
+            bubbleShape.ShadowOffset = new Vector2(3f, -3f);
+            bubbleShape.ShadowColor = ComicStyle.Ink;
+            bubbleShape.SpeechTail = false;
+            bubbleShape.Halftone = false;
+            bubbleShape.GlossAlpha = 0f;
+            bubbleShape.DrawGloss = false;
+
+            var titleGo = new GameObject("Title", typeof(RectTransform), typeof(TextMeshProUGUI));
+            titleGo.transform.SetParent(bubbleGo.transform, false);
+            var titleRect = titleGo.GetComponent<RectTransform>();
+            titleRect.anchorMin = Vector2.zero;
+            titleRect.anchorMax = Vector2.one;
+            titleRect.offsetMin = new Vector2(14f, 0f);
+            titleRect.offsetMax = new Vector2(-14f, 0f);
+            _headerTitle = titleGo.GetComponent<TextMeshProUGUI>();
+            // 不设字体就会出现方块字：必须使用 theme.ResolveFont 解析 CJK 黄油体
+            _headerTitle.font = theme.ResolveFont(true, "武器整备 · ARSENAL");
+            _headerTitle.fontSize = touch ? 26f : 24f;
+            _headerTitle.fontStyle = FontStyles.Bold;
+            _headerTitle.alignment = TextAlignmentOptions.MidlineLeft;
+            _headerTitle.color = ComicStyle.Ink;
+            _headerTitle.textWrappingMode = TextWrappingModes.NoWrap; // 绝对禁止换行重叠
+            _headerTitle.overflowMode = TextOverflowModes.Ellipsis;
+            _headerTitle.text = "武器整备 <size=72%><color=#FF6600>·</color> ARSENAL</size>";
+            _headerTitle.raycastTarget = false;
+
+            var subGo = new GameObject("Subtitle", typeof(RectTransform), typeof(TextMeshProUGUI));
+            subGo.transform.SetParent(headerGo.transform, false);
+            var subRect = subGo.GetComponent<RectTransform>();
+            subRect.anchorMin = new Vector2(0f, 0f);
+            subRect.anchorMax = new Vector2(1f, 0f);
+            subRect.pivot = new Vector2(0f, 0f);
+            subRect.anchoredPosition = new Vector2(10f, 2f);
+            subRect.sizeDelta = new Vector2(-90f, 22f);
+            _headerSubtitle = subGo.GetComponent<TextMeshProUGUI>();
+            // 触屏设备没有 1~7 键，文案换成点击说明
+            string subtitleText = touch
+                ? "选择本局出战武器 · 点击卡片切换"
+                : "选择本局出战武器 · 按 1~7 快速切换";
+            _headerSubtitle.font = theme.ResolveFont(false, subtitleText);
+            _headerSubtitle.fontSize = touch ? 17f : 15f;
+            _headerSubtitle.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.75f);
+            _headerSubtitle.text = subtitleText;
+            _headerSubtitle.raycastTarget = false;
+
             // 5. 卡片列表容器 (带滑动支持)
             var scrollGo = new GameObject("CardScroll", typeof(RectTransform), typeof(ScrollRect));
             scrollGo.transform.SetParent(_drawerRoot, false);
@@ -302,7 +331,7 @@ namespace P1.UI.WeaponSelect
             scrollRectTransform.anchorMin = new Vector2(0f, 0f);
             scrollRectTransform.anchorMax = new Vector2(1f, 1f);
             scrollRectTransform.offsetMin = new Vector2(14f, 42f);
-            scrollRectTransform.offsetMax = new Vector2(-14f, -96f);
+            scrollRectTransform.offsetMax = new Vector2(-14f, -104f);
 
             var scroll = scrollGo.GetComponent<ScrollRect>();
             scroll.horizontal = false;
@@ -485,6 +514,10 @@ namespace P1.UI.WeaponSelect
         {
             _isDrawerOpen = open;
             _targetDrawerX = open ? 24f : -(_drawerWidth + 40f);
+            if (_backdropGo != null)
+            {
+                _backdropGo.SetActive(open);
+            }
             UpdateToggleButtonState();
 
             if (open && _toggleMotion != null)
@@ -519,6 +552,10 @@ namespace P1.UI.WeaponSelect
             if (gameObject.activeSelf != visible)
             {
                 gameObject.SetActive(visible);
+            }
+            if (!visible && _backdropGo != null)
+            {
+                _backdropGo.SetActive(false);
             }
         }
 

@@ -114,9 +114,11 @@ U="$HOME/.unity/bin/unity"
 ```
 
 - 代码改完必须编译干净：`compilationFailed: false` 且无 `error CS`；不以「warning 而已」交付。
-- 测试：`"$U" command test run --mode EditMode`；PlayMode 用 `--async_tests` + `test status` 轮询。
-  **PlayMode 会把任何运行时 log error 判为失败**（抓 `ParticleSystem`、UI、池等隐性问题最有效）。
-  基线：EditMode 209 / PlayMode 70（P9 快照），新改动不得让既有用例转红。
+- 测试统一走 **`tools/run_tests.sh`**（编译预检 + 清理残留运行 + 失败摘要，避免并行编译期误报）：
+  `./tools/run_tests.sh fast`（改 UI 首选，EditMode + PlayMode UI 子集）、`ui`、`play`、`edit`、`all`。
+  底层接口仍是 `"$U" command test run --mode …`；**PlayMode 会把任何运行时 log error 判为失败**
+  （抓 `ParticleSystem`、UI、池等隐性问题最有效）。
+  基线：EditMode 219 / PlayMode 73 条（P13 快照），新改动不得让既有用例转红。
 - 纯逻辑测试放 `Tests/EditMode`（`XxxTests.cs`）；涉及 MonoBehaviour 生命周期放 `Tests/PlayMode`。
 - **UI 截图**：`screenshot --view game` 只拍相机，不含 ScreenSpaceOverlay 的 uGUI；
   请用 `"$U" command script.eval --code 'UnityEngine.ScreenCapture.CaptureScreenshot("Logs/ui.png");'`。

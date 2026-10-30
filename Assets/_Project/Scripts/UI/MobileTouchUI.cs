@@ -474,7 +474,7 @@ namespace P1.UI
 
             // 5. 屏幕左上角悬浮【⚙️ 键位】快速编辑入口（132x64，字号 20）
             // 左上角最内侧 (24,-24) 的 88x88 留给 PauseMenuOverlay 的移动端暂停按钮，
-            // 键位入口下移一行，避免两个按钮重叠、暂停按钮吃掉键位按钮的点击。
+            // 键位入口横排在暂停按钮右侧并与之垂直居中对齐，避免占用第二行遮挡视野。
             CreateSettingsEntryButton(_safeArea);
 
             var initialMatch = MatchManager.Instance != null ? MatchManager.Instance : FindAnyObjectByType<MatchManager>();
@@ -517,8 +517,9 @@ namespace P1.UI
             rt.anchorMin = new Vector2(0f, 1f); // 左上角
             rt.anchorMax = new Vector2(0f, 1f);
             rt.pivot = new Vector2(0f, 1f);
-            // 让出最内层 88x88 的暂停按钮区域，键位入口放在其正下方
-            rt.anchoredPosition = new Vector2(24f, -124f);
+            // 暂停按钮占 (24,-24) 的 88x88；键位入口贴在其右侧（间隔 12px），
+            // 用 -36 让 64 高的小标签与 88 高的暂停按钮垂直中心对齐（-68）。
+            rt.anchoredPosition = new Vector2(124f, -36f);
             rt.sizeDelta = new Vector2(132f, 64f);
 
             // 1. 硬阴影

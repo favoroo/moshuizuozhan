@@ -89,7 +89,8 @@ namespace P1.UI
             if (rootProxy == null) rootProxy = target.gameObject.AddComponent<LayoutDragProxy>();
             rootProxy.Init(this, item);
 
-            // 2. 为目标生成与自身同尺寸的透明命中层（HitProxy），确保 raycastTarget=true 且不拦截子视图渲染
+            // 2. 为目标生成与自身同尺寸的透明命中层（HitProxy），确保 raycastTarget=true 且不拦截子视图渲染。
+            //    默认隐藏：只有在编辑模式下才激活，避免它抢走玩法期按键的 PointerDown（见 MobileConfigurableItem.hitProxy 注释）。
             var hitProxyGo = new GameObject("HitProxy", typeof(RectTransform), typeof(Image));
             hitProxyGo.transform.SetParent(target, false);
             var hitRt = hitProxyGo.GetComponent<RectTransform>();
@@ -100,10 +101,13 @@ namespace P1.UI
 
             var hitImg = hitProxyGo.GetComponent<Image>();
             hitImg.color = Color.clear;
-            hitImg.raycastTarget = true; // 确保在编辑模式下始终能被 PointerDown 命中
+            hitImg.raycastTarget = true; // 编辑模式下提供整块按键的可拖拽区域
 
             var proxy = hitProxyGo.AddComponent<LayoutDragProxy>();
             proxy.Init(this, item);
+
+            item.hitProxy = hitProxyGo;
+            hitProxyGo.SetActive(false);
         }
 
         private void BuildUI(Sprite circleRingSprite)
@@ -301,6 +305,12 @@ namespace P1.UI
                     _originalBlocksRaycasts[item.id] = item.group.blocksRaycasts;
                     item.group.blocksRaycasts = true;
                 }
+
+                // 编辑期才启用透明命中层，让整块按键（含透明圆角）都可拖拽
+                if (item != null && item.hitProxy != null)
+                {
+                    item.hitProxy.SetActive(true);
+                }
             }
 
             _workingConfig = MobileLayoutStorage.Load() ?? GetCurrentConfig();
@@ -336,6 +346,12 @@ namespace P1.UI
                 if (item != null && item.group != null && _originalBlocksRaycasts.TryGetValue(item.id, out bool orig))
                 {
                     item.group.blocksRaycasts = orig;
+                }
+
+                // 关闭编辑后必须收回透明命中层，否则玩法期按键会被它吞掉 PointerDown
+                if (item != null && item.hitProxy != null)
+                {
+                    item.hitProxy.SetActive(false);
                 }
             }
 
@@ -679,6 +695,14 @@ namespace P1.UI
         public Vector2 defaultPos;
         public float defaultScale;
         public float defaultAlpha;
+
+        /// <summary>
+        /// 仅编辑期启用的透明命中层（子物体）。平时必须保持隐藏：
+        /// 它挂有 LayoutDragProxy（实现了 IPointerDownHandler），一旦常驻激活，
+        /// EventSystem 的 ExecuteHierarchy 会在它身上就找到「指针按下处理器」并停止向上冒泡，
+        /// 父节点上的 MobileActionButton 永远收不到 OnPointerDown —— 表现为所有操作按钮点不动。
+        /// </summary>
+        public GameObject hitProxy;
     }
 
     /// <summary>挂载在各操作按键与透明命中层上的拖拽代理，仅在编辑模式下生效。</summary>

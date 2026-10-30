@@ -361,5 +361,54 @@ namespace P1.Tests
             Object.DestroyImmediate(touchGo);
             Object.DestroyImmediate(matchGo);
         }
+
+        [Test]
+        public void MobileLayoutCustomizer_HitProxy_MustStayInactiveOutsideEditing()
+        {
+            // 回归用例：HitProxy 常驻激活会吞掉按键的 PointerDown。
+            // LayoutDragProxy 实现了 IPointerDownHandler，而 EventSystem 的 ExecuteHierarchy
+            // 在命中层就会找到处理器并停止冒泡，父节点的 MobileActionButton 永远收不到按下 ——
+            // 线上表现为「右下角所有操作按钮一个都点不动」。
+            var host = new GameObject("TestHitProxyHost", typeof(RectTransform));
+            var btn = MobileActionButton.Create(
+                host.transform, "FireButton", "射击",
+                new Vector2(-150f, 150f), 176f, Color.red,
+                null, null, null, MobileButtonMode.HoldWithAimDrag);
+
+            var customizer = MobileLayoutCustomizer.Create(null, host.GetComponent<RectTransform>(), null);
+            customizer.RegisterItem("Fire", "射击大键", btn.RectTransform, btn.CanvasGroup,
+                new Vector2(-150f, 150f), 1f, 1f);
+
+            var hitProxy = btn.RectTransform.Find("HitProxy");
+            Assert.IsNotNull(hitProxy, "RegisterItem 必须为按键生成透明命中层");
+            Assert.IsNotNull(hitProxy.GetComponent<LayoutDragProxy>(), "命中层必须挂载 LayoutDragProxy 才能拖拽");
+            Assert.IsFalse(hitProxy.gameObject.activeSelf,
+                "游玩期透明命中层必须隐藏，否则它会吞掉按键的 PointerDown");
+
+            // 命中层一旦激活，事件处理器就落在它身上（复现线上故障的机制）
+            hitProxy.gameObject.SetActive(true);
+            var blockedHandler = ExecuteEvents.GetEventHandler<IPointerDownHandler>(hitProxy.gameObject);
+            Assert.AreNotSame(btn.gameObject, blockedHandler,
+                "命中层激活时新增的 LayoutDragProxy 会接管按下事件，确认这正是需要隐藏它的原因");
+            hitProxy.gameObject.SetActive(false);
+
+            // 隐藏后，真实射线命中的 Bg 必须冒泡到按键本体
+            var bg = btn.RectTransform.Find("Content/Bg");
+            Assert.IsNotNull(bg, "按键必须包含可接收射线的 Bg");
+            var handler = ExecuteEvents.GetEventHandler<IPointerDownHandler>(bg.gameObject);
+            Assert.AreSame(btn.gameObject, handler,
+                "命中层隐藏后，按下 Bg 必须由 MobileActionButton 接收，操作按钮才能响应");
+
+            // 编辑模式启用 / 关闭后收回
+            customizer.Open();
+            Assert.IsTrue(hitProxy.gameObject.activeSelf,
+                "进入自定义键位编辑时必须启用命中层，保证整块按键（含透明圆角）可拖拽");
+
+            customizer.Close(save: false);
+            Assert.IsFalse(hitProxy.gameObject.activeSelf,
+                "退出编辑后必须立即收回命中层，恢复玩法期按键点击");
+
+            Object.DestroyImmediate(host);
+        }
     }
 }

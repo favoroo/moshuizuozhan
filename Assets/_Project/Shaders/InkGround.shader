@@ -8,6 +8,13 @@ Shader "P1/InkGround"
         _InkTex ("Ink Atlas (R=team G=birth-ts*coverage B=tone A=coverage)", 2D) = "black" {}
         _InkMapOriginXZ ("Ink Map Origin XZ", Vector) = (-20, -28, 40, 56)
         _InkTexelSize ("Ink Texel Size", Vector) = (0.0002441406, 0.0002441406, 4096, 4096)
+        // 仅 InkAtlasPaint / InkAtlasStamp 两个图集写入 Pass 使用，由 InkSplatAtlas 在运行时
+        // 通过 Material.SetVector/SetFloat 写入。声明为隐藏属性是为了让 UnityPerMaterial
+        // 常量缓冲区一定有这三项（并给出非零兜底默认值：_InkYFlip 若为 0 会把墨斑四边形压成
+        // 一条零高度线，图集将静默地画不出任何墨）。
+        [HideInInspector] _InkMapSize ("Ink Map Size (m)", Vector) = (40, 56, 0, 0)
+        [HideInInspector] _InkTexelMeters ("Ink Atlas Texel Meters", Float) = 0.01
+        [HideInInspector] _InkYFlip ("Ink Atlas Y Flip", Float) = 1
         _GroundTex ("Ground Albedo (Arena)", 2D) = "white" {}
         _GroundTexStrength ("Ground Texture Strength", Range(0, 1)) = 1.0
         _CliffColor ("Cliff / Vertical Side Color", Color) = (0.34, 0.33, 0.31, 1.0)
@@ -780,6 +787,12 @@ Shader "P1/InkGround"
             #pragma fragment P1InkAtlasPaintFrag
             #pragma target 3.5
 
+            // CBUFFER_START / CBUFFER_END 由 SRP Core 的平台 API 头定义，
+            // 本 Pass 必须显式包含 Core.hlsl（否则 Metal/GLES3/Vulkan 报 unrecognized identifier 'CBUFFER_START'，
+            // 写入 Pass 编译失败 → 地面完全没有墨迹）。Core.hlsl 带 include guard，后面的
+            // InkSurfaceOverlay.hlsl 再次包含它不会重复定义。
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
             // 与场景 Pass 完全一致的 UnityPerMaterial 布局（SRP Batcher 兼容）；
             // 本 Pass 实际只使用 _InkMapSize / _InkTexelMeters / _InkYFlip。
             CBUFFER_START(UnityPerMaterial)
@@ -873,6 +886,10 @@ Shader "P1/InkGround"
             #pragma vertex P1InkAtlasVert
             #pragma fragment P1InkAtlasStampFrag
             #pragma target 3.5
+
+            // 与 InkAtlasPaint 同上：CBUFFER_START 需要先包含 SRP Core 的平台 API 头。
+            // 缺少这一行时 Stamp Pass 编译失败 → G 通道时间戳永远不写，湿润度/生长动画全部失效。
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             // 与场景 Pass 完全一致的 UnityPerMaterial 布局（SRP Batcher 兼容）；
             // 本 Pass 实际只使用 _InkMapSize / _InkTexelMeters / _InkYFlip。

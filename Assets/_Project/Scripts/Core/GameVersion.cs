@@ -8,9 +8,9 @@ namespace P1.Core
     /// </summary>
     public static class GameVersion
     {
-        public const string APP_NAME = "墨水作战";
+        public const string APP_NAME = "墨水大作战";
         public const string APP_NAME_EN = "InkTurf";
-        public const string APP_VERSION = "0.1.2";
+        public const string APP_VERSION = "0.1.3";
         public const string APP_VERSION_NAME = "v" + APP_VERSION;
 
         public const string GITHUB_OWNER = "favoroo";

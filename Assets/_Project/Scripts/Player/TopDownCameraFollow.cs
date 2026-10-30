@@ -8,7 +8,7 @@ namespace P1.Player
     /// 第三人称轨道跟随相机（P9）：
     /// 类名 <c>TopDownCameraFollow</c> 保留以兼容旧调用方/测试，实现已从俯视跟随改为 Inkwave 式第三人称。
     /// 1. 鼠标 / 手柄右摇杆 / 触屏滑屏驱动 yaw-pitch；
-    /// 2. 枢轴跟随角色（人形 1.85m、潜墨 1.30m），吊臂 4.5m / 4.1m；
+    /// 2. 枢轴跟随角色（人形 1.45m、潜墨 1.05m，对齐 1.25m 蛋形角色），吊臂 4.5m / 4.1m；
     /// 3. 球探针防穿墙、贴墙自动收进、近距离右肩偏移、地面高度保护；
     /// 4. 透视 52° FOV，蓄力狙变焦、手雷瞄准微调；保留 Trauma 震屏与全部旧公共 API。
     /// </summary>
@@ -335,8 +335,8 @@ namespace P1.Player
 
         private float GetPivotHeight()
         {
-            float standing = gameConfig != null ? gameConfig.tpsPivotHeight : 1.85f;
-            float swimming = gameConfig != null ? gameConfig.tpsPivotHeightSwimming : 1.30f;
+            float standing = gameConfig != null ? gameConfig.tpsPivotHeight : 1.45f;
+            float swimming = gameConfig != null ? gameConfig.tpsPivotHeightSwimming : 1.05f;
             bool isSwimming = _motor != null && _motor.IsSwimming;
             return ThirdPersonCameraMath.ComputePivotHeight(isSwimming, standing, swimming);
         }

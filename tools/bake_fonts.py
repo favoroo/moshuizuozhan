@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """把 Inkwave 调研库的 woff2 字体解包成 Unity 可用的静态 TTF，并落地到 Art/Fonts/。
 
+MiSans（完整 CJK 字库）的源件在 MediaRaw/fonts/（小米官方免费商用），同样在这里转静态 TTF，
+作为 TMP 的中文正文字体（Semibold）与标题字体（Heavy），替换站酷两款。
+
 为什么需要这个脚本：
 - Unity 的 TrueTypeFontImporter **不认 woff2**（不认 woff2 容器，也不认可变字体轴）；
   调研库给的是 Google Fonts 的 latin 子集 woff2，必须先转成静态 TTF。
@@ -41,6 +44,19 @@ FONT_PLAN = {
         ("Rubik-Regular.ttf", {"wght": 400}, "Rubik", "Regular", 400),
         ("Rubik-Bold.ttf", {"wght": 700}, "Rubik", "Bold", 700),
         ("Rubik-Black.ttf", {"wght": 900}, "Rubik", "Black", 900),
+    ],
+}
+
+# MiSans：完整 CJK 字库（小米官方免费商用，原稿 woff2 在 MediaRaw/fonts/）。
+# 每档字重本就是独立静态文件，无需实例化，解容器 + 重写 name 表即可。
+# 分工对齐 TMP fallback 链：Semibold(650) 正文 / Heavy(900) 标题显示。
+MISANS_SRC_DIR = ROOT / "MediaRaw" / "fonts"
+MISANS_FONT_PLAN = {
+    "MiSans-Semibold.woff2": [
+        ("MiSans-Semibold.ttf", None, "MiSans", "Semibold", 650),
+    ],
+    "MiSans-Heavy.woff2": [
+        ("MiSans-Heavy.ttf", None, "MiSans", "Heavy", 900),
     ],
 }
 
@@ -98,32 +114,38 @@ def main() -> int:
     ap.add_argument("--list", action="store_true")
     args = ap.parse_args()
 
-    if not SRC_DIR.is_dir():
-        print(f"找不到字体源目录: {SRC_DIR}", file=sys.stderr)
-        return 2
+    plans = ((SRC_DIR, FONT_PLAN), (MISANS_SRC_DIR, MISANS_FONT_PLAN))
+    for src_dir, _ in plans:
+        if not src_dir.is_dir():
+            print(f"找不到字体源目录: {src_dir}", file=sys.stderr)
+            return 2
 
-    missing = [n for n in FONT_PLAN if not (SRC_DIR / n).exists()]
+    missing = [f"{src_dir.name}/{n}"
+               for src_dir, plan in plans for n in plan
+               if not (src_dir / n).exists()]
     if missing:
         print(f"缺少源字体: {', '.join(missing)}", file=sys.stderr)
         return 2
 
     if args.list:
-        for src_name, outs in FONT_PLAN.items():
-            f = TTFont(str(SRC_DIR / src_name))
-            variable = "fvar" in f
-            print(f"{src_name}  (可变={variable}, 字符={len(f.getBestCmap())})")
-            for out, coords, family, style, weight in outs:
-                tag = "原样静态化" if coords is None else str(coords)
-                print(f"  → {out:<22} {family} {style} ({weight})  {tag}")
+        for src_dir, plan in plans:
+            for src_name, outs in plan.items():
+                f = TTFont(str(src_dir / src_name))
+                variable = "fvar" in f
+                print(f"{src_name}  (可变={variable}, 字符={len(f.getBestCmap())})")
+                for out, coords, family, style, weight in outs:
+                    tag = "原样静态化" if coords is None else str(coords)
+                    print(f"  → {out:<22} {family} {style} ({weight})  {tag}")
         return 0
 
     total = 0
-    for src_name, outs in FONT_PLAN.items():
-        for out_name, coords, family, style, weight in outs:
-            dst = args.out_dir / out_name
-            glyphs, full = convert(SRC_DIR / src_name, dst, coords, family, style, weight)
-            print(f"  {out_name:<22} {glyphs:3d} 字符  fullName='{full}'  → {dst.relative_to(ROOT)}")
-            total += 1
+    for src_dir, plan in plans:
+        for src_name, outs in plan.items():
+            for out_name, coords, family, style, weight in outs:
+                dst = args.out_dir / out_name
+                glyphs, full = convert(src_dir / src_name, dst, coords, family, style, weight)
+                print(f"  {out_name:<22} {glyphs:3d} 字符  fullName='{full}'  → {dst.relative_to(ROOT)}")
+                total += 1
     print(f"DONE: {total} 个静态 TTF → {args.out_dir}")
     return 0
 

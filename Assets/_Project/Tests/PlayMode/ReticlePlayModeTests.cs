@@ -15,6 +15,7 @@ namespace P1.Tests
     /// 2. 地面准星在小枪、滚筒、蓄力狙之间平滑跨形态过渡与散布角驱动；
     /// 3. 屏幕专属准星 UI (WeaponReticleUI) 屏幕投影定位与副武器微胶囊状态响应。
     /// </summary>
+    [Category("UI")]
     public class ReticlePlayModeTests
     {
         [UnityTest]

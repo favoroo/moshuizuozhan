@@ -73,6 +73,18 @@ namespace P1.Weapons
         {
             if (Instance == this)
                 Instance = null;
+
+            if (_sharedMat != null)
+            {
+                Destroy(_sharedMat);
+                _sharedMat = null;
+            }
+
+            if (_ringMesh != null)
+            {
+                Destroy(_ringMesh);
+                _ringMesh = null;
+            }
         }
 
         public void ClearAllBombs()

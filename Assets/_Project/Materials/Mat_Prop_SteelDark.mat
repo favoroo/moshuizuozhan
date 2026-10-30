@@ -27,7 +27,7 @@ Material:
     m_Floats:
     - _CorrugationDepth: 0.28
     - _CorrugationScale: 2.5
-    - _DetailNoiseStrength: 0.12
+    - _DetailNoiseStrength: 0.04
     - _DitherAlpha: 1
     - _EdgeHighlight: 0.25
     - _EnableCorrugation: 0
@@ -36,10 +36,20 @@ Material:
     - _FocusWeight: 0
     - _Metallic: 0.12
     - _PanelLineStrength: 0.35
+    - _RimPower: 3
+    - _RimStrength: 0.18
+    - _ShadeSoftness: 0.03
+    - _ShadeThreshold: 0.5
+    - _ShadowFloor: 0.42
     - _Smoothness: 0.38
+    - _SpecSoftness: 0.02
+    - _SpecStrength: 0.5
+    - _SpecThreshold: 0.95
     m_Colors:
-    - _BaseColor: {r: 0.046964195, g: 0.059253525, b: 0.07323897, a: 1}
+    - _BaseColor: {r: 0.046964195, g: 0.059253525, b: 0.08353512, a: 1}
     - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
-    - _TrimColor: {r: 0.027211778, g: 0.033889063, b: 0.041435573, a: 1}
+    - _RimColor: {r: 0.5225216, g: 0.71056664, b: 1, a: 1}
+    - _ShadowTint: {r: 0.13286833, g: 0.17064494, b: 0.34239164, a: 1}
+    - _TrimColor: {r: 0.027211778, g: 0.033889063, b: 0.046964195, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

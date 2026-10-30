@@ -32,6 +32,20 @@ namespace P1.AI
 
         private static readonly Collider[] OverlapBuffer = new Collider[16];
 
+        // A* 复用缓冲：按格子下标直接寻址 + 递增访问令牌，替代每次寻路 new 出来的
+        // 两个全尺寸 Dictionary / HashSet / MinHeap（7 Bot × ~2 次/秒 时每秒 >5MB GC）。
+        private float[] _gScore;
+        private int[] _cameFrom;
+        private int[] _openStamp;
+        private int[] _closedStamp;
+        private int[] _heapItems;
+        private float[] _heapKeys;
+        private int _heapCount;
+        private int _searchToken;
+        private float[] _prefixCost;
+        private readonly List<Vector3> _scratchPath = new List<Vector3>(256);
+        private readonly List<Vector3> _smoothedPath = new List<Vector3>(256);
+
         public NavGrid(int width, int height, float cellSize, Vector2 originXZ)
         {
             Width = width;
@@ -40,6 +54,15 @@ namespace P1.AI
             OriginXZ = originXZ;
             _walkable = new bool[width * height];
             _surfaceY = new float[width * height];
+
+            int total = Width * Height;
+            _gScore = new float[total];
+            _cameFrom = new int[total];
+            _openStamp = new int[total];
+            _closedStamp = new int[total];
+            int heapCap = Mathf.Clamp(total / 4, 256, 4096);
+            _heapItems = new int[heapCap];
+            _heapKeys = new float[heapCap];
         }
 
         /// <summary>
@@ -230,10 +253,9 @@ namespace P1.AI
             }
 
             int total = Width * Height;
-            var gScore = new Dictionary<int, float>(total);
-            var cameFrom = new Dictionary<int, int>(total);
-            var closed = new HashSet<int>();
-            var open = new MinHeap();
+            _searchToken++;
+            int token = _searchToken;
+            _heapCount = 0;
 
             int startIdx = sy * Width + sx;
             int goalIdx = ey * Width + ex;
@@ -241,16 +263,18 @@ namespace P1.AI
             // 代价倍率可以小于 1，启发函数同步收缩才不会被高估（可采纳性）
             float heuristicScale = minCostMultiplier > 0f ? Mathf.Min(1f, minCostMultiplier) : 1f;
 
-            gScore[startIdx] = 0f;
-            open.Push(startIdx, Heuristic(sx, sy, ex, ey) * heuristicScale);
+            _gScore[startIdx] = 0f;
+            _openStamp[startIdx] = token;
+            HeapPush(startIdx, Heuristic(sx, sy, ex, ey) * heuristicScale);
 
             bool found = false;
             int guard = 0;
 
-            while (open.Count > 0 && guard++ < total * 4)
+            while (_heapCount > 0 && guard++ < total * 4)
             {
-                int current = open.Pop();
-                if (!closed.Add(current)) continue;
+                int current = HeapPop();
+                if (_closedStamp[current] == token) continue;
+                _closedStamp[current] = token;
 
                 if (current == goalIdx)
                 {
@@ -260,7 +284,7 @@ namespace P1.AI
 
                 int cx = current % Width;
                 int cy = current / Width;
-                float cg = gScore[current];
+                float cg = _gScore[current];
 
                 for (int dy = -1; dy <= 1; dy++)
                 {
@@ -290,31 +314,34 @@ namespace P1.AI
                         int nIdx = ny * Width + nx;
                         float tentative = cg + stepCost;
 
-                        if (gScore.TryGetValue(nIdx, out float known) && tentative >= known) continue;
+                        if (_openStamp[nIdx] == token && tentative >= _gScore[nIdx]) continue;
 
-                        gScore[nIdx] = tentative;
-                        cameFrom[nIdx] = current;
-                        open.Push(nIdx, tentative + Heuristic(nx, ny, ex, ey) * heuristicScale);
+                        _gScore[nIdx] = tentative;
+                        _openStamp[nIdx] = token;
+                        _cameFrom[nIdx] = current;
+                        HeapPush(nIdx, tentative + Heuristic(nx, ny, ex, ey) * heuristicScale);
                     }
                 }
             }
 
             if (!found) return false;
 
-            var reversed = new List<Vector3>();
+            // 回溯到复用缓冲（终点 → 起点），再正序写入 outPath
+            _scratchPath.Clear();
             int walk = goalIdx;
             while (walk != startIdx)
             {
                 int wx = walk % Width;
                 int wy = walk / Width;
-                reversed.Add(CellToWorld(wx, wy));
-                if (!cameFrom.TryGetValue(walk, out walk)) break;
+                _scratchPath.Add(CellToWorld(wx, wy));
+                if (_openStamp[walk] != token) break;
+                walk = _cameFrom[walk];
             }
-            reversed.Add(startSnap);
+            _scratchPath.Add(startSnap);
 
-            for (int i = reversed.Count - 1; i >= 0; i--)
+            for (int i = _scratchPath.Count - 1; i >= 0; i--)
             {
-                outPath.Add(reversed[i]);
+                outPath.Add(_scratchPath[i]);
             }
 
             // 终点用真实目标点替换，避免吸附误差
@@ -340,15 +367,19 @@ namespace P1.AI
             int count = points.Count;
             if (count <= 2) return;
 
-            // 前缀代价：prefix[k] = 原路点从 0 走到 k 的墨水加权里程
-            var prefix = new float[count];
-            for (int i = 1; i < count; i++)
+            // 前缀代价：prefix[k] = 原路点从 0 走到 k 的墨水加权里程（复用缓冲，仅按需扩容）
+            if (_prefixCost == null || _prefixCost.Length < count)
             {
-                prefix[i] = prefix[i - 1] + EstimateSegmentCost(points[i - 1], points[i], provider);
+                _prefixCost = new float[Mathf.Max(count, 256)];
             }
 
-            var smoothed = new List<Vector3>(count);
-            smoothed.Add(points[0]);
+            for (int i = 1; i < count; i++)
+            {
+                _prefixCost[i] = _prefixCost[i - 1] + EstimateSegmentCost(points[i - 1], points[i], provider);
+            }
+
+            _smoothedPath.Clear();
+            _smoothedPath.Add(points[0]);
 
             int read = 0;
             while (read < count - 1)
@@ -358,7 +389,7 @@ namespace P1.AI
 
                 for (int candidate = limit; candidate > read + 1; candidate--)
                 {
-                    float replacedCost = prefix[candidate] - prefix[read];
+                    float replacedCost = _prefixCost[candidate] - _prefixCost[read];
                     if (LineIsTraversable(points[read], points[candidate], maxHeightStep, provider,
                             replacedCost))
                     {
@@ -367,12 +398,15 @@ namespace P1.AI
                     }
                 }
 
-                smoothed.Add(points[next]);
+                _smoothedPath.Add(points[next]);
                 read = next;
             }
 
             points.Clear();
-            points.AddRange(smoothed);
+            for (int i = 0; i < _smoothedPath.Count; i++)
+            {
+                points.Add(_smoothedPath[i]);
+            }
         }
 
         /// <summary>用中点所在格的代价估算一段路点的墨水加权里程。</summary>
@@ -438,57 +472,56 @@ namespace P1.AI
             return (dx + dy) + (1.4142f - 2f) * Mathf.Min(dx, dy);
         }
 
-        /// <summary>极简二叉最小堆，避免 A* 每步排序。</summary>
-        private sealed class MinHeap
+        /// <summary>极简二叉最小堆（数组版，跨寻路复用，容量按需倍增）。</summary>
+        private void HeapPush(int item, float key)
         {
-            private readonly List<int> _items = new List<int>();
-            private readonly List<float> _keys = new List<float>();
-
-            public int Count => _items.Count;
-
-            public void Push(int item, float key)
+            if (_heapCount == _heapItems.Length)
             {
-                _items.Add(item);
-                _keys.Add(key);
-                int i = _items.Count - 1;
-                while (i > 0)
-                {
-                    int parent = (i - 1) / 2;
-                    if (_keys[parent] <= _keys[i]) break;
-                    Swap(parent, i);
-                    i = parent;
-                }
+                int newCap = Mathf.Max(256, _heapItems.Length * 2);
+                System.Array.Resize(ref _heapItems, newCap);
+                System.Array.Resize(ref _heapKeys, newCap);
             }
 
-            public int Pop()
+            int i = _heapCount;
+            _heapItems[i] = item;
+            _heapKeys[i] = key;
+            _heapCount++;
+
+            while (i > 0)
             {
-                int result = _items[0];
-                int last = _items.Count - 1;
-                _items[0] = _items[last];
-                _keys[0] = _keys[last];
-                _items.RemoveAt(last);
-                _keys.RemoveAt(last);
+                int parent = (i - 1) / 2;
+                if (_heapKeys[parent] <= _heapKeys[i]) break;
+                HeapSwap(parent, i);
+                i = parent;
+            }
+        }
 
-                int i = 0;
-                int n = _items.Count;
-                while (true)
-                {
-                    int l = i * 2 + 1, r = l + 1, smallest = i;
-                    if (l < n && _keys[l] < _keys[smallest]) smallest = l;
-                    if (r < n && _keys[r] < _keys[smallest]) smallest = r;
-                    if (smallest == i) break;
-                    Swap(i, smallest);
-                    i = smallest;
-                }
+        private int HeapPop()
+        {
+            int result = _heapItems[0];
+            _heapCount--;
+            _heapItems[0] = _heapItems[_heapCount];
+            _heapKeys[0] = _heapKeys[_heapCount];
 
-                return result;
+            int i = 0;
+            int n = _heapCount;
+            while (true)
+            {
+                int l = i * 2 + 1, r = l + 1, smallest = i;
+                if (l < n && _heapKeys[l] < _heapKeys[smallest]) smallest = l;
+                if (r < n && _heapKeys[r] < _heapKeys[smallest]) smallest = r;
+                if (smallest == i) break;
+                HeapSwap(i, smallest);
+                i = smallest;
             }
 
-            private void Swap(int a, int b)
-            {
-                (_items[a], _items[b]) = (_items[b], _items[a]);
-                (_keys[a], _keys[b]) = (_keys[b], _keys[a]);
-            }
+            return result;
+        }
+
+        private void HeapSwap(int a, int b)
+        {
+            (_heapItems[a], _heapItems[b]) = (_heapItems[b], _heapItems[a]);
+            (_heapKeys[a], _heapKeys[b]) = (_heapKeys[b], _heapKeys[a]);
         }
     }
 }

@@ -9,11 +9,11 @@ namespace P1.Player
     /// <summary>
     /// 精致多部件程序化角色（Squidkid）与武器模型运行时控制器。
     /// 现已升级适配「Q 版无腿蛋形」形态：
-    /// 1. 弹跳步态（EggGaitSolver）：以垂直弹跳、左右交替摇摆与手臂反相摆动表现无腿跑动；
+    /// 1. 贴地步态（EggGaitSolver）：左右摇摆 + 极轻微起伏表现无腿走路，不再上下弹跳；
     /// 2. 果冻弹簧（Jelly Spring）：起跳向上拉伸、落地按速度阻尼压扁缓冲、滞空仰俯；
     /// 3. 前倾与侧倾（Lean Springs）：适配贴地枢轴（y=0.05m），抑制过大倾角放大；
     /// 4. 独立挤压节点（BodySquash）：挤压与呼吸形变完全隔离于武器挂点（Chest）之外，杜绝武器被连带压扁；
-    /// 5. 待机自然微呼吸与实例非同步眨眼；
+    /// 5. 待机自然微呼吸与实例非同步眨眼（站立时不位移，避免原地一蹦一蹦）；
     /// 6. 踩敌方墨水抖动与墨墙攀爬小幅蠕动；
     /// 7. 人形态 ⇄ 乌贼潜行弹性形变过渡；
     /// 8. 7 类主武器换装、双枪/单持姿态适配与专属机构动画（滚筒、加特林、蓄力线圈等）。
@@ -105,6 +105,7 @@ namespace P1.Player
 
         // 运动采样与物理状态
         private Vector3 _prevWorldPos;
+        private float _planarSpeed;
         private float _prevYaw;
         private float _verticalVel;
         private bool _wasGrounded = true;
@@ -139,11 +140,17 @@ namespace P1.Player
         private float _swimTransition01;
         private bool _isCurrentlySwimming;
 
+        // 潜行贴地下沉量（米）：乌贼展开时按 pop 比例沉入墨面，腹部埋进地面、只露背脊与眼睛，
+        // 消除"整只乌贼浮在墨面上"的悬浮感（Splatoon 式半潜观感）
+        private const float SquidSubmergeDepth = 0.10f;
+        private Vector3 _squidBodyDefaultPos = Vector3.zero;
+
         // 武器缓存表
         private readonly Dictionary<WeaponKind, GameObject> _weaponMap = new Dictionary<WeaponKind, GameObject>();
         private readonly Dictionary<WeaponKind, Transform> _muzzleMap = new Dictionary<WeaponKind, Transform>();
 
         private static readonly int EmissionColorProp = Shader.PropertyToID("_EmissionColor");
+        private MaterialPropertyBlock _chargerCoilPropBlock;
 
         public GameObject KidRoot => kidRoot;
         public GameObject SquidRoot => squidRoot;
@@ -325,6 +332,11 @@ namespace P1.Player
                 _tankFillBaseScale = tankLiquidFill.localScale;
             }
 
+            if (squidBodyTransform != null)
+            {
+                _squidBodyDefaultPos = squidBodyTransform.localPosition;
+            }
+
             // 缓存装配器赋予的初始手臂位姿：仅在首次绑定或挂载目标变更时缓存，避免后续 EquipWeaponKind 相对位移污染基准
             if (leftArmTransform != null && leftArmTransform != _lastCachedLeftArm)
             {
@@ -465,8 +477,9 @@ namespace P1.Player
                 }
                 else
                 {
-                    leftArmTransform.localPosition = _defaultLeftArmPos + new Vector3(0.04f, 0.00f, 0.04f);
-                    _leftArmWeaponPoseRot = Quaternion.Euler(15f, 25f, -10f);
+                    // 单持武器：左手自然垂在身侧，不再横到胸前（旧姿势会在奶油白身体上留下一个肤色圆点）
+                    leftArmTransform.localPosition = _defaultLeftArmPos + new Vector3(-0.03f, 0.00f, 0.02f);
+                    _leftArmWeaponPoseRot = Quaternion.Euler(4f, -6f, -2f);
                 }
                 leftArmTransform.localRotation = _leftArmWeaponPoseRot;
             }
@@ -490,6 +503,7 @@ namespace P1.Player
             {
                 // 潜行期间保持采样锚点同步，避免浮出墨面第一帧由于大位移产生误触发瞬移或着地震荡
                 _prevWorldPos = transform.position;
+                _planarSpeed = 0f;
                 _prevYaw = transform.eulerAngles.y;
                 _wasGrounded = _motor == null || _motor.IsGrounded;
             }
@@ -530,6 +544,14 @@ namespace P1.Player
                     float pop = Mathf.SmoothStep(0.2f, 1.0f, t);
                     squidRoot.transform.localScale = new Vector3(pop, pop, pop);
 
+                    // 潜行贴地：身体随展开比例沉入墨面（SquidRoot 被缩放 pop，故世界下沉量随 pop 平滑加速），
+                    // 展开过程呈现"从墨里钻出来再沉回去"，而不是凭空放大悬浮
+                    if (squidBodyTransform != null)
+                    {
+                        squidBodyTransform.localPosition = _squidBodyDefaultPos
+                            + Vector3.down * (SquidSubmergeDepth * pop);
+                    }
+
                     // 乌贼贴水波浪游动
                     if (squidTentaclesRoot != null && _motor != null)
                     {
@@ -537,6 +559,11 @@ namespace P1.Player
                         float wave = Mathf.Sin(Time.time * 16f) * 12f * spd01;
                         squidTentaclesRoot.localRotation = Quaternion.Euler(0f, wave, 0f);
                     }
+                }
+                else if (squidBodyTransform != null)
+                {
+                    // 人形态期间恢复默认高度，保证下一次潜入从同一基准展开
+                    squidBodyTransform.localPosition = _squidBodyDefaultPos;
                 }
             }
 
@@ -549,10 +576,10 @@ namespace P1.Player
         /// <summary>
         /// 无腿蛋形角色程序化动作管线核心：
         /// 1. 速度与着地边沿采样（含传送跳变重置）；
-        /// 2. 弹跳步态（EggGaitSolver 采样垂直弹跳 Bob、左右交替摇摆 Rock、挤压拉伸 Squash、双臂摆动 ArmSwing）；
-        /// 3. 果冻弹簧（起跳瞬间拉伸、落地按速度二次阻尼压扁缓冲、滞空仰俯）；
+        /// 2. 贴地步态（EggGaitSolver 采样轻微起伏 Bob、左右摇摆 Rock、少量挤压 Squash、手臂反相摆动 ArmSwing）；
+        /// 3. 果冻弹簧（起跳瞬间拉伸、真正有下落速度的落地才压扁缓冲、滞空仰俯）；
         /// 4. 躯干前倾与转弯侧向倾斜（针对贴地枢轴下调角度倍率的 Lean Springs）；
-        /// 5. 待机呼吸与实例异步自然眨眼；
+        /// 5. 待机呼吸与实例异步自然眨眼（呼吸只做缩放，不做位移）；
         /// 6. 踩敌方墨水高频挣扎抖动；
         /// 7. 墨墙攀爬蠕动；
         /// 8. 姿态与挤压写回（所有形变全部作用于 bodySquashTransform 节点，严禁缩放 Chest 以免武器变形）。
@@ -576,20 +603,27 @@ namespace P1.Player
                 _jelly = 0f;
                 _jellyVel = 0f;
                 _lastAirVelY = 0f;
+                _planarSpeed = 0f;
             }
             _prevWorldPos = curPos;
             _verticalVel = worldVel.y;
+            // 关键：步态必须用真实位移速度，而不是 motor.CurrentMoveSpeed（那是当前形态的速度上限，站立时也为 6）。
+            // 旧写法导致角色一落地就永远在走弹跳步态，原地站着也一蹦一蹦。
+            _planarSpeed = new Vector2(worldVel.x, worldVel.z).magnitude;
 
             Vector3 localVel = transform.InverseTransformDirection(worldVel);
             float curYaw = transform.eulerAngles.y;
             float yawRate = Mathf.DeltaAngle(_prevYaw, curYaw) / Mathf.Max(0.0001f, dt);
             _prevYaw = curYaw;
 
-            // --- 2. 弹跳步态计算 ---
-            float speed = _motor != null ? _motor.CurrentMoveSpeed : 0f;
+            // --- 2. 贴地步态计算 ---
+            float speed = _planarSpeed;
             float speed01 = EggGaitSolver.Speed01(speed);
-            // 步态权重：仅在地面且高于静止阈值时生效，减速时平滑趋于 0，姿态自然回到中性位
-            float gaitWeight = grounded ? Mathf.Clamp01((speed - EggGaitSolver.MoveSpeedThreshold) / 2.5f) : 0f;
+            // 步态权重：仅在地面且高于静止阈值时生效；用 SmoothStep 让起步/停步过渡柔和，
+            // 站立（含 Bot 交火时的小幅走位）不会触发持续的"原地弹跳"。
+            float gaitWeight = grounded
+                ? Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((speed - EggGaitSolver.MoveSpeedThreshold) / 2.2f))
+                : 0f;
             if (gaitWeight > 0.02f)
             {
                 _gaitPhase += Mathf.PI * EggGaitSolver.CadenceHz(speed01) * dt;
@@ -610,8 +644,13 @@ namespace P1.Player
             }
             else if (!_wasGrounded && grounded)
             {
-                // 离地 -> 着地：按下落速度阻尼压扁缓冲
-                _jellyVel -= Mathf.Lerp(2.0f, 7.5f, Mathf.Clamp01(Mathf.Max(0f, -_lastAirVelY) / 14f));
+                // 离地 -> 着地：只有真正下落（不是贴地被 isGrounded 抖动）才触发压扁缓冲，
+                // 否则角色站着会每隔几帧被弹簧弹一下，看起来像原地蹦。
+                float fallSpeed = Mathf.Max(0f, -_lastAirVelY);
+                if (fallSpeed > 1.2f)
+                {
+                    _jellyVel -= Mathf.Lerp(0.8f, 6.0f, Mathf.Clamp01(fallSpeed / 14f));
+                }
             }
             _wasGrounded = grounded;
 
@@ -628,7 +667,7 @@ namespace P1.Player
             const float JellyD = 18f;
             _jellyVel += (-JellyK * _jelly - JellyD * _jellyVel) * dt;
             _jelly += _jellyVel * dt;
-            _jelly = Mathf.Clamp(_jelly, -0.30f, 0.22f);
+            _jelly = Mathf.Clamp(_jelly, -0.22f, 0.16f);
 
             // --- 4. 前倾与侧倾（Lean Springs） ---
             // 蛋形角色躯干枢轴贴地（CharacterMetrics.ChestPivotY = 0.05m），
@@ -640,11 +679,12 @@ namespace P1.Player
             _currentRoll = Mathf.SmoothDamp(_currentRoll, targetRoll, ref _rollVelocity, 0.08f, 100f, dt);
 
             // --- 5. 待机呼吸起伏与眨眼 ---
-            if (speed < 0.6f && grounded)
+            // 呼吸只做极轻微的缩放，不做上下位移：蛋形角色贴地站立时必须纹丝不动。
+            if (speed < EggGaitSolver.MoveSpeedThreshold && grounded)
             {
                 float breath = Mathf.Sin(Time.time * 2.2f);
-                squashY += breath * 0.012f;
-                bob += breath * 0.006f;
+                squashY += breath * 0.006f;
+                squashXZ -= breath * 0.003f;
             }
             UpdateBlink(dt);
 
@@ -796,9 +836,9 @@ namespace P1.Player
             // 1. 滚筒滚轴旋转
             if (_currentWeaponKind == WeaponKind.Roller && rollerDrumTransform != null)
             {
-                if (_motor != null && _motor.IsGrounded && _motor.CurrentMoveSpeed > 0.1f)
+                if (_motor != null && _motor.IsGrounded && _planarSpeed > 0.1f)
                 {
-                    rollerDrumTransform.Rotate(Vector3.right, _motor.CurrentMoveSpeed * 280f * dt, Space.Self);
+                    rollerDrumTransform.Rotate(Vector3.right, _planarSpeed * 280f * dt, Space.Self);
                 }
             }
 
@@ -820,12 +860,19 @@ namespace P1.Player
                 Color baseGlow = _team == Team.TeamA ? new Color(1f, 0.45f, 0.08f) : new Color(0.16f, 0.55f, 1f);
                 Color glow = baseGlow * (0.2f + charge * 2.8f);
 
+                if (_chargerCoilPropBlock == null)
+                {
+                    _chargerCoilPropBlock = new MaterialPropertyBlock();
+                }
+
                 for (int i = 0; i < chargerCoilRenderers.Length; i++)
                 {
                     var rend = chargerCoilRenderers[i];
-                    if (rend != null && rend.sharedMaterial != null)
+                    if (rend != null)
                     {
-                        rend.sharedMaterial.SetColor(EmissionColorProp, glow);
+                        rend.GetPropertyBlock(_chargerCoilPropBlock);
+                        _chargerCoilPropBlock.SetColor(EmissionColorProp, glow);
+                        rend.SetPropertyBlock(_chargerCoilPropBlock);
                     }
                 }
             }

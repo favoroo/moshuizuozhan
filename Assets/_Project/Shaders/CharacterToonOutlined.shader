@@ -11,8 +11,9 @@ Shader "P1/CharacterToonOutlined"
         _RimColor         ("Rim Color", Color) = (1,1,1,1)
         _RimStrength      ("Rim Strength", Range(0,2)) = 0.5
         _RimPower         ("Rim Power", Range(1,8)) = 3
-        _ShadowTint       ("Shadow Tint", Color) = (0.55,0.55,0.62,1)
+        _ShadowTint       ("Shadow Tint", Color) = (0.40,0.45,0.62,1)
         _ShadeThreshold   ("Shade Threshold", Range(0,1)) = 0.5
+        _ShadeSoftness    ("Shade Softness", Range(0.001, 0.2)) = 0.02
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull Mode", Float) = 2
 
         // 运行时潜墨隐匿幽灵态（InkCharacterMotor）克隆材质后动态修改的透明通道属性，不可删除或更名
@@ -21,6 +22,10 @@ Shader "P1/CharacterToonOutlined"
         [HideInInspector] _SrcBlend ("__src", Float) = 1
         [HideInInspector] _DstBlend ("__dst", Float) = 0
         [HideInInspector] _ZWrite   ("__zw", Float) = 1
+
+        _ShadowFloor      ("Shadow Floor", Range(0.0, 1.0)) = 0.55
+        _SpecThreshold    ("Spec Threshold", Range(0.5, 0.999)) = 0.93
+        _SpecSoftness     ("Spec Softness", Range(0.001, 0.1)) = 0.02
 
         // 蛋形身体描边属性（仅 Outlined 材质独有，用于反向法线外扩 Pass）
         _OutlineWidth     ("Outline Width (Object Space)", Float) = 0.012
@@ -59,6 +64,10 @@ Shader "P1/CharacterToonOutlined"
             #pragma vertex vert
             #pragma fragment frag
 
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
+
             // 潜墨隐匿半透明变体：开启时片元输出 albedo.a
             #pragma multi_compile_local_fragment _ _SURFACE_TYPE_TRANSPARENT
 
@@ -89,6 +98,11 @@ Shader "P1/CharacterToonOutlined"
             HLSLPROGRAM
             #pragma vertex ShadowPassVertex
             #pragma fragment ShadowPassFragment
+
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体（shadowmap 同样走 GRD 批处理）
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
+
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -113,6 +127,11 @@ Shader "P1/CharacterToonOutlined"
             HLSLPROGRAM
             #pragma vertex OutlinePassVertex
             #pragma fragment OutlinePassFragment
+
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体（每角色额外一次 draw，同样走 GRD 批处理）
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
+
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"

@@ -120,7 +120,7 @@ Godot 导入 MP3 勾 loop 即无缝；**Unity 没有导入期 loop 开关**（�
 |---|---|---|
 | 透明底 PNG | ✅ 走 `--keyout` 品红管线 | 主体含品红/粉色时换纯绿底 + `keyout.py --green` |
 | 中文语音（播报/台词） | ✅ `gen_voice.sh` | — |
-| BGM | ⚠️ `gen_music.sh` 流程保留，但 `lyria-3.5` **2026-10-29 起上游禁用**（400 `PROXY_GENERATION_DISABLED`） | 改用 **`python3 tools/bake_bgm.py`**（本地程序化合成，固定种子、零配额，产 OGG 进 `Assets/_Project/Audio/Music/`）；网关恢复后仍可用 `gen_music.sh --ogg` |
+| BGM | ⚠️ `gen_music.sh` 流程保留（模型链 `lyria-3.5` → `lyria-3-pro-preview` 自动回退），但**两个模型 2026-10-29 实测都被上游禁用**（400 `PROXY_GENERATION_DISABLED`） | 改用 **`python3 tools/bake_bgm.py`**（本地程序化合成，固定种子、零配额，产 OGG 进 `Assets/_Project/Audio/Music/`）；网关恢复后仍可用 `gen_music.sh --ogg`，无需改脚本 |
 | **音效 SFX（枪声/溅射/UI 音）** | **❌ 网关没有 SFX 模型，且音乐模型不能当音效用**：实测提示词写「只要 0.15 秒点击音」，`lyria-3.5` 仍返回 56 秒整段素材（按「一首曲子」理解 prompt），剪开头也剪不出干脆瞬态 | **本项目已有一等公民：`python3 tools/bake_sfx.py`**（纯标准库离线合成，固定种子可复现，17 个音效族/23 个文件，产 WAV 进 `Assets/_Project/Audio/SFX/`）。其次 jsfxr、freesound.org、Kenney 音频包（需你明确授权引入第三方素材） |
 | 逐帧动画序列（走路循环等） | ❌ 模型生成不了多帧一致的动画 | 静态图 + 程序化动画；P1 是 3D 占位，本来也不需要 |
 | 精确时长的音乐段落 | ⚠️ 无时长参数（实测要 1 秒给 56 秒） | 生成后用 ffmpeg 裁裁/淡出对齐 |

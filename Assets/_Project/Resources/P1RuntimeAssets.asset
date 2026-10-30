@@ -29,6 +29,140 @@ MonoBehaviour:
   - {fileID: 21300000, guid: 51c51cb9c94834ceea0626627fae125a, type: 3}
   - {fileID: 21300000, guid: 29bba3f40d78d439ea8a2c8c12caa804, type: 3}
   - {fileID: 21300000, guid: a5047039acdd840f5beacec071a7ebe5, type: 3}
+  uiIconNames:
+  - glyph_back
+  - glyph_bolt
+  - glyph_booyah
+  - glyph_bot
+  - glyph_check
+  - glyph_clock
+  - glyph_close
+  - glyph_copy
+  - glyph_crown
+  - glyph_dice
+  - glyph_drop
+  - glyph_exit
+  - glyph_eye
+  - glyph_feather
+  - glyph_flag
+  - glyph_flex
+  - glyph_gamepad
+  - glyph_gear
+  - glyph_hair
+  - glyph_hand
+  - glyph_hanger
+  - glyph_key
+  - glyph_keyboard
+  - glyph_lock
+  - glyph_map
+  - glyph_monitor
+  - glyph_moon
+  - glyph_next
+  - glyph_note
+  - glyph_online
+  - glyph_palette
+  - glyph_paste
+  - glyph_pencil
+  - glyph_play
+  - glyph_plus
+  - glyph_question
+  - glyph_reset
+  - glyph_rotate
+  - glyph_shirt
+  - glyph_signal
+  - glyph_smile
+  - glyph_sparkle
+  - glyph_speaker
+  - glyph_squidlet
+  - glyph_star
+  - glyph_sun
+  - glyph_swords
+  - glyph_target
+  - glyph_users
+  - mark_death
+  - mark_splat
+  - mark_squid
+  - rule_climb
+  - rule_enemy
+  - rule_swim
+  - rule_turf
+  - special_slam
+  - special_storm
+  - sub_bomb
+  - weapon_blaster
+  - weapon_charger
+  - weapon_dualies
+  - weapon_roller
+  - weapon_shooter
+  - weapon_slosher
+  - weapon_splatling
+  uiIcons:
+  - {fileID: 21300000, guid: a204ce398d4324ec9a79d62a828dbf4b, type: 3}
+  - {fileID: 21300000, guid: 7b28a031994b34ecf957be52338cc46c, type: 3}
+  - {fileID: 21300000, guid: 943b3f00cd9024603b7c5e6fbd2fe183, type: 3}
+  - {fileID: 21300000, guid: 3e934a2a562ba4d60850a5be35d23c19, type: 3}
+  - {fileID: 21300000, guid: 27056b7f34b1c4228a670436ca05ae3d, type: 3}
+  - {fileID: 21300000, guid: 50a353681b046439fb7aa9656f8f7c75, type: 3}
+  - {fileID: 21300000, guid: c641bc18059c449c2b61818fb2ebc32f, type: 3}
+  - {fileID: 21300000, guid: cb274b457a88d4ab7aeb80dfb9d1983f, type: 3}
+  - {fileID: 21300000, guid: 50f9a10532bf6432a8cd2b3456bf24cc, type: 3}
+  - {fileID: 21300000, guid: e99db845181494ca38ea04024feee542, type: 3}
+  - {fileID: 21300000, guid: e57019f8e600147b292df5ba9c55b3b4, type: 3}
+  - {fileID: 21300000, guid: 40232d09ca1394408bdf03195fa972f2, type: 3}
+  - {fileID: 21300000, guid: f66c5c1c1532a45cda40b2ce7b06bb13, type: 3}
+  - {fileID: 21300000, guid: 9a404c8d34be74e969b29db590afa56c, type: 3}
+  - {fileID: 21300000, guid: 1d1000c5f41654ad69ef95cc9bc2d9e0, type: 3}
+  - {fileID: 21300000, guid: 8c87563e2e6e843259b1c77bd6ee753e, type: 3}
+  - {fileID: 21300000, guid: af1554d8762f94634b277ee1949f3b44, type: 3}
+  - {fileID: 21300000, guid: 4f274bccf71e641dea095bfc7d2ff7b6, type: 3}
+  - {fileID: 21300000, guid: 22ce67523c42444af8f45daba72fdb21, type: 3}
+  - {fileID: 21300000, guid: c8da19892a2d14ccb90802ba62ef6673, type: 3}
+  - {fileID: 21300000, guid: 47e17568fc7204f4c87da06abbd21a79, type: 3}
+  - {fileID: 21300000, guid: 0831a22f8b48b4198b1d81419637b234, type: 3}
+  - {fileID: 21300000, guid: c7b1fce2301244a5db050a5412e6b16f, type: 3}
+  - {fileID: 21300000, guid: 434dd770d61e6460e96e1426acdd2d76, type: 3}
+  - {fileID: 21300000, guid: a946e2997cb0b4a1b885a62090370bc0, type: 3}
+  - {fileID: 21300000, guid: 084cbb8f9d23e4774b14c778a70e18ac, type: 3}
+  - {fileID: 21300000, guid: 3f0e224e8742341719983bda934d57c1, type: 3}
+  - {fileID: 21300000, guid: 74ff88cd2b2e8497fbba0f7b9bcceebc, type: 3}
+  - {fileID: 21300000, guid: 976fd4ec40e8143408eddc28ff2ccd70, type: 3}
+  - {fileID: 21300000, guid: a52d9080c82ce47b3b74f85d41e5bee8, type: 3}
+  - {fileID: 21300000, guid: 9d5dca76d5cf9402c8df69648473880a, type: 3}
+  - {fileID: 21300000, guid: c27d67c27f0b04472aa60274d926e8f3, type: 3}
+  - {fileID: 21300000, guid: 29ac0342e2d474465b126860f64ede61, type: 3}
+  - {fileID: 21300000, guid: 932d4d09795ac49c19da0cf557028954, type: 3}
+  - {fileID: 21300000, guid: 7b76e1d39c84143ee876c1c8137654c7, type: 3}
+  - {fileID: 21300000, guid: 539b4a7730b3842d1aadd85ea5552e59, type: 3}
+  - {fileID: 21300000, guid: 34ee77d4a8af4449bb26d02251cc54be, type: 3}
+  - {fileID: 21300000, guid: c171abfef5c4441aaaedccc5c2f2e64a, type: 3}
+  - {fileID: 21300000, guid: 0689debd2bf314191928699c2cbc6566, type: 3}
+  - {fileID: 21300000, guid: 34aa578fea300463d8a9ea42b6fb9de3, type: 3}
+  - {fileID: 21300000, guid: e2e314579f1c747b68633085bfe020c6, type: 3}
+  - {fileID: 21300000, guid: 047cd4b8c3e07404c9dccef87747265c, type: 3}
+  - {fileID: 21300000, guid: f4741982f416e46bb9a88868a02f262b, type: 3}
+  - {fileID: 21300000, guid: 60584ea97c2bd4e4aa2114260d6e95f1, type: 3}
+  - {fileID: 21300000, guid: f994c40d829e6413ba8ca7e5e8cd410f, type: 3}
+  - {fileID: 21300000, guid: 734f27258a2e048b68f63ef369499de4, type: 3}
+  - {fileID: 21300000, guid: 52b990f043bdd4965ad5920d894fec2c, type: 3}
+  - {fileID: 21300000, guid: e801586c5638540da9d0acd1fe8714f2, type: 3}
+  - {fileID: 21300000, guid: 7924daba530a24cd8b33f2d21ccb4fba, type: 3}
+  - {fileID: 21300000, guid: a9d11ce873fa54cfea86b5344d334eba, type: 3}
+  - {fileID: 21300000, guid: 6b06b7b71bccd44059d323c0052ff7be, type: 3}
+  - {fileID: 21300000, guid: 5bb4eeca172c849bebb9db19657fb0ea, type: 3}
+  - {fileID: 21300000, guid: c5edcc97426d04a6b89f9097b4c3cd90, type: 3}
+  - {fileID: 21300000, guid: c2c1c0c514a76467b9aa34fd93fe37c6, type: 3}
+  - {fileID: 21300000, guid: 81f99df38f9bb4f1cac553688291640e, type: 3}
+  - {fileID: 21300000, guid: dca8a5d02e4244b2899ca854979bbd68, type: 3}
+  - {fileID: 21300000, guid: 194ef78fb40114841ac6bc85fded200b, type: 3}
+  - {fileID: 21300000, guid: 22563bc37c1c048ae91448c6d45e8ec3, type: 3}
+  - {fileID: 21300000, guid: 43949f63f7b0c4461b2d0f309b5337ed, type: 3}
+  - {fileID: 21300000, guid: 29bba3f40d78d439ea8a2c8c12caa804, type: 3}
+  - {fileID: 21300000, guid: 35b164a7c79454ce4b8eaec0342fc0f8, type: 3}
+  - {fileID: 21300000, guid: 864cc6f5ee183484991065385d37ff03, type: 3}
+  - {fileID: 21300000, guid: bcfa89d97b80044158a18a2e987cc48e, type: 3}
+  - {fileID: 21300000, guid: 636211327fd9c4b9c89fa0e4512886eb, type: 3}
+  - {fileID: 21300000, guid: 51c51cb9c94834ceea0626627fae125a, type: 3}
+  - {fileID: 21300000, guid: a5047039acdd840f5beacec071a7ebe5, type: 3}
   sfxNames:
   - blaster_boom_1
   - blaster_boom_2

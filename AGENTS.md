@@ -15,6 +15,7 @@ Unity 第三人称 3D「涂地对战」游戏（玩法参考 Splatoon 涂地模�
 | `Docs/GamePlan.md` | 设计定位、核心循环、技术决策（为什么这样做） |
 | `Docs/OptimizationPlan.md` | **多 Agent 任务看板**：领任务、标 `[-]`、完工打 `[x]`，含依赖与领域锁 |
 | `Docs/P6B-QA-Report.md` / `Docs/ProfilerReport_P6C.md` | 测试与性能验收留底 |
+| `Docs/UI-ComicStyle.md` | **UI 漫画风规范**：token、动效上限、组件 API、禁止项、自检工具 |
 
 > 详细操作手册（Unity CLI 全量命令、菜单/批处理、测试与环境坑、素材落地、并行冲突细则）
 > 见技能 **`p1-dev-workflow`**；生成素材见 **`media-gen`**；发版见 **`p1-release`**。
@@ -55,11 +56,12 @@ inkwave-aah-research/  竞品（INKWAVE）逆向资料，只读参考
 |---|---|---|
 | 涂地规则/覆盖率/网格 | `Ink/InkGridConfigSO`、`Ink/InkSurfaceController` | 每帧最多上传一次纹理 |
 | 油漆观感/湿润/凹凸 | `Shaders/InkGround.shader`、`InkWall.shader` | 材质在 `Materials/`，不手改 `.mat` YAML |
+| 整体三渲二/描边/光照 | `Shaders/ToonLighting.hlsl`、`ToonOutline.shader`、`Editor/ToonStyleInstaller.cs` | 一键 `P1/画风/1`，回退用 `P1/画风/2` |
 | 武器数值/新武器 | `Weapons/WeaponConfigSO` + `*WeaponStrategy` + `WeaponStrategyFactory` | 外部只经 `WeaponController` 公共 API |
 | 移动/潜墨/踩墨/生命 | `Player/InkCharacterMotor`、`PlayerConfigSO`、`CombatantHealth` | 60 HP 踩墨保护底线不可破 |
 | 比赛流程/时长/结算 | `Core/MatchManager`、`GameConfigSO` | 阶段事件 `PhaseChanged` 被 UI/音频订阅 |
 | Bot 行为 | `AI/BotController`、`BotConfigSO`、`NavGrid`、`BotTactics` | 寻路按墨水加权，撤退不得朝敌 |
-| HUD/UI 样式 | `UI/HudController` + 对应 View；`UIThemeSO`、`HudGaugeStyleSO` | 运行时建 Graphic 必须补 `CanvasRenderer` |
+| HUD/UI 样式 | `UI/HudController` + 对应 View；`UIThemeSO`、`HudGaugeStyleSO`、`UI/Core/ComicStyle` | 先读 `Docs/UI-ComicStyle.md`；运行时建 Graphic 必须补 `CanvasRenderer`，已有 Image 的物体不能 `AddComponent<UIInkShapeGraphic>`（用 `CreateChildBackground`） |
 | 战前选枪/配装 | `UI/WeaponSelect/WeaponSelectBootstrap`、`WeaponSelectView` | 选择存 PlayerPrefs；独立包依赖 `P1RuntimeAssets` |
 | 暂停/设置/震屏 | `UI/Menus/PauseMenuOverlay`、`Core/GameSettingsService` | 暂停用 `Time.timeScale=0`，与 Hitstop 协调 |
 | 音效/循环音 | `Core/AudioManager`、`Weapons/WeaponAudioDriver`、`Player/MovementAudioDriver` | 新增音效后必须重建运行时资源库 |
@@ -67,6 +69,8 @@ inkwave-aah-research/  竞品（INKWAVE）逆向资料，只读参考
 | 地图/掩体/遮挡 | `Environment/ArenaGeometryBuilder`（菜单 `P1/关卡与地图/…`） | 重建会重写场景，先确认无人在 Play |
 | 场景装配 | `Editor/ProjectScaffolder`（菜单 `P1/构建/…`） | **禁止手改 `.unity`** |
 | 图标/字体/音效/BGM | `MediaRaw/` 原稿 + `tools/bake_*.py`，落地 `Art|Audio` | 落地后必须 Refresh + 体检 |
+| UI 图标运行时查找 | `UI/Core/UIIconLibrary` + `P1RuntimeAssets.uiIcons` | 取不到必须隐藏 Image；新增图标后跑菜单 `P1/构建/11` |
+| 中文字体 | `Art/Fonts/ZCOOL*.ttf` + 菜单 `P1/画风/漫画风/0` | 项目原字体无 CJK；缺字会显示 □，菜单 0 会自检 1200+ 汉字 |
 
 ## 硬性规则
 
@@ -126,6 +130,12 @@ U="$HOME/.unity/bin/unity"
   正式发版走 `python3 .agents/skills/p1-release/release.py`（版本递增 + 双端 Release）。
 - **新增/替换 SFX、武器图标或 UI 主题后**：先运行 `P1/构建/11. 生成运行时资源库 (P1RuntimeAssets)`，
   否则独立包会静音/缺图标（编辑器内仍能靠 `AssetDatabase` 兜底，容易漏检）。
+- **改 UI 外观前先跑** `P1/画风/漫画风/2. 生成样式画廊场景`，在 `Scenes/ComicGallery.unity` 里确认
+  面板/气泡/网点/字体正常，再改真实界面；主题数值用菜单 `P1/画风/漫画风/1` 写入，不手改 `.asset`。
+- **同一物体已有 Image 时禁止 `AddComponent<UIInkShapeGraphic>()`**：Unity 的 `Graphic` 带
+  `[DisallowMultipleComponent]`，会静默返回 null（表现为"换了皮但什么都没发生"）。
+- **纯装饰性换肤代码要 try/catch + LogWarning**：装饰失败不该让整局游戏起不来，
+  也不该触发 PlayMode 的 log-error 门禁。
 
 ## 素材生成
 
@@ -134,7 +144,8 @@ U="$HOME/.unity/bin/unity"
 1. **画风档案**：生成美术前先读 `MediaRaw/style/STYLE.md`；它目前是**空白**的 = 禁止生成正式素材
    （仅允许管线冒烟测试，且必须标注为测试件）。
 2. **短音效与 BGM 不走网关**：音效用 `python3 tools/bake_sfx.py`，BGM 用 `python3 tools/bake_bgm.py`
-   （固定种子、可复现、零配额）；`lyria-3.5` 已于 2026-10-29 被上游禁用。
+   （固定种子、可复现、零配额）；网关音乐通道（`lyria-3.5` 与备用 `lyria-3-pro-preview`）
+   2026-10-29 实测均被上游禁用（400 `PROXY_GENERATION_DISABLED`）。
 3. **落地靠路径**：拷进 `Assets/_Project/Art|Audio/...` 对应目录，导入设置自动套；
    落地后必须 `AssetDatabase.Refresh()` + `MediaTools.ReportMedia()` 体检（详见技能）。
 

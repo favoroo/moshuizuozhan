@@ -42,6 +42,7 @@ namespace P1.UI
         [SerializeField] private UIInkShapeGraphic readyHintPill;
         [SerializeField] private Text readyHintLabel;
         [SerializeField] private UISpringMotion readyHintMotion;
+        [SerializeField] private ComicActionLinesGraphic actionLines;
 
         [SerializeField] private bool autoBindLocalPlayerTeam = true;
 
@@ -107,6 +108,12 @@ namespace P1.UI
             if (halo != null) halo.Intensity = 0f;
             if (halo != null && halo.gameObject.activeSelf) halo.gameObject.SetActive(false);
             if (readyHint != null) readyHint.gameObject.SetActive(false);
+
+            if (actionLines == null && pulseRoot != null)
+            {
+                actionLines = pulseRoot.GetComponentInChildren<ComicActionLinesGraphic>(true);
+            }
+            if (actionLines != null) actionLines.Alpha = 0f;
         }
 
         /// <summary>装配球心技能图标（阴影 + 白色主图标），由程序化工厂调用。</summary>
@@ -172,8 +179,33 @@ namespace P1.UI
             autoBindLocalPlayerTeam = enabled;
         }
 
+        private void Awake()
+        {
+            EnsureSubCanvas();
+        }
+
+        private void EnsureSubCanvas()
+        {
+            var canvas = GetComponent<Canvas>();
+            if (canvas == null)
+            {
+                canvas = gameObject.AddComponent<Canvas>();
+                canvas.overrideSorting = false;
+                var parentCanvas = transform.parent != null ? transform.parent.GetComponentInParent<Canvas>() : null;
+                if (parentCanvas != null)
+                {
+                    canvas.additionalShaderChannels = parentCanvas.additionalShaderChannels | AdditionalCanvasShaderChannels.TexCoord1;
+                }
+                else
+                {
+                    canvas.additionalShaderChannels = AdditionalCanvasShaderChannels.TexCoord1 | AdditionalCanvasShaderChannels.Normal | AdditionalCanvasShaderChannels.Tangent;
+                }
+            }
+        }
+
         private void Start()
         {
+            EnsureSubCanvas();
             EnsureWiring();
         }
 
@@ -230,6 +262,20 @@ namespace P1.UI
                 if (visible) halo.Intensity = _haloIntensity.Value;
             }
 
+            // 漫画放射动作线：满能时亮起并自转
+            if (actionLines == null && pulseRoot != null)
+            {
+                actionLines = pulseRoot.GetComponentInChildren<ComicActionLinesGraphic>(true);
+            }
+            if (actionLines != null)
+            {
+                actionLines.Alpha = _ready ? 0.24f : 0f;
+                if (_ready)
+                {
+                    actionLines.transform.localRotation = Quaternion.Euler(0f, 0f, _pulseTime * 40f);
+                }
+            }
+
             ApplyPercent();
         }
 
@@ -281,16 +327,22 @@ namespace P1.UI
             if (!force && _iconApplied) return;
             _iconApplied = true;
 
-            Sprite sprite = HudGaugeStyleSO.Resolve(style).GetSpecialIcon(_specialKind);
+            string iconName = _specialKind == SpecialKind.Storm ? "special_storm" : "special_slam";
+            Sprite sprite = UIIconLibrary.Get(iconName);
             if (sprite == null)
             {
+                sprite = HudGaugeStyleSO.Resolve(style).GetSpecialIcon(_specialKind);
+            }
+
 #if UNITY_EDITOR
+            if (sprite == null)
+            {
                 // 资产引用尚未同步时（例如首次进 Play 前的旧 .asset），按资源路径兜底，
                 // 避免球心空白；正式构建以 HudGaugeStyleSO 的序列化引用为准。
                 string path = _specialKind == SpecialKind.Storm ? EditorStormIconPath : EditorSlamIconPath;
                 sprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(path);
-#endif
             }
+#endif
 
             if (specialIcon != null)
             {
@@ -325,29 +377,28 @@ namespace P1.UI
 
             if (rimShape != null)
             {
-                rimShape.BorderColor = new Color(themeResolved.textPrimary.r, themeResolved.textPrimary.g,
-                    themeResolved.textPrimary.b, 0.92f);
+                rimShape.BorderColor = ComicStyle.Ink;
             }
 
             if (halo != null) halo.color = themeResolved.readyGold;
             if (burst != null) burst.color = themeResolved.readyGold;
+            if (actionLines != null) actionLines.color = ComicStyle.Yellow;
 
             if (readyHintPill != null)
             {
-                readyHintPill.color = new Color(ink.r, ink.g, ink.b, 1f);
-                readyHintPill.BorderColor = themeResolved.outlineColor;
+                readyHintPill.color = ComicStyle.Paper;
+                readyHintPill.BorderColor = ComicStyle.Ink;
             }
 
-            if (readyHintLabel != null) readyHintLabel.color = new Color(0.06f, 0.05f, 0.09f, 1f);
-            if (percentLabel != null) percentLabel.color = themeResolved.textPrimary;
+            if (readyHintLabel != null) readyHintLabel.color = ComicStyle.Ink;
+            if (percentLabel != null) percentLabel.color = ComicStyle.Ink;
 
             // 白色矢量图标 + 深墨硬阴影，压在队伍色液面上依然清晰
             if (specialIcon != null) specialIcon.color = Color.white;
 
             if (specialIconShadow != null)
             {
-                Color outline = themeResolved.outlineColor;
-                specialIconShadow.color = new Color(outline.r, outline.g, outline.b, 0.62f);
+                specialIconShadow.color = ComicStyle.Ink;
             }
         }
 

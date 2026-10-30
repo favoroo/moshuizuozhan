@@ -125,8 +125,10 @@ namespace P1.Tests
             yield return LoadPlaybox();
 
             var match = MatchManager.Instance;
+            // 压缩 3s 倒计时：本用例只验证 Playing 下的操作互换
+            PlayModeTestKit.ShortenMatchTimers();
             match.StartMatch();
-            yield return new WaitForSeconds(3.6f);
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Playing, 6f);
             Assert.IsTrue(MatchManager.InputAllowed, "比赛开始后应允许玩家输入");
 
             var player = PlayerController.LocalPlayer;

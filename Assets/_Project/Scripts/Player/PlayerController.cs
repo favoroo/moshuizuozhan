@@ -35,6 +35,8 @@ namespace P1.Player
         private Vector3 _aimDirection = Vector3.forward;
         private Transform _reticleTransform;
         private MeshRenderer _reticleRenderer;
+        private Mesh _reticleMesh;
+        private Material _reticleMaterial;
         private MaterialPropertyBlock _propBlock;
         private GroundAimReticle _groundReticle;
         private SubWeaponThrowTrajectory _subTrajectory;
@@ -122,7 +124,20 @@ namespace P1.Player
             if (LocalPlayer == this)
                 LocalPlayer = null;
             if (_reticleTransform != null)
+            {
                 Destroy(_reticleTransform.gameObject);
+                _reticleTransform = null;
+            }
+            if (_reticleMesh != null)
+            {
+                Destroy(_reticleMesh);
+                _reticleMesh = null;
+            }
+            if (_reticleMaterial != null)
+            {
+                Destroy(_reticleMaterial);
+                _reticleMaterial = null;
+            }
         }
 
         private void OnApplicationFocus(bool hasFocus)
@@ -330,8 +345,11 @@ namespace P1.Player
             {
                 Vector2 touchDelta = TouchLookDelta;
                 TouchLookDelta = Vector2.zero;
-                yawDelta += touchDelta.x * TouchLookDegreesPerPixel * touchSensitivity;
-                pitchDelta += -touchDelta.y * TouchLookDegreesPerPixel * touchSensitivity * invertSign;
+                // 触屏增量是物理像素：按设备 DPI 归一到 400dpi 基准，
+                // 否则同样一次物理滑动，500ppi 屏上的转角只有 260ppi 屏的一半左右。
+                float dpiNorm = Mathf.Clamp(MobileUiMetrics.DefaultDpi / Mathf.Max(1f, Screen.dpi), 0.6f, 1.6f);
+                yawDelta += touchDelta.x * TouchLookDegreesPerPixel * touchSensitivity * dpiNorm;
+                pitchDelta += -touchDelta.y * TouchLookDegreesPerPixel * touchSensitivity * invertSign * dpiNorm;
             }
             else if (TouchLookDelta.sqrMagnitude > 0f)
             {
@@ -440,7 +458,7 @@ namespace P1.Player
                 if (target.Team == _health.Team)
                     continue;
 
-                InkCharacterMotor targetMotor = target.GetComponent<InkCharacterMotor>();
+                InkCharacterMotor targetMotor = target.Motor;
                 if (targetMotor != null && targetMotor.IsStealthed)
                     continue;
 
@@ -685,12 +703,14 @@ namespace P1.Player
 
             // 保留原有 MeshFilter 与 MeshRenderer 字段以保持向后兼容性
             var mf = go.AddComponent<MeshFilter>();
-            mf.sharedMesh = VfxPool.BuildRingMesh(28, 0.80f, 0.65f);
+            _reticleMesh = VfxPool.BuildRingMesh(28, 0.80f, 0.65f);
+            mf.sharedMesh = _reticleMesh;
             _reticleRenderer = go.AddComponent<MeshRenderer>();
 
             Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
             if (sh == null) sh = Shader.Find("Sprites/Default");
-            _reticleRenderer.sharedMaterial = new Material(sh);
+            _reticleMaterial = new Material(sh);
+            _reticleRenderer.sharedMaterial = _reticleMaterial;
             _reticleRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             _reticleRenderer.enabled = false; // 由 GroundAimReticle 程序化组件负责渲染多武器形态
 

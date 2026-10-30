@@ -16,7 +16,19 @@ Shader "P1/ObstacleDitherLit"
         [Header(Surface Detail)]
         _EdgeHighlight ("Edge Highlight", Range(0.0, 2.0)) = 0.25
         _PanelLineStrength ("Panel Line Strength", Range(0.0, 1.0)) = 0.35
-        _DetailNoiseStrength ("Detail Noise Strength", Range(0.0, 1.0)) = 0.12
+        _DetailNoiseStrength ("Detail Noise Strength", Range(0.0, 1.0)) = 0.04
+
+        [Header(Toon Shading)]
+        _ShadeThreshold ("Shade Threshold", Range(0.2, 0.8)) = 0.5
+        _ShadeSoftness ("Shade Softness", Range(0.005, 0.2)) = 0.03
+        _ShadowTint ("Shadow Tint", Color) = (0.40, 0.45, 0.62, 1)
+        _ShadowFloor ("Shadow Floor", Range(0.0, 1.0)) = 0.42
+        _RimColor ("Rim Color", Color) = (0.75, 0.86, 1.0, 1)
+        _RimStrength ("Rim Strength", Range(0.0, 1.0)) = 0.18
+        _RimPower ("Rim Power", Range(0.5, 8.0)) = 3.0
+        _SpecStrength ("Spec Strength", Range(0.0, 2.0)) = 0.5
+        _SpecThreshold ("Spec Threshold", Range(0.5, 0.999)) = 0.95
+        _SpecSoftness ("Spec Softness", Range(0.001, 0.1)) = 0.02
 
         [Header(Dither Occlusion Settings)]
         _DitherAlpha ("Dither Alpha", Range(0.0, 1.0)) = 1.0
@@ -47,12 +59,20 @@ Shader "P1/ObstacleDitherLit"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
+            // 注：带 MPB（OcclusionFader 淡化中）的 renderer 会被 GRD 排除并自动回退普通路径，仍正确
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
+
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "ToonLighting.hlsl"
+            #include "InkSurfaceOverlay.hlsl"
 
             struct Attributes
             {
@@ -81,6 +101,16 @@ Shader "P1/ObstacleDitherLit"
                 float _EdgeHighlight;
                 float _PanelLineStrength;
                 float _DetailNoiseStrength;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                half4 _RimColor;
+                float _RimStrength;
+                float _RimPower;
+                float _SpecStrength;
+                float _SpecThreshold;
+                float _SpecSoftness;
                 float _DitherAlpha;
                 float4 _FocusPos;
                 float _FocusRadius;
@@ -178,26 +208,30 @@ Shader "P1/ObstacleDitherLit"
                     }
                 }
 
-                // 3. 基础光照与高光（含主光阴影，道具/柜体才会真正落地）
-                Light mainLight = GetMainLight();
+                // 3. 基础光照与高光（含主光阴影与三渲二光照）
+                float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
+                Light mainLight = GetMainLight(shadowCoord);
                 float shadowAtten = mainLight.shadowAttenuation;
                 float3 L = normalize(mainLight.direction);
                 float3 V = normalize(GetCameraPositionWS() - input.positionWS);
                 float3 H = normalize(L + V);
 
-                float NdotL = saturate(dot(geomN, L));
                 float NdotH = saturate(dot(geomN, H));
 
-                // 漫反射与暗部环境补光
-                half3 ambient = SampleSH(geomN) * 0.45 + half3(0.18, 0.20, 0.24);
-                half3 diffuse = surfaceColor * (ambient + mainLight.color * ((NdotL * 0.75 + 0.25) * shadowAtten));
+                half3 ambient = P1ToonAmbient(geomN, _ShadowTint.rgb, 0.55, 0.10);
+                half3 diffuse = P1ToonDiffuse(surfaceColor, mainLight.color, dot(geomN, L), shadowAtten,
+                                              _ShadeThreshold, _ShadeSoftness, _ShadowFloor, _ShadowTint.rgb, ambient);
 
-                // 粗糙度高光
-                float specPower = exp2(8.0 * _Smoothness + 1.0);
-                float spec = pow(NdotH, specPower) * (NdotL * 0.8 + 0.2) * _Metallic;
-                half3 specular = mainLight.color * (spec * shadowAtten);
+                half spec = P1ToonSpec(NdotH, _SpecThreshold, _SpecSoftness, _SpecStrength * (0.5 + _Metallic), shadowAtten);
+                half3 specular = mainLight.color * spec;
 
-                half3 finalColor = MixFog(diffuse + specular, input.fogFactor);
+                half rim = P1ToonRim(saturate(dot(geomN, V)), _RimPower, shadowAtten) * _RimStrength;
+                half3 rimLight = _RimColor.rgb * rim;
+
+                half3 shaded = diffuse + specular + rimLight;
+                ApplyTopInkOverlay(shaded, input.positionWS, geomN, shadowAtten, L, V);
+
+                half3 finalColor = MixFog(shaded, input.fogFactor);
                 return half4(finalColor, 1.0);
             }
             ENDHLSL
@@ -216,6 +250,10 @@ Shader "P1/ObstacleDitherLit"
             HLSLPROGRAM
             #pragma vertex ShadowPassVertex
             #pragma fragment ShadowPassFragment
+
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体（shadowmap 同样走 GRD 批处理）
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -243,6 +281,16 @@ Shader "P1/ObstacleDitherLit"
                 float _EdgeHighlight;
                 float _PanelLineStrength;
                 float _DetailNoiseStrength;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                half4 _RimColor;
+                float _RimStrength;
+                float _RimPower;
+                float _SpecStrength;
+                float _SpecThreshold;
+                float _SpecSoftness;
                 float _DitherAlpha;
                 float4 _FocusPos;
                 float _FocusRadius;
@@ -297,6 +345,119 @@ Shader "P1/ObstacleDitherLit"
                     }
                 }
                 return 0;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthNormals"
+            Tags { "LightMode" = "DepthNormals" }
+
+            ZWrite On
+            ZTest LEqual
+            Cull Back
+
+            HLSLPROGRAM
+            #pragma vertex DepthNormalsVertex
+            #pragma fragment DepthNormalsFragment
+
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体（DepthNormals prepass 同样走 GRD 批处理）
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
+
+            #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct DepthNormalsAttributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS   : NORMAL;
+            };
+
+            struct DepthNormalsVaryings
+            {
+                float4 positionCS : SV_POSITION;
+                float3 positionWS : TEXCOORD0;
+                float3 normalWS   : TEXCOORD1;
+            };
+
+            CBUFFER_START(UnityPerMaterial)
+                half4 _BaseColor;
+                half4 _TrimColor;
+                float _Smoothness;
+                float _Metallic;
+                float _CorrugationScale;
+                float _CorrugationDepth;
+                float _EnableCorrugation;
+                float _EdgeHighlight;
+                float _PanelLineStrength;
+                float _DetailNoiseStrength;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                half4 _RimColor;
+                float _RimStrength;
+                float _RimPower;
+                float _SpecStrength;
+                float _SpecThreshold;
+                float _SpecSoftness;
+                float _DitherAlpha;
+                float4 _FocusPos;
+                float _FocusRadius;
+                float _FocusMinAlpha;
+                float _FocusWeight;
+            CBUFFER_END
+
+            static const float4x4 _BayerMatrix4x4 = float4x4(
+                 0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
+                12.0/16.0,  4.0/16.0, 14.0/16.0,  6.0/16.0,
+                 3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
+                15.0/16.0,  7.0/16.0, 13.0/16.0,  5.0/16.0
+            );
+
+            DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)
+            {
+                DepthNormalsVaryings output;
+                output.positionWS = TransformObjectToWorld(input.positionOS.xyz);
+                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                output.normalWS   = TransformObjectToWorldNormal(input.normalOS);
+                return output;
+            }
+
+            half4 DepthNormalsFragment(DepthNormalsVaryings input) : SV_Target
+            {
+                // 俯视角网点半透明遮挡剔除 (Screen-Door Dither Occlusion)
+                float effectiveAlpha = _DitherAlpha;
+                if (_FocusWeight > 0.001)
+                {
+                    float d = length(input.positionWS.xz - _FocusPos.xz);
+                    float focusFade = saturate(d / max(0.1, _FocusRadius));
+                    effectiveAlpha = lerp(_FocusMinAlpha, _DitherAlpha, focusFade);
+                }
+
+                if (effectiveAlpha < 0.999)
+                {
+                    float2 screenPixel = input.positionCS.xy;
+                    int bx = int(fmod(screenPixel.x, 4.0));
+                    int by = int(fmod(screenPixel.y, 4.0));
+                    if (_BayerMatrix4x4[by][bx] >= effectiveAlpha)
+                    {
+                        discard;
+                    }
+                }
+
+                float3 normalWS = normalize(input.normalWS);
+            #if defined(_GBUFFER_NORMALS_OCT)
+                float2 octNormalWS = PackNormalOctQuadEncode(normalWS);
+                float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5);
+                half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);
+                return half4(packedNormalWS, 0.0);
+            #else
+                return half4(normalWS, 0.0);
+            #endif
             }
             ENDHLSL
         }

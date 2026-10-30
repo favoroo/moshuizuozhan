@@ -102,6 +102,8 @@ namespace P1.Tests
                 var motor = player.Motor;
                 var weapon = player.Weapon;
 
+                // 压缩 3s 倒计时（本用例只关心 Playing 之后的子系统日志）
+                PlayModeTestKit.ShortenMatchTimers();
                 MatchManager.Instance.StartMatch();
                 float timeout = 8f;
                 while (!MatchManager.CombatAllowed && timeout > 0f)
@@ -171,9 +173,11 @@ namespace P1.Tests
                 Assert.IsFalse(weapon.IsPerformingSpecial, "砸地结算后应结束大招状态");
                 player.Health.IsInvulnerable = true;
 
-                // 5) Ink Tempest：发生器 0.45s 飞行 → 云层 6.5s 漂移 + DOT → 回收
+                // 5) Ink Tempest：发生器 0.45s 飞行 → 云层漂移 + DOT → 回收
+                //    生命周期用临时配置压到 2.0s（真实默认 6.5s），回收路径完全一致，只是省 4.5s 真实等待。
                 WeaponConfigSO stormConfig = CreateConfig(WeaponKind.Blaster);
                 stormConfig.specialKind = SpecialKind.Storm;
+                stormConfig.stormDuration = 2.0f;
                 weapon.EquipWeapon(stormConfig);
                 weapon.ResetAllWeaponState();
                 motor.RefillInkFull();
@@ -184,9 +188,14 @@ namespace P1.Tests
                 Assert.IsNotNull(InkStormCloudPool.Instance, "首次释放应自动创建风暴云对象池");
                 Assert.AreEqual(1, InkStormCloudPool.Instance.ActiveStormCount, "应有一朵风暴云处于激活状态");
 
-                yield return new WaitForSeconds(6.9f);
+                // 轮询到回收完成，避免低帧率掐点
+                float stormDeadline = Time.time + 5f;
+                while (InkStormCloudPool.Instance.ActiveStormCount > 0 && Time.time < stormDeadline)
+                {
+                    yield return null;
+                }
                 Assert.AreEqual(0, InkStormCloudPool.Instance.ActiveStormCount,
-                    "6.5s 生命周期结束后风暴云应完全回收");
+                    "生命周期结束后风暴云应完全回收");
 
                 // 6) VFX 对象池收束：环 / 卫星墨珠 / 延迟环全部归零
                 yield return new WaitForSeconds(1.2f);

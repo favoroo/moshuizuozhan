@@ -222,7 +222,9 @@ namespace P1.Tests
             Assert.IsFalse(health.IsAlive, "200 伤害应击杀玩家");
             Assert.AreEqual(4f, health.RespawnRemaining, 0.2f, "复活倒计时应为 4s");
 
-            yield return new WaitForSeconds(4.3f);
+            // 复活计时走 Time.deltaTime：用 8 倍时间倍率等待 4.3 游戏内秒（约 0.5s 真实时间），
+            // 断言仍按游戏内秒（复活满血清墨等），契约不变。
+            yield return PlayModeTestKit.WaitGameSecondsAccelerated(4.3f);
 
             Assert.IsTrue(health.IsAlive, "4s 后应自动复活");
             Assert.AreEqual(100f, health.CurrentHealth, 0.5f, "复活应满血");

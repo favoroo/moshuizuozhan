@@ -28,6 +28,7 @@ namespace P1.UI.WeaponSelect
         private readonly Sprite[] _icons = new Sprite[WeaponSelectMath.WeaponCount];
         private Coroutine _equipRetryCoroutine;
         private bool _subscribedMatch;
+        private MatchManager _currentMatch;
         private bool _hasExplicitSelection;
         private bool _weaponAppliedExternally;
 
@@ -206,16 +207,18 @@ namespace P1.UI.WeaponSelect
         private void SubscribeMatch(MatchManager match)
         {
             if (match == null || _subscribedMatch) return;
-            match.PhaseChanged += HandlePhaseChanged;
+            _currentMatch = match;
+            _currentMatch.PhaseChanged += HandlePhaseChanged;
             _subscribedMatch = true;
         }
 
         private void UnsubscribeMatch()
         {
             if (!_subscribedMatch) return;
-            if (MatchManager.Instance != null)
+            if (_currentMatch != null)
             {
-                MatchManager.Instance.PhaseChanged -= HandlePhaseChanged;
+                _currentMatch.PhaseChanged -= HandlePhaseChanged;
+                _currentMatch = null;
             }
             _subscribedMatch = false;
         }

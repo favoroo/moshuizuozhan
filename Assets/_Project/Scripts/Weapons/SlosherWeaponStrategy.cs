@@ -13,6 +13,7 @@ namespace P1.Weapons
         private float _cooldown;
         private float _windupTimer = -1f;
         private WeaponAim _pendingAim;
+        private readonly SlosherVolley _reusableVolley = new SlosherVolley();
 
         public SlosherWeaponStrategy(WeaponConfigSO config) : base(config)
         {
@@ -26,6 +27,7 @@ namespace P1.Weapons
         {
             _cooldown = 0f;
             _windupTimer = -1f;
+            _reusableVolley.Clear();
         }
 
         public override bool OnTriggerHeld(WeaponAim aim, float dt, IWeaponRuntimeHost host)
@@ -80,7 +82,8 @@ namespace P1.Weapons
             if (!host.IsAlive)
                 return;
 
-            var volley = new SlosherVolley();
+            _reusableVolley.Clear();
+            var volley = _reusableVolley;
             int drops = Config != null ? Mathf.Max(1, Config.slosherDrops) : 8;
             float speed = Config != null ? Mathf.Max(1f, Config.projectileSpeed) : 15f;
             float gravity = Config != null ? Mathf.Max(0.01f, Config.projectileGravity) : 22f;

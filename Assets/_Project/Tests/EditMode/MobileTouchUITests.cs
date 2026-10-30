@@ -14,31 +14,91 @@ namespace P1.Tests
         [Test]
         public void ActionButtons_AreAnchoredToBottomRight_AndHaveNoOverlaps()
         {
-            // 验证 5 个主操作按键的扇形人体工学排布均在右下角，且彼此之间保持足够物理间距
-            var positions = new (string name, Vector2 pos, float size)[]
-            {
-                ("Fire", new Vector2(-160f, 160f), 148f),
-                ("Swim", new Vector2(-310f, 110f), 118f),
-                ("Jump", new Vector2(-110f, 310f), 110f),
-                ("Bomb", new Vector2(-245f, 260f), 112f),
-                ("Special", new Vector2(-370f, 340f), 124f)
-            };
+            // 验证从 MobileTouchUI.DefaultLayout 读取的 5 个主操作按键扇形排布均在右下角且无重叠
+            var layout = MobileTouchUI.DefaultLayout;
+            Assert.IsNotNull(layout, "MobileTouchUI.DefaultLayout 不可为空");
+            Assert.AreEqual(5, layout.Length, "默认排布表必须包含 5 个主操作按键");
 
-            for (int i = 0; i < positions.Length; i++)
+            for (int i = 0; i < layout.Length; i++)
             {
                 // 所有按键均在屏幕右下角区域（X 为负相对右边距，Y 为正相对底边距）
-                Assert.Less(positions[i].pos.x, 0f, $"{positions[i].name} 必须以右下角锚定 (负 X)");
-                Assert.Greater(positions[i].pos.y, 0f, $"{positions[i].name} 必须在下半屏 (正 Y)");
-                Assert.Less(positions[i].pos.y, 500f, $"{positions[i].name} 绝不能飞到上半屏遮挡战况条与小地图");
+                Assert.Less(layout[i].pos.x, 0f, $"{layout[i].id} 必须以右下角锚定 (负 X)");
+                Assert.Greater(layout[i].pos.y, 0f, $"{layout[i].id} 必须在下半屏 (正 Y)");
+                Assert.Less(layout[i].pos.y, 500f, $"{layout[i].id} 绝不能飞到上半屏遮挡战况条与小地图");
 
-                for (int j = i + 1; j < positions.Length; j++)
+                for (int j = i + 1; j < layout.Length; j++)
                 {
-                    float dist = Vector2.Distance(positions[i].pos, positions[j].pos);
-                    float minAllowedDist = (positions[i].size + positions[j].size) * 0.5f - 1f; // 允许微接触，不允许严重重叠
+                    float dist = Vector2.Distance(layout[i].pos, layout[j].pos);
+                    float minAllowedDist = (layout[i].size + layout[j].size) * 0.5f - 1f; // 允许微接触，不允许严重重叠
                     Assert.GreaterOrEqual(dist, minAllowedDist,
-                        $"{positions[i].name} 与 {positions[j].name} 发生重叠 (距离 {dist} < 最小允许 {minAllowedDist})");
+                        $"{layout[i].id} 与 {layout[j].id} 发生重叠 (距离 {dist} < 最小允许 {minAllowedDist})");
                 }
             }
+        }
+
+        [Test]
+        public void MobileLayoutCustomizer_Backdrop_DoesNotBlockRaycasts()
+        {
+            // 验证修复 Bug 1：编辑模式背板 Image 的 raycastTarget 必须为 false，杜绝吞掉 PointerDown
+            var go = new GameObject("TestCustomizerHost", typeof(RectTransform));
+            var safeArea = go.GetComponent<RectTransform>();
+            var customizer = MobileLayoutCustomizer.Create(null, safeArea, null);
+
+            var bgImg = customizer.GetComponent<Image>();
+            Assert.IsNotNull(bgImg, "Customizer 根物体必须包含背景 Image");
+            Assert.IsFalse(bgImg.raycastTarget, "全屏背板 raycastTarget 必须为 false，避免吞掉按键与代理的 PointerDown");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void MobileLayoutCustomizer_Open_EnablesBlocksRaycastsForRegisteredItems_AndRestoresOnClose()
+        {
+            // 验证修复 Bug 2：摇杆 CanvasGroup 在编辑态下临时开放 blocksRaycasts，退出时精确恢复
+            var go = new GameObject("TestHost", typeof(RectTransform));
+            var safeArea = go.GetComponent<RectTransform>();
+
+            var itemGo = new GameObject("TestItem", typeof(RectTransform), typeof(CanvasGroup));
+            itemGo.transform.SetParent(safeArea, false);
+            var itemGroup = itemGo.GetComponent<CanvasGroup>();
+            itemGroup.blocksRaycasts = false; // 初始为 false（如摇杆 VisualContainer）
+
+            var customizer = MobileLayoutCustomizer.Create(null, safeArea, null);
+            customizer.RegisterItem("Stick", "摇杆", itemGo.GetComponent<RectTransform>(), itemGroup, Vector2.zero, 1f, 1f);
+
+            customizer.Open();
+            Assert.IsTrue(itemGroup.blocksRaycasts, "进入编辑模式时必须将 blocksRaycasts 置 true 以接收点击与拖拽");
+
+            customizer.Close(save: false);
+            Assert.IsFalse(itemGroup.blocksRaycasts, "退出编辑模式后必须恢复原始 blocksRaycasts 状态 (false)");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void MobileUiMetrics_ComputeScale_ClampsWithinExpectedRange()
+        {
+            // 验证 DPI 物理毫米自适应与 0.85~1.25 钳制
+            float standardScale = MobileUiMetrics.ComputeScale(400f, 1.0f);
+            Assert.GreaterOrEqual(standardScale, 0.85f);
+            Assert.LessOrEqual(standardScale, 1.25f);
+
+            // 极端超低 DPI -> 钳制在 0.85 下限
+            float lowScale = MobileUiMetrics.ComputeScale(160f, 1.0f);
+            Assert.AreEqual(0.85f, lowScale, 1e-4f);
+
+            // 极端超高 DPI -> 钳制在 1.25 上限
+            float highScale = MobileUiMetrics.ComputeScale(600f, 1.0f);
+            Assert.AreEqual(1.25f, highScale, 1e-4f);
+
+            // 非法 DPI -> 兜底按 400
+            float fallbackScale = MobileUiMetrics.ComputeScale(-5f, 1.0f);
+            Assert.AreEqual(standardScale, fallbackScale, 1e-4f);
+
+            // 物理毫米在目标 11~13mm 范围内
+            float primaryMm = MobileUiMetrics.UiUnitsToMillimeters(176f * standardScale, 1.0f, 400f);
+            Assert.GreaterOrEqual(primaryMm, 11f);
+            Assert.LessOrEqual(primaryMm, 13f);
         }
 
         [Test]
@@ -198,7 +258,6 @@ namespace P1.Tests
         public void MobileLayoutConfig_ClampsScaleAndAlpha_ToSafeLimits()
         {
             var config = new MobileLayoutConfig();
-            // 尝试设置极端非法数值
             config.Set("Test", Vector2.zero, 99f, -10f);
 
             var item = config.Find("Test");
@@ -262,7 +321,6 @@ namespace P1.Tests
             var touchGo = new GameObject("TestTouchHost", typeof(MobileTouchUI));
             var touchUI = touchGo.GetComponent<MobileTouchUI>();
 
-            // 启用强制显示开关供测试
             var showField = typeof(MobileTouchUI).GetField("showTouchUiInEditor", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             showField.SetValue(touchUI, true);
 

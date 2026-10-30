@@ -9,6 +9,7 @@
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+#include "ToonLighting.hlsl"
 
 // ----------------------------------------------------------------------------
 // 常量缓冲区 (UnityPerMaterial)
@@ -28,12 +29,16 @@ CBUFFER_START(UnityPerMaterial)
     float _RimPower;
     half4 _ShadowTint;
     float _ShadeThreshold;
+    float _ShadeSoftness;
     float _Cull;
     float _Surface;
     float _Blend;
     float _SrcBlend;
     float _DstBlend;
     float _ZWrite;
+    float _ShadowFloor;
+    float _SpecThreshold;
+    float _SpecSoftness;
 #if defined(CHARACTER_TOON_OUTLINE)
     // 描边属性仅在 CharacterToonOutlined 中启用，放于 CBUFFER 末尾保持前序字段一致
     float _OutlineWidth;
@@ -93,23 +98,16 @@ half4 frag(Varyings input) : SV_Target
 
     float3 L = normalize(mainLight.direction);
     float3 H = normalize(L + V);
-
-    // 1. 半兰伯特两段平滑过渡（smoothstep 消除锯齿硬边）
-    half halfLambert = dot(N, L) * 0.5 + 0.5;
-    half band = smoothstep(_ShadeThreshold - 0.03, _ShadeThreshold + 0.03, halfLambert);
-
-    // 2. 漫反射：半兰伯特二分阶梯 + 阴影着色 (Shadow Tint) + 球谐环境光 (SampleSH + 0.10 兜底)
-    half3 ambient = SampleSH(N) + half3(0.10, 0.10, 0.10);
-    half3 toonLight = lerp(_ShadowTint.rgb, half3(1.0, 1.0, 1.0), band) * shadowAtten;
-    half3 diffuse = albedo.rgb * (ambient + mainLight.color * toonLight);
-
-    // 3. 边缘光：基于菲涅尔的轮廓光，阴影区保留 35% 基础轮廓强度
-    half fres = pow(1.0 - saturate(dot(N, V)), _RimPower);
-    half3 rim = _RimColor.rgb * _RimStrength * fres * (0.35 + 0.65 * shadowAtten);
-
-    // 4. 高光：紧凑 Blinn 镜面反射
     half NdotH = saturate(dot(N, H));
-    half spec = pow(NdotH, 48.0) * _Smoothness * 0.45 * shadowAtten;
+
+    half band = P1ToonBand(dot(N, L), _ShadeThreshold, _ShadeSoftness);
+    half shadowTerm = P1ToonShadowTerm(shadowAtten, _ShadowFloor, 0.02);
+    half3 ambient = P1ToonAmbient(N, _ShadowTint.rgb, 0.72, 0.18);
+    half3 shadeTint = lerp(_ShadowTint.rgb, half3(1,1,1), 0.30);
+    half3 toonLight = lerp(shadeTint, half3(1,1,1), band) * shadowTerm;
+    half3 diffuse = albedo.rgb * (ambient + mainLight.color * toonLight);
+    half3 rim = _RimColor.rgb * _RimStrength * P1ToonRim(saturate(dot(N,V)), _RimPower, shadowAtten);
+    half spec = P1ToonSpec(NdotH, _SpecThreshold, _SpecSoftness, _Smoothness * 0.55, shadowAtten);
     half3 specular = spec * mainLight.color;
 
     // 5. 自发光
@@ -188,7 +186,10 @@ struct OutlineVaryings
 OutlineVaryings OutlinePassVertex(OutlineAttributes input)
 {
     OutlineVaryings output;
-    float3 posOS = input.positionOS.xyz + input.normalOS * _OutlineWidth;
+    float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
+    float camDist = distance(positionWS, GetCameraPositionWS());
+    float widthScale = clamp(camDist / 4.5, 0.7, 2.2);
+    float3 posOS = input.positionOS.xyz + input.normalOS * _OutlineWidth * widthScale;
     output.positionCS = TransformObjectToHClip(posOS);
     output.fogFactor  = ComputeFogFactor(output.positionCS.z);
     return output;

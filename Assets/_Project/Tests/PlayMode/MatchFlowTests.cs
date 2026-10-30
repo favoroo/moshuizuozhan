@@ -12,6 +12,7 @@ namespace P1.Tests
     /// <summary>
     /// 比赛闭环回归测试：Ready → Countdown → Playing → Finished → Result → Restart。
     /// </summary>
+    [Category("UI")]
     public class MatchFlowTests
     {
         const string SceneName = "PhaseA_Playbox";
@@ -29,6 +30,9 @@ namespace P1.Tests
             yield return null;
             yield return null;
             Assert.IsNotNull(MatchManager.Instance, "场景应包含 MatchManager");
+            // 倒计时 3s / 终局定格 1.6s 只在真实游玩里有意义，
+            // 用例只验证状态机跳转，压缩到亚秒级（场景重载即还原）。
+            PlayModeTestKit.ShortenMatchTimers();
         }
 
         [UnityTest]
@@ -52,8 +56,7 @@ namespace P1.Tests
 
             Assert.AreEqual(MatchManager.Phase.Countdown, match.CurrentPhase);
 
-            yield return new WaitForSeconds(3.6f);
-            Assert.AreEqual(MatchManager.Phase.Playing, match.CurrentPhase, "倒计时结束后应进入 Playing");
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Playing, 6f);
             Assert.IsTrue(MatchManager.CombatAllowed);
         }
 
@@ -64,19 +67,17 @@ namespace P1.Tests
 
             var match = MatchManager.Instance;
             match.StartMatch();
-            yield return new WaitForSeconds(3.4f);
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Playing, 6f);
 
             InkSurfaceController.Instance.PaintCircle(new Vector3(0f, 0f, 4f), 4f, Team.TeamA);
             yield return null;
 
             SetRemaining(match, 0.05f);
-            yield return new WaitForSeconds(0.4f);
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Finished, 6f);
 
-            Assert.AreEqual(MatchManager.Phase.Finished, match.CurrentPhase, "时间到应先进入 FINISH 定格");
             Assert.IsFalse(MatchManager.CombatAllowed);
 
-            yield return new WaitForSeconds(2.0f);
-            Assert.AreEqual(MatchManager.Phase.Result, match.CurrentPhase, "定格结束后应进入结算");
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Result, 6f);
             Assert.Greater(match.FinalCoverageA, 0f, "结算应记录橙队覆盖率");
         }
 
@@ -87,15 +88,14 @@ namespace P1.Tests
 
             var match = MatchManager.Instance;
             match.StartMatch();
-            yield return new WaitForSeconds(3.4f);
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Playing, 6f);
 
             InkSurfaceController.Instance.PaintCircle(new Vector3(0f, 0f, 4f), 5f, Team.TeamA);
             yield return null;
             Assert.Greater(InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA), 0f);
 
             SetRemaining(match, 0.05f);
-            yield return new WaitForSeconds(2.4f);
-            Assert.AreEqual(MatchManager.Phase.Result, match.CurrentPhase);
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Result, 8f);
 
             match.RestartMatch();
             yield return null;

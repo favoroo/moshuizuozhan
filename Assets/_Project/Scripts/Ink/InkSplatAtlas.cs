@@ -13,14 +13,23 @@ namespace P1.Ink
     /// 以带 SDF 的有机构型直接绘制进一张高分辨率 RenderTexture（40m 场地默认 4096² = 1cm/texel），
     /// 让墨迹边缘是平滑连续曲线，而不是二值网格的阶梯。
     ///
-    /// 通道打包（见 InkSplat.shader）：
-    ///   R = 队伍归属，G = 湿润度，B = 单斑色调，A = 覆盖率。
-    /// 因此不再有「每格一个随机色」的马赛克，湿润度也能真正随时间衰减。
+    /// 通道打包（写入端为 InkGround.shader 的 InkAtlasPaint / InkAtlasStamp Pass）：
+    ///   R = 队伍归属，B = 单斑色调，A = 覆盖率（语义与旧版一致）；
+    ///   G = 覆盖此纹素的「最新落墨时间戳 × 覆盖率」（预乘，Max 混合，最新墨斑获胜）。
+    ///   预乘与 R/B 同一约定：双线性 / mip 过滤下片元 G/A 恒等于真实时间戳。
+    ///
+    /// 时间驱动的外观演化全部改为「存时刻、片元现算」：
+    ///   烘干与生长动画由 InkGround 片元按 (_InkWetClockNorm − G) 现算，
+    ///   因此图集只在有新墨斑（或需清屏 / 内容变化后重建 mip）时才增量绘制，
+    ///   不再有任何周期性整图重绘（旧版：15Hz 全屏烘干 Pass + 生长期间每帧重画墨斑 + 定期 mip 重建）。
     /// </summary>
     public sealed class InkSplatAtlas : IDisposable
     {
-        /// <summary>同一帧最多绘制的墨斑数量（含生长中的重绘），超出者直接以完成态补画。</summary>
+        /// <summary>同一帧最多绘制的墨斑数量，超出者丢弃（与旧版一致）。</summary>
         public const int MaxQuads = 384;
+
+        /// <summary>湿润时间戳默认回绕周期（秒），与 <see cref="InkGridConfigSO.atlasWetClockPeriod"/> 默认值一致。</summary>
+        public const float DefaultWetClockPeriod = 32f;
 
         private const int QuadVerts = 4;
 
@@ -32,21 +41,24 @@ namespace P1.Ink
             public float Seed;
             public float Kind;
             public float Reach;
-            public float BirthTime;
+            public float BirthTime;   // Time.time 时基，与片元 _InkWetClockNorm 一致（暂停时湿度同步冻结）
         }
 
         private static readonly float[] KindReach = { 1.9f, 2.3f, 2.5f, 2.7f, 2.75f };
 
+        private static readonly int InkMapSizeId = Shader.PropertyToID("_InkMapSize");
+        private static readonly int InkTexelMetersId = Shader.PropertyToID("_InkTexelMeters");
+        private static readonly int InkYFlipId = Shader.PropertyToID("_InkYFlip");
+
         private readonly RenderTexture _atlas;
         private readonly Material _splatMaterial;
-        private readonly Material _dryMaterial;
         private readonly Mesh _quadMesh;
-        private readonly Mesh _fullscreenMesh;
+        private readonly Mesh _instantQuadMesh;
         private readonly CommandBuffer _cmd = new CommandBuffer { name = "InkSplatAtlas" };
 
         private readonly List<Splat> _pending = new List<Splat>(256);
+        // 仅作 ActiveSplatCount 诊断计数用：生长动画已改为片元侧时间戳驱动，不再按帧重绘
         private readonly List<Splat> _active = new List<Splat>(256);
-        private readonly List<Splat> _instant = new List<Splat>(64);
 
         private readonly List<Vector3> _verts = new List<Vector3>(MaxQuads * QuadVerts);
         private readonly List<Vector4> _uv0 = new List<Vector4>(MaxQuads * QuadVerts);
@@ -57,14 +69,16 @@ namespace P1.Ink
         private readonly Vector2 _originXZ;
         private readonly float _texelMeters;
         private readonly float _growSeconds;
-        private readonly float _dryingSeconds;
-        private readonly float _dryHz;
+        private readonly float _wetClockPeriod;
+
+        private readonly int _paintPassIndex;
+        private readonly int _stampPassIndex;
+        private readonly bool _shaderReady;
 
         private bool _needsClear = true;
+        private bool _needsMips = true;
         private bool _disposed;
-        private float _wetUntil;
-        private float _nextDryTime;
-        private float _baseDryStep;
+        private float _lastSplatTime = float.NegativeInfinity;
         private float _nextMipTime;
 
         /// <summary>最近一次命令缓冲执行的 CPU 耗时（毫秒）。</summary>
@@ -73,13 +87,16 @@ namespace P1.Ink
         /// <summary>累计落墨次数（诊断用）。</summary>
         public int TotalSplatCount { get; private set; }
 
-        /// <summary>当前正在生长动画中的墨斑数量。</summary>
+        /// <summary>当前处于生长窗口内的墨斑数量（诊断用；动画本身由片元按时间戳驱动）。</summary>
         public int ActiveSplatCount => _active.Count;
 
         public RenderTexture Atlas => _atlas;
         public Vector2 MapSize => _mapSize;
         public Vector2 OriginXZ => _originXZ;
 
+        /// <param name="dryHz">兼容保留：旧「按 dryHz 定时全屏烘干」已删除，湿润度由片元现算，此参数不再使用。</param>
+        /// <param name="dryingSeconds">兼容保留：烘干时长只被地面片元消费（全局 _InkWetDryingSeconds），此处不再使用。</param>
+        /// <param name="wetClockPeriod">湿润时间戳回绕周期（秒），需与 InkSurfaceController 推送的 _InkWetClockPeriod 一致。</param>
         public InkSplatAtlas(
             Vector2 mapSize,
             Vector2 originXZ,
@@ -87,13 +104,13 @@ namespace P1.Ink
             bool mipmaps,
             float growSeconds,
             float dryingSeconds,
-            float dryHz = 15f)
+            float dryHz = 15f,
+            float wetClockPeriod = DefaultWetClockPeriod)
         {
             _mapSize = new Vector2(Mathf.Max(0.01f, mapSize.x), Mathf.Max(0.01f, mapSize.y));
             _originXZ = originXZ;
             _growSeconds = Mathf.Max(0f, growSeconds);
-            _dryingSeconds = Mathf.Max(0.25f, dryingSeconds);
-            _dryHz = Mathf.Clamp(dryHz, 1f, 60f);
+            _wetClockPeriod = Mathf.Clamp(wetClockPeriod, 4f, 600f);
 
             int size = Mathf.Clamp(resolution, 128, 8192);
 
@@ -113,7 +130,6 @@ namespace P1.Ink
             }
 
             _texelMeters = Mathf.Max(_mapSize.x / texWidth, _mapSize.y / texHeight);
-            _baseDryStep = 1f / _dryingSeconds / _dryHz;
 
             var desc = new RenderTextureDescriptor(texWidth, texHeight, RenderTextureFormat.ARGB32, 0)
             {
@@ -134,15 +150,12 @@ namespace P1.Ink
             };
             _atlas.Create();
 
-            // 放在 Resources 下，保证打包时不会被 Shader Stripping 剔除（Shader.Find 在 Player 里找不到未引用着色器）
-            Shader shader = Resources.Load<Shader>("InkSplat");
+            // 写入端 Pass 挂在 P1/InkGround 上：该着色器被场景地面材质引用，必然随包分发，
+            // 不会被 Shader Stripping 剔除（旧 Resources/P1/InkSplat 写入端已由这两个 Pass 取代）。
+            Shader shader = Shader.Find("P1/InkGround");
             if (shader == null)
             {
-                shader = Shader.Find("P1/InkSplat");
-            }
-            if (shader == null)
-            {
-                Debug.LogError("[InkSplatAtlas] 找不到 P1/InkSplat 着色器，地面将不显示墨水。");
+                Debug.LogError("[InkSplatAtlas] 找不到 P1/InkGround 着色器（InkAtlas 写入 Pass），地面将不显示墨水。");
                 return;
             }
 
@@ -151,20 +164,23 @@ namespace P1.Ink
                 name = "Mat_InkSplat",
                 hideFlags = HideFlags.DontSave
             };
-            _splatMaterial.SetVector("_InkMapSize", new Vector4(_mapSize.x, _mapSize.y, 0f, 0f));
-            _splatMaterial.SetFloat("_InkTexelMeters", _texelMeters);
-            // D3D / Metal / Vulkan 的渲染目标原点在左上，clip Y 需要翻转才能对上纹理 V
-            _splatMaterial.SetFloat("_InkYFlip", SystemInfo.graphicsUVStartsAtTop ? -1f : 1f);
-
-            _dryMaterial = new Material(shader)
+            // Shader 类没有公开 FindPass（Unity 6000.6）：按名查 Pass 必须经由 Material.FindPass
+            _paintPassIndex = _splatMaterial.FindPass("InkAtlasPaint");
+            _stampPassIndex = _splatMaterial.FindPass("InkAtlasStamp");
+            if (_paintPassIndex < 0 || _stampPassIndex < 0)
             {
-                name = "Mat_InkDry",
-                hideFlags = HideFlags.DontSave
-            };
-            _dryMaterial.SetFloat("_DryAmount", _baseDryStep);
+                Debug.LogError("[InkSplatAtlas] P1/InkGround 缺少 InkAtlasPaint/InkAtlasStamp 写入 Pass，地面将不显示墨水。");
+                return;
+            }
+            _shaderReady = true;
+
+            _splatMaterial.SetVector(InkMapSizeId, new Vector4(_mapSize.x, _mapSize.y, 0f, 0f));
+            _splatMaterial.SetFloat(InkTexelMetersId, _texelMeters);
+            // D3D / Metal / Vulkan 的渲染目标原点在左上，clip Y 需要翻转才能对上纹理 V
+            _splatMaterial.SetFloat(InkYFlipId, SystemInfo.graphicsUVStartsAtTop ? -1f : 1f);
 
             _quadMesh = BuildQuadMesh();
-            _fullscreenMesh = BuildFullscreenMesh();
+            _instantQuadMesh = BuildQuadMesh();
 
             for (int q = 0; q < MaxQuads; q++)
             {
@@ -188,9 +204,8 @@ namespace P1.Ink
             _cmd.Release();
 
             DestroyObject(_splatMaterial);
-            DestroyObject(_dryMaterial);
             DestroyObject(_quadMesh);
-            DestroyObject(_fullscreenMesh);
+            DestroyObject(_instantQuadMesh);
 
             if (_atlas != null)
             {
@@ -222,7 +237,8 @@ namespace P1.Ink
             _pending.Clear();
             _active.Clear();
             _needsClear = true;
-            _wetUntil = 0f;
+            _needsMips = true;
+            _lastSplatTime = float.NegativeInfinity;
         }
 
         /// <summary>
@@ -230,10 +246,11 @@ namespace P1.Ink
         /// </summary>
         public void AddSplat(Vector2 centerXZ, float radius, Team team)
         {
-            if (_disposed || radius <= 0.001f || team == Team.Neutral)
+            if (_disposed || !_shaderReady || radius <= 0.001f || team == Team.Neutral)
                 return;
 
             float kind = ClassifyKind(radius);
+            float birth = Time.time;
             var splat = new Splat
             {
                 CenterXZ = centerXZ,
@@ -242,40 +259,44 @@ namespace P1.Ink
                 Seed = MakeSeed(centerXZ, radius),
                 Kind = kind,
                 Reach = KindReach[(int)kind],
-                BirthTime = Time.realtimeSinceStartup
+                BirthTime = birth
             };
 
             if (_pending.Count >= MaxQuads * 2)
                 _pending.RemoveAt(0);
             _pending.Add(splat);
             TotalSplatCount++;
-
-            _wetUntil = Time.realtimeSinceStartup + _dryingSeconds + 0.3f;
+            _lastSplatTime = birth;
         }
 
-        /// <summary>每帧调用一次（LateUpdate）：推进生长动画、烘干，并把本帧所有墨斑一次性画进图集。</summary>
+        /// <summary>
+        /// 是否仍有墨斑处于生长窗口（growSeconds × 1.6）内。
+        /// InkSurfaceController 据此开启地面片元的生长侵蚀；窗口结束或 growSeconds=0 时恒为 false。
+        /// </summary>
+        public bool HasGrowingSplats()
+        {
+            return _growSeconds > 0.001f &&
+                   Time.time - _lastSplatTime < _growSeconds * 1.6f + 0.05f;
+        }
+
+        /// <summary>
+        /// 每帧调用一次（LateUpdate）：仅当本帧有新落墨（或需要清屏 / 内容变化后重建 mip）时才提交绘制。
+        /// 烘干与生长动画都在地面片元里按时间戳现算，空闲帧零 GPU 提交、零命令缓冲构建。
+        /// </summary>
         public void Advance()
         {
-            if (_disposed)
+            if (_disposed || !_shaderReady)
                 return;
 
-            float now = Time.realtimeSinceStartup;
-            bool canGrow = _growSeconds > 0.001f;
+            float now = Time.time;
 
-            // 待绘制 -> 生长队列 / 完成态补画
-            _instant.Clear();
-            for (int i = 0; i < _pending.Count; i++)
+            // 待绘制墨斑移入诊断计数队列（生长动画由片元按时间戳驱动，这里不再按帧重绘）
+            bool hasDraw = _pending.Count > 0;
+            if (hasDraw)
             {
-                if (canGrow && _active.Count < MaxQuads)
-                {
+                for (int i = 0; i < _pending.Count; i++)
                     _active.Add(_pending[i]);
-                }
-                else
-                {
-                    _instant.Add(_pending[i]);
-                }
             }
-            _pending.Clear();
 
             if (_active.Count > 0)
             {
@@ -287,17 +308,10 @@ namespace P1.Ink
                 }
             }
 
-            bool dry = now < _wetUntil && now >= _nextDryTime;
-            if (dry)
-            {
-                _nextDryTime = now + 1f / _dryHz;
-            }
-
-            bool hasDraw = _active.Count > 0 || _instant.Count > 0;
-            if (!_needsClear && !hasDraw && !dry)
+            // mip 只在图集内容有变化时重建（旧版每 0.25s 无条件重建）
+            bool wantMips = _atlas.useMipMap && _needsMips && now >= _nextMipTime;
+            if (!_needsClear && !hasDraw && !wantMips)
                 return;
-
-            bool wantMips = _atlas.useMipMap && now >= _nextMipTime;
 
             _cmd.Clear();
 
@@ -308,29 +322,23 @@ namespace P1.Ink
                 _needsClear = false;
             }
 
-            if (_active.Count > 0)
+            if (hasDraw)
             {
-                BuildMesh(_active, false, now);
+                // preAge = 0：时间戳即真实落墨时刻，片元据此做生长侵蚀。
+                // 同一 mesh 连续两次 DrawMesh（Paint 写 R/B/A，Stamp 写 G），记录期间不修改 mesh，
+                // 满足「record 与 execute 之间不得复用/清空同一 Mesh」的约束。
+                BuildMesh(_pending, 0f, _quadMesh);
                 _cmd.SetRenderTarget(_atlas);
-                _cmd.DrawMesh(_quadMesh, Matrix4x4.identity, _splatMaterial, 0, 0);
-            }
-
-            if (_instant.Count > 0)
-            {
-                BuildMesh(_instant, true, now);
-                _cmd.SetRenderTarget(_atlas);
-                _cmd.DrawMesh(_quadMesh, Matrix4x4.identity, _splatMaterial, 0, 0);
-            }
-
-            if (dry)
-            {
-                _cmd.SetRenderTarget(_atlas);
-                _cmd.DrawMesh(_fullscreenMesh, Matrix4x4.identity, _dryMaterial, 0, 1);
+                _cmd.DrawMesh(_quadMesh, Matrix4x4.identity, _splatMaterial, 0, _paintPassIndex);
+                _cmd.DrawMesh(_quadMesh, Matrix4x4.identity, _splatMaterial, 0, _stampPassIndex);
+                _pending.Clear();
+                _needsMips = true;
             }
 
             if (wantMips)
             {
                 _cmd.GenerateMips(_atlas);
+                _needsMips = false;
                 _nextMipTime = now + 0.25f;
             }
 
@@ -338,10 +346,10 @@ namespace P1.Ink
             Execute();
         }
 
-        /// <summary>编辑模式 / 立即出图：把所有待绘制墨斑点以完成态画进去，不做生长动画。</summary>
+        /// <summary>编辑模式 / 立即出图：把待绘制墨斑以最终形态画进图集（时间戳预老化 → 片元不做生长侵蚀）。</summary>
         public void FlushImmediate()
         {
-            if (_disposed)
+            if (_disposed || !_shaderReady)
                 return;
 
             _cmd.Clear();
@@ -357,10 +365,15 @@ namespace P1.Ink
 
             if (_pending.Count > 0)
             {
-                BuildMesh(_pending, true, Time.realtimeSinceStartup);
+                // 预老化一个生长周期：编辑模式预览没有持续运行的片元时钟，直接呈现完成态
+                BuildMesh(_pending, _growSeconds * 1.6f, _instantQuadMesh);
                 _cmd.SetRenderTarget(_atlas);
-                _cmd.DrawMesh(_quadMesh, Matrix4x4.identity, _splatMaterial, 0, 0);
+                _cmd.DrawMesh(_instantQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _paintPassIndex);
+                _cmd.DrawMesh(_instantQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _stampPassIndex);
+                for (int i = 0; i < _pending.Count; i++)
+                    _active.Add(_pending[i]);
                 _pending.Clear();
+                _needsMips = true;
                 did = true;
             }
 
@@ -371,18 +384,16 @@ namespace P1.Ink
             Execute();
         }
 
-        private void BuildMesh(List<Splat> splats, bool instant, float now)
+        private void BuildMesh(List<Splat> splats, float preAgeSeconds, Mesh targetMesh)
         {
             _verts.Clear();
             _uv0.Clear();
             _uv1.Clear();
 
-            float grow = Mathf.Max(0.02f, _growSeconds);
             for (int i = 0; i < splats.Count; i++)
             {
                 Splat s = splats[i];
-                float progress = instant ? 3f : (now - s.BirthTime) / grow;
-                AddQuad(s, progress);
+                AddQuad(s, SplatTimestamp(s.BirthTime - preAgeSeconds));
             }
 
             // 必须先 Clear：上一帧的索引缓冲可能引用比本帧更多的顶点，直接 SetVertices 会报
@@ -390,14 +401,14 @@ namespace P1.Ink
             // 同时限制 quadCount：FlushImmediate 可能一次提交 MaxQuads*2 个待绘制墨斑，
             // 而 _indices 只为 MaxQuads 个 quad 预留，超出会索引越界。
             int quadCount = Mathf.Min(_verts.Count / QuadVerts, MaxQuads);
-            _quadMesh.Clear();
-            _quadMesh.SetVertices(_verts);
-            _quadMesh.SetUVs(0, _uv0);
-            _quadMesh.SetUVs(1, _uv1);
-            _quadMesh.SetIndices(_indices, 0, quadCount * 6, MeshTopology.Triangles, 0, false);
+            targetMesh.Clear();
+            targetMesh.SetVertices(_verts);
+            targetMesh.SetUVs(0, _uv0);
+            targetMesh.SetUVs(1, _uv1);
+            targetMesh.SetIndices(_indices, 0, quadCount * 6, MeshTopology.Triangles, 0, false);
         }
 
-        private void AddQuad(Splat s, float progress)
+        private void AddQuad(Splat s, float birthTs01)
         {
             float uvX = (s.CenterXZ.x - _originXZ.x) / _mapSize.x;
             float uvY = (s.CenterXZ.y - _originXZ.y) / _mapSize.y;
@@ -408,13 +419,20 @@ namespace P1.Ink
             _verts.Add(new Vector3(1f, 1f, 0f));
             _verts.Add(new Vector3(-1f, 1f, 0f));
 
+            // splatA = (中心UV, 半径, 队伍)；splatB = (种子, 种类, 归一化落墨时间戳, 覆盖倍数)
             var a = new Vector4(uvX, uvY, s.Radius, s.Team);
-            var b = new Vector4(s.Seed, s.Kind, progress, s.Reach);
+            var b = new Vector4(s.Seed, s.Kind, birthTs01, s.Reach);
             for (int i = 0; i < QuadVerts; i++)
             {
                 _uv0.Add(a);
                 _uv1.Add(b);
             }
+        }
+
+        /// <summary>落墨时刻 → 归一化时间戳 [0,1)。8bit G 通道下的量化步长 = 周期/256 秒。</summary>
+        private float SplatTimestamp(float birthTime)
+        {
+            return Mathf.Repeat(birthTime, _wetClockPeriod) / _wetClockPeriod;
         }
 
         private void Execute()
@@ -457,25 +475,6 @@ namespace P1.Ink
                 hideFlags = HideFlags.DontSave
             };
             mesh.MarkDynamic();
-            return mesh;
-        }
-
-        private static Mesh BuildFullscreenMesh()
-        {
-            var mesh = new Mesh
-            {
-                name = "InkDryQuad",
-                hideFlags = HideFlags.DontSave
-            };
-            mesh.SetVertices(new List<Vector3>
-            {
-                new Vector3(-1f, -1f, 0f),
-                new Vector3(1f, -1f, 0f),
-                new Vector3(1f, 1f, 0f),
-                new Vector3(-1f, 1f, 0f)
-            });
-            mesh.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0, false);
-            mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1e6f);
             return mesh;
         }
     }

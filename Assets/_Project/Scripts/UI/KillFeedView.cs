@@ -21,8 +21,8 @@ namespace P1.UI
         [Header("主题与配置")]
         [SerializeField] private UIThemeSO theme;
         [SerializeField] private int maxVisibleCards = 4;
-        [SerializeField] private float cardSpacing = 58f;
-        [SerializeField] private Vector2 cardSize = new Vector2(300f, 50f);
+        [SerializeField] private float cardSpacing = 72f;
+        [SerializeField] private Vector2 cardSize = new Vector2(320f, 66f);
 
         [Header("武器与技能图标库")]
         [SerializeField] private Sprite shooterIcon;
@@ -68,13 +68,14 @@ namespace P1.UI
         {
             if (_rectTransform == null) _rectTransform = GetComponent<RectTransform>();
 
-            // 默认定位在屏幕右侧、计时器与小地图下方（约 Y=-230）
+            // 默认定位在屏幕右侧、计时器与小地图下方（约 Y=-260）。
+            // 小地图框底边约 -250，起点再往上会让第一张击杀卡压住地图。
             _rectTransform.anchorMin = new Vector2(1f, 1f);
             _rectTransform.anchorMax = new Vector2(1f, 1f);
             _rectTransform.pivot = new Vector2(1f, 1f);
             if (_rectTransform.anchoredPosition == Vector2.zero)
             {
-                _rectTransform.anchoredPosition = new Vector2(-20f, -230f);
+                _rectTransform.anchoredPosition = new Vector2(-20f, -260f);
             }
             _rectTransform.sizeDelta = new Vector2(cardSize.x, 300f);
         }
@@ -166,13 +167,33 @@ namespace P1.UI
 
         public Sprite ResolveWeaponIcon(KillFeedEvent ev)
         {
-            if (ev.IsSubBomb) return bombIcon;
+            if (ev.IsSubBomb)
+            {
+                return UIIconLibrary.Get("sub_bomb") ?? bombIcon;
+            }
+
             if (ev.IsSpecial)
             {
                 if (ev.WeaponDisplayName != null && ev.WeaponDisplayName.IndexOf("Storm", System.StringComparison.OrdinalIgnoreCase) >= 0)
-                    return stormIcon;
-                return slamIcon;
+                {
+                    return UIIconLibrary.Get("special_storm") ?? stormIcon;
+                }
+                return UIIconLibrary.Get("special_slam") ?? slamIcon;
             }
+
+            string iconKey = ev.WeaponKind switch
+            {
+                WeaponKind.Roller => "weapon_roller",
+                WeaponKind.Charger => "weapon_charger",
+                WeaponKind.Dualies => "weapon_dualies",
+                WeaponKind.Slosher => "weapon_slosher",
+                WeaponKind.Blaster => "weapon_blaster",
+                WeaponKind.Splatling => "weapon_splatling",
+                _ => "weapon_shooter"
+            };
+
+            Sprite icon = UIIconLibrary.Get(iconKey);
+            if (icon != null) return icon;
 
             return ev.WeaponKind switch
             {

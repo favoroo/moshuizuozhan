@@ -43,7 +43,7 @@ Material:
     - _Cutoff: 0.5
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _GlowStrength: 0.55
+    - _GlowStrength: 0.3
     - _QueueOffset: 0
     - _SampleGI: 0
     - _SrcBlend: 1
@@ -52,10 +52,10 @@ Material:
     - _XRMotionVectorsPass: 1
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.0173891, g: 0.021980947, b: 0.030074105, a: 1}
-    - _ChevronColor: {r: 1, g: 0.827571, b: 0.47699985, a: 1}
-    - _Color: {r: 1, g: 0.19599415, b: 0.0071944073, a: 1}
-    - _PlatformColor: {r: 0.38005632, g: 0.3546921, b: 0.2956998, a: 1}
+    - _BaseColor: {r: 0.07323897, g: 0.08898155, b: 0.11928018, a: 1}
+    - _ChevronColor: {r: 0.71056664, g: 0.42003334, b: 0.033104762, a: 1}
+    - _Color: {r: 0.07323897, g: 0.08898155, b: 0.11928018, a: 1}
+    - _PlatformColor: {r: 0.3672465, g: 0.34239164, b: 0.2846467, a: 1}
     - _RingColor: {r: 0.827571, g: 0.8480884, b: 0.89000547, a: 1}
     - _TeamColor: {r: 1, g: 0.19599415, b: 0.0071944073, a: 1}
   m_BuildTextureStacks: []

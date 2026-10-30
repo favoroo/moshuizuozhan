@@ -73,3 +73,8 @@ crashlytics-build.properties
 
 # ZCode 本地会话计划记录（工具本地状态，非工程配置）
 /.zcode/plans/
+/.zcode/skills/
+/.claude/
+
+# Unity PlayMode 测试自动生成的临时场景（每次跑测试会重建）
+/[Aa]ssets/InitTestScene*

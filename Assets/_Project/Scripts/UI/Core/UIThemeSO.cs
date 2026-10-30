@@ -50,6 +50,21 @@ namespace P1.UI
 
         public float contentPadding = 24f;
 
+        [Header("漫画面板（P10）")]
+        [Tooltip("开启后：硬边偏移阴影 + 半调网点 + 关闭渐变高光/内沿，是本项目默认观感")]
+        public bool comicPanel = true;
+
+        [Tooltip("硬阴影偏移（UI 像素，Y 为负=向下）")]
+        public Vector2 shadowOffset = new Vector2(6f, -6f);
+
+        [Range(0f, 32f)] public float shadowPadding = 8f;
+
+        [Tooltip("面板内部的半调网点")]
+        public bool halftone;
+
+        [Tooltip("对话气泡尖角（仅圆角矩形有效）")]
+        public bool speechTail;
+
         public UIInkCardStyle Clone()
         {
             return (UIInkCardStyle)MemberwiseClone();
@@ -67,25 +82,29 @@ namespace P1.UI
     public class UIThemeSO : ScriptableObject
     {
         [Header("Chunky Outline · 黑边与面板")]
-        public Color outlineColor = new Color(0.082f, 0.071f, 0.110f, 1f);
+        [Tooltip("墨线黑（漫画风：#1A1A1A）")]
+        public Color outlineColor = new Color(0.102f, 0.102f, 0.102f, 1f);
 
-        public Color outlineSoftColor = new Color(0.122f, 0.102f, 0.173f, 1f);
+        public Color outlineSoftColor = new Color(0.25f, 0.25f, 0.25f, 1f);
 
-        public Color deepShadowColor = new Color(0f, 0f, 0f, 0.35f);
+        [Tooltip("硬阴影墨色（无模糊）")]
+        public Color deepShadowColor = new Color(0.102f, 0.102f, 0.102f, 1f);
 
-        public Color panelColor = new Color(0.098f, 0.082f, 0.145f, 0.92f);
+        [Tooltip("纸面白面板底（#FFFEF0）")]
+        public Color panelColor = new Color(1f, 0.996f, 0.941f, 0.97f);
 
-        public Color panelGlassColor = new Color(0.149f, 0.122f, 0.227f, 0.90f);
+        public Color panelGlassColor = new Color(0.949f, 0.937f, 0.847f, 0.96f);
 
-        public Color textPrimary = Color.white;
+        [Tooltip("纸上文字（#1A1A1A）")]
+        public Color textPrimary = new Color(0.102f, 0.102f, 0.102f, 1f);
 
-        public Color textMuted = new Color(0.765f, 0.741f, 0.839f, 1f);
+        public Color textMuted = new Color(0.29f, 0.29f, 0.29f, 1f);
 
-        public Color highlightColor = new Color(1f, 1f, 1f, 0.16f);
+        public Color highlightColor = new Color(1f, 0.8f, 0f, 1f);
 
-        public Color readyGold = new Color(1f, 0.835f, 0.29f, 1f);
+        public Color readyGold = new Color(1f, 0.8f, 0f, 1f);
 
-        public Color dangerRed = new Color(0.784f, 0.09f, 0.227f, 1f);
+        public Color dangerRed = new Color(1f, 0.2f, 0.2f, 1f);
 
         [Header("墨队配色（默认值与 InkGridConfig 一致；运行时会优先读 InkSurfaceController）")]
         public Color teamAColor = new Color(1f, 0.44f, 0.06f, 1f);
@@ -122,69 +141,147 @@ namespace P1.UI
 
         [Header("Chunky 文字")]
         [Tooltip("TMP 描边宽度（0..1，受字体 SDF padding 限制）")]
-        [Range(0f, 1f)] public float chunkyOutlineWidth = 0.35f;
+        [Range(0f, 1f)] public float chunkyOutlineWidth = 0.06f;
 
         [Range(0f, 1f)] public float chunkyInnerOutlineWidth = 0.05f;
 
         [Tooltip("填充层相对描边层上移的距离（em），形成硬阴影")]
-        [Range(0f, 0.2f)] public float chunkyShadowOffsetY = 0.05f;
+        [Range(0f, 0.2f)] public float chunkyShadowOffsetY = 0.045f;
 
-        [Header("卡片预设")]
+        [Tooltip("填充层相对描边层右移的距离（em）：漫画硬阴影往右下偏，像印刷套色偏移")]
+        [Range(-0.1f, 0.1f)] public float chunkyShadowOffsetX = 0.03f;
+
+        // ==================== 漫画风 token（P10） ====================
+        // 只增不改：上面所有旧字段继续有效，老调用方无需改签名即可换肤。
+
+        [Header("漫画 · 调色板")]
+        [Tooltip("墨线黑：所有边框、硬阴影、纸上文字")]
+        public Color inkColor = new Color(0.102f, 0.102f, 0.102f, 1f);
+
+        [Tooltip("纸面白：面板底色")]
+        public Color paperColor = new Color(1f, 0.996f, 0.941f, 1f);
+
+        [Tooltip("次级纸面：列表行/内嵌区块")]
+        public Color paperAltColor = new Color(0.949f, 0.937f, 0.847f, 1f);
+
+        public Color accentRed = new Color(1f, 0.2f, 0.2f, 1f);
+
+        public Color accentYellow = new Color(1f, 0.8f, 0f, 1f);
+
+        public Color accentBlue = new Color(0.2f, 0.4f, 1f, 1f);
+
+        public Color accentGreen = new Color(0.2f, 0.8f, 0.2f, 1f);
+
+        [Header("漫画 · 墨线与硬阴影")]
+        [Range(0f, 16f)] public float inkBorderWidth = 6f;
+
+        [Range(0f, 20f)] public float inkBorderHeavyWidth = 8f;
+
+        [Tooltip("硬阴影偏移（UI 像素，Y 为负=向下）。悬停时缩到 3px，按下归零")]
+        public Vector2 hardShadowOffset = new Vector2(6f, -6f);
+
+        [Tooltip("移动端是否保留半调网点（低端机关掉可省顶点）")]
+        public bool halftoneOnMobile = true;
+
+        [Header("漫画 · 半调网点")]
+        [Range(4f, 24f)] public float halftoneSpacing = 8f;
+
+        [Range(0.5f, 4f)] public float halftoneDotRadius = 1.3f;
+
+        [Range(0f, 1f)] public float halftoneAlpha = 0.14f;
+
+        [Range(0f, 1f)] public float halftoneHoverAlpha = 0.22f;
+
+        [Header("漫画 · 动效（毫秒级硬切，无回弹）")]
+        [Tooltip("按下压印时长（秒），规范上限 0.1")]
+        [Range(0.02f, 0.1f)] public float pressDuration = 0.06f;
+
+        [Range(0.02f, 0.1f)] public float hoverDuration = 0.08f;
+
+        [Range(0.02f, 0.1f)] public float entranceDuration = 0.12f;
+
+        [Range(1f, 1.2f)] public float hoverScale = 1.06f;
+
+        [Tooltip("悬停倾斜角度（负值=逆时针，像漫画音效气泡）")]
+        [Range(-10f, 0f)] public float hoverTiltDegrees = -3f;
+
+        [Range(0.85f, 1f)] public float pressScale = 0.97f;
+
+        [Header("漫画 · 中文字体（OFL：庆科黄油体 / 快乐体）")]
+        [Tooltip("标题/横幅用中文字体；缺字时 TMP 会走各自的 fallback 链")]
+        public TMP_FontAsset displayCjkFont;
+
+        [Tooltip("正文/设置项用中文字体")]
+        public TMP_FontAsset bodyCjkFont;
+
+        [Header("卡片预设（漫画风）")]
         public UIInkCardStyle teamCard = new UIInkCardStyle
         {
-            shape = UIInkShape.Blob,
+            shape = UIInkShape.RoundedRect,
             fillColor = new Color(1f, 0.44f, 0.06f, 1f),
             fillUsesTeamColor = true,
-            borderColor = new Color(0.082f, 0.071f, 0.110f, 1f),
-            borderWidth = 8f,
-            cornerRadius = 40f,
-            wobble = 0.06f,
-            glossAlpha = 0.18f,
-            glossSlope = 0.30f,
-            glossCenter = 0.72f,
-            glossThickness = 0.16f,
-            innerRimAlpha = 0.12f,
+            borderColor = new Color(0.102f, 0.102f, 0.102f, 1f),
+            borderWidth = 6f,
+            cornerRadius = 5f,
+            wobble = 0f,
+            glossAlpha = 0f,
+            glossSlope = 0f,
+            glossCenter = 0.5f,
+            glossThickness = 0f,
+            innerRimAlpha = 0f,
             titleColor = Color.white,
-            titleSize = 38f,
-            contentPadding = 26f,
+            titleSize = 40f,
+            contentPadding = 20f,
+            comicPanel = true,
+            halftone = true,
+            shadowOffset = new Vector2(6f, -6f),
+            shadowPadding = 8f,
         };
 
         public UIInkCardStyle darkCard = new UIInkCardStyle
         {
             shape = UIInkShape.RoundedRect,
-            fillColor = new Color(0.098f, 0.082f, 0.145f, 0.92f),
+            fillColor = new Color(0.102f, 0.102f, 0.102f, 1f),
             fillUsesTeamColor = false,
-            borderColor = new Color(0.122f, 0.102f, 0.173f, 1f),
-            borderWidth = 7f,
-            cornerRadius = 30f,
+            borderColor = new Color(0.102f, 0.102f, 0.102f, 1f),
+            borderWidth = 6f,
+            cornerRadius = 5f,
             wobble = 0f,
-            glossAlpha = 0.10f,
-            glossSlope = 0.30f,
-            glossCenter = 0.74f,
-            glossThickness = 0.14f,
-            innerRimAlpha = 0.08f,
-            titleColor = Color.white,
-            titleSize = 36f,
-            contentPadding = 24f,
+            glossAlpha = 0f,
+            glossSlope = 0f,
+            glossCenter = 0.5f,
+            glossThickness = 0f,
+            innerRimAlpha = 0f,
+            titleColor = new Color(1f, 0.996f, 0.941f, 1f),
+            titleSize = 40f,
+            contentPadding = 20f,
+            comicPanel = true,
+            halftone = false,
+            shadowOffset = new Vector2(6f, -6f),
+            shadowPadding = 8f,
         };
 
         public UIInkCardStyle lightCard = new UIInkCardStyle
         {
             shape = UIInkShape.RoundedRect,
-            fillColor = new Color(0.945f, 0.933f, 0.98f, 1f),
+            fillColor = new Color(1f, 0.996f, 0.941f, 1f),
             fillUsesTeamColor = false,
-            borderColor = new Color(0.082f, 0.071f, 0.110f, 1f),
-            borderWidth = 7f,
-            cornerRadius = 30f,
+            borderColor = new Color(0.102f, 0.102f, 0.102f, 1f),
+            borderWidth = 6f,
+            cornerRadius = 5f,
             wobble = 0f,
-            glossAlpha = 0.35f,
-            glossSlope = 0.30f,
-            glossCenter = 0.74f,
-            glossThickness = 0.16f,
+            glossAlpha = 0f,
+            glossSlope = 0f,
+            glossCenter = 0.5f,
+            glossThickness = 0f,
             innerRimAlpha = 0f,
-            titleColor = new Color(0.082f, 0.071f, 0.110f, 1f),
+            titleColor = new Color(0.102f, 0.102f, 0.102f, 1f),
             titleSize = 36f,
-            contentPadding = 24f,
+            contentPadding = 20f,
+            comicPanel = true,
+            halftone = true,
+            shadowOffset = new Vector2(6f, -6f),
+            shadowPadding = 8f,
         };
 
         private static UIThemeSO _fallback;
@@ -255,5 +352,42 @@ namespace P1.UI
             if (display && displayFont != null) return displayFont;
             return bodyFont != null ? bodyFont : displayFont;
         }
+
+        /// <summary>中文字体：标题走庆科黄油体，正文走快乐体。</summary>
+        public TMP_FontAsset GetCjkFont(bool display)
+        {
+            if (display && displayCjkFont != null) return displayCjkFont;
+            return bodyCjkFont != null ? bodyCjkFont : displayCjkFont;
+        }
+
+        /// <summary>
+        /// 按文本内容自动选字体：含汉字就用 CJK 字体（保证描边材质对中文同样生效），
+        /// 纯拉丁/数字仍走 TitanOne / Rubik，保留漫画数字的味道。
+        /// </summary>
+        public TMP_FontAsset ResolveFont(bool display, string text)
+        {
+            TMP_FontAsset cjk = GetCjkFont(display);
+            if (cjk != null && ComicStyle.ContainsCjk(text)) return cjk;
+            return GetFont(display);
+        }
+
+        /// <summary>纸上正文色（漫画风默认观感）；深色面板上请用 <see cref="paperColor"/>。</summary>
+        public Color InkText => textPrimary;
+
+        /// <summary>网点透明度：悬停时从 14% 提到 22%，是「Halftone Reveal」的核心。</summary>
+        public float HalftoneAlphaFor(bool hovered)
+        {
+            return hovered ? halftoneHoverAlpha : halftoneAlpha;
+        }
+
+        /// <summary>单位：秒；严格夹在规范上限 100ms 内，防止别处传进来长长的动画。</summary>
+        public float ClampDuration(float seconds)
+        {
+            return Mathf.Clamp(seconds, 0.02f, 0.1f);
+        }
+
+        public Vector2 HoverShadowOffset => hardShadowOffset * 0.5f;
+
+        public Vector2 CollapsedShadowOffset => Vector2.zero;
     }
 }

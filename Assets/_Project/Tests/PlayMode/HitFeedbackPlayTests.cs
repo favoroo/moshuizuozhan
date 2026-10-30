@@ -15,6 +15,7 @@ namespace P1.Tests
     /// 2. 本地玩家击杀敌人 → 全局时间微缩（Hitstop）并在真实时间 0.2s 内弹簧恢复到 1.0；
     /// 3. 本地玩家自身受击 → 屏幕中央定向受击弧（伤害来源方向）。
     /// </summary>
+    [Category("UI")]
     public class HitFeedbackPlayTests
     {
         private GameObject _playerGo;

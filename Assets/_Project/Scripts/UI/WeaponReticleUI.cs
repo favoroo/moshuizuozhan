@@ -32,6 +32,7 @@ namespace P1.UI
 
         // 小枪组件
         private RectTransform[] _shooterTicks = new RectTransform[4];
+        private Image[] _shooterTickImages = new Image[4];
         private Image _shooterRing;
         private Image _shooterCenterDot;
 
@@ -79,6 +80,7 @@ namespace P1.UI
         // 定向受击指示弧（Damage Direction Arcs, P6-A）
         private RectTransform _damageArcLayer;
         private readonly List<DamageArc> _damageArcs = new List<DamageArc>(6);
+        private readonly List<DamageArc> _damageArcPool = new List<DamageArc>(6);
 
         [Header("打击标记 (P6-A)")]
         [Tooltip("普通命中的标记停留时长（秒）")]
@@ -178,16 +180,42 @@ namespace P1.UI
         {
             CombatantHealth.DamageApplied -= HandleDamageApplied;
             ClearDamageArcs();
+            _damageArcs.Clear();
+            _damageArcPool.Clear();
             if (_damageArcLayer != null)
             {
                 Destroy(_damageArcLayer.gameObject);
                 _damageArcLayer = null;
             }
+            DestroyProceduralSprites();
+        }
+
+        private void DestroyProceduralSprites()
+        {
+            DestroySpriteAndTexture(ref _dotSprite);
+            DestroySpriteAndTexture(ref _ringSprite);
+            DestroySpriteAndTexture(ref _boxSprite);
+            DestroySpriteAndTexture(ref _pillSprite);
+            DestroySpriteAndTexture(ref _arcSprite);
+        }
+
+        private static void DestroySpriteAndTexture(ref Sprite sprite)
+        {
+            if (sprite != null)
+            {
+                Texture2D tex = sprite.texture;
+                if (tex != null)
+                {
+                    Destroy(tex);
+                }
+                Destroy(sprite);
+                sprite = null;
+            }
         }
 
         private void GenerateProceduralSprites()
         {
-            // 1. 圆点 Sprite (64x64)
+            // 1. 圆点 Sprite (64x64)：墨黑实心 + 白色硬描边（保证在橙/蓝墨地上都可读）
             Texture2D dotTex = new Texture2D(64, 64, TextureFormat.RGBA32, false) { name = "ReticleDotTex" };
             Color[] dotCols = new Color[64 * 64];
             for (int y = 0; y < 64; y++)
@@ -195,15 +223,26 @@ namespace P1.UI
                 for (int x = 0; x < 64; x++)
                 {
                     float dist = Vector2.Distance(new Vector2(x, y), new Vector2(31.5f, 31.5f));
-                    float alpha = Mathf.Clamp01((30f - dist) * 0.7f);
-                    dotCols[y * 64 + x] = new Color(1f, 1f, 1f, alpha);
+                    if (dist <= 18f)
+                    {
+                        dotCols[y * 64 + x] = ComicStyle.Ink;
+                    }
+                    else if (dist <= 26.5f)
+                    {
+                        dotCols[y * 64 + x] = Color.white;
+                    }
+                    else
+                    {
+                        float alpha = Mathf.Clamp01((28.5f - dist) * 1.5f);
+                        dotCols[y * 64 + x] = new Color(1f, 1f, 1f, alpha);
+                    }
                 }
             }
             dotTex.SetPixels(dotCols);
             dotTex.Apply();
             _dotSprite = Sprite.Create(dotTex, new Rect(0, 0, 64, 64), new Vector2(0.5f, 0.5f));
 
-            // 2. 细圆环 Sprite (128x128)
+            // 2. 细圆环 Sprite (128x128)：墨黑实心环 + 白色双侧硬描边
             Texture2D ringTex = new Texture2D(128, 128, TextureFormat.RGBA32, false) { name = "ReticleRingTex" };
             Color[] ringCols = new Color[128 * 128];
             for (int y = 0; y < 128; y++)
@@ -211,24 +250,42 @@ namespace P1.UI
                 for (int x = 0; x < 128; x++)
                 {
                     float dist = Vector2.Distance(new Vector2(x, y), new Vector2(63.5f, 63.5f));
-                    float ringDist = Mathf.Abs(dist - 56f);
-                    float alpha = Mathf.Clamp01((5f - ringDist) * 0.6f);
-                    ringCols[y * 128 + x] = new Color(1f, 1f, 1f, alpha);
+                    float ringDiff = Mathf.Abs(dist - 56f);
+                    if (ringDiff <= 2.8f)
+                    {
+                        ringCols[y * 128 + x] = ComicStyle.Ink;
+                    }
+                    else if (ringDiff <= 5.2f)
+                    {
+                        ringCols[y * 128 + x] = Color.white;
+                    }
+                    else
+                    {
+                        float alpha = Mathf.Clamp01((6.5f - ringDiff) * 1.5f);
+                        ringCols[y * 128 + x] = new Color(1f, 1f, 1f, alpha);
+                    }
                 }
             }
             ringTex.SetPixels(ringCols);
             ringTex.Apply();
             _ringSprite = Sprite.Create(ringTex, new Rect(0, 0, 128, 128), new Vector2(0.5f, 0.5f));
 
-            // 3. 实心白色贴图 (32x32)
+            // 3. 刻度矩形贴图 (32x32)：墨黑实心 + 白色硬描边
             Texture2D boxTex = new Texture2D(32, 32, TextureFormat.RGBA32, false) { name = "ReticleBoxTex" };
             Color[] boxCols = new Color[32 * 32];
-            for (int i = 0; i < boxCols.Length; i++) boxCols[i] = Color.white;
+            for (int y = 0; y < 32; y++)
+            {
+                for (int x = 0; x < 32; x++)
+                {
+                    bool isBorder = x < 4 || x >= 28 || y < 4 || y >= 28;
+                    boxCols[y * 32 + x] = isBorder ? Color.white : ComicStyle.Ink;
+                }
+            }
             boxTex.SetPixels(boxCols);
             boxTex.Apply();
             _boxSprite = Sprite.Create(boxTex, new Rect(0, 0, 32, 32), new Vector2(0.5f, 0.5f));
 
-            // 4. 圆角胶囊贴图 (64x32)
+            // 4. 圆角胶囊贴图 (64x32)：墨黑底 + 白色硬描边
             Texture2D pillTex = new Texture2D(64, 32, TextureFormat.RGBA32, false) { name = "ReticlePillTex" };
             Color[] pillCols = new Color[64 * 32];
             for (int y = 0; y < 32; y++)
@@ -238,8 +295,19 @@ namespace P1.UI
                     float dx = x < 16 ? (16 - x) : (x > 47 ? (x - 47) : 0);
                     float dy = Mathf.Abs(y - 15.5f);
                     float dist = Mathf.Sqrt(dx * dx + dy * dy);
-                    float alpha = Mathf.Clamp01((15.5f - dist) * 0.8f);
-                    pillCols[y * 64 + x] = new Color(1f, 1f, 1f, alpha);
+                    if (dist <= 11f)
+                    {
+                        pillCols[y * 64 + x] = ComicStyle.Ink;
+                    }
+                    else if (dist <= 15.5f)
+                    {
+                        pillCols[y * 64 + x] = Color.white;
+                    }
+                    else
+                    {
+                        float alpha = Mathf.Clamp01((17f - dist) * 1.5f);
+                        pillCols[y * 64 + x] = new Color(1f, 1f, 1f, alpha);
+                    }
                 }
             }
             pillTex.SetPixels(pillCols);
@@ -317,6 +385,7 @@ namespace P1.UI
                 rt.sizeDelta = new Vector2(3f, 11f);
                 rt.localRotation = Quaternion.Euler(0f, 0f, angles[i]);
                 _shooterTicks[i] = rt;
+                _shooterTickImages[i] = img;
             }
         }
 
@@ -619,6 +688,36 @@ namespace P1.UI
             _damageArcLayer.anchoredPosition = Vector2.zero;
             _damageArcLayer.sizeDelta = Vector2.zero;
             _damageArcLayer.SetAsLastSibling();
+
+            int poolCount = Mathf.Max(1, maxDamageArcs);
+            _damageArcPool.Clear();
+            for (int i = 0; i < poolCount; i++)
+            {
+                var arcGo = new GameObject($"DamageArc_{i}", typeof(RectTransform), typeof(Image));
+                arcGo.transform.SetParent(_damageArcLayer, false);
+
+                var image = arcGo.GetComponent<Image>();
+                image.sprite = _arcSprite;
+                image.raycastTarget = false;
+                image.color = damageArcColor;
+
+                var rect = arcGo.GetComponent<RectTransform>();
+                rect.anchorMin = new Vector2(0.5f, 0.5f);
+                rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.anchoredPosition = Vector2.zero;
+                rect.sizeDelta = new Vector2(damageArcSizePixels, damageArcSizePixels);
+                arcGo.SetActive(false);
+
+                _damageArcPool.Add(new DamageArc
+                {
+                    Rect = rect,
+                    Image = image,
+                    Attacker = null,
+                    LastSourcePos = Vector3.zero,
+                    Age = 0f
+                });
+            }
         }
 
         private void HandleDamageApplied(CombatantHealth victim, CombatantHealth attacker, float damage, bool killed)
@@ -699,32 +798,57 @@ namespace P1.UI
             {
                 DamageArc oldest = _damageArcs[0];
                 _damageArcs.RemoveAt(0);
-                if (oldest.Rect != null) Destroy(oldest.Rect.gameObject);
+                if (oldest.Rect != null) oldest.Rect.gameObject.SetActive(false);
+                oldest.Attacker = null;
+                _damageArcPool.Add(oldest);
             }
 
-            var go = new GameObject("DamageArc", typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(_damageArcLayer, false);
-
-            var image = go.GetComponent<Image>();
-            image.sprite = _arcSprite;
-            image.raycastTarget = false;
-            image.color = damageArcColor;
-
-            var rect = go.GetComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = Vector2.zero;
-            rect.sizeDelta = new Vector2(damageArcSizePixels, damageArcSizePixels);
-
-            _damageArcs.Add(new DamageArc
+            DamageArc arc;
+            if (_damageArcPool.Count > 0)
             {
-                Rect = rect,
-                Image = image,
-                Attacker = attacker,
-                LastSourcePos = attacker.transform.position,
-                Age = 0f
-            });
+                arc = _damageArcPool[_damageArcPool.Count - 1];
+                _damageArcPool.RemoveAt(_damageArcPool.Count - 1);
+            }
+            else
+            {
+                var go = new GameObject("DamageArc", typeof(RectTransform), typeof(Image));
+                go.transform.SetParent(_damageArcLayer, false);
+
+                var image = go.GetComponent<Image>();
+                image.sprite = _arcSprite;
+                image.raycastTarget = false;
+                image.color = damageArcColor;
+
+                var rect = go.GetComponent<RectTransform>();
+                rect.anchorMin = new Vector2(0.5f, 0.5f);
+                rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.anchoredPosition = Vector2.zero;
+                rect.sizeDelta = new Vector2(damageArcSizePixels, damageArcSizePixels);
+
+                arc = new DamageArc
+                {
+                    Rect = rect,
+                    Image = image,
+                    Attacker = null,
+                    LastSourcePos = Vector3.zero,
+                    Age = 0f
+                };
+            }
+
+            arc.Attacker = attacker;
+            arc.LastSourcePos = attacker.transform.position;
+            arc.Age = 0f;
+            if (arc.Rect != null)
+            {
+                arc.Rect.gameObject.SetActive(true);
+            }
+            if (arc.Image != null)
+            {
+                arc.Image.color = damageArcColor;
+            }
+
+            _damageArcs.Add(arc);
         }
 
         private void UpdateDamageArcs(float unscaledDt)
@@ -774,7 +898,9 @@ namespace P1.UI
 
                 if (arc.Age >= lifetime)
                 {
-                    Destroy(arc.Rect.gameObject);
+                    if (arc.Rect != null) arc.Rect.gameObject.SetActive(false);
+                    arc.Attacker = null;
+                    _damageArcPool.Add(arc);
                     _damageArcs.RemoveAt(i);
                 }
             }
@@ -791,7 +917,9 @@ namespace P1.UI
             for (int i = 0; i < _damageArcs.Count; i++)
             {
                 if (_damageArcs[i].Rect != null)
-                    Destroy(_damageArcs[i].Rect.gameObject);
+                    _damageArcs[i].Rect.gameObject.SetActive(false);
+                _damageArcs[i].Attacker = null;
+                _damageArcPool.Add(_damageArcs[i]);
             }
             _damageArcs.Clear();
         }
@@ -813,9 +941,6 @@ namespace P1.UI
                 _canvasGroup.alpha = Mathf.MoveTowards(_canvasGroup.alpha, 0f, Time.deltaTime * 6f);
                 return;
             }
-
-            Camera cam = TopDownCameraFollow.Instance != null ? TopDownCameraFollow.Instance.CameraComponent : Camera.main;
-            if (cam == null) return;
 
             // 1. P9：准星固定在屏幕中心。根节点 anchor/pivot 已在 EnsureInitialized 锁为 (0.5, 0.5)，
             //    不再把世界地面瞄准点 WorldToScreenPoint 投影过来。
@@ -880,11 +1005,10 @@ namespace P1.UI
                 float ringScale = 1.0f + (spreadDeg - 1.2f) * 0.06f;
                 _shooterRing.rectTransform.localScale = Vector3.one * ringScale;
 
-                Color tint = Color.Lerp(Color.white, teamColor, 0.4f);
-                tint.a = _shooterWeight;
+                Color tint = new Color(1f, 1f, 1f, _shooterWeight);
                 _shooterCenterDot.color = tint;
                 _shooterRing.color = tint;
-                for (int i = 0; i < 4; i++) _shooterTicks[i].GetComponent<Image>().color = tint;
+                for (int i = 0; i < 4; i++) _shooterTickImages[i].color = tint;
             }
             else if (_shooterContainer.gameObject.activeSelf)
             {
@@ -899,8 +1023,7 @@ namespace P1.UI
                 if (!_rollerContainer.gameObject.activeSelf) _rollerContainer.gameObject.SetActive(true);
                 _rollerContainer.localScale = Vector3.one * _rollerWeight;
 
-                Color tint = Color.Lerp(Color.white, teamColor, 0.45f);
-                tint.a = _rollerWeight;
+                Color tint = new Color(1f, 1f, 1f, _rollerWeight);
                 _rollerBarImage.color = tint;
             }
             else if (_rollerContainer.gameObject.activeSelf)
@@ -938,7 +1061,7 @@ namespace P1.UI
                     Color fillColor = Color.Lerp(teamColor, Color.white, ch01 * 0.7f);
                     fillColor.a = _chargerWeight;
                     _chargerFillRing.color = fillColor;
-                    _chargerCenterDot.color = fillColor;
+                    _chargerCenterDot.color = new Color(1f, 1f, 1f, _chargerWeight);
                 }
             }
             else if (_chargerContainer.gameObject.activeSelf)

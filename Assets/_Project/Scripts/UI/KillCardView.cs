@@ -65,11 +65,21 @@ namespace P1.UI
                 bgGo.transform.SetParent(transform, false);
                 Stretch((RectTransform)bgGo.transform);
                 cardBgGraphic = bgGo.GetComponent<UIInkShapeGraphic>();
-                cardBgGraphic.Shape = UIInkShape.RoundedRect;
-                cardBgGraphic.CornerRadius = 24f;
-                cardBgGraphic.BorderWidth = 4f;
-                cardBgGraphic.BorderColor = new Color(0.082f, 0.071f, 0.110f, 1f);
-                cardBgGraphic.color = new Color(0.098f, 0.082f, 0.145f, 0.94f);
+                cardBgGraphic.Shape = UIInkShape.SpeechBubble;
+                cardBgGraphic.CornerRadius = ComicStyle.CornerBubble;
+                cardBgGraphic.SpeechTail = true;
+                cardBgGraphic.TailSize = new Vector2(16f, 16f);
+                cardBgGraphic.TailAngle = 0f; // 尖角朝向右侧边缘
+                cardBgGraphic.BorderWidth = ComicStyle.Border;
+                cardBgGraphic.BorderColor = ComicStyle.Ink;
+                cardBgGraphic.HardShadow = true;
+                cardBgGraphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+                cardBgGraphic.ShadowColor = ComicStyle.Ink;
+                cardBgGraphic.Halftone = false;
+                cardBgGraphic.GlossAlpha = 0f;
+                cardBgGraphic.DrawGloss = false;
+                cardBgGraphic.InnerRimAlpha = 0f;
+                cardBgGraphic.color = ComicStyle.Paper;
                 cardBgGraphic.raycastTarget = false;
             }
 
@@ -105,14 +115,14 @@ namespace P1.UI
                 kRect.anchorMin = new Vector2(0f, 0.5f);
                 kRect.anchorMax = new Vector2(0f, 0.5f);
                 kRect.pivot = new Vector2(0f, 0.5f);
-                kRect.anchoredPosition = new Vector2(56f, 9f);
-                kRect.sizeDelta = new Vector2(160f, 22f);
+                kRect.anchoredPosition = new Vector2(56f, 10f);
+                kRect.sizeDelta = new Vector2(170f, 24f);
 
                 killerText = killerGo.GetComponent<TextMeshProUGUI>();
-                killerText.fontSize = 15f;
+                killerText.fontSize = 17f;
                 killerText.fontStyle = FontStyles.Bold;
                 killerText.alignment = TextAlignmentOptions.Left;
-                killerText.color = Color.white;
+                killerText.color = ComicStyle.Ink;
                 killerText.raycastTarget = false;
             }
 
@@ -124,14 +134,14 @@ namespace P1.UI
                 tRect.anchorMin = new Vector2(0f, 0.5f);
                 tRect.anchorMax = new Vector2(0f, 0.5f);
                 tRect.pivot = new Vector2(0f, 0.5f);
-                tRect.anchoredPosition = new Vector2(56f, -10f);
-                tRect.sizeDelta = new Vector2(60f, 18f);
+                tRect.anchoredPosition = new Vector2(56f, -12f);
+                tRect.sizeDelta = new Vector2(80f, 20f);
 
                 actionTagText = tagGo.GetComponent<TextMeshProUGUI>();
-                actionTagText.fontSize = 10f;
+                actionTagText.fontSize = 16f;
                 actionTagText.fontStyle = FontStyles.Bold;
                 actionTagText.alignment = TextAlignmentOptions.Left;
-                actionTagText.color = new Color(0.72f, 0.70f, 0.80f, 1f);
+                actionTagText.color = ComicStyle.Ink;
                 actionTagText.text = "SPLAT";
                 actionTagText.raycastTarget = false;
             }
@@ -144,14 +154,14 @@ namespace P1.UI
                 vRect.anchorMin = new Vector2(0f, 0.5f);
                 vRect.anchorMax = new Vector2(0f, 0.5f);
                 vRect.pivot = new Vector2(0f, 0.5f);
-                vRect.anchoredPosition = new Vector2(110f, -10f);
-                vRect.sizeDelta = new Vector2(160f, 18f);
+                vRect.anchoredPosition = new Vector2(138f, -12f);
+                vRect.sizeDelta = new Vector2(150f, 20f);
 
                 victimText = victimGo.GetComponent<TextMeshProUGUI>();
-                victimText.fontSize = 12f;
+                victimText.fontSize = 16f;
                 victimText.fontStyle = FontStyles.Bold;
                 victimText.alignment = TextAlignmentOptions.Left;
-                victimText.color = new Color(0.88f, 0.88f, 0.92f, 1f);
+                victimText.color = ComicStyle.Ink;
                 victimText.raycastTarget = false;
             }
 
@@ -172,28 +182,24 @@ namespace P1.UI
             Color killerCol = resolved.GetTeamColor(ev.KillerTeam);
             Color victimCol = resolved.GetTeamColor(ev.VictimTeam);
 
-            // 1. 背景：本玩家击杀时加金边，玩家阵亡时深紫红，普通击杀深黑
+            // 1. 对话气泡背景与漫画红/黄强调（粗墨边 6px + 硬阴影）
             if (cardBgGraphic != null)
             {
+                cardBgGraphic.BorderColor = ComicStyle.Ink;
+                cardBgGraphic.BorderWidth = ComicStyle.Border;
+
                 if (ev.IsLocalPlayerKiller)
                 {
-                    cardBgGraphic.BorderColor = resolved.readyGold;
-                    cardBgGraphic.BorderWidth = 5f;
-                    cardBgGraphic.color = new Color(0.14f, 0.10f, 0.05f, 0.96f);
+                    cardBgGraphic.color = ComicStyle.Yellow;
                 }
                 else if (ev.IsLocalPlayerVictim)
                 {
-                    cardBgGraphic.BorderColor = resolved.dangerRed;
-                    cardBgGraphic.BorderWidth = 4.5f;
-                    cardBgGraphic.color = new Color(0.18f, 0.05f, 0.08f, 0.96f);
+                    cardBgGraphic.color = ComicStyle.Red;
                 }
                 else
                 {
-                    cardBgGraphic.BorderColor = resolved.outlineColor;
-                    cardBgGraphic.BorderWidth = 3.5f;
-                    cardBgGraphic.color = new Color(0.082f, 0.071f, 0.110f, 0.92f);
+                    cardBgGraphic.color = ComicStyle.Paper;
                 }
-                cardBgGraphic.PlayWobble(0.09f, 0.35f);
             }
 
             // 2. 武器圆形底与图标
@@ -208,23 +214,27 @@ namespace P1.UI
                 weaponIconImage.enabled = weaponIcon != null;
             }
 
-            // 3. 文字
+            // 3. 文字（必须 >= 16px，使用字体解析）
             if (killerText != null)
             {
+                killerText.font = resolved.ResolveFont(true, ev.KillerName);
                 killerText.text = ev.KillerName;
-                killerText.color = ev.IsLocalPlayerKiller ? resolved.readyGold : killerCol;
+                killerText.color = ev.IsLocalPlayerKiller ? ComicStyle.Ink : (ev.IsLocalPlayerVictim ? ComicStyle.Paper : killerCol);
             }
 
             if (actionTagText != null)
             {
-                actionTagText.text = ev.IsLocalPlayerKiller ? "CRUSHED" : "SPLAT";
-                actionTagText.color = new Color(0.75f, 0.72f, 0.85f, 1f);
+                string tag = ev.IsLocalPlayerKiller ? "CRUSHED!" : "SPLAT!";
+                actionTagText.font = resolved.ResolveFont(true, tag);
+                actionTagText.text = tag;
+                actionTagText.color = ev.IsLocalPlayerVictim ? ComicStyle.Yellow : ComicStyle.Ink;
             }
 
             if (victimText != null)
             {
+                victimText.font = resolved.ResolveFont(true, ev.VictimName);
                 victimText.text = ev.VictimName;
-                victimText.color = ev.IsLocalPlayerVictim ? resolved.dangerRed : victimCol;
+                victimText.color = ev.IsLocalPlayerKiller ? ComicStyle.Ink : (ev.IsLocalPlayerVictim ? ComicStyle.Paper : victimCol);
             }
 
             gameObject.SetActive(true);

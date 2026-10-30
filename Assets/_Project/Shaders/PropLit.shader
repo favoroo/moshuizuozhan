@@ -9,6 +9,18 @@ Shader "P1/PropLit"
         _EmissionStrength ("Emission Strength", Float) = 0.0
         _AmbientBoost ("Ambient Boost", Range(0.0, 2.0)) = 1.0
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull Mode", Float) = 2
+
+        [Header(Toon Shading)]
+        _ShadeThreshold ("Shade Threshold", Range(0.2, 0.8)) = 0.5
+        _ShadeSoftness ("Shade Softness", Range(0.005, 0.2)) = 0.03
+        _ShadowTint ("Shadow Tint", Color) = (0.40, 0.45, 0.62, 1)
+        _ShadowFloor ("Shadow Floor", Range(0.0, 1.0)) = 0.42
+        _RimColor ("Rim Color", Color) = (0.75, 0.86, 1.0, 1)
+        _RimStrength ("Rim Strength", Range(0.0, 1.0)) = 0.18
+        _RimPower ("Rim Power", Range(0.5, 8.0)) = 3.0
+        _SpecStrength ("Spec Strength", Range(0.0, 2.0)) = 0.5
+        _SpecThreshold ("Spec Threshold", Range(0.5, 0.999)) = 0.95
+        _SpecSoftness ("Spec Softness", Range(0.001, 0.1)) = 0.02
     }
 
     SubShader
@@ -33,12 +45,18 @@ Shader "P1/PropLit"
             #pragma vertex vert
             #pragma fragment frag
 
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
+
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "ToonLighting.hlsl"
+            #include "InkSurfaceOverlay.hlsl"
 
             struct Attributes
             {
@@ -66,6 +84,16 @@ Shader "P1/PropLit"
                 float _EmissionStrength;
                 float _AmbientBoost;
                 float _Cull;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                half4 _RimColor;
+                float _RimStrength;
+                float _RimPower;
+                float _SpecStrength;
+                float _SpecThreshold;
+                float _SpecSoftness;
             CBUFFER_END
 
             Varyings vert(Attributes input)
@@ -99,24 +127,17 @@ Shader "P1/PropLit"
                 float3 L = normalize(mainLight.direction);
                 float3 H = normalize(L + viewDirWS);
 
-                float NdotL = saturate(dot(normalWS, L));
                 float NdotH = saturate(dot(normalWS, H));
 
-                // 环境光 SampleSH + _AmbientBoost，0.04 极弱保底避免死黑
-                half3 ambient = max(SampleSH(normalWS) * _AmbientBoost, half3(0.04, 0.04, 0.04));
-
-                // 主光 Lambert 漫反射
-                half3 diffuse = albedo.rgb * (ambient + mainLight.color * (NdotL * shadowAtten));
-
-                // Blinn 高光
-                float specPower = exp2(8.0 * _Smoothness + 1.0);
-                float spec = pow(NdotH, specPower) * NdotL * shadowAtten * _Metallic;
-                half3 specular = mainLight.color * spec;
-
-                // 自发光
+                half3 ambient = P1ToonAmbient(normalWS, _ShadowTint.rgb, _AmbientBoost, 0.06);
+                half3 diffuse = P1ToonDiffuse(albedo.rgb, mainLight.color, dot(normalWS, L), shadowAtten,
+                                              _ShadeThreshold, _ShadeSoftness, _ShadowFloor, _ShadowTint.rgb, ambient);
+                half spec = P1ToonSpec(NdotH, _SpecThreshold, _SpecSoftness, _SpecStrength * _Metallic, shadowAtten);
+                half rim = P1ToonRim(saturate(dot(normalWS, viewDirWS)), _RimPower, shadowAtten) * _RimStrength;
                 half3 emission = _EmissionColor.rgb * _EmissionStrength;
+                half3 finalRgb = diffuse + mainLight.color * spec + _RimColor.rgb * rim + emission;
 
-                half3 finalRgb = diffuse + specular + emission;
+                ApplyTopInkOverlay(finalRgb, input.positionWS, normalWS, shadowAtten, L, viewDirWS);
 
                 // 雾效
                 finalRgb = MixFog(finalRgb, input.fogFactor);
@@ -140,6 +161,10 @@ Shader "P1/PropLit"
             #pragma vertex ShadowPassVertex
             #pragma fragment ShadowPassFragment
 
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体（shadowmap 同样走 GRD 批处理）
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
+
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
@@ -162,6 +187,16 @@ Shader "P1/PropLit"
                 float _EmissionStrength;
                 float _AmbientBoost;
                 float _Cull;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                half4 _RimColor;
+                float _RimStrength;
+                float _RimPower;
+                float _SpecStrength;
+                float _SpecThreshold;
+                float _SpecSoftness;
             CBUFFER_END
 
             float3 _LightDirection;
@@ -191,6 +226,82 @@ Shader "P1/PropLit"
             half4 ShadowPassFragment(ShadowVaryings input) : SV_Target
             {
                 return 0;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthNormals"
+            Tags { "LightMode" = "DepthNormals" }
+
+            Cull [_Cull]
+            ZWrite On
+            ZTest LEqual
+
+            HLSLPROGRAM
+            #pragma vertex DepthNormalsVertex
+            #pragma fragment DepthNormalsFragment
+
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体（DepthNormals prepass 同样走 GRD 批处理）
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
+
+            #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct DepthNormalsAttributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS   : NORMAL;
+            };
+
+            struct DepthNormalsVaryings
+            {
+                float4 positionCS : SV_POSITION;
+                float3 normalWS   : TEXCOORD0;
+            };
+
+            CBUFFER_START(UnityPerMaterial)
+                half4 _BaseColor;
+                half4 _EmissionColor;
+                float _Smoothness;
+                float _Metallic;
+                float _EmissionStrength;
+                float _AmbientBoost;
+                float _Cull;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                half4 _RimColor;
+                float _RimStrength;
+                float _RimPower;
+                float _SpecStrength;
+                float _SpecThreshold;
+                float _SpecSoftness;
+            CBUFFER_END
+
+            DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)
+            {
+                DepthNormalsVaryings output;
+                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                output.normalWS   = TransformObjectToWorldNormal(input.normalOS);
+                return output;
+            }
+
+            half4 DepthNormalsFragment(DepthNormalsVaryings input) : SV_Target
+            {
+                float3 normalWS = normalize(input.normalWS);
+            #if defined(_GBUFFER_NORMALS_OCT)
+                float2 octNormalWS = PackNormalOctQuadEncode(normalWS);
+                float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5);
+                half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);
+                return half4(packedNormalWS, 0.0);
+            #else
+                return half4(normalWS, 0.0);
+            #endif
             }
             ENDHLSL
         }

@@ -113,13 +113,42 @@ namespace P1.Environment
             _currentAlpha = Mathf.MoveTowards(_currentAlpha, _targetAlpha, fadeSpeed * deltaTime);
             _currentFocusWeight = Mathf.MoveTowards(_currentFocusWeight, _targetFocusWeight, fadeSpeed * deltaTime);
 
-            // 当透明度发生变化，或处于半透明状态时，刷新 MaterialPropertyBlock
-            if (Mathf.Abs(prevAlpha - _currentAlpha) > 0.001f || _currentAlpha < 0.999f)
+            // 当处于半透明/过渡态时刷新 MaterialPropertyBlock；
+            // 完全恢复不透明后把 MPB 清掉（shader 默认 _DitherAlpha=1），掩体重新回到 SRP Batcher 批处理。
+            bool fullyOpaque = _currentAlpha >= 0.999f && _currentFocusWeight <= 0.001f;
+            if (fullyOpaque)
+            {
+                if (prevAlpha < 0.999f)
+                {
+                    ClearProperties();
+                }
+            }
+            else
             {
                 ApplyProperties();
             }
 
             _isOccludingThisFrame = false;
+        }
+
+        private void ClearProperties()
+        {
+            if (_renderer == null) _renderer = GetComponent<Renderer>();
+            if (_renderer != null)
+            {
+                _renderer.SetPropertyBlock(null);
+            }
+
+            if (_childRenderers != null)
+            {
+                for (int i = 0; i < _childRenderers.Count; i++)
+                {
+                    if (_childRenderers[i] != null)
+                    {
+                        _childRenderers[i].SetPropertyBlock(null);
+                    }
+                }
+            }
         }
 
         private void ApplyProperties()
@@ -160,7 +189,7 @@ namespace P1.Environment
             _currentFocusWeight = 0.0f;
             _targetFocusWeight = 0.0f;
             _isOccludingThisFrame = false;
-            ApplyProperties();
+            ClearProperties();
         }
     }
 }

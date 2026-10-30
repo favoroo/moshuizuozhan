@@ -61,6 +61,7 @@ namespace P1.Editor
                 sun.color = Linear(style.sunColor);
                 sun.intensity = style.sunIntensity;
                 sun.shadows = LightShadows.Soft;
+                sun.shadowStrength = style.shadowStrength;
                 sun.transform.rotation = Quaternion.Euler(style.sunEuler);
                 RenderSettings.sun = sun;
             }
@@ -70,7 +71,7 @@ namespace P1.Editor
             RenderSettings.ambientEquatorColor = Linear(style.ambientEquator);
             RenderSettings.ambientGroundColor = Linear(style.ambientGround);
             RenderSettings.ambientIntensity = style.ambientIntensity;
-            RenderSettings.reflectionIntensity = 0.55f;
+            RenderSettings.reflectionIntensity = style.reflectionIntensity;
         }
 
         private static void ApplyFog(ArenaStyleSO style)
@@ -108,7 +109,9 @@ namespace P1.Editor
 
             GetOrAddComponent<Tonemapping>(profile, c =>
             {
-                c.mode.Override(TonemappingMode.ACES);
+                c.mode.Override(style.tonemapMode == ArenaTonemapMode.Neutral
+                    ? TonemappingMode.Neutral
+                    : TonemappingMode.ACES);
             });
 
             GetOrAddComponent<Bloom>(profile, c =>

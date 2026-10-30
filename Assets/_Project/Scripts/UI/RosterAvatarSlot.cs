@@ -36,22 +36,55 @@ namespace P1.UI
         [SerializeField] private Team team = Team.TeamA;
         [SerializeField] private bool isLocalPlayer;
 
+        [Header("漫画风兜底组件")]
+        [SerializeField] private GameObject fallbackSquid;
+        [SerializeField] private GameObject fallbackDeath;
+        [SerializeField] private GameObject youBadge;
+
         private CombatantHealth _boundCombatant;
         private WeaponController _boundWeapon;
         private bool _wasAlive = true;
         private bool _wasSpecialReady;
         private bool _hasBoundTarget;
+        private int _lastDisplayedSecs = -1;
 
         public Team SlotTeam => team;
         public bool IsLocalPlayer => isLocalPlayer;
         public CombatantHealth BoundCombatant => _boundCombatant;
 
-        private static readonly Color DeadColor = new Color(0.290f, 0.267f, 0.345f, 1f); // #4a4458
+        private static readonly Color DeadColor = ComicStyle.Red;
         private static readonly Color GoldRingColor = new Color(1f, 0.835f, 0.29f, 1f);
 
         private void Awake()
         {
             if (springMotion == null) springMotion = GetComponent<UISpringMotion>();
+            ResolveFallbacks();
+        }
+
+        public void SetFallbacks(GameObject fbSquid, GameObject fbDeath, GameObject you)
+        {
+            fallbackSquid = fbSquid;
+            fallbackDeath = fbDeath;
+            youBadge = you;
+        }
+
+        private void ResolveFallbacks()
+        {
+            if (fallbackSquid == null)
+            {
+                var t = transform.Find("SquidFallback");
+                if (t != null) fallbackSquid = t.gameObject;
+            }
+            if (fallbackDeath == null)
+            {
+                var t = transform.Find("DeathFallback");
+                if (t != null) fallbackDeath = t.gameObject;
+            }
+            if (youBadge == null)
+            {
+                var t = transform.Find("YouIndicator");
+                if (t != null) youBadge = t.gameObject;
+            }
         }
 
         public void BindCombatant(CombatantHealth combatant, bool isPlayer = false, UIThemeSO themeAsset = null)
@@ -77,6 +110,10 @@ namespace P1.UI
             if (youIndicatorArrow != null)
             {
                 youIndicatorArrow.gameObject.SetActive(isLocalPlayer);
+            }
+            if (youBadge != null)
+            {
+                youBadge.SetActive(isLocalPlayer);
             }
 
             RefreshVisualsImmediate();
@@ -158,34 +195,63 @@ namespace P1.UI
             UIThemeSO resolvedTheme = UIThemeSO.Resolve(theme);
             Color teamColor = resolvedTheme.GetTeamColor(team);
 
-            // 背景底色与形状
+            // 背景底色与形状：存活队伍色，阵亡态红底
             if (backgroundBlob != null)
             {
-                backgroundBlob.color = isAlive ? teamColor : DeadColor;
+                backgroundBlob.color = isAlive ? teamColor : ComicStyle.Red;
             }
 
-            // 乌贼图标三态
+            // 乌贼图标三态与兜底（绝不留白块）
             if (squidIcon != null)
             {
                 if (isAlive)
                 {
-                    squidIcon.color = Color.white;
-                    squidIcon.transform.localScale = Vector3.one;
+                    squidIcon.gameObject.SetActive(true);
+                    if (squidIcon.sprite != null)
+                    {
+                        squidIcon.enabled = true;
+                        squidIcon.color = Color.white;
+                        squidIcon.transform.localScale = Vector3.one;
+                        if (fallbackSquid != null) fallbackSquid.SetActive(false);
+                    }
+                    else
+                    {
+                        squidIcon.enabled = false;
+                        if (fallbackSquid != null) fallbackSquid.SetActive(true);
+                    }
                 }
                 else
                 {
-                    squidIcon.color = new Color(1f, 1f, 1f, 0.35f);
-                    squidIcon.transform.localScale = new Vector3(0.85f, 0.85f, 1f);
+                    squidIcon.gameObject.SetActive(false);
+                    if (fallbackSquid != null) fallbackSquid.SetActive(false);
                 }
             }
 
-            // 阵亡 X 标 / 骷髅
+            // 阵亡 X 标（黑 X）与兜底
             if (deathIcon != null)
             {
                 deathIcon.gameObject.SetActive(!isAlive);
+                if (!isAlive)
+                {
+                    if (deathIcon.sprite != null)
+                    {
+                        deathIcon.enabled = true;
+                        deathIcon.color = ComicStyle.Ink;
+                        if (fallbackDeath != null) fallbackDeath.SetActive(false);
+                    }
+                    else
+                    {
+                        deathIcon.enabled = false;
+                        if (fallbackDeath != null) fallbackDeath.SetActive(true);
+                    }
+                }
+                else
+                {
+                    if (fallbackDeath != null) fallbackDeath.SetActive(false);
+                }
             }
 
-            // 阵亡进度环与角标
+            // 阵亡进度环与角标（5px 加粗环）
             if (progressRing != null)
             {
                 if (!isAlive && remaining > 0f)
@@ -193,7 +259,7 @@ namespace P1.UI
                     progressRing.gameObject.SetActive(true);
                     float fill = Mathf.Clamp01(1f - (remaining / Mathf.Max(0.1f, duration)));
                     progressRing.Progress = fill;
-                    progressRing.ProgressColor = Color.white;
+                    progressRing.ProgressColor = ComicStyle.Yellow;
                 }
                 else
                 {
@@ -208,21 +274,38 @@ namespace P1.UI
                 countdownBadge.gameObject.SetActive(!isAlive && remaining > 0f);
             }
 
-            if (countdownText != null && !isAlive)
+            if (countdownText != null)
             {
-                int secs = Mathf.CeilToInt(Mathf.Max(0f, remaining));
-                countdownText.text = secs > 0 ? secs.ToString() : string.Empty;
+                if (!isAlive)
+                {
+                    int secs = Mathf.CeilToInt(Mathf.Max(0f, remaining));
+                    if (secs != _lastDisplayedSecs)
+                    {
+                        _lastDisplayedSecs = secs;
+                        countdownText.text = secs > 0 ? secs.ToString() : string.Empty;
+                    }
+                }
+                else if (_lastDisplayedSecs != -1)
+                {
+                    _lastDisplayedSecs = -1;
+                }
             }
 
             // 大招金光环
             if (specialReadyRing != null)
             {
                 float targetIntensity = isSpecialReady ? 1f : 0f;
-                specialReadyRing.Intensity = Mathf.MoveTowards(specialReadyRing.Intensity, targetIntensity, Time.unscaledDeltaTime * 4f);
+                specialReadyRing.Intensity = Mathf.MoveTowards(specialReadyRing.Intensity, targetIntensity, Time.unscaledDeltaTime * 6f);
                 if (isSpecialReady)
                 {
                     specialReadyRing.color = resolvedTheme != null ? resolvedTheme.readyGold : GoldRingColor;
                 }
+            }
+
+            // 「YOU」角标显示
+            if (youBadge != null)
+            {
+                youBadge.SetActive(isLocalPlayer);
             }
         }
 
@@ -232,23 +315,13 @@ namespace P1.UI
             {
                 springMotion.PlayIn(0f);
             }
-
-            if (backgroundBlob != null)
-            {
-                backgroundBlob.PlayWobble(0.14f, 0.45f);
-            }
         }
 
         private void OnKilled()
         {
             if (springMotion != null)
             {
-                springMotion.Punch();
-            }
-
-            if (backgroundBlob != null)
-            {
-                backgroundBlob.PlayWobble(0.10f, 0.35f);
+                springMotion.Punch(0.08f);
             }
         }
 
@@ -256,17 +329,13 @@ namespace P1.UI
         {
             if (springMotion != null)
             {
-                springMotion.Punch();
-            }
-
-            if (backgroundBlob != null)
-            {
-                backgroundBlob.PlayWobble(0.08f, 0.35f);
+                springMotion.Punch(0.08f);
             }
         }
 
         public void RefreshVisualsImmediate()
         {
+            ResolveFallbacks();
             if (_boundCombatant != null)
             {
                 UpdateVisuals(
@@ -279,11 +348,26 @@ namespace P1.UI
             {
                 UIThemeSO resolvedTheme = UIThemeSO.Resolve(theme);
                 if (backgroundBlob != null) backgroundBlob.color = resolvedTheme.GetTeamColor(team);
-                if (squidIcon != null) squidIcon.color = Color.white;
+                if (squidIcon != null)
+                {
+                    if (squidIcon.sprite != null)
+                    {
+                        squidIcon.enabled = true;
+                        squidIcon.color = Color.white;
+                        if (fallbackSquid != null) fallbackSquid.SetActive(false);
+                    }
+                    else
+                    {
+                        squidIcon.enabled = false;
+                        if (fallbackSquid != null) fallbackSquid.SetActive(true);
+                    }
+                }
                 if (deathIcon != null) deathIcon.gameObject.SetActive(false);
+                if (fallbackDeath != null) fallbackDeath.SetActive(false);
                 if (progressRing != null) progressRing.gameObject.SetActive(false);
                 if (countdownBadge != null) countdownBadge.gameObject.SetActive(false);
                 if (specialReadyRing != null) specialReadyRing.Intensity = 0f;
+                if (youBadge != null) youBadge.SetActive(isLocalPlayer);
             }
         }
     }

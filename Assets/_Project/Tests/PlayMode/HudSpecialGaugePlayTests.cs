@@ -12,6 +12,7 @@ namespace P1.Tests
     /// P4-C 运行时验收：HUD 自举装配、大招球满能爆发（光环 + 爆发计数 + 按键提示）、
     /// 墨水管低墨告警与迟滞解除，全部在真实 MonoBehaviour 生命周期下运行。
     /// </summary>
+    [Category("UI")]
     public class HudSpecialGaugePlayTests
     {
         private static GameObject CreateCanvas()

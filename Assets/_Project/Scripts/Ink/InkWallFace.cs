@@ -43,10 +43,12 @@ namespace P1.Ink
         public float TopY => OriginWorld.y + VAxis.y * WorldHeight;
 
         public bool IsDirty { get; private set; }
+        public bool HasInk => _hasInk;
         public Texture2D Texture { get; }
         public Color32[] PixelBuffer => _pixels;
         public string Name { get; }
 
+        private bool _hasInk;
         private readonly byte[] _owners;
         private readonly Color32[] _pixels;
         private readonly Color32 _neutralColor;
@@ -80,8 +82,9 @@ namespace P1.Ink
             WorldHeight = worldHeight;
 
             // 贴图分辨率与格数一一对应，格子尽量取正方形，边缘多出的部分由 UV 拉伸吸收
-            Width = Mathf.Max(1, Mathf.RoundToInt(worldWidth / cellSize));
-            Height = Mathf.Max(1, Mathf.RoundToInt(worldHeight / cellSize));
+            // 设置硬上限 1024 防止异常 Transform 缩放导致创建超大显存贴图
+            Width = Mathf.Clamp(Mathf.RoundToInt(worldWidth / cellSize), 1, 1024);
+            Height = Mathf.Clamp(Mathf.RoundToInt(worldHeight / cellSize), 1, 1024);
             CellWidth = worldWidth / Width;
             CellHeight = worldHeight / Height;
 
@@ -160,7 +163,6 @@ namespace P1.Ink
 
             float rSq = radiusMeters * radiusMeters;
             byte targetByte = (byte)team;
-            byte enemyByte = (byte)(team == Team.TeamA ? Team.TeamB : Team.TeamA);
             Color32 baseColor = team == Team.TeamA ? _teamAColor : _teamBColor;
             int changed = 0;
 
@@ -187,8 +189,10 @@ namespace P1.Ink
 
                     if (distSq > rSq)
                     {
-                        // 圆外一圈只补视觉过渡，不改归属、也不覆盖敌方墨色
-                        if (_owners[idx] == enemyByte)
+                        // 圆外一圈只给未涂格子补视觉过渡；任何已有归属的格子一律不动像素。
+                        // 过渡环 alpha ≤ 0.5 会被 InkWall.shader 的 smoothstep(…, 0.5) 整格剔除，
+                        // 若盖到已涂格等于「连续喷扫把自己先前的墨迹擦掉」。
+                        if (_owners[idx] != (byte)Team.Neutral)
                             continue;
 
                         float coverage = Mathf.Clamp01((radiusMeters - dist) * invFade + 0.5f);
@@ -201,7 +205,17 @@ namespace P1.Ink
                     }
 
                     if (_owners[idx] == targetByte)
+                    {
+                        // 己方已涂格：亚格子覆盖率只升不降，反复喷扫把边缘虚格逐渐补成实心
+                        float solidCoverage = Mathf.Max(Mathf.Clamp01((radiusMeters - dist) * invFade + 0.5f), 0.62f);
+                        byte solidA = (byte)Mathf.Clamp(Mathf.RoundToInt(solidCoverage * 255f), 0, 255);
+                        if (solidA > _pixels[idx].a)
+                        {
+                            _pixels[idx].a = solidA;
+                            IsDirty = true;
+                        }
                         continue;
+                    }
 
                     _owners[idx] = targetByte;
                     float edgeCoverage = Mathf.Clamp01((radiusMeters - dist) * invFade + 0.5f);
@@ -212,6 +226,7 @@ namespace P1.Ink
 
             if (changed > 0)
             {
+                _hasInk = true;
                 IsDirty = true;
             }
 
@@ -242,6 +257,7 @@ namespace P1.Ink
 
         public void ResetPaint()
         {
+            _hasInk = false;
             Array.Clear(_owners, 0, _owners.Length);
             for (int i = 0; i < _pixels.Length; i++)
             {

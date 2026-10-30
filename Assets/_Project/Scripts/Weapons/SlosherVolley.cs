@@ -32,6 +32,12 @@ namespace P1.Weapons
 
         public int HitCount => _hitTargets.Count;
 
+        /// <summary>清空已命中目标记录，供下一波泼洒复用。</summary>
+        public void Clear()
+        {
+            _hitTargets.Clear();
+        }
+
         public void Reset()
         {
             _hitTargets.Clear();

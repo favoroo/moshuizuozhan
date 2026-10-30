@@ -17,6 +17,26 @@ MonoBehaviour:
   weaponConfig: {fileID: 11400000, guid: 26c06a9b589584b409cd88da00b45c29, type: 2}
   matchDurationSeconds: 120
   finalWarningSeconds: 30
+  tpsPivotHeight: 1.45
+  tpsPivotHeightSwimming: 1.05
+  tpsPivotSmoothTime: 0.06
+  tpsDistance: 4.5
+  tpsDistanceSwimming: 4.1
+  tpsMinDistance: 0.55
+  tpsFov: 52
+  tpsPitchDefault: 6
+  tpsPitchMin: -60
+  tpsPitchMax: 66
+  tpsCollisionRadius: 0.32
+  tpsShoulderOffset: 0.55
+  tpsShoulderCloseDistance: 2.8
+  tpsGroundClearance: 0.25
+  tpsAimRayDistance: 70
+  tpsShakeScale: 0.45
+  tpsChargerZoomFov: 14
+  tpsChargerZoomDistance: 0.6
+  tpsSubAimFovKick: 4
+  tpsSubAimDistanceKick: 0.35
   usePerspective: 1
   cameraFov: 40
   cameraOrthoSize: 4.4

@@ -13,11 +13,19 @@ namespace P1.Player
     /// 2. 贴地枢轴（ChestPivotY = 0.05m）让倾斜与弹跳表现为整蛋摇摆而非上半身折叠；
     /// 3. 蛋体网格采用解析法线分段光滑旋转体，原点置于脚底，保证着色连续与无接缝；
     /// 4. 材质全面切换为 P1/CharacterToon 卡通着色器（蛋体唯一启用外描边），玻璃保持 URP Lit 透明；
-    /// 5. 7 套武器模型按 CharacterMetrics 缩放换算挂载并绑定动态构件与枪口。
+    /// 5. 7 套武器模型按 CharacterMetrics 缩放换算挂载并绑定动态构件与枪口；
+    /// 6. 武器静态构件在装配时按材质合并为少量 MergedStatic_* 网格压缩 DrawCall：
+    ///    源部件 GameObject / MeshFilter / 测试锚点层级全部保留、仅禁用渲染；
+    ///    动态构件（滚筒滚轴、加特林枪管簇、蓄力线圈）与枪口锚点不参与合并。
     /// </summary>
     public static class CharacterVisualAssembler
     {
         private static Mesh _eggMesh;
+        private static Mesh _eggShortsShellMesh;
+        private static Mesh _eggWaistbandShellMesh;
+        private static Mesh _sideTentacleMesh;
+        private static Mesh _centerTentacleMesh;
+        private static Mesh _squidMesh;
 
         #region Public Assembly Entry
 
@@ -76,6 +84,19 @@ namespace P1.Player
             weaponGo.transform.SetParent(chest, false);
             weaponGo.transform.localPosition = -chest.localPosition;
 
+            // 5.2 武器静态构件网格合并（装配期一次性完成，战斗热路径零开销）：
+            // 每把程序化武器由十几个独立 MeshRenderer 组成，按材质分组合并成少量 MergedStatic_* 网格压缩 DrawCall。
+            // 源部件 GameObject 与测试锚点全部保留、仅禁用渲染；合并失败自动降级回独立渲染，不影响装配主流程。
+            try
+            {
+                MergeWeaponStaticMeshes(shooterGo, rollerGo, chargerGo, dualiesGo, slosherGo, blasterGo, splatlingGo,
+                    rollerDrum, splatlingBarrels, chargerCoils);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[CharacterVisualAssembler] 武器静态网格合并失败，已降级为独立部件渲染：{e}");
+            }
+
             // 6. 挂载并绑定 CharacterVisualController
             var controller = visualRoot.GetComponent<CharacterVisualController>();
             if (controller == null)
@@ -97,6 +118,9 @@ namespace P1.Player
             WeaponKind startKind = initialWeaponConfig != null ? initialWeaponConfig.weaponKind : WeaponKind.Shooter;
             controller.EquipWeaponKind(startKind);
 
+            // 裁剪面部贴片、墨渍小滴、手部与细碎构件等微小部件的阴影投射
+            ApplyShadowCastingRules(visualRoot);
+
             return controller;
         }
 
@@ -106,8 +130,19 @@ namespace P1.Player
 
         private struct Palette
         {
+            /// <summary>中性上衣（奶油白），蛋体主体与短袖内层。</summary>
+            public Material Shirt;
+            /// <summary>浅灰短袖：和奶油白上衣拉开层次，让手臂不再糊成身体上的圆点。</summary>
+            public Material Sleeve;
+            /// <summary>深色短裤，蛋体下段。</summary>
+            public Material Shorts;
+            /// <summary>队伍色腰带，唯一横贯身体的大面积队伍色点缀。</summary>
+            public Material Waistband;
+            /// <summary>兼容旧字段：等价于 Shirt。</summary>
             public Material TeamCloth;
             public Material TeamHair;
+            /// <summary>胸口墨渍专用：哑光队伍色，避免小圆片被高光打成"气泡"。</summary>
+            public Material InkDecal;
             public Material TeamLiquid;
             public Material SquidBody;
             public Material Skin;
@@ -131,33 +166,29 @@ namespace P1.Player
         {
             Palette p = new Palette();
 
-            // 从可能传入的旧材质中读取基础颜色语义，不直接复用旧的 URP Lit 实例，确保角色全套材质卡通风格统一
-            Color clothColor = teamCol;
-            if (fallbackBodyMat != null)
-            {
-                if (fallbackBodyMat.HasProperty("_BaseColor"))
-                    clothColor = fallbackBodyMat.GetColor("_BaseColor");
-                else if (fallbackBodyMat.HasProperty("_Color"))
-                    clothColor = fallbackBodyMat.GetColor("_Color");
-            }
+            // 设计参考 INKWAVE：服装/皮肤保持中性色，队伍墨色只作为局部点缀。
+            // 旧版整颗蛋都刷队伍色，站在同色墨水上会完全糊进地面；现在上衣为奶油白、下摆为深色短裤，
+            // 队伍色只出现在腰带、墨焰、瞳孔、墨罐、胸章与手腕，任何底色上都能一眼分辨。
+            Color shirtColor = new Color(0.94f, 0.93f, 0.89f);
+            Color shortsColor = new Color(0.153f, 0.188f, 0.290f); // 对齐 INKWAVE 的深海军蓝短裤
+            Color darkColor = new Color(0.10f, 0.115f, 0.155f);
 
-            Color darkColor = new Color(0.12f, 0.14f, 0.18f);
-            if (fallbackDarkMat != null)
-            {
-                if (fallbackDarkMat.HasProperty("_BaseColor"))
-                    darkColor = fallbackDarkMat.GetColor("_BaseColor");
-                else if (fallbackDarkMat.HasProperty("_Color"))
-                    darkColor = fallbackDarkMat.GetColor("_Color");
-            }
+            // 整颗蛋体只用这一件奶油白描边材质；短裤与腰带是另外的贴面薄壳（GetEggShortsShellMesh / GetEggWaistbandShellMesh）。
+            p.Shirt = CreateCharacterMat("Mat_CharacterShirt", shirtColor, 0.62f, 0.35f, outlined: true, shadeSoftness: 0.10f);
+            p.Sleeve = CreateCharacterMat("Mat_CharacterSleeve", new Color(0.78f, 0.81f, 0.85f), 0.50f, 0.30f, shadeSoftness: 0.08f);
+            // 短裤与腰带是不带描边的贴面薄壳：整颗蛋体只保留一条连续外描边，避免多材质接缝处出现黑线
+            p.Shorts = CreateCharacterMat("Mat_CharacterShorts", shortsColor, 0.45f, 0.30f, shadeSoftness: 0.08f);
+            p.Waistband = CreateCharacterMat("Mat_CharacterWaistband", teamCol, 0.85f, 0.55f, shadeSoftness: 0.06f);
+            p.TeamCloth = p.Shirt;
 
-            // 蛋体作为视觉核心且轮廓最大，唯一启用黑色外描边；其他微小部件不启用描边，避免密集杂线
-            p.TeamCloth = CreateCharacterMat("Mat_TeamCloth", clothColor, 0.55f, 0.55f, outlined: true);
-            p.TeamHair = CreateCharacterMat("Mat_TeamHair", teamCol, 0.90f, 0.70f);
+            // 队伍墨色部件：墨焰/瞳孔/腕带共用；胸章使用哑光 InkDecal，墨罐液面单独带一点自发光。
+            p.TeamHair = CreateCharacterMat("Mat_TeamHair", teamCol, 0.90f, 0.70f, shadeSoftness: 0.05f);
+            p.InkDecal = CreateCharacterMat("Mat_TeamInkDecal", teamCol, 0.18f, 0.12f, shadeSoftness: 0.06f);
             p.TeamLiquid = CreateCharacterMat("Mat_TeamLiquid", teamCol, 0.95f, 0.60f, emission: teamCol * 0.35f);
             p.SquidBody = CreateCharacterMat("Mat_SquidBody", teamCol, 0.90f, 0.70f);
 
-            p.Skin = CreateCharacterMat("Mat_KidSkin", new Color(0.97f, 0.80f, 0.68f), 0.30f, 0.20f);
-            p.Dark = CreateCharacterMat("Mat_DarkPlastic", darkColor, 0.35f, 0.25f);
+            p.Skin = CreateCharacterMat("Mat_KidSkin", new Color(0.96f, 0.73f, 0.61f), 0.38f, 0.18f);
+            p.Dark = CreateCharacterMat("Mat_DarkPlastic", darkColor, 0.40f, 0.25f);
             p.White = CreateCharacterMat("Mat_AccentsWhite", new Color(0.95f, 0.96f, 0.98f), 0.40f, 0.30f);
             p.Metal = CreateCharacterMat("Mat_Gunmetal", new Color(0.55f, 0.58f, 0.65f), 0.65f, 0.40f);
             p.Blush = CreateCharacterMat("Mat_Blush", new Color(0.98f, 0.62f, 0.60f), 0.20f, 0.15f);
@@ -174,7 +205,8 @@ namespace P1.Player
             float smoothness,
             float rimStrength,
             bool outlined = false,
-            Color? emission = null)
+            Color? emission = null,
+            float shadeSoftness = 0.03f)
         {
             string targetShaderName = outlined ? "P1/CharacterToonOutlined" : "P1/CharacterToon";
             Shader sh = Shader.Find(targetShaderName);
@@ -202,19 +234,19 @@ namespace P1.Player
                     {
                         asset.shader = sh;
                     }
-                    ApplyCharacterMatSettings(asset, baseCol, smoothness, rimStrength, emission);
+                    ApplyCharacterMatSettings(asset, baseCol, smoothness, rimStrength, emission, shadeSoftness);
                     UnityEditor.EditorUtility.SetDirty(asset);
                     return asset;
                 }
 
                 var created = new Material(sh) { name = fileName };
-                ApplyCharacterMatSettings(created, baseCol, smoothness, rimStrength, emission);
+                ApplyCharacterMatSettings(created, baseCol, smoothness, rimStrength, emission, shadeSoftness);
                 UnityEditor.AssetDatabase.CreateAsset(created, path);
                 return created;
             }
 #endif
             var mat = new Material(sh) { name = name };
-            ApplyCharacterMatSettings(mat, baseCol, smoothness, rimStrength, emission);
+            ApplyCharacterMatSettings(mat, baseCol, smoothness, rimStrength, emission, shadeSoftness);
             return mat;
         }
 
@@ -223,7 +255,8 @@ namespace P1.Player
             Color baseCol,
             float smoothness,
             float rimStrength,
-            Color? emission)
+            Color? emission,
+            float shadeSoftness)
         {
             if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", baseCol);
             if (mat.HasProperty("_Color")) mat.SetColor("_Color", baseCol);
@@ -232,6 +265,8 @@ namespace P1.Player
 
             if (mat.HasProperty("_RimStrength")) mat.SetFloat("_RimStrength", rimStrength);
             if (mat.HasProperty("_RimColor")) mat.SetColor("_RimColor", Color.white);
+            // 明暗交界柔化：曲面蛋体上硬二分色阶会切出明显的块状边界，看起来"不平整"
+            if (mat.HasProperty("_ShadeSoftness")) mat.SetFloat("_ShadeSoftness", shadeSoftness);
 
             if (emission.HasValue && emission.Value != Color.black)
             {
@@ -352,37 +387,100 @@ namespace P1.Player
         private static GameObject CreateCapsule(Transform parent, string name, Vector3 pos, Vector3 scale, Material mat)
             => CreatePart(parent, name, PrimitiveType.Capsule, pos, scale, Quaternion.identity, mat);
 
+        private static GameObject CreateMeshPart(Transform parent, string name, Mesh mesh, Material mat)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            return go;
+        }
+
+        /// <summary>
+        /// 优化角色的阴影投射：裁剪微小部件（面部贴片、墨渍小滴、袖口/小臂/手、旋钮与武器细碎零件）
+        /// 的阴影以压缩阴影 Pass DrawCall，保留蛋体主躯干、发束与武器主体件的投影。
+        /// 武器合并网格（MergedStatic_*）不在此逐件裁剪：其阴影行为已在合并时按组内部件多数决定。
+        /// </summary>
+        private static void ApplyShadowCastingRules(Transform visualRoot)
+        {
+            var renderers = visualRoot.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                var r = renderers[i];
+                if (r == null) continue;
+                // 合并网格按多数规则已带阴影开关，跳过名称规则避免覆盖（组内微小件随大网格投影属预期增益/损耗）
+                if (r.gameObject.name.StartsWith(MergedPartPrefix)) continue;
+                r.shadowCastingMode = ShouldCastShadow(r.gameObject.name)
+                    ? UnityEngine.Rendering.ShadowCastingMode.On
+                    : UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
+        }
+
+        private static bool ShouldCastShadow(string partName)
+        {
+            // 关闭面部小件、墨渍小滴、背包外露附件、手部小件与武器零件阴影
+            if (partName.StartsWith("EyeMask") ||
+                partName.StartsWith("Eye_") ||
+                partName == "Iris" ||
+                partName == "Pupil" ||
+                partName.StartsWith("Glint") ||
+                partName.StartsWith("Blush") ||
+                partName == "Mouth" ||
+                partName.StartsWith("ChestInk") ||
+                partName == "TopCap" ||
+                partName == "ValveKnob" ||
+                partName == "BottomCap" ||
+                partName == "Cuff" ||
+                partName == "Forearm" ||
+                partName == "Hand" ||
+                partName.Contains("Grip") ||
+                partName == "InkSpine" ||
+                partName.StartsWith("Nozzle") ||
+                partName.StartsWith("Bearing") ||
+                partName.StartsWith("TreadRib") ||
+                partName == "ButtPad" ||
+                partName == "ScopeLens" ||
+                partName == "MuzzleBrake" ||
+                partName.StartsWith("Coil_") ||
+                partName == "DorsalFin" ||
+                partName.StartsWith("ReinforceHoop") ||
+                partName == "PourLip" ||
+                partName == "HandleLever" ||
+                partName == "CarryBar" ||
+                partName.StartsWith("BulbRib") ||
+                partName == "PressureGauge" ||
+                partName == "GaugeDial" ||
+                partName == "GaugeNeedle" ||
+                partName == "BellRim" ||
+                partName == "PumpSlide" ||
+                partName.StartsWith("DrumCap") ||
+                partName.StartsWith("ClampDisc"))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
         #endregion
 
         #region Egg Body Procedural Mesh
 
-        private static readonly float[] ProfileT = new float[]
-        {
-            0.00f, 0.08f, 0.20f, 0.35f, 0.50f, 0.65f, 0.78f, 0.88f, 0.95f, 1.00f
-        };
-
-        private static readonly float[] ProfileR01 = new float[]
-        {
-            0.62f, 0.86f, 0.96f, 1.00f, 0.99f, 0.94f, 0.84f, 0.68f, 0.46f, 0.10f
-        };
+        // 解析蛋形轮廓：max(半径) 出现高度约 36%，下段饱满、上段收窄。
+        // 旧版用 10 个控制点 + SmoothStep 分段插值，每个控制点都会把曲率压平，
+        // 在蛋体表面形成一圈圈"微鼓包"；这里改为单一解析函数，半径与切向连续可导。
+        private const float EggProfileAlpha = 0.68f;
+        private const float EggProfileBeta = 0.50f;
 
         /// <summary>
-        /// 采样蛋体归一化轮廓半径比例（0~1）。分段采用 SmoothStep 平滑插值，保证轮廓二阶光滑无折角。
+        /// 采样蛋体归一化轮廓半径比例（0~1）。解析函数在两端自然收敛到 0，
+        /// 底部圆润触地、顶部收成圆顶，不再需要分段焊接。
         /// </summary>
         private static float SampleEggRadius01(float t)
         {
             t = Mathf.Clamp01(t);
-            for (int i = 0; i < ProfileT.Length - 1; i++)
-            {
-                if (t <= ProfileT[i + 1])
-                {
-                    float segLength = ProfileT[i + 1] - ProfileT[i];
-                    float u = (t - ProfileT[i]) / Mathf.Max(0.0001f, segLength);
-                    float smoothU = Mathf.SmoothStep(0f, 1f, u);
-                    return Mathf.Lerp(ProfileR01[i], ProfileR01[i + 1], smoothU);
-                }
-            }
-            return ProfileR01[ProfileR01.Length - 1];
+            float s = Mathf.Sin(Mathf.PI * Mathf.Pow(t, EggProfileAlpha));
+            return Mathf.Pow(Mathf.Max(0f, s), EggProfileBeta);
         }
 
         /// <summary>蛋体在指定高度处的实际半径（米）。</summary>
@@ -413,8 +511,9 @@ namespace P1.Player
 
         /// <summary>
         /// 创建并静态缓存 Q 版无腿蛋形角色网格。
-        /// 24 环 × 24 径向段旋转体，原点位于脚底（y=0），底部封口（半径 0.248m 做三角扇）。
-        /// 法线完全使用切空间解析法推导，确保顶点法线精确指向外侧且圆环处平滑无硬边。
+        /// 40 环 × 40 径向段解析旋转体，原点位于脚底（y=0）；上下极点各用一个中心点封口。
+        /// 整颗蛋体使用单一描边材质；短裤与腰带是另外的贴面薄壳（见 CreateEggShellMesh）。
+        /// 法线全部由解析轮廓切线推导，避免四边形拼接处的硬边与明暗断裂。
         /// </summary>
         public static Mesh CreateEggBodyMesh()
         {
@@ -422,22 +521,26 @@ namespace P1.Player
 
             var mesh = new Mesh { name = "EggBodyMesh" };
 
-            const int ringCount = 24;
-            const int radialSegs = 24;
+            const int ringCount = 40;
+            const int radialSegs = 40;
 
             List<Vector3> verts = new List<Vector3>();
             List<Vector3> normals = new List<Vector3>();
             List<Vector2> uvs = new List<Vector2>();
             List<int> tris = new List<int>();
 
-            // 1. 生成旋转体侧面顶点与解析法线
-            // 为保证 UV 纹理在 0~1 闭合时无拉伸接缝，每环包含 (radialSegs + 1) 列顶点
-            for (int r = 0; r <= ringCount; r++)
+            // 1. 底部极点（y=0，贴地）
+            int bottomCenterIdx = 0;
+            verts.Add(Vector3.zero);
+            normals.Add(Vector3.down);
+            uvs.Add(new Vector2(0.5f, 0f));
+
+            // 2. 侧面圆环：跳过两端极点，避免退化三角形
+            for (int r = 1; r < ringCount; r++)
             {
                 float t = (float)r / ringCount;
                 float y = t * CharacterMetrics.BodyHeight;
-                float r01 = SampleEggRadius01(t);
-                float radius = r01 * CharacterMetrics.BodyMaxRadius;
+                float radius = SampleEggRadius01(t) * CharacterMetrics.BodyMaxRadius;
 
                 // 差分计算轮廓沿高度切线斜率 dr/dy
                 const float dt = 0.0005f;
@@ -456,10 +559,7 @@ namespace P1.Player
 
                     verts.Add(new Vector3(cos * radius, y, sin * radius));
 
-                    // 解析法线推导：
-                    // aroundTangent = (-sin, 0, cos)，profileTangent = (dr_dy * cos, 1, dr_dy * sin)
-                    // cross(profileTangent, aroundTangent) = (cos, -dr_dy, sin)
-                    // 与 radialDir (cos, 0, sin) 点乘结果为 1 > 0，严格指向外部，杜绝法线反向导致的黑脸
+                    // 解析法线：profileTangent × aroundTangent = (cos, -dr_dy, sin)，严格朝外
                     Vector3 radialDir = new Vector3(cos, 0f, sin);
                     Vector3 normal = new Vector3(cos, -dr_dy, sin);
                     if (Vector3.Dot(normal, radialDir) < 0f)
@@ -472,11 +572,22 @@ namespace P1.Player
                 }
             }
 
-            // 2. 缝合侧面圆环三角形（绕序朝外）
-            for (int r = 0; r < ringCount; r++)
+            int lastRing = ringCount - 1;
+
+            // 3. 底部封口三角扇
+            int firstRingBase = 1;
+            for (int s = 0; s < radialSegs; s++)
             {
-                int row0 = r * (radialSegs + 1);
-                int row1 = (r + 1) * (radialSegs + 1);
+                tris.Add(bottomCenterIdx);
+                tris.Add(firstRingBase + s);
+                tris.Add(firstRingBase + s + 1);
+            }
+
+            // 4. 侧面四边形拆三角
+            for (int r = 1; r < ringCount - 1; r++)
+            {
+                int row0 = 1 + (r - 1) * (radialSegs + 1);
+                int row1 = 1 + r * (radialSegs + 1);
 
                 for (int s = 0; s < radialSegs; s++)
                 {
@@ -495,35 +606,18 @@ namespace P1.Player
                 }
             }
 
-            // 3. 底部平底封口（y=0 处半径 0.248m 做向下三角扇，保证站立触地接触面严密）
-            int bottomCenterIdx = verts.Count;
-            verts.Add(Vector3.zero);
-            normals.Add(Vector3.down);
-            uvs.Add(new Vector2(0.5f, 0f));
-
-            for (int s = 0; s < radialSegs; s++)
-            {
-                int p_s = s;
-                int p_next = s + 1;
-                tris.Add(bottomCenterIdx);
-                tris.Add(p_s);
-                tris.Add(p_next);
-            }
-
-            // 4. 顶部极点封顶三角扇（闭合水密网格）
+            // 5. 顶部极点封顶
             int topCenterIdx = verts.Count;
             verts.Add(new Vector3(0f, CharacterMetrics.BodyHeight, 0f));
             normals.Add(Vector3.up);
             uvs.Add(new Vector2(0.5f, 1f));
 
-            int topRow = ringCount * (radialSegs + 1);
+            int lastRingBase = 1 + (lastRing - 1) * (radialSegs + 1);
             for (int s = 0; s < radialSegs; s++)
             {
-                int p_s = topRow + s;
-                int p_next = topRow + s + 1;
                 tris.Add(topCenterIdx);
-                tris.Add(p_next);
-                tris.Add(p_s);
+                tris.Add(lastRingBase + s + 1);
+                tris.Add(lastRingBase + s);
             }
 
             mesh.SetVertices(verts);
@@ -534,6 +628,190 @@ namespace P1.Player
 
             _eggMesh = mesh;
             return _eggMesh;
+        }
+
+        /// <summary>短裤薄壳（贴面、无描边）。</summary>
+        private static Mesh GetEggShortsShellMesh()
+        {
+            if (_eggShortsShellMesh == null)
+            {
+                _eggShortsShellMesh = BuildEggShellMesh(0.006f, 0.325f, 0.005f, "EggShortsShell");
+            }
+            return _eggShortsShellMesh;
+        }
+
+        /// <summary>队伍色腰带薄壳（贴面、无描边，略高于短裤上沿以盖住接缝）。</summary>
+        private static Mesh GetEggWaistbandShellMesh()
+        {
+            if (_eggWaistbandShellMesh == null)
+            {
+                _eggWaistbandShellMesh = BuildEggShellMesh(0.295f, 0.365f, 0.009f, "EggWaistbandShell", true, true, 0.005f, 0f);
+            }
+            return _eggWaistbandShellMesh;
+        }
+
+        /// <summary>
+        /// 生成沿蛋体表面偏移 offset 的开放薄壳（上下不封口，由内层蛋体兜底）。
+        /// 用薄壳替代同一网格的 submesh 分材质：整颗蛋体只保留一次描边，
+        /// 短裤/腰带交界处不会因为多份描边壳叠加而出现细黑线。
+        /// </summary>
+        private static Mesh BuildEggShellMesh(
+            float tStart,
+            float tEnd,
+            float offset,
+            string name,
+            bool capBottom = false,
+            bool capTop = false,
+            float innerOffsetBottom = 0f,
+            float innerOffsetTop = 0f)
+        {
+            var mesh = new Mesh { name = name };
+
+            const int ringCount = 12;
+            const int radialSegs = 40;
+
+            List<Vector3> verts = new List<Vector3>();
+            List<Vector3> normals = new List<Vector3>();
+            List<Vector2> uvs = new List<Vector2>();
+            List<int> tris = new List<int>();
+
+            for (int r = 0; r <= ringCount; r++)
+            {
+                float t = Mathf.Lerp(tStart, tEnd, (float)r / ringCount);
+                float y = t * CharacterMetrics.BodyHeight;
+                float radius = SampleEggRadius01(t) * CharacterMetrics.BodyMaxRadius + offset;
+
+                const float dt = 0.0005f;
+                float tPrev = Mathf.Max(0f, t - dt);
+                float tNext = Mathf.Min(1f, t + dt);
+                float rPrev = SampleEggRadius01(tPrev) * CharacterMetrics.BodyMaxRadius;
+                float rNext = SampleEggRadius01(tNext) * CharacterMetrics.BodyMaxRadius;
+                float dr_dy = (rNext - rPrev) / Mathf.Max(0.00001f, (tNext - tPrev) * CharacterMetrics.BodyHeight);
+
+                for (int s = 0; s <= radialSegs; s++)
+                {
+                    float uCoord = (float)s / radialSegs;
+                    float theta = uCoord * Mathf.PI * 2f;
+                    float cos = Mathf.Cos(theta);
+                    float sin = Mathf.Sin(theta);
+
+                    verts.Add(new Vector3(cos * radius, y, sin * radius));
+
+                    Vector3 radialDir = new Vector3(cos, 0f, sin);
+                    Vector3 normal = new Vector3(cos, -dr_dy, sin);
+                    if (Vector3.Dot(normal, radialDir) < 0f) normal = -normal;
+                    normals.Add(normal.normalized);
+
+                    uvs.Add(new Vector2(uCoord, t));
+                }
+            }
+
+            for (int r = 0; r < ringCount; r++)
+            {
+                int row0 = r * (radialSegs + 1);
+                int row1 = (r + 1) * (radialSegs + 1);
+                for (int s = 0; s < radialSegs; s++)
+                {
+                    int i0 = row0 + s;
+                    int i1 = row1 + s;
+                    int i0_next = row0 + s + 1;
+                    int i1_next = row1 + s + 1;
+
+                    tris.Add(i0);
+                    tris.Add(i1);
+                    tris.Add(i0_next);
+
+                    tris.Add(i0_next);
+                    tris.Add(i1);
+                    tris.Add(i1_next);
+                }
+            }
+
+            // 6. 腰带上下沿做一圈内收盖面，接到底下的短裤/蛋体表面：
+            // 薄壳的开放边缘会在接缝处投出一条黑线，加盖后变成干净的队伍色皮带边。
+            if (capBottom || capTop)
+            {
+                int outerBottomRow = 0;
+                int outerTopRow = ringCount * (radialSegs + 1);
+
+                if (capBottom)
+                {
+                    AddShellCap(verts, normals, uvs, tris,
+                        tStart, outerBottomRow, offset, innerOffsetBottom, radialSegs, facingUp: false);
+                }
+                if (capTop)
+                {
+                    AddShellCap(verts, normals, uvs, tris,
+                        tEnd, outerTopRow, offset, innerOffsetTop, radialSegs, facingUp: true);
+                }
+            }
+
+            mesh.SetVertices(verts);
+            mesh.SetNormals(normals);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        /// <summary>给薄壳端面补一圈水平盖面（从外圈收到内圈），避免开放边缘露缝/露黑。</summary>
+        private static void AddShellCap(
+            List<Vector3> verts,
+            List<Vector3> normals,
+            List<Vector2> uvs,
+            List<int> tris,
+            float t,
+            int outerRowBase,
+            float outerOffset,
+            float innerOffset,
+            int radialSegs,
+            bool facingUp)
+        {
+            float y = t * CharacterMetrics.BodyHeight;
+            float bodyRadius = SampleEggRadius01(t) * CharacterMetrics.BodyMaxRadius;
+            int innerRowBase = verts.Count;
+
+            for (int s = 0; s <= radialSegs; s++)
+            {
+                float uCoord = (float)s / radialSegs;
+                float theta = uCoord * Mathf.PI * 2f;
+                float cos = Mathf.Cos(theta);
+                float sin = Mathf.Sin(theta);
+                float innerRadius = bodyRadius + innerOffset;
+
+                verts.Add(new Vector3(cos * innerRadius, y, sin * innerRadius));
+                normals.Add(facingUp ? Vector3.up : Vector3.down);
+                uvs.Add(new Vector2(uCoord, t));
+            }
+
+            for (int s = 0; s < radialSegs; s++)
+            {
+                int outerA = outerRowBase + s;
+                int outerB = outerRowBase + s + 1;
+                int innerA = innerRowBase + s;
+                int innerB = innerRowBase + s + 1;
+
+                if (facingUp)
+                {
+                    tris.Add(outerA);
+                    tris.Add(innerA);
+                    tris.Add(outerB);
+
+                    tris.Add(outerB);
+                    tris.Add(innerA);
+                    tris.Add(innerB);
+                }
+                else
+                {
+                    tris.Add(outerA);
+                    tris.Add(outerB);
+                    tris.Add(innerA);
+
+                    tris.Add(outerB);
+                    tris.Add(innerB);
+                    tris.Add(innerA);
+                }
+            }
         }
 
         #endregion
@@ -572,17 +850,30 @@ namespace P1.Player
             squashGo.transform.localPosition = new Vector3(0f, -CharacterMetrics.ChestPivotY, 0f);
             bodySquash = squashGo.transform;
 
-            // 2.1 蛋形主躯干网格（唯一使用带外描边 Cartoon Shader 的部件）
+            // 2.1 蛋形主躯干：整颗蛋体只用一件带描边的奶油白材质。
+            // 短裤与腰带是另外两层贴面薄壳（沿表面法线外扩 5mm / 9mm），像真实衣物一样叠在蛋体上；
+            // 这样外轮廓只有一条完整黑边，不会出现 submesh 各画一次描边造成的接缝黑线。
             var eggGo = new GameObject("EggBody");
             eggGo.transform.SetParent(bodySquash, false);
             eggGo.transform.localPosition = Vector3.zero;
             var mf = eggGo.AddComponent<MeshFilter>();
             var mr = eggGo.AddComponent<MeshRenderer>();
             mf.sharedMesh = CreateEggBodyMesh();
-            mr.sharedMaterial = p.TeamCloth;
+            mr.sharedMaterial = p.Shirt;
 
-            // 2.2 面部分区靠大眼与墨焰承担，蛋体本身保持整块干净曲面：
-            // 早期试过在腰部加一圈深色墨环，但圆柱与蛋形曲面的相交处会切出锯齿状碎边，观感很差，故不做。
+            var shortsGo = new GameObject("EggShorts");
+            shortsGo.transform.SetParent(bodySquash, false);
+            shortsGo.transform.localPosition = Vector3.zero;
+            shortsGo.AddComponent<MeshFilter>().sharedMesh = GetEggShortsShellMesh();
+            shortsGo.AddComponent<MeshRenderer>().sharedMaterial = p.Shorts;
+
+            var bandGo = new GameObject("EggWaistband");
+            bandGo.transform.SetParent(bodySquash, false);
+            bandGo.transform.localPosition = Vector3.zero;
+            bandGo.AddComponent<MeshFilter>().sharedMesh = GetEggWaistbandShellMesh();
+            bandGo.AddComponent<MeshRenderer>().sharedMaterial = p.Waistband;
+
+            // 2.2 面部分区靠大眼、连体面罩与胸前墨点承担，蛋体本身保持一整块干净曲面。
 
             // 2.3 面部容器 (Face)：容器本身放在原点，所有部件直接用「蛋体身体空间」坐标贴面
             var faceGo = new GameObject("Face");
@@ -590,8 +881,13 @@ namespace P1.Player
             faceGo.transform.localPosition = Vector3.zero;
             var face = faceGo.transform;
 
-            // 大眼与深色眼罩：眼睛贴在上半前脸（y≈0.72），由曲面采样保证既不陷入也不悬浮
+            // 2.3.1 连体深色眼罩：两片眼窝 + 中间鼻梁桥，读起来像 inkling 的面罩，而不是两个孤立的黑斑。
             const float eyeY = 0.72f;
+            var maskBridge = CreateSphere(face, "EyeMask_Bridge",
+                EggFrontPoint(0f, eyeY, 0.002f), new Vector3(0.20f, 0.15f, 0.028f), p.Dark);
+            maskBridge.transform.localRotation = Quaternion.identity;
+
+            // 大眼：眼睛贴在上半前脸（y≈0.72），由曲面采样保证既不陷入也不悬浮。
             leftEye = null;
             rightEye = null;
             for (int s = -1; s <= 1; s += 2)
@@ -600,52 +896,85 @@ namespace P1.Player
                 string side = s < 0 ? "L" : "R";
                 Quaternion faceRot = Quaternion.Euler(0f, EggFaceYaw(eyeX, eyeY), 0f);
 
-                // 深色底托略大于白眼球，合成连体面罩的视觉轮廓
-                var mask = CreateSphere(face, "EyeMask_" + side, EggFrontPoint(eyeX, eyeY, 0.004f), new Vector3(0.225f, 0.245f, 0.055f), p.Dark);
+                // 面罩压扁成贴面片，减少"脸上贴了几个球"的凸起感
+                var mask = CreateSphere(face, "EyeMask_" + side, EggFrontPoint(eyeX, eyeY, 0.003f), new Vector3(0.24f, 0.25f, 0.030f), p.Dark);
                 mask.transform.localRotation = faceRot;
 
-                var eye = CreateSphere(face, "Eye_" + side, EggFrontPoint(eyeX, eyeY, 0.012f), new Vector3(0.17f, 0.19f, 0.09f), p.White);
+                var eye = CreateSphere(face, "Eye_" + side, EggFrontPoint(eyeX, eyeY, 0.010f), new Vector3(0.175f, 0.195f, 0.062f), p.White);
                 eye.transform.localRotation = faceRot;
-                // 瞳孔必须是「贴在眼球表面的一枚凸片」：眼球的局部空间半径是 0.5（Unity 球体直径为 1），
-                // 放在 z=0.5 的极点处、厚度 0.35，才能从白眼球表面凸出来被看见；埋进眼球内部会完全不可见。
-                CreateSphere(eye.transform, "Pupil", new Vector3(0f, -0.01f, 0.50f), new Vector3(0.55f, 0.55f, 0.35f), p.TeamHair);
-                CreateSphere(eye.transform, "Glint", new Vector3(-0.16f, 0.16f, 0.62f), new Vector3(0.18f, 0.18f, 0.18f), p.White);
-                CreateSphere(eye.transform, "Glint2", new Vector3(0.13f, -0.13f, 0.60f), new Vector3(0.10f, 0.10f, 0.10f), p.White);
+
+                // 白眼球 + 队伍色虹膜 + 深色瞳孔 + 双高光：彩色只占眼球中央一小块，远看仍是大白眼。
+                // 眼球的局部空间半径是 0.5（Unity 球体直径为 1），贴片必须放在 z≈0.5 的极点附近才能露出表面。
+                CreateSphere(eye.transform, "Iris", new Vector3(0f, -0.005f, 0.50f), new Vector3(0.58f, 0.58f, 0.26f), p.TeamHair);
+                CreateSphere(eye.transform, "Pupil", new Vector3(0f, -0.005f, 0.62f), new Vector3(0.30f, 0.32f, 0.18f), p.Dark);
+                CreateSphere(eye.transform, "Glint", new Vector3(-0.15f, 0.17f, 0.70f), new Vector3(0.16f, 0.16f, 0.10f), p.White);
+                CreateSphere(eye.transform, "Glint2", new Vector3(0.12f, -0.12f, 0.68f), new Vector3(0.09f, 0.09f, 0.08f), p.White);
 
                 if (s < 0) leftEye = eye.transform;
                 else rightEye = eye.transform;
 
                 // 腮红贴在眼睛外下方
                 float blushX = s * 0.255f;
-                var blush = CreateSphere(face, "Blush_" + side, EggFrontPoint(blushX, 0.585f, 0.004f), new Vector3(0.10f, 0.055f, 0.035f), p.Blush);
+                var blush = CreateSphere(face, "Blush_" + side, EggFrontPoint(blushX, 0.585f, 0.004f), new Vector3(0.095f, 0.05f, 0.022f), p.Blush);
                 blush.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(blushX, 0.585f), 0f);
             }
 
             // 小 ω 嘴：极扁的深色椭圆，贴在两眼下方的中线上
-            var mouth = CreateSphere(face, "Mouth", EggFrontPoint(0f, 0.60f, 0.004f), new Vector3(0.09f, 0.032f, 0.03f), p.Dark);
+            var mouth = CreateSphere(face, "Mouth", EggFrontPoint(0f, 0.60f, 0.004f), new Vector3(0.085f, 0.028f, 0.020f), p.Dark);
             mouth.transform.localRotation = Quaternion.identity;
 
-            // 2.4 头顶墨焰触须束 (InkCrest)：根部 y = 0.98m，复用发辫惯性物理摆荡
+            // 2.3.2 胸前队伍色墨点：把"全身刷队伍色"改成小面积墨渍点缀，既保留队伍识别，
+            // 又不会让角色和地面/墨迹糊成一片。位置全部由蛋体曲面采样，不会浮空。
+            Vector3[] chestInkPos = new Vector3[]
+            {
+                new Vector3(0.12f, 0.500f, 0f),
+                new Vector3(0.19f, 0.455f, 0f),
+                new Vector3(0.045f, 0.545f, 0f),
+                new Vector3(0.155f, 0.415f, 0f)
+            };
+            float[] chestInkSize = new float[] { 0.085f, 0.050f, 0.042f, 0.034f };
+            for (int i = 0; i < chestInkPos.Length; i++)
+            {
+                Vector3 cp = chestInkPos[i];
+                float size = chestInkSize[i];
+                var spot = CreateSphere(face, "ChestInk_" + i, EggFrontPoint(cp.x, cp.y, 0.003f),
+                    new Vector3(size, size * 0.85f, size * 0.14f), p.InkDecal);
+                spot.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(cp.x, cp.y), 0f);
+            }
+            var drip = CreateSphere(face, "ChestInk_Drip", EggFrontPoint(0.105f, 0.430f, 0.003f),
+                new Vector3(0.022f, 0.050f, 0.012f), p.InkDecal);
+            drip.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(0.105f, 0.430f), 0f);
+
+            // 2.4 头顶墨焰触须束 (InkCrest)：三束墨焰从圆顶后方起笔、向后下方扫出弧线，
+            // 像真正垂在脑后的触须头发，而不是竖在头顶的两根天线。
             var crestGo = new GameObject("InkCrest");
             crestGo.transform.SetParent(bodySquash, false);
-            crestGo.transform.localPosition = new Vector3(0f, 0.98f, 0f);
+            crestGo.transform.localPosition = new Vector3(0f, 0.99f, 0f);
 
             var lHairGo = new GameObject("LeftHairPivot");
             lHairGo.transform.SetParent(crestGo.transform, false);
-            lHairGo.transform.localPosition = new Vector3(-0.10f, 0f, 0f);
+            lHairGo.transform.localPosition = new Vector3(-0.09f, 0f, 0f);
+            lHairGo.transform.localRotation = Quaternion.Euler(0f, 0f, 8f);   // 向左外扩，形成扇形墨发
             leftHair = lHairGo.transform;
-            BuildInkFlameCrest(leftHair, p, -1);
+            CreateMeshPart(leftHair, "LeftTentacle", GetSideTentacleMesh(), p.TeamHair);
 
             var rHairGo = new GameObject("RightHairPivot");
             rHairGo.transform.SetParent(crestGo.transform, false);
-            rHairGo.transform.localPosition = new Vector3(0.10f, 0f, 0f);
+            rHairGo.transform.localPosition = new Vector3(0.09f, 0f, 0f);
+            rHairGo.transform.localRotation = Quaternion.Euler(0f, 0f, -8f);  // 向右外扩
             rightHair = rHairGo.transform;
-            BuildInkFlameCrest(rightHair, p, 1);
+            CreateMeshPart(rightHair, "RightTentacle", GetSideTentacleMesh(), p.TeamHair);
+
+            // 中央发束：比两侧短一截，填满头冠又不遮挡脸
+            var centerHairGo = new GameObject("CenterHairPivot");
+            centerHairGo.transform.SetParent(crestGo.transform, false);
+            centerHairGo.transform.localPosition = new Vector3(0f, 0.012f, -0.020f);
+            CreateMeshPart(centerHairGo.transform, "CenterTentacle", GetCenterTentacleMesh(), p.TeamHair);
 
             // 2.5 后背紧凑型墨罐背包 (InkTankBackpack)：外推到 z=-0.40，让壳体真正凸出蛋体背面成为可见背包
             var backpackGo = new GameObject("InkTankBackpack");
             backpackGo.transform.SetParent(bodySquash, false);
-            backpackGo.transform.localPosition = new Vector3(0f, 0.50f, -0.40f);
+            backpackGo.transform.localPosition = new Vector3(0f, 0.50f, -0.43f);
 
             CreateBox(backpackGo.transform, "MountPlate", new Vector3(0f, 0f, 0.04f), new Vector3(0.16f, 0.26f, 0.035f), p.Dark);
             CreateCylinder(backpackGo.transform, "GlassChamber", Vector3.zero, new Vector3(0.26f, 0.15f, 0.26f), p.Glass);
@@ -680,32 +1009,167 @@ namespace P1.Player
         }
 
         /// <summary>
-        /// 短圆手：袖管从肩部沿「肩 → 握把」方向伸到身前，末端是白色圆手套。
-        /// inward 为横向收拢方向（左臂 +1 向身体中线，右臂 -1 同理）。
+        /// 短袖手臂：上臂（奶油白短袖）→ 队伍色袖口 → 肤色小臂 → 肤色圆手。
+        /// 旧版整条手臂都是奶油白袖子，叠在奶油白蛋体上远看只剩几个圆点；
+        /// 露出一段肤色小臂后，正面/侧面都能读出"手在握枪"。
         /// </summary>
         private static void BuildMittenArm(Transform root, Palette p, int inward)
         {
-            Vector3 toHand = new Vector3(inward * 0.16f, 0.06f, 0.30f);
-            Vector3 mid = toHand * 0.5f;
+            Vector3 toHand = new Vector3(inward * 0.11f, 0.06f, 0.46f);
+            // 肘部放到 72% 处：刚好越过蛋体表面，短袖、袖口和小臂都能被看见；
+            // 旧版 52% 时整段上臂都埋在肚子里，正面只剩一颗肤色圆点。
+            Vector3 elbow = toHand * 0.72f;
+            Vector3 wrist = toHand * 0.93f;
 
-            var sleeve = CreateCapsule(root, "Sleeve", mid,
-                new Vector3(0.085f, toHand.magnitude * 0.5f, 0.085f), p.TeamCloth);
-            sleeve.transform.localRotation = Quaternion.FromToRotation(Vector3.up, toHand.normalized);
+            // 上臂短袖
+            Vector3 sleeveVec = elbow;
+            var sleeve = CreateCapsule(root, "Sleeve", sleeveVec * 0.5f,
+                new Vector3(0.095f, sleeveVec.magnitude * 0.5f, 0.095f), p.Sleeve);
+            sleeve.transform.localRotation = Quaternion.FromToRotation(Vector3.up, sleeveVec.normalized);
 
-            CreateSphere(root, "Hand", toHand, new Vector3(0.12f, 0.12f, 0.12f), p.White);
+            // 队伍色袖口：盖住短袖与肤色小臂的接缝
+            var cuff = CreateCylinder(root, "Cuff", elbow,
+                new Vector3(0.105f, 0.018f, 0.105f), p.TeamHair);
+            cuff.transform.localRotation = Quaternion.FromToRotation(Vector3.up, sleeveVec.normalized);
+
+            // 肤色小臂
+            Vector3 forearmVec = wrist - elbow;
+            var forearm = CreateCapsule(root, "Forearm", (elbow + wrist) * 0.5f,
+                new Vector3(0.075f, forearmVec.magnitude * 0.5f + 0.01f, 0.075f), p.Skin);
+            forearm.transform.localRotation = Quaternion.FromToRotation(Vector3.up, forearmVec.normalized);
+
+            // 圆手
+            CreateSphere(root, "Hand", toHand, new Vector3(0.105f, 0.105f, 0.105f), p.Skin);
         }
 
-        private static void BuildInkFlameCrest(Transform root, Palette p, int side)
+        private static Mesh GetSideTentacleMesh()
         {
-            // 3 段由粗到细、向后上方微弯的队伍色墨焰束
-            var s1 = CreateCapsule(root, "FlameSeg1", new Vector3(0f, 0.05f, -0.015f), new Vector3(0.09f, 0.09f, 0.09f), p.TeamHair);
-            s1.transform.localRotation = Quaternion.Euler(-12f, side * 10f, side * -5f);
+            if (_sideTentacleMesh == null)
+            {
+                _sideTentacleMesh = CreateTentacleMesh(
+                    0.070f, 0.012f,
+                    new Vector3(0f, -0.020f, 0.020f),
+                    new Vector3(0f, 0.140f, 0.040f),
+                    new Vector3(0f, 0.180f, -0.180f),
+                    new Vector3(0f, 0.080f, -0.380f),
+                    "SideTentacleMesh");
+            }
+            return _sideTentacleMesh;
+        }
 
-            var s2 = CreateCapsule(root, "FlameSeg2", new Vector3(0f, 0.12f, -0.045f), new Vector3(0.075f, 0.08f, 0.075f), p.TeamHair);
-            s2.transform.localRotation = Quaternion.Euler(-24f, side * 15f, side * -8f);
+        private static Mesh GetCenterTentacleMesh()
+        {
+            if (_centerTentacleMesh == null)
+            {
+                _centerTentacleMesh = CreateTentacleMesh(
+                    0.065f, 0.011f,
+                    new Vector3(0f, -0.020f, 0.020f),
+                    new Vector3(0f, 0.130f, 0.030f),
+                    new Vector3(0f, 0.160f, -0.150f),
+                    new Vector3(0f, 0.050f, -0.290f),
+                    "CenterTentacleMesh");
+            }
+            return _centerTentacleMesh;
+        }
 
-            var s3 = CreateCapsule(root, "FlameTip", new Vector3(0f, 0.18f, -0.085f), new Vector3(0.055f, 0.07f, 0.055f), p.TeamHair);
-            s3.transform.localRotation = Quaternion.Euler(-36f, side * 20f, side * -12f);
+        /// <summary>
+        /// 单条触须：三次贝塞尔中心线 + 变半径圆截面管状网格，两端自然收细。
+        /// 用一整条光滑曲面替代"4 段胶囊叠起来"的做法，背面不会再出现一串肉瘤状凸起。
+        /// </summary>
+        private static Mesh CreateTentacleMesh(
+            float baseRadius,
+            float tipRadius,
+            Vector3 p0,
+            Vector3 p1,
+            Vector3 p2,
+            Vector3 p3,
+            string name)
+        {
+            const int ringCount = 20;
+            const int radialSegs = 14;
+
+            var mesh = new Mesh { name = name };
+            List<Vector3> verts = new List<Vector3>();
+            List<Vector2> uvs = new List<Vector2>();
+            List<int> tris = new List<int>();
+
+            Vector3 lastCenter = p3;
+            Vector3 lastTangent = (p3 - p2).normalized;
+
+            for (int r = 0; r <= ringCount; r++)
+            {
+                float u = (float)r / ringCount;
+                Vector3 center = Bezier(p0, p1, p2, p3, u);
+                Vector3 tangent = (Bezier(p0, p1, p2, p3, Mathf.Min(1f, u + 0.002f))
+                                   - Bezier(p0, p1, p2, p3, Mathf.Max(0f, u - 0.002f))).normalized;
+                if (tangent.sqrMagnitude < 0.0001f) tangent = lastTangent;
+
+                // 根部粗、梢部细，中段略鼓；曲线在 YZ 平面内，right 始终与切线垂直
+                float taper = Mathf.Lerp(baseRadius, tipRadius, Mathf.Pow(u, 0.9f));
+                float radius = taper * (1f + 0.08f * Mathf.Sin(u * Mathf.PI));
+
+                Vector3 side = Vector3.right;
+                Vector3 up = Vector3.Cross(tangent, side).normalized;
+
+                for (int s = 0; s < radialSegs; s++)
+                {
+                    float theta = (float)s / radialSegs * Mathf.PI * 2f;
+                    Vector3 dir = side * Mathf.Cos(theta) + up * Mathf.Sin(theta);
+                    verts.Add(center + dir * radius);
+                    uvs.Add(new Vector2((float)s / radialSegs, u));
+                }
+
+                lastCenter = center;
+                lastTangent = tangent;
+            }
+
+            for (int r = 0; r < ringCount; r++)
+            {
+                int row0 = r * radialSegs;
+                int row1 = (r + 1) * radialSegs;
+                for (int s = 0; s < radialSegs; s++)
+                {
+                    int next = (s + 1) % radialSegs;
+                    int i0 = row0 + s;
+                    int i0n = row0 + next;
+                    int i1 = row1 + s;
+                    int i1n = row1 + next;
+
+                    tris.Add(i0);
+                    tris.Add(i0n);
+                    tris.Add(i1);
+
+                    tris.Add(i0n);
+                    tris.Add(i1n);
+                    tris.Add(i1);
+                }
+            }
+
+            // 圆润尖端封口
+            int tipIndex = verts.Count;
+            verts.Add(lastCenter + lastTangent * tipRadius * 0.8f);
+            uvs.Add(new Vector2(0.5f, 1f));
+            int lastRow = ringCount * radialSegs;
+            for (int s = 0; s < radialSegs; s++)
+            {
+                int next = (s + 1) % radialSegs;
+                tris.Add(lastRow + s);
+                tris.Add(lastRow + next);
+                tris.Add(tipIndex);
+            }
+
+            mesh.SetVertices(verts);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Vector3 Bezier(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float u)
+        {
+            float v = 1f - u;
+            return a * (v * v * v) + b * (3f * v * v * u) + c * (3f * v * u * u) + d * (u * u * u);
         }
 
         #endregion
@@ -758,10 +1222,13 @@ namespace P1.Player
 
         /// <summary>
         /// 生成更胖更圆润的程序化流线型乌贼墨团网格。
-        /// 长度由 0.62m 缩减至约 0.52m，横向 rx 拓宽至约 0.23m，竖向 ry 提升至 0.50*baseR。
+        /// 长度约 0.52m，横向 rx 约 0.23m，竖向 ry 为 0.50*baseR。
+        /// 18 环 × 24 径向段 + 平滑法线，避免低分段在墨团表面切出可见棱面。
         /// </summary>
         public static Mesh CreateSquidMesh()
         {
+            if (_squidMesh != null) return _squidMesh;
+
             var mesh = new Mesh { name = "SquidMantleMesh" };
 
             List<Vector3> verts = new List<Vector3>();
@@ -769,8 +1236,8 @@ namespace P1.Player
             List<Vector2> uvs = new List<Vector2>();
             List<int> tris = new List<int>();
 
-            const int ringCount = 15;
-            const int radialSegs = 16;
+            const int ringCount = 18;
+            const int radialSegs = 24;
 
             for (int r = 0; r <= ringCount; r++)
             {
@@ -822,7 +1289,8 @@ namespace P1.Player
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
 
-            return mesh;
+            _squidMesh = mesh;
+            return _squidMesh;
         }
 
         #endregion
@@ -1124,6 +1592,306 @@ namespace P1.Player
             muz.transform.SetParent(root, false);
             muz.transform.localPosition = new Vector3(0f, 0.04f, 0.65f);
             muzzle = muz.transform;
+        }
+
+        #endregion
+
+        #region Weapon Static Mesh Merge
+
+        /// <summary>合并网格物体命名前缀：ApplyShadowCastingRules 遇到该前缀直接跳过（阴影行为已在合并时按组内部件多数决定）。</summary>
+        private const string MergedPartPrefix = "MergedStatic_";
+
+        /// <summary>每类武器的合并根数量上限：0 = 武器主根，1 = 动态构件簇（滚筒滚轴 / 加特林枪管簇）。</summary>
+        private const int MaxMergeRootsPerWeapon = 2;
+
+        /// <summary>
+        /// 合并网格静态缓存：7 类武器几何完全确定性（同一构建代码 + 固定 Primitive 组合），
+        /// 合并网格只含几何不含材质，可跨实例 / 跨队伍复用。
+        /// 结构：武器种类 → 合并根序号 → 材质组网格列表（null 项表示该组校验失败、维持原部件独立渲染）。
+        /// 缓存网格装配时一次性生成、永不销毁（随会话存续，Domain Reload 自动清空），
+        /// 避免逐实例重建网格在换枪/重装配时泄漏。
+        /// </summary>
+        private static readonly Dictionary<WeaponKind, List<Mesh>[]> _mergedMeshCache =
+            new Dictionary<WeaponKind, List<Mesh>[]>();
+
+        /// <summary>
+        /// 对 7 类武器执行「静态构件网格合并」：
+        /// 1. 只合并相对合并根刚体静止、不参与逐帧动画 / MPB 特殊属性的 MeshRenderer；
+        /// 2. 按 sharedMaterial 引用分组，用 CombineMeshes 把部件按「相对合并根的局部矩阵」烘焙成组网格；
+        /// 3. 源部件仅禁用渲染（GameObject / MeshFilter / 测试锚点层级全部保留）；
+        /// 4. 滚筒滚轴与加特林枪管簇是动态枢轴：整棵子树跳过后作为二级合并根单独烘焙，
+        ///    簇内构件相对枢轴刚体静止，合并网格挂在枢轴下随其整体旋转，动画表现完全不变。
+        /// </summary>
+        private static void MergeWeaponStaticMeshes(
+            GameObject shooter, GameObject roller, GameObject charger, GameObject dualies,
+            GameObject slosher, GameObject blaster, GameObject splatling,
+            Transform rollerDrum, Transform splatlingBarrels, Renderer[] chargerCoils)
+        {
+            // 1. Spritzer：全部构件相对枪根静止（枪口锚点无渲染器，自然保留）
+            MergeWeaponRoot(AsTransform(shooter), WeaponKind.Shooter, 0, null, null);
+
+            // 2. Swell：滚筒滚轴是测试锚点 + 旋转动画，整棵子树跳过后作为二级合并根单独烘焙
+            MergeWeaponRoot(AsTransform(roller), WeaponKind.Roller, 0, ToArray(rollerDrum), null);
+            MergeWeaponRoot(rollerDrum, WeaponKind.Roller, 1, null, null);
+
+            // 3. Glint：充能线圈逐帧写自发光 MaterialPropertyBlock，必须保留独立渲染器；其余部件全部静止
+            MergeWeaponRoot(AsTransform(charger), WeaponKind.Charger, 0, null, chargerCoils);
+
+            // 4. Twinfin：两把手枪整体静止，跨子根合并（烘焙矩阵含手枪挂点偏移；枪口锚点自然保留）
+            MergeWeaponRoot(AsTransform(dualies), WeaponKind.Dualies, 0, null, null);
+
+            // 5. Tidebucket / Popper：全部构件静止
+            MergeWeaponRoot(AsTransform(slosher), WeaponKind.Slosher, 0, null, null);
+            MergeWeaponRoot(AsTransform(blaster), WeaponKind.Blaster, 0, null, null);
+
+            // 6. Gyre：加特林枪管簇同滚筒处理
+            MergeWeaponRoot(AsTransform(splatling), WeaponKind.Splatling, 0, ToArray(splatlingBarrels), null);
+            MergeWeaponRoot(splatlingBarrels, WeaponKind.Splatling, 1, null, null);
+        }
+
+        /// <summary>
+        /// 合并单个合并根下的静态部件：
+        /// 收集 → 按 sharedMaterial 分组 → 生成/复用缓存网格 → 挂载 MergedStatic_* 物体 → 禁用组内源部件渲染。
+        /// 只有组网格构建成功才禁用该组源部件，任何失败都让该组维持原状（降级而非缺件）。
+        /// </summary>
+        private static void MergeWeaponRoot(
+            Transform bakeRoot,
+            WeaponKind kind,
+            int mergeIndex,
+            Transform[] skipSubtrees,
+            Renderer[] skipRenderers)
+        {
+            if (bakeRoot == null || mergeIndex < 0 || mergeIndex >= MaxMergeRootsPerWeapon) return;
+
+            // 1. 深度优先收集可合并部件（遍历顺序确定 → 材质组顺序确定 → 缓存组序跨队伍/实例一致）
+            var parts = new List<MeshRenderer>();
+            CollectMergeableParts(bakeRoot, skipSubtrees, skipRenderers, parts);
+            if (parts.Count == 0) return;
+
+            // 2. 按 sharedMaterial 引用分组（保持首次出现顺序）
+            var groupMats = new List<Material>();
+            var groups = new List<List<MeshRenderer>>();
+            for (int i = 0; i < parts.Count; i++)
+            {
+                Material mat = parts[i].sharedMaterial;
+                if (mat == null) continue;
+                int gi = -1;
+                for (int m = 0; m < groupMats.Count; m++)
+                {
+                    if (ReferenceEquals(groupMats[m], mat)) { gi = m; break; }
+                }
+                if (gi < 0)
+                {
+                    gi = groupMats.Count;
+                    groupMats.Add(mat);
+                    groups.Add(new List<MeshRenderer>());
+                }
+                groups[gi].Add(parts[i]);
+            }
+            if (groups.Count == 0) return;
+
+            // 3. 生成 / 复用缓存网格（网格几何只取决于部件集合与矩阵，与材质实例无关 → 缓存 key 无需含队伍色）
+            if (!_mergedMeshCache.TryGetValue(kind, out var perRoot) || perRoot == null
+                || perRoot.Length != MaxMergeRootsPerWeapon)
+            {
+                perRoot = new List<Mesh>[MaxMergeRootsPerWeapon];
+                _mergedMeshCache[kind] = perRoot;
+            }
+            List<Mesh> cachedGroups = perRoot[mergeIndex];
+            bool reuseCache = cachedGroups != null && cachedGroups.Count == groups.Count;
+
+            var builtMeshes = new Mesh[groups.Count];
+            for (int g = 0; g < groups.Count; g++)
+            {
+                if (reuseCache)
+                {
+                    builtMeshes[g] = cachedGroups[g]; // 可能含 null（该组校验失败保持不合并）
+                    continue;
+                }
+                builtMeshes[g] = BuildMergedGroupMesh(kind, mergeIndex, g, bakeRoot, groups[g]);
+            }
+            if (!reuseCache)
+            {
+                perRoot[mergeIndex] = new List<Mesh>(builtMeshes);
+            }
+
+            // 4. 挂载合并网格物体并禁用组内源部件渲染（GameObject / 锚点层级全部保留）
+            for (int g = 0; g < groups.Count; g++)
+            {
+                Mesh mergedMesh = builtMeshes[g];
+                if (mergedMesh == null) continue;
+                var members = groups[g];
+
+                var mergedGo = new GameObject(MergedPartPrefix + groupMats[g].name);
+                mergedGo.transform.SetParent(bakeRoot, false);
+                mergedGo.AddComponent<MeshFilter>().sharedMesh = mergedMesh;
+                var mergedRend = mergedGo.AddComponent<MeshRenderer>();
+                mergedRend.sharedMaterial = groupMats[g];
+
+                // 阴影行为按组内「多数部件」决定（ShouldCastShadow 是装配期唯一真源，此时逐件裁剪尚未应用）；
+                // 平票时保守保留投影。微件（握把/轴承等）随大网格获得投影属预期内的轻微增益。
+                int castCount = 0;
+                for (int i = 0; i < members.Count; i++)
+                {
+                    if (ShouldCastShadow(members[i].gameObject.name)) castCount++;
+                }
+                mergedRend.shadowCastingMode = castCount * 2 >= members.Count
+                    ? UnityEngine.Rendering.ShadowCastingMode.On
+                    : UnityEngine.Rendering.ShadowCastingMode.Off;
+
+                for (int i = 0; i < members.Count; i++)
+                {
+                    members[i].enabled = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 深度优先收集可合并部件：MeshFilter+MeshRenderer 齐全且网格/材质非空；
+        /// 跳过动态子树（滚筒/枪管簇等）、MPB 动画渲染器（蓄力线圈）、枪口锚点子树与已合并对象。
+        /// </summary>
+        private static void CollectMergeableParts(
+            Transform current,
+            Transform[] skipSubtrees,
+            Renderer[] skipRenderers,
+            List<MeshRenderer> results)
+        {
+            for (int i = 0; i < current.childCount; i++)
+            {
+                Transform child = current.GetChild(i);
+                if (skipSubtrees != null && ContainsReference(skipSubtrees, child)) continue;
+                if (child.name.StartsWith(MergedPartPrefix)) continue; // 防御：避免重复收集已合并对象
+                if (child.name == "Muzzle") continue;                  // 枪口锚点子树（当前无渲染器，防御性跳过）
+
+                var rend = child.GetComponent<MeshRenderer>();
+                var filter = child.GetComponent<MeshFilter>();
+                if (rend != null && filter != null && filter.sharedMesh != null && rend.sharedMaterial != null)
+                {
+                    if (skipRenderers == null || !ContainsReference(skipRenderers, rend))
+                    {
+                        results.Add(rend);
+                    }
+                }
+
+                // 当前部件均为叶子，防御性支持未来嵌套部件结构
+                CollectMergeableParts(child, skipSubtrees, skipRenderers, results);
+            }
+        }
+
+        /// <summary>
+        /// 把同材质组内的部件按「相对合并根的局部矩阵」烘焙合并成一个网格。
+        /// 所有部件均为 Unity Primitive（Cube/Sphere/Cylinder），顶点属性布局天然统一；
+        /// 若组内出现属性不一致 / 多 submesh 的网格则放弃合并（返回 null），该组维持原部件独立渲染。
+        /// </summary>
+        private static Mesh BuildMergedGroupMesh(
+            WeaponKind kind,
+            int mergeIndex,
+            int groupIndex,
+            Transform bakeRoot,
+            List<MeshRenderer> members)
+        {
+            // 1. 顶点属性布局一致性校验（防御：未来若混入非 Primitive 网格则整组放弃合并）
+            Mesh firstMesh = members[0].GetComponent<MeshFilter>().sharedMesh;
+            if (firstMesh == null || firstMesh.subMeshCount != 1)
+            {
+                Debug.LogWarning($"[CharacterVisualAssembler] 武器 {kind} 材质组 {groupIndex} 首个网格无效或多 submesh，放弃合并该组");
+                return null;
+            }
+            bool needNormals = firstMesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.Normal);
+            bool needUv = firstMesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.TexCoord0);
+            bool needTangents = firstMesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.Tangent);
+            for (int i = 1; i < members.Count; i++)
+            {
+                Mesh mesh = members[i].GetComponent<MeshFilter>().sharedMesh;
+                if (mesh == null || mesh.subMeshCount != 1 ||
+                    mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.Normal) != needNormals ||
+                    mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.TexCoord0) != needUv ||
+                    mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.Tangent) != needTangents)
+                {
+                    Debug.LogWarning($"[CharacterVisualAssembler] 武器 {kind} 材质组 {groupIndex} 顶点属性不一致，放弃合并该组（保持独立渲染）");
+                    return null;
+                }
+            }
+
+            // 2. 烘焙合并：矩阵 = bakeRoot.worldToLocal × part.localToWorld（部件在合并根局部空间中的位姿），
+            //    合并物体随后以单位变换挂在合并根下，最终世界变换与原部件完全一致。
+            var combine = new CombineInstance[members.Count];
+            Matrix4x4 rootWorldToLocal = bakeRoot.worldToLocalMatrix;
+            for (int i = 0; i < members.Count; i++)
+            {
+                combine[i].mesh = members[i].GetComponent<MeshFilter>().sharedMesh;
+                combine[i].transform = rootWorldToLocal * members[i].transform.localToWorldMatrix;
+            }
+
+            var merged = new Mesh { name = "MergedWeapon_" + kind + "_R" + mergeIndex + "_G" + groupIndex };
+            try
+            {
+                merged.CombineMeshes(combine, true, true);
+            }
+            catch (System.Exception e)
+            {
+                Object.DestroyImmediate(merged);
+                Debug.LogWarning($"[CharacterVisualAssembler] CombineMeshes 失败（{kind} 根 {mergeIndex} 组 {groupIndex}）：{e.Message}，该组保持独立渲染");
+                return null;
+            }
+
+            // 3. 非等比缩放烘焙后法线/切线模长会漂移（部件均为轴向缩放，方向不受影响），
+            //    统一归一化，避免卡通着色出现明暗斑块。
+            NormalizeMergedVectors(merged, needNormals, needTangents);
+            merged.RecalculateBounds();
+            return merged;
+        }
+
+        /// <summary>烘焙合并后统一归一化法线与切线（方向由 CombineMeshes 变换，模长受非等比缩放漂移）。</summary>
+        private static void NormalizeMergedVectors(Mesh mesh, bool hasNormals, bool hasTangents)
+        {
+            if (hasNormals)
+            {
+                var normals = mesh.normals;
+                for (int i = 0; i < normals.Length; i++)
+                {
+                    Vector3 n = normals[i];
+                    float mag = n.magnitude;
+                    normals[i] = mag > 1e-5f ? n / mag : Vector3.up;
+                }
+                mesh.normals = normals;
+            }
+
+            if (hasTangents)
+            {
+                var tangents = mesh.tangents;
+                for (int i = 0; i < tangents.Length; i++)
+                {
+                    Vector4 t = tangents[i];
+                    Vector3 xyz = new Vector3(t.x, t.y, t.z);
+                    float mag = xyz.magnitude;
+                    if (mag > 1e-5f) xyz /= mag;
+                    tangents[i] = new Vector4(xyz.x, xyz.y, xyz.z, t.w);
+                }
+                mesh.tangents = tangents;
+            }
+        }
+
+        private static Transform AsTransform(GameObject go) => go != null ? go.transform : null;
+
+        private static Transform[] ToArray(Transform t) => t != null ? new[] { t } : null;
+
+        private static bool ContainsReference(Transform[] array, Transform t)
+        {
+            for (int i = 0; i < array.Length; i++)
+            {
+                if (ReferenceEquals(array[i], t)) return true;
+            }
+            return false;
+        }
+
+        private static bool ContainsReference(Renderer[] array, Renderer r)
+        {
+            for (int i = 0; i < array.Length; i++)
+            {
+                if (ReferenceEquals(array[i], r)) return true;
+            }
+            return false;
         }
 
         #endregion

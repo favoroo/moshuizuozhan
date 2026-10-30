@@ -2,9 +2,8 @@ Shader "P1/SpawnPad"
 {
     Properties
     {
-        _BaseColor ("Base Color", Color) = (0.15, 0.17, 0.20, 1.0)
+        _BaseColor ("Base Color", Color) = (0.24, 0.27, 0.32, 1.0)
         _PlatformColor ("Platform Concrete Color", Color) = (0.65, 0.63, 0.58, 1.0)
-        _TeamColor ("Team Color", Color) = (1.00, 0.44, 0.06, 1.0)
         _RingColor ("Ring Color", Color) = (0.90, 0.92, 0.95, 1.0)
         _ChevronColor ("Chevron Color", Color) = (1.00, 0.85, 0.20, 1.0)
         _GlowStrength ("Glow Strength", Range(0.0, 4.0)) = 0.6
@@ -54,7 +53,6 @@ Shader "P1/SpawnPad"
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
                 half4 _PlatformColor;
-                half4 _TeamColor;
                 half4 _RingColor;
                 half4 _ChevronColor;
                 float _GlowStrength;
@@ -88,7 +86,7 @@ Shader "P1/SpawnPad"
                 float fwRing = max(fwidth(distToRing), 0.015);
                 float ringMask = smoothstep(0.08 + fwRing, 0.08 - fwRing, distToRing) * upness;
 
-                // 2. 距中心 2.8-3.15m 的柔和队色发光边
+                // 2. 距中心 2.8-3.15m 的柔和白色发光边（安全区语义）
                 float glowEdge = smoothstep(2.8, 3.0, r) * (1.0 - smoothstep(3.0, 3.15, r)) * upness;
 
                 // 3. 3 道指向 +Z 的 V 形箭头（围绕中心，间距 0.9m，线宽 0.16m）
@@ -112,10 +110,10 @@ Shader "P1/SpawnPad"
                 chevronMask *= upness;
 
                 // 4. 颜色合成：
-                // 台面外缘（r > 3.0m）以及侧立面使用自然混凝土基台色；中心圆形区域（r < 3.0m）为深色能量出生池
+                // 台面外缘（r > 3.0m）以及侧立面使用自然混凝土基台色；中心圆形区域（r < 3.0m）为钢灰色出生池
                 float poolMask = smoothstep(3.15, 2.95, r) * upness;
-                float innerAccent = smoothstep(2.7, 1.0, r) * 0.25 * poolMask;
-                half3 poolBg = lerp(_BaseColor.rgb, _TeamColor.rgb, innerAccent);
+                float innerAccent = smoothstep(2.7, 1.0, r) * 0.35 * poolMask;
+                half3 poolBg = lerp(_BaseColor.rgb, _RingColor.rgb * 0.55, innerAccent);
                 half3 col = lerp(_PlatformColor.rgb, poolBg, poolMask);
 
                 // 叠加 V 形箭头
@@ -124,8 +122,8 @@ Shader "P1/SpawnPad"
                 // 叠加外圈圆环
                 col = lerp(col, _RingColor.rgb, ringMask);
 
-                // 边缘队色发光提升
-                half3 glowCol = _TeamColor.rgb * (glowEdge * _GlowStrength);
+                // 边缘白色柔光提升（无队色，安全区语义）
+                half3 glowCol = _RingColor.rgb * (glowEdge * _GlowStrength);
                 col += glowCol;
 
                 // 5. 光照计算（受主光影响的简单 Lambert + 暗部环境补光）

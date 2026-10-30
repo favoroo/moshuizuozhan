@@ -18,10 +18,10 @@ namespace P1.Core
         public float finalWarningSeconds = 30f;
 
         [Header("第三人称相机 (TPS, P9)")]
-        [Tooltip("人形状态下相机枢轴相对脚底的高度（米）。1.85m 略高于头顶，准星不会被自己挡住")]
-        public float tpsPivotHeight = 1.85f;
-        [Tooltip("潜墨状态下相机枢轴高度（米）。角色压扁贴地，镜头随之降低")]
-        public float tpsPivotHeightSwimming = 1.30f;
+        [Tooltip("人形状态下相机枢轴相对脚底的高度（米）。按 1.25m 蛋形角色设定为 1.45m，略高于头顶，准星不被自己挡住")]
+        public float tpsPivotHeight = 1.45f;
+        [Tooltip("潜墨状态下相机枢轴高度（米）。按 1.25m 蛋形角色设定为 1.05m，角色压扁贴地，镜头随之降低")]
+        public float tpsPivotHeightSwimming = 1.05f;
         [Tooltip("枢轴跟随的平滑时间（秒）。越小越跟手，越大越稳")]
         public float tpsPivotSmoothTime = 0.06f;
         [Tooltip("人形状态相机吊臂长度（米）")]

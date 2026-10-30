@@ -105,7 +105,8 @@ cp MediaRaw/images/ui_icon_inktank.png Assets/_Project/Art/Sprites/
 | ~~生图（草稿/批量）~~ | ~~`gemini-3.1-flash-lite-image`~~ | **2026-10-28 实测通道被上游禁用**（400 `PROXY_GENERATION_DISABLED`），别再用；草稿也用品质模型 |
 | 语音（默认） | `gemini-3.8-flash-tts` | WAV 24kHz |
 | 语音（批量草稿） | `gemini-3.8-flash-lite-tts` | 更便宜，实测可用 |
-| 音乐 | ~~`lyria-3.5`~~ **2026-10-29 起上游禁用** | 请求返回 400 `PROXY_GENERATION_DISABLED`。BGM 改用 **`python3 tools/bake_bgm.py`**（本地确定性合成，零配额） |
+| 音乐（主用） | ~~`lyria-3.5`~~ **2026-10-29 起上游禁用** | 请求返回 400 `PROXY_GENERATION_DISABLED`。BGM 改用 **`python3 tools/bake_bgm.py`**（本地确定性合成，零配额） |
+| 音乐（备用，自动回退） | `lyria-3-pro-preview` | 已接入 `gen_music.sh` 的模型链：主用失败后自动尝试。**2026-10-29 实测同样被禁用**（400），两个都不可用时脚本会打印上游原文并提示改用 `bake_bgm.py` |
 | 音效 SFX | **不走网关** | `python3 tools/bake_sfx.py`（纯标准库离线合成，零配额） |
 | ~~sensenova-u1.5-lite~~ | 网关上游配置错误，**暂不可用** |
 | ~~gpt-image-*~~ | 通道无鉴权，不可用 |

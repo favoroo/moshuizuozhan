@@ -19,6 +19,7 @@ namespace P1.Ink
     public class InkWallSurface : MonoBehaviour
     {
         private static readonly List<InkWallSurface> Registered = new List<InkWallSurface>();
+        private static readonly Dictionary<Collider, InkWallSurface> ColliderLookup = new Dictionary<Collider, InkWallSurface>();
 
         /// <summary>场景内全部可涂墙面（运行时注册，供手雷/大招/重开统一处理）。</summary>
         public static IReadOnlyList<InkWallSurface> All => Registered;
@@ -26,6 +27,7 @@ namespace P1.Ink
         [SerializeField] private BoxCollider wallCollider;
         [SerializeField] private Material overlayMaterial;
         [SerializeField] private InkGridConfigSO config;
+        [SerializeField] private bool canClimb = true;
 
         private readonly List<InkWallFace> _faces = new List<InkWallFace>(4);
         private readonly List<Mesh> _meshes = new List<Mesh>(4);
@@ -46,6 +48,7 @@ namespace P1.Ink
         public int FaceCount => _faces.Count;
         public InkGridConfigSO Config => config;
         public BoxCollider WallCollider => wallCollider;
+        public bool CanClimb { get => canClimb; set => canClimb = value; }
 
         private void Awake()
         {
@@ -59,6 +62,7 @@ namespace P1.Ink
                 Registered.Add(this);
                 _isRegistered = true;
             }
+            RegisterColliders();
         }
 
         private void OnDisable()
@@ -68,10 +72,13 @@ namespace P1.Ink
                 Registered.Remove(this);
                 _isRegistered = false;
             }
+            UnregisterColliders();
         }
 
         private void OnDestroy()
         {
+            UnregisterColliders();
+
             for (int i = 0; i < _meshes.Count; i++)
             {
                 if (_meshes[i] != null)
@@ -90,31 +97,89 @@ namespace P1.Ink
             _faceRenderers.Clear();
         }
 
+        private void RegisterColliders()
+        {
+            Collider[] colliders = GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Collider col = colliders[i];
+                if (col != null)
+                {
+                    ColliderLookup[col] = this;
+                }
+            }
+        }
+
+        private void UnregisterColliders()
+        {
+            Collider[] colliders = GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Collider col = colliders[i];
+                if (col != null && ColliderLookup.TryGetValue(col, out var existing) && existing == this)
+                {
+                    ColliderLookup.Remove(col);
+                }
+            }
+        }
+
         /// <summary>由生成脚本注入墙体碰撞体、叠加层材质与涂地配置。</summary>
-        public void Configure(BoxCollider collider, Material material, InkGridConfigSO gridConfig)
+        public void Configure(BoxCollider collider, Material material, InkGridConfigSO gridConfig, bool allowClimb = true)
         {
             wallCollider = collider;
             overlayMaterial = material;
             config = gridConfig;
+            canClimb = allowClimb;
+            if (collider != null)
+            {
+                ColliderLookup[collider] = this;
+            }
         }
 
-        public bool InitializeIfNeeded()
+        public void Configure(Collider collider, Material material, InkGridConfigSO gridConfig, bool allowClimb = true)
+        {
+            if (collider is BoxCollider box)
+                wallCollider = box;
+            overlayMaterial = material;
+            config = gridConfig;
+            canClimb = allowClimb;
+            if (collider != null)
+            {
+                ColliderLookup[collider] = this;
+            }
+        }
+
+        public bool InitializeIfNeeded(bool force = false)
         {
             if (_initialized)
                 return true;
 
-            // 贴图与 Quad 都是运行时对象：编辑器里不生成，避免把临时贴图留在场景中
-            if (!Application.isPlaying)
+            // 贴图与 Quad 都是运行时对象：编辑器里默认不生成（除非显式 force，供单测验证结构）
+            if (!Application.isPlaying && !force)
                 return false;
 
             if (wallCollider == null)
             {
                 wallCollider = GetComponent<BoxCollider>();
             }
-            if (wallCollider == null)
+
+            Collider col = wallCollider != null ? (Collider)wallCollider : GetComponent<Collider>();
+            if (col != null)
             {
-                Debug.LogWarning($"[InkWallSurface] {name} 没有 BoxCollider，无法生成可涂墙面。", this);
-                return false;
+                _worldBounds = col.bounds;
+            }
+            else
+            {
+                Renderer rend = GetComponent<Renderer>();
+                if (rend != null)
+                {
+                    _worldBounds = rend.bounds;
+                }
+                else
+                {
+                    Debug.LogWarning($"[InkWallSurface] {name} 没有 Collider 或 Renderer，无法生成可涂墙面。", this);
+                    return false;
+                }
             }
 
             if (_propBlock == null)
@@ -130,8 +195,6 @@ namespace P1.Ink
                     overlayMaterial = new Material(sh) { name = "RuntimeInkWallMat" };
                 }
             }
-
-            _worldBounds = wallCollider.bounds;
             float cellSize = config != null ? config.wallCellSize : 0.1f;
             Color32 teamA = config != null ? (Color32)config.teamAColor : new Color32(255, 112, 15, 255);
             Color32 teamB = config != null ? (Color32)config.teamBColor : new Color32(38, 107, 255, 255);
@@ -231,6 +294,8 @@ namespace P1.Ink
             mr.sharedMaterial = overlayMaterial;
             mr.shadowCastingMode = ShadowCastingMode.Off;
             mr.receiveShadows = false;
+            // 未落墨前保持禁用，0 DrawCall 开销；首次涂上墨斑后再激活
+            mr.enabled = face.HasInk;
 
             _propBlock.SetTexture(InkTexProp, face.Texture);
             mr.SetPropertyBlock(_propBlock);
@@ -258,7 +323,16 @@ namespace P1.Ink
             if (!face.IsInsideFace(facePoint, 0.2f))
                 return 0;
 
-            return face.PaintCircle(facePoint, radius, team);
+            int changed = face.PaintCircle(facePoint, radius, team);
+            if (changed > 0)
+            {
+                int idx = _faces.IndexOf(face);
+                if (idx >= 0 && idx < _faceRenderers.Count && _faceRenderers[idx] != null)
+                {
+                    _faceRenderers[idx].enabled = true;
+                }
+            }
+            return changed;
         }
 
         /// <summary>该世界点在该墙面上是否为指定队伍的墨水。</summary>
@@ -291,7 +365,15 @@ namespace P1.Ink
 
                 Vector3 projected = center - face.NormalWorld * planeDistance;
                 float onFaceRadius = Mathf.Sqrt(radius * radius - absDist * absDist);
-                changed += face.PaintCircle(face.WorldToFace(projected), onFaceRadius, team);
+                int painted = face.PaintCircle(face.WorldToFace(projected), onFaceRadius, team);
+                if (painted > 0)
+                {
+                    if (i < _faceRenderers.Count && _faceRenderers[i] != null)
+                    {
+                        _faceRenderers[i].enabled = true;
+                    }
+                    changed += painted;
+                }
             }
 
             return changed;
@@ -302,6 +384,10 @@ namespace P1.Ink
             for (int i = 0; i < _faces.Count; i++)
             {
                 _faces[i].ResetPaint();
+                if (i < _faceRenderers.Count && _faceRenderers[i] != null)
+                {
+                    _faceRenderers[i].enabled = false;
+                }
             }
         }
 
@@ -315,6 +401,10 @@ namespace P1.Ink
 
         private InkWallFace FindFace(Vector3 worldNormal)
         {
+            // 命中朝上的顶面（Ny > 0.55）归顶面墨迹系统处理，不属于 4 竖直立面
+            if (worldNormal.y > 0.55f)
+                return null;
+
             InkWallFace best = null;
             float bestDot = 0.55f;
             for (int i = 0; i < _faces.Count; i++)
@@ -333,7 +423,21 @@ namespace P1.Ink
 
         public static InkWallSurface FindForCollider(Collider collider)
         {
-            return collider != null ? collider.GetComponentInParent<InkWallSurface>() : null;
+            if (collider == null)
+                return null;
+
+            if (ColliderLookup.TryGetValue(collider, out InkWallSurface wall))
+            {
+                if (wall != null)
+                    return wall;
+            }
+
+            wall = collider.GetComponentInParent<InkWallSurface>();
+            if (wall != null)
+            {
+                ColliderLookup[collider] = wall;
+            }
+            return wall;
         }
 
         /// <summary>对场景内所有墙面做球形涂色，返回总变化格数。</summary>

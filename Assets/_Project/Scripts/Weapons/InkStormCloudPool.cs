@@ -128,6 +128,12 @@ namespace P1.Weapons
 
             if (Instance == this)
                 Instance = null;
+
+            if (_sharedMat != null)
+            {
+                Destroy(_sharedMat);
+                _sharedMat = null;
+            }
         }
 
         private void InitializeResources()

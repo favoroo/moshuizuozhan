@@ -42,6 +42,11 @@ namespace P1.UI
         [SerializeField] private RectTransform playerArrow;
         [SerializeField] private RectTransform playerPulseRing;
 
+        private Image _playerArrowImage;
+        private Image _playerPulseRingImage;
+        private readonly Dictionary<CombatantHealth, InkCharacterMotor> _motorCache = new Dictionary<CombatantHealth, InkCharacterMotor>(8);
+        private readonly List<CombatantHealth> _deadHealthBuffer = new List<CombatantHealth>(8);
+
         private readonly List<ActorMarkerItem> _allyMarkers = new List<ActorMarkerItem>(4);
         private readonly List<ActorMarkerItem> _enemyMarkers = new List<ActorMarkerItem>(4);
         private readonly List<HazardMarkerItem> _hazardMarkers = new List<HazardMarkerItem>(6);
@@ -91,7 +96,7 @@ namespace P1.UI
 
             UIThemeSO resolved = UIThemeSO.Resolve(theme);
 
-            // 1. 浮雕外框背景
+            // 1. 漫画纸白画框 + 6px 墨边 + 硬阴影 (6,-6)
             if (frameGraphic == null)
             {
                 var bgGo = new GameObject("FrameBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
@@ -99,20 +104,27 @@ namespace P1.UI
                 Stretch((RectTransform)bgGo.transform);
                 frameGraphic = bgGo.GetComponent<UIInkShapeGraphic>();
                 frameGraphic.Shape = UIInkShape.RoundedRect;
-                frameGraphic.CornerRadius = cornerRadius;
-                frameGraphic.BorderWidth = 5f;
-                frameGraphic.BorderColor = resolved.outlineColor;
-                frameGraphic.color = new Color(0.13f, 0.16f, 0.22f, 0.98f);
+                frameGraphic.CornerRadius = ComicStyle.CornerSharp;
+                frameGraphic.BorderWidth = ComicStyle.Border;
+                frameGraphic.BorderColor = ComicStyle.Ink;
+                frameGraphic.HardShadow = true;
+                frameGraphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+                frameGraphic.ShadowColor = ComicStyle.Ink;
+                frameGraphic.Halftone = false;
+                frameGraphic.GlossAlpha = 0f;
+                frameGraphic.DrawGloss = false;
+                frameGraphic.InnerRimAlpha = 0f;
+                frameGraphic.color = ComicStyle.Paper;
                 frameGraphic.raycastTarget = false;
             }
 
-            // 2. 墨水贴图容器（带圆角遮罩裁切）
+            // 2. 墨水贴图容器（带直角/微圆角遮罩裁切）
             if (mapContentContainer == null)
             {
                 var maskGo = new GameObject("MapMask", typeof(RectTransform), typeof(RectMask2D));
                 maskGo.transform.SetParent(transform, false);
                 mapContentContainer = maskGo.GetComponent<RectTransform>();
-                Stretch(mapContentContainer, 6f);
+                Stretch(mapContentContainer, 8f);
 
                 var rawGo = new GameObject("MinimapRawImage", typeof(RectTransform), typeof(RawImage));
                 rawGo.transform.SetParent(mapContentContainer, false);
@@ -122,7 +134,7 @@ namespace P1.UI
                 minimapRawImage.raycastTarget = false;
             }
 
-            // 3. 内部高光层 (iw-map__gloss)
+            // 3. 内部高光层（漫画模式关闭渐变）
             if (glossOverlay == null)
             {
                 var glossGo = new GameObject("GlossOverlay", typeof(RectTransform), typeof(Image));
@@ -130,8 +142,9 @@ namespace P1.UI
                 glossOverlay = glossGo.GetComponent<RectTransform>();
                 Stretch(glossOverlay);
                 var glossImg = glossGo.GetComponent<Image>();
-                glossImg.color = new Color(1f, 1f, 1f, 0.08f);
+                glossImg.color = Color.clear;
                 glossImg.raycastTarget = false;
+                glossGo.SetActive(false);
             }
 
             // 4. 标记层 MarkersContainer
@@ -143,36 +156,36 @@ namespace P1.UI
                 Stretch(markersContainer);
             }
 
-            // 5. 本地主角指示标记
+            // 5. 本地主角指示标记（放大到 8px 半径）
             if (playerMarker == null && markersContainer != null)
             {
                 var pGo = new GameObject("PlayerMarker", typeof(RectTransform));
                 pGo.transform.SetParent(markersContainer, false);
                 playerMarker = pGo.GetComponent<RectTransform>();
-                playerMarker.sizeDelta = new Vector2(24f, 24f);
+                playerMarker.sizeDelta = new Vector2(30f, 30f);
 
                 // 外层脉冲光环
                 var pulseGo = new GameObject("PulseRing", typeof(RectTransform), typeof(Image));
                 pulseGo.transform.SetParent(playerMarker, false);
                 playerPulseRing = pulseGo.GetComponent<RectTransform>();
-                playerPulseRing.sizeDelta = new Vector2(28f, 28f);
+                playerPulseRing.sizeDelta = new Vector2(34f, 34f);
                 var pImg = pulseGo.GetComponent<Image>();
                 pImg.sprite = GetRingSprite();
-                pImg.color = new Color(1f, 1f, 1f, 0.7f);
+                pImg.color = new Color(ComicStyle.Yellow.r, ComicStyle.Yellow.g, ComicStyle.Yellow.b, 0.85f);
                 pImg.raycastTarget = false;
 
                 // 朝向箭头/核心点
                 var arrowGo = new GameObject("Arrow", typeof(RectTransform), typeof(Image));
                 arrowGo.transform.SetParent(playerMarker, false);
                 playerArrow = arrowGo.GetComponent<RectTransform>();
-                playerArrow.sizeDelta = new Vector2(16f, 18f);
+                playerArrow.sizeDelta = new Vector2(20f, 22f);
                 var aImg = arrowGo.GetComponent<Image>();
                 aImg.sprite = GetArrowSprite();
                 aImg.color = Color.white;
                 aImg.raycastTarget = false;
             }
 
-            // 6. 右上角 MAP 胶囊角标 (iw-map__label)
+            // 6. 右上角 MAP 胶囊角标（漫画黄底黑边）
             if (mapBadge == null)
             {
                 var badgeGo = new GameObject("MapBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
@@ -181,29 +194,71 @@ namespace P1.UI
                 mapBadge.anchorMin = new Vector2(1f, 1f);
                 mapBadge.anchorMax = new Vector2(1f, 1f);
                 mapBadge.pivot = new Vector2(1f, 1f);
-                mapBadge.anchoredPosition = new Vector2(10f, 12f);
-                mapBadge.sizeDelta = new Vector2(48f, 22f);
+                mapBadge.anchoredPosition = new Vector2(6f, 8f);
+                mapBadge.sizeDelta = new Vector2(50f, 22f);
 
                 var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
                 badgeShape.Shape = UIInkShape.RoundedRect;
-                badgeShape.CornerRadius = 11f;
-                badgeShape.BorderWidth = 2.5f;
-                badgeShape.BorderColor = Color.white;
-                badgeShape.color = resolved.outlineColor;
+                badgeShape.CornerRadius = ComicStyle.CornerSharp;
+                badgeShape.BorderWidth = ComicStyle.BorderThin;
+                badgeShape.BorderColor = ComicStyle.Ink;
+                badgeShape.HardShadow = true;
+                badgeShape.ShadowOffset = new Vector2(2.5f, -2.5f);
+                badgeShape.ShadowColor = ComicStyle.Ink;
+                badgeShape.color = ComicStyle.Yellow;
 
                 var txtGo = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
                 txtGo.transform.SetParent(mapBadge, false);
                 Stretch((RectTransform)txtGo.transform);
                 var txt = txtGo.GetComponent<TextMeshProUGUI>();
-                txt.fontSize = 11f;
+                txt.font = resolved.ResolveFont(true, "MAP");
+                txt.fontSize = 12f;
                 txt.fontStyle = FontStyles.Bold;
                 txt.alignment = TextAlignmentOptions.Center;
-                txt.color = Color.white;
+                txt.color = ComicStyle.Ink;
                 txt.text = "MAP";
                 txt.raycastTarget = false;
             }
 
+            // 7. 角落黑色纸胶带条（三条小黑矩形，模拟纸面粘贴感）
+            BuildCornerTapes();
+
             BuildActorMarkerPools();
+
+            if (_playerArrowImage == null && playerArrow != null) _playerArrowImage = playerArrow.GetComponent<Image>();
+            if (_playerPulseRingImage == null && playerPulseRing != null) _playerPulseRingImage = playerPulseRing.GetComponent<Image>();
+        }
+
+        private void BuildCornerTapes()
+        {
+            if (transform.Find("Tape_TL") != null) return;
+
+            // 左上胶带
+            CreateTape("Tape_TL", new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 0f), 35f, new Vector2(30f, 10f));
+            // 右上胶带
+            CreateTape("Tape_TR", new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(0f, 0f), -35f, new Vector2(30f, 10f));
+            // 左下胶带
+            CreateTape("Tape_BL", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0f, 0f), -35f, new Vector2(28f, 10f));
+        }
+
+        private void CreateTape(string name, Vector2 anchor, Vector2 pivot, Vector2 pos, float rotation, Vector2 size)
+        {
+            var tapeGo = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            tapeGo.transform.SetParent(transform, false);
+            var rt = tapeGo.GetComponent<RectTransform>();
+            rt.anchorMin = anchor;
+            rt.anchorMax = anchor;
+            rt.pivot = pivot;
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+            rt.localRotation = Quaternion.Euler(0f, 0f, rotation);
+
+            var shape = tapeGo.GetComponent<UIInkShapeGraphic>();
+            shape.Shape = UIInkShape.RoundedRect;
+            shape.CornerRadius = 1.5f;
+            shape.BorderWidth = 0f;
+            shape.color = ComicStyle.Ink;
+            shape.raycastTarget = false;
         }
 
         private void BuildActorMarkerPools()
@@ -232,7 +287,8 @@ namespace P1.UI
             var go = new GameObject(name, typeof(RectTransform), typeof(Image));
             go.transform.SetParent(markersContainer, false);
             var rt = go.GetComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(12f, 12f);
+            // 标记适当放大（玩家 8px、敌人 6px 直径 12px，队友 16px）
+            rt.sizeDelta = new Vector2(isAlly ? 16f : 12f, isAlly ? 16f : 12f);
 
             var img = go.GetComponent<Image>();
             img.sprite = GetCircleSprite();
@@ -242,9 +298,9 @@ namespace P1.UI
             var crossGo = new GameObject("Cross", typeof(RectTransform), typeof(Image));
             crossGo.transform.SetParent(rt, false);
             var crt = crossGo.GetComponent<RectTransform>();
-            crt.sizeDelta = new Vector2(8f, 8f);
+            crt.sizeDelta = new Vector2(10f, 10f);
             var cImg = crossGo.GetComponent<Image>();
-            cImg.color = new Color(0.15f, 0.15f, 0.15f, 0.9f);
+            cImg.color = ComicStyle.Ink;
             cImg.raycastTarget = false;
             crossGo.SetActive(false);
 
@@ -280,9 +336,10 @@ namespace P1.UI
             };
         }
 
-        private void Update()
+        private void OnDestroy()
         {
-            UpdateMinimap();
+            _motorCache.Clear();
+            _deadHealthBuffer.Clear();
         }
 
         public void UpdateMinimap()
@@ -318,8 +375,8 @@ namespace P1.UI
                         float angle = Mathf.Atan2(aimDir.z, aimDir.x) * Mathf.Rad2Deg - 90f;
                         playerArrow.localRotation = Quaternion.Euler(0f, 0f, angle);
                     }
-                    var arrowImg = playerArrow.GetComponent<Image>();
-                    if (arrowImg != null) arrowImg.color = resolved.GetTeamColor(localPlayer.Health.Team);
+                    if (_playerArrowImage == null) _playerArrowImage = playerArrow.GetComponent<Image>();
+                    if (_playerArrowImage != null) _playerArrowImage.color = resolved.GetTeamColor(localPlayer.Health.Team);
                 }
 
                 _pulseTimer += Time.deltaTime * 2.2f;
@@ -328,8 +385,8 @@ namespace P1.UI
                     float pScale = 1.0f + (Mathf.Repeat(_pulseTimer, 1f) * 0.8f);
                     float pAlpha = 1f - Mathf.Repeat(_pulseTimer, 1f);
                     playerPulseRing.localScale = new Vector3(pScale, pScale, 1f);
-                    var pImg = playerPulseRing.GetComponent<Image>();
-                    if (pImg != null) pImg.color = new Color(1f, 1f, 1f, pAlpha * 0.65f);
+                    if (_playerPulseRingImage == null) _playerPulseRingImage = playerPulseRing.GetComponent<Image>();
+                    if (_playerPulseRingImage != null) _playerPulseRingImage.color = new Color(1f, 1f, 1f, pAlpha * 0.65f);
                 }
             }
 
@@ -345,6 +402,20 @@ namespace P1.UI
             var all = CombatantHealthRegistry.All;
             if (all == null) return;
 
+            if (_motorCache.Count > 16)
+            {
+                _deadHealthBuffer.Clear();
+                foreach (var kvp in _motorCache)
+                {
+                    if (kvp.Key == null) _deadHealthBuffer.Add(kvp.Key);
+                }
+                for (int k = 0; k < _deadHealthBuffer.Count; k++)
+                {
+                    _motorCache.Remove(_deadHealthBuffer[k]);
+                }
+                _deadHealthBuffer.Clear();
+            }
+
             var localPlayer = PlayerController.LocalPlayer;
             CombatantHealth localHealth = localPlayer != null ? localPlayer.Health : null;
             Team myTeam = localHealth != null ? localHealth.Team : Team.TeamA;
@@ -357,7 +428,12 @@ namespace P1.UI
                 var ch = all[i];
                 if (ch == null || ch == localHealth) continue;
 
-                var motor = ch.GetComponent<InkCharacterMotor>();
+                if (!_motorCache.TryGetValue(ch, out var motor))
+                {
+                    motor = ch.GetComponent<InkCharacterMotor>();
+                    _motorCache[ch] = motor;
+                }
+
                 bool isAlly = ch.Team == myTeam;
 
                 if (isAlly)

@@ -12,10 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 711916ec8c3864cfcade766adfeeb170, type: 3}
   m_Name: HudGaugeStyle
   m_EditorClassIdentifier: P1.Game::P1.UI.HudGaugeStyleSO
-  orbAnchoredPosition: {x: -330, y: -132}
-  orbSize: 124
-  tankAnchoredPosition: {x: -429, y: -170}
-  tankSize: {x: 54, y: 180}
+  orbAnchoredPosition: {x: -360, y: -156}
+  orbSize: 156
+  tankAnchoredPosition: {x: -486, y: -196}
+  tankSize: {x: 66, y: 214}
   lowInkThreshold01: 0.2
   lowInkHysteresis: 0.03
   bombThreshold01: 0.7
@@ -41,14 +41,14 @@ MonoBehaviour:
   readyHintText: "\u6309 Q \u91CA\u653E"
   readyHintKey: Q
   readyHintDelay: 0.06
-  readyHintSize: {x: 140, y: 30}
+  readyHintSize: {x: 176, y: 36}
   readyHintOffsetY: -76
   slamIcon: {fileID: 21300000, guid: 194ef78fb40114841ac6bc85fded200b, type: 3}
   stormIcon: {fileID: 21300000, guid: 22563bc37c1c048ae91448c6d45e8ec3, type: 3}
-  specialIconSize: 44
+  specialIconSize: 48
   specialIconOffsetY: 6
-  percentFontSize: 20
-  hintFontSize: 18
+  percentFontSize: 22
+  hintFontSize: 20
   tankFillSpring:
     frequency: 8.5
     damping: 0.9

@@ -128,12 +128,15 @@ Material:
     - _FocusRadius: 2.2
     - _FocusWeight: 0
     - _GelNoiseScale: 2.2
-    - _GelNoiseStrength: 0.035
+    - _GelNoiseStrength: 0.022
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
     - _GroundTexStrength: 1
-    - _InkGlow: 0.16
+    - _InkGlow: 0.2
+    - _InkShadeSoftness: 0.08
+    - _InkShadeThreshold: 0.48
+    - _InkShadowFloor: 0.72
     - _LipHeight: 0.014
     - _LipSoftness: 1.7
     - _LipStrength: 2.4
@@ -148,6 +151,9 @@ Material:
     - _SeamLipHeight: 0.02
     - _SeamLipStrength: 1.8
     - _SeamShadowStrength: 0.48
+    - _ShadeSoftness: 0.03
+    - _ShadeThreshold: 0.5
+    - _ShadowFloor: 0.55
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
@@ -164,12 +170,13 @@ Material:
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _CliffColor: {r: 0.09462964, g: 0.08898155, b: 0.078288324, a: 1}
-    - _Color: {r: 0.72, g: 0.69, b: 0.62, a: 1}
+    - _Color: {r: 0.76, g: 0.74, b: 0.68, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
     - _GridLineColor: {r: 0.23302203, g: 0.21404114, b: 0.17064494, a: 1}
     - _InkMapOriginXZ: {r: -20, g: -20, b: 40, a: 40}
     - _InkTexelSize: {r: 0.0002441406, g: 0.0002441406, b: 4096, a: 4096}
+    - _ShadowTint: {r: 0.13286833, g: 0.17064494, b: 0.34239164, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _TeamAColor: {r: 1, g: 0.43999997, b: 0.059999965, a: 1}
     - _TeamBColor: {r: 0.14999998, g: 0.41999996, b: 1, a: 1}

@@ -116,6 +116,9 @@ namespace P1.Tests
             _tempConfig = ScriptableObject.CreateInstance<WeaponConfigSO>();
             _tempConfig.specialKind = SpecialKind.Storm;
             _tempConfig.specialPointsRequired = 180f;
+            // 云层寿命从 6.5s 压到 3.0s：漂移/持续伤害断言都在前 1.75s 内完成，
+            // 后面的"寿命结束回收"走同一条代码路径，仅省下纯等待。
+            _tempConfig.stormDuration = 3.0f;
             weapon.EquipWeapon(_tempConfig);
             weapon.AddSpecialPoints(500);
             Assert.IsTrue(weapon.IsSpecialReady, "换装风暴云武器并充能后应就绪");
@@ -150,15 +153,15 @@ namespace P1.Tests
             float coverageAfter = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
             Assert.Greater(coverageAfter, coverageBefore + 0.3f, "雨点应持续侵蚀地面");
 
-            // 6.5s 生命周期结束后云层应被回收；低帧率下轮询到回收完成，避免掐点抖动
-            yield return new WaitForSeconds(5.2f);
-            float recycleDeadline = Time.time + 2.0f;
+            // 生命周期（临时配置 3.0s）结束后云层应被回收；低帧率下轮询到回收完成，避免掐点抖动
+            yield return new WaitForSeconds(1.4f);
+            float recycleDeadline = Time.time + 2.5f;
             while (pool.ActiveStormCount > 0 && Time.time < recycleDeadline)
             {
                 yield return null;
             }
 
-            Assert.AreEqual(0, pool.ActiveStormCount, "6.5s 后云层应完全消散并回收");
+            Assert.AreEqual(0, pool.ActiveStormCount, "生命周期结束后云层应完全消散并回收");
         }
 
         [UnityTest]

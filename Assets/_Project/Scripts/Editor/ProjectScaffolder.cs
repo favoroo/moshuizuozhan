@@ -39,9 +39,7 @@ namespace P1.Editor
             var botCfg = LoadOrCreateSO<BotConfigSO>($"{SoFolder}/BotConfig.asset");
             var arenaStyle = LoadOrCreateSO<ArenaStyleSO>(ArenaStylePath);
 
-            // 远景雾只在 55m 之后生效，避免俯视全景/远景被整片白雾糊住；近景战斗完全无雾。
-            arenaStyle.fogStartDistance = 55f;
-            arenaStyle.fogEndDistance = 150f;
+            // P10-A：雾距统一由 ArenaStyleSO 驱动，重建材质时不再覆盖风格参数。
             EditorUtility.SetDirty(arenaStyle);
 
             // P7-B：40×56 集装箱码头地图与涂地网格（保持原有 400/200 网格规格，兼容冒烟测试断言）
@@ -1579,7 +1577,10 @@ namespace P1.Editor
             return mat;
         }
 
-        /// <summary>P7-B：出生台队色圆盘材质（队色 + 圆环 + 导向箭头 + 混凝土基台外缘）。</summary>
+        /// <summary>
+        /// P7-B：出生台圆盘材质（P11-C：中性钢灰出生池，与码头风格协调，不带队色；
+        /// 白色圆环 + 警戒黄导向箭头 + 混凝土基台外缘）。teamColor 参数保留兼容旧调用。
+        /// </summary>
         private static Material CreateOrUpdateSpawnPadMaterial(string path, Color teamColor)
         {
             Shader sh = FindArenaShader("SpawnPad.shader", "P1/SpawnPad", "Universal Render Pipeline/Unlit");
@@ -1595,13 +1596,13 @@ namespace P1.Editor
                 mat.shader = sh;
             }
 
-            mat.SetColor("_BaseColor", Linear(new Color(0.14f, 0.16f, 0.19f, 1f)));
-            mat.SetColor("_PlatformColor", Linear(new Color(0.65f, 0.63f, 0.58f, 1f)));
-            mat.SetColor("_TeamColor", Linear(teamColor));
+            ArenaStyleSO style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
+            mat.SetColor("_BaseColor", Linear(new Color(0.30f, 0.33f, 0.38f, 1f)));
+            mat.SetColor("_PlatformColor", Linear(style != null ? style.concreteMid : new Color(0.65f, 0.63f, 0.58f, 1f)));
             mat.SetColor("_RingColor", Linear(new Color(0.92f, 0.93f, 0.95f, 1f)));
-            mat.SetColor("_ChevronColor", Linear(new Color(1f, 0.92f, 0.72f, 1f)));
-            mat.SetFloat("_GlowStrength", 0.55f);
-            mat.color = Linear(teamColor);
+            mat.SetColor("_ChevronColor", Linear(style != null ? style.hazardYellow : new Color(0.86f, 0.68f, 0.20f, 1f)));
+            mat.SetFloat("_GlowStrength", 0.30f);
+            mat.color = Linear(new Color(0.30f, 0.33f, 0.38f, 1f));
             EditorUtility.SetDirty(mat);
             return mat;
         }

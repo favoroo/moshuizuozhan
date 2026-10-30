@@ -51,6 +51,8 @@ namespace P1.Weapons
         private Vector3 _specialGroundCenter;
         private Transform _specialWarningRing;
         private MeshRenderer _specialRingRenderer;
+        private Mesh _specialRingMesh;
+        private Material _specialRingMaterial;
         private MaterialPropertyBlock _propBlock;
 
         // 蓄力狙表现：地面激光指示线 + 释放瞬间的贯穿光柱
@@ -169,6 +171,17 @@ namespace P1.Weapons
             if (_specialWarningRing != null)
             {
                 DestroySafe(_specialWarningRing.gameObject);
+                _specialWarningRing = null;
+            }
+            if (_specialRingMesh != null)
+            {
+                DestroySafe(_specialRingMesh);
+                _specialRingMesh = null;
+            }
+            if (_specialRingMaterial != null)
+            {
+                DestroySafe(_specialRingMaterial);
+                _specialRingMaterial = null;
             }
             if (_laserSight != null)
             {
@@ -713,12 +726,14 @@ namespace P1.Weapons
         {
             var go = new GameObject($"{name}_SpecialWarningRing");
             var mf = go.AddComponent<MeshFilter>();
-            mf.sharedMesh = VfxPool.BuildRingMesh(40, 0.92f, 1.0f);
+            _specialRingMesh = VfxPool.BuildRingMesh(40, 0.92f, 1.0f);
+            mf.sharedMesh = _specialRingMesh;
             _specialRingRenderer = go.AddComponent<MeshRenderer>();
 
             Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
             if (sh == null) sh = Shader.Find("Sprites/Default");
-            _specialRingRenderer.sharedMaterial = new Material(sh);
+            _specialRingMaterial = new Material(sh);
+            _specialRingRenderer.sharedMaterial = _specialRingMaterial;
             _specialRingRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             go.SetActive(false);
 

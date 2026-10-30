@@ -35,6 +35,16 @@ namespace P1.Ink
         [Range(0f, 0.5f)]
         public float splatGrowSeconds = 0.12f;
 
+        [Tooltip("墨迹图集湿润时间戳回绕周期（秒）：G 通道存 frac(落墨时刻/周期)，8bit 精度 = 周期/256。"+
+                 "默认 32s → 0.125s/级（湿润度量化步长约 0.02）；周期越大回绕伪影越少但时间戳越粗")]
+        [Range(8f, 120f)]
+        public float atlasWetClockPeriod = 32f;
+
+        [Tooltip("生长动画片元侧侵蚀的最大回缩距离（米）：新墨斑以最终形态写入图集，可见边缘从最终轮廓"+
+                 "向内回缩这么多再随时间松开（近似旧版从 0.4R 放大到 R 的铺开观感）")]
+        [Range(0f, 2f)]
+        public float atlasGrowShrinkMeters = 0.4f;
+
         [Tooltip("每个墨斑的色调微差强度：0 = 完全纯色，1 = 参考实现默认")]
         [Range(0f, 2f)]
         public float splatToneStrength = 1f;

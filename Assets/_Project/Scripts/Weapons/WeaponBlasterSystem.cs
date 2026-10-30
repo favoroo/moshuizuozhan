@@ -68,7 +68,7 @@ namespace P1.Weapons
 
             if (InkSurfaceController.Instance != null)
             {
-                painted = InkSurfaceController.Instance.PaintCircle(groundPoint, paintRadius, attackerTeam);
+                painted = InkSurfaceController.Instance.PaintSphereWithWalls(burstCenter, paintRadius, attackerTeam);
                 if (painted > 0)
                 {
                     onCellsPainted?.Invoke(painted);

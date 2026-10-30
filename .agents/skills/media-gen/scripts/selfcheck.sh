@@ -72,10 +72,13 @@ try:
 except Exception as e:
     print("  ! 响应不是预期的 /v1/models JSON: %s" % e); sys.exit(0)
 want = ["gemini-3.1-flash-image", "gemini-3.1-flash-lite-image",
-        "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "lyria-3.5"]
+        "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts",
+        "lyria-3.5", "lyria-3-pro-preview"]
 # 名单里有 ≠ 真能用：下面这些是实测已知的「在名单但通道不可用」
 KNOWN_BROKEN = {
     "gemini-3.1-flash-lite-image": "2026-10-28 实测 PROXY_GENERATION_DISABLED，改用品质模型",
+    "lyria-3.5": "2026-10-29 实测 PROXY_GENERATION_DISABLED，BGM 改用 tools/bake_bgm.py",
+    "lyria-3-pro-preview": "2026-10-29 实测同样 PROXY_GENERATION_DISABLED（gen_music.sh 的备用模型）",
 }
 print("  网关共 %d 个模型" % len(ids))
 for w in want:

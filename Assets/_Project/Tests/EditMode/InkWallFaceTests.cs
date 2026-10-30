@@ -128,5 +128,45 @@ namespace P1.Tests
             int centerIndex = (face.Height / 2) * face.Width + (face.Width / 2);
             Assert.AreEqual(255, pixels[centerIndex].a, "已涂区域 alpha 应为 255");
         }
+
+        [Test]
+        public void PaintCircle_RepeatedOverlappingSplats_NeverDemoteExistingInk()
+        {
+            InkWallFace face = CreateFace(4f, 2f, 0.1f);
+
+            // 第一发：圆心格应为实心墨水（alpha ≥ 0.62 底线）
+            face.PaintCircle(new Vector2(2f, 1f), 0.8f, Team.TeamA);
+            int centerIndex = (face.Height / 2) * face.Width + (face.Width / 2);
+            byte alphaAfterFirst = face.PixelBuffer[centerIndex].a;
+            Assert.GreaterOrEqual(alphaAfterFirst, 158, "己方实心格 alpha 不应低于 0.62 底线");
+
+            // 随后 8 发中心错开、互相重叠的墨斑（模拟连续扫射）：
+            // 后续墨斑的圆外过渡环（alpha ≤ 0.5，渲染时被整格剔除）绝不允许压低已有墨水，
+            // 否则连续喷扫视觉上等于一边喷一边擦。
+            for (int i = 1; i <= 8; i++)
+            {
+                face.PaintCircle(new Vector2(2f + i * 0.12f, 1f + (i % 2) * 0.1f), 0.8f, Team.TeamA);
+                Assert.GreaterOrEqual(
+                    face.PixelBuffer[centerIndex].a,
+                    alphaAfterFirst,
+                    $"第 {i + 1} 发墨斑的过渡环不得压低已有墨水 alpha（喷扫 = 擦除回归）");
+            }
+        }
+
+        [Test]
+        public void PaintCircle_RepeatedSpraysOnSameSpot_SolidifyCoverage()
+        {
+            InkWallFace face = CreateFace(4f, 2f, 0.1f);
+            face.PaintCircle(new Vector2(2f, 1f), 0.9f, Team.TeamA);
+
+            int centerIndex = (face.Height / 2) * face.Width + (face.Width / 2);
+            face.PixelBuffer[centerIndex].a = 100; // 模拟早期半覆盖格
+            byte before = face.PixelBuffer[centerIndex].a;
+
+            // 同位置补喷：覆盖率只升不降
+            face.PaintCircle(new Vector2(2f, 1f), 0.9f, Team.TeamA);
+            Assert.GreaterOrEqual(face.PixelBuffer[centerIndex].a, before, "补喷不得降低已有格覆盖率");
+            Assert.AreEqual(Team.TeamA, face.InkAt(new Vector2(2f, 1f)), "补喷不改归属");
+        }
     }
 }

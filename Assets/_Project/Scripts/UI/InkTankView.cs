@@ -44,6 +44,31 @@ namespace P1.UI
         private float _blinkPhase;
         private float _nextWarningTime;
         private int _displayedPercent = -1;
+        private int _lastFrameAlarmStep = -1;
+
+        private void Awake()
+        {
+            EnsureSubCanvas();
+        }
+
+        private void EnsureSubCanvas()
+        {
+            var canvas = GetComponent<Canvas>();
+            if (canvas == null)
+            {
+                canvas = gameObject.AddComponent<Canvas>();
+                canvas.overrideSorting = false;
+                var parentCanvas = transform.parent != null ? transform.parent.GetComponentInParent<Canvas>() : null;
+                if (parentCanvas != null)
+                {
+                    canvas.additionalShaderChannels = parentCanvas.additionalShaderChannels | AdditionalCanvasShaderChannels.TexCoord1;
+                }
+                else
+                {
+                    canvas.additionalShaderChannels = AdditionalCanvasShaderChannels.TexCoord1 | AdditionalCanvasShaderChannels.Normal | AdditionalCanvasShaderChannels.Tangent;
+                }
+            }
+        }
 
         /// <summary>当前是否处于低墨告警（带迟滞）。</summary>
         public bool IsLowInk => _low;
@@ -216,17 +241,23 @@ namespace P1.UI
 
             if (warningGlow != null)
             {
-                Color red = themeResolved.dangerRed;
+                Color red = ComicStyle.Red;
                 warningGlow.color = new Color(red.r, red.g, red.b, blink * resolved.warningGlowAlpha);
             }
 
             if (frameShape != null)
             {
-                Color normal = themeResolved.outlineColor;
-                Color alarm = themeResolved.dangerRed;
-                frameShape.BorderColor = _low
-                    ? Color.Lerp(normal, alarm, 0.25f + blink * 0.75f)
-                    : normal;
+                int step = _low ? Mathf.RoundToInt((0.25f + blink * 0.75f) * 4f) : 0;
+                if (step != _lastFrameAlarmStep)
+                {
+                    _lastFrameAlarmStep = step;
+                    Color normal = ComicStyle.Ink;
+                    Color alarm = ComicStyle.Red;
+                    frameShape.BorderColor = _low
+                        ? Color.Lerp(normal, alarm, step / 4f)
+                        : normal;
+                    frameShape.BorderWidth = ComicStyle.Border;
+                }
             }
         }
 
@@ -248,6 +279,18 @@ namespace P1.UI
             {
                 Color panel = themeResolved.panelColor;
                 bodyShape.color = new Color(panel.r, panel.g, panel.b, panel.a);
+            }
+
+            if (frameShape != null)
+            {
+                frameShape.BorderColor = ComicStyle.Ink;
+                frameShape.BorderWidth = ComicStyle.Border;
+                frameShape.HardShadow = true;
+                frameShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+                frameShape.ShadowColor = ComicStyle.Ink;
+                frameShape.GlossAlpha = 0f;
+                frameShape.DrawGloss = false;
+                frameShape.InnerRimAlpha = 0f;
             }
         }
 

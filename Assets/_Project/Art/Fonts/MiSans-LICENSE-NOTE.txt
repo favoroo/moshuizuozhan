@@ -1,0 +1,23 @@
+MiSans 字体（Semibold / Heavy）—— 来源与授权说明
+====================================================
+
+来源
+  小米官方发布的 MiSans 全套中文字体（用户提供原版 woff2，原稿存于
+  MediaRaw/fonts/MiSans-*.woff2；静态 TTF 由 `python3 tools/bake_fonts.py` 重建）。
+
+授权
+  MiSans 由小米官方以《MiSans 字体知识产权许可协议》授权：个人与企业均可
+  免费商用（含应用/游戏内嵌），无需支付授权费、无需另行授权。
+  协议全文以小米官方发布页为准：https://hyperos.mi.com/font/
+  （下载包内附协议原文，落地正式发版前建议将官方 txt 存放于此目录替换本说明。）
+
+限制（摘要，非法律意见）
+  - 不得对字体软件本身拆解、修改后单独分发或售卖；
+    本项目内的格式转换（woff2→TTF）与 TMP 图集烘焙均为游戏内嵌使用，不在其列。
+  - 不得将字体文件本身作为独立作品分发。
+
+字重分工
+  MiSans-Semibold(650) → UI 正文字体（TMP: "MiSans-Semibold SDF"）
+  MiSans-Heavy(900)    → 标题/大字显示（TMP: "MiSans-Heavy SDF"）
+
+  2026-10-30 替换原站酷快乐体 / 站酷庆科黄油体（OFL，原件仍存 MediaRaw/fonts/）。

@@ -26,6 +26,8 @@ namespace P1.Player
         private MaterialPropertyBlock _propBlock;
         private CombatantHealth _lastAttacker;
         private string _lastWeaponCause;
+        private InkCharacterMotor _motorCache;
+        private bool _motorQueried;
 
         private static readonly int BaseColorProp = Shader.PropertyToID("_BaseColor");
 
@@ -36,6 +38,20 @@ namespace P1.Player
         public bool IsAlive { get; private set; } = true;
         public bool IsInvulnerable { get; set; }
         public float RespawnRemaining => _respawnTimer;
+
+        /// <summary>挂载在该单位上的机动组件（懒缓存，null 结果也标记已查，避免逐帧重复查询）。</summary>
+        public InkCharacterMotor Motor
+        {
+            get
+            {
+                if (!_motorQueried)
+                {
+                    _motorCache = GetComponent<InkCharacterMotor>();
+                    _motorQueried = true;
+                }
+                return _motorCache;
+            }
+        }
 
         /// <summary>该战斗单位的配置（打击反馈参数等，HUD 可只读访问）。</summary>
         public PlayerConfigSO Config => config;
@@ -306,6 +322,7 @@ namespace P1.Player
         private void ApplyHitFlash(bool whiteFlash)
         {
             if (bodyRenderers == null) return;
+            if (_propBlock == null) _propBlock = new MaterialPropertyBlock();
             for (int i = 0; i < bodyRenderers.Length; i++)
             {
                 var r = bodyRenderers[i];

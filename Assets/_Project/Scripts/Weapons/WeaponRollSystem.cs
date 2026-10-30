@@ -64,6 +64,12 @@ namespace P1.Weapons
                 }
             }
 
+            // 滚筒推抵墙面时同时给接触立面下沿涂上墨水
+            if (InkWallSurface.All.Count > 0)
+            {
+                changed += InkWallSurface.PaintAllInSphere(to + forward * 0.35f, radius * 1.5f, team);
+            }
+
             return changed;
         }
 

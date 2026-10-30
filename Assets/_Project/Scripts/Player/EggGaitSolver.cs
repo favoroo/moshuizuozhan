@@ -29,27 +29,29 @@ namespace P1.Player
     }
 
     /// <summary>
-    /// 无腿蛋形角色的弹跳步态求解。
-    /// |sin| 给出每个周期两次触地（触地压扁、最高点拉长），sin 给出左右交替摇摆。
+    /// 无腿蛋形角色的贴地步态求解（左右摇摆，不做上下弹跳）。
+    /// 旧版用 |sin| 驱动垂直弹跳与 12% 触地挤压，蛋仔走起来像在连续蹦；
+    /// 现在只保留很小的起伏（≤ 8 mm）与摇摆，让脚底始终贴地，站立时完全静止。
     /// 纯函数、无状态、零分配，可在 EditMode 直接单测；实际位移仍由物理移动组件负责。
     /// </summary>
     public static class EggGaitSolver
     {
         /// <summary>低于此速度视为静止，调用方不应推进步态相位。</summary>
-        public const float MoveSpeedThreshold = 0.6f;
+        public const float MoveSpeedThreshold = 1.0f;
 
-        /// <summary>触地频率（次/秒）：慢走约 2.0，潜墨全速约 3.4。</summary>
-        public const float CadenceSlow = 2.0f;
-        public const float CadenceFast = 3.4f;
+        /// <summary>触地频率（次/秒）：慢走约 1.35，潜墨全速约 2.2（旧版 2.0~3.4 太急促）。</summary>
+        public const float CadenceSlow = 1.35f;
+        public const float CadenceFast = 2.2f;
 
-        public const float BobSlow = 0.030f;
-        public const float BobFast = 0.055f;
-        public const float SquashDepth = 0.120f;
-        public const float SquashBulge = 0.070f;
-        public const float RockSlow = 2.5f;
-        public const float RockFast = 6.0f;
-        public const float ArmSwingSlow = 10f;
-        public const float ArmSwingFast = 30f;
+        // 起伏必须远小于体型（1.12m），否则会读成"跳跃"而不是"走路"
+        public const float BobSlow = 0.004f;
+        public const float BobFast = 0.008f;
+        public const float SquashDepth = 0.060f;
+        public const float SquashBulge = 0.040f;
+        public const float RockSlow = 1.6f;
+        public const float RockFast = 3.2f;
+        public const float ArmSwingSlow = 6f;
+        public const float ArmSwingFast = 14f;
 
         /// <summary>把实际移速归一化（11.8 m/s 为潜墨全速，也是本项目的最高移速）。</summary>
         public static float Speed01(float moveSpeed)
@@ -66,17 +68,18 @@ namespace P1.Player
         {
             speed01 = Mathf.Clamp01(speed01);
 
-            float bounce = Mathf.Abs(Mathf.Sin(phaseRadians));
-            float contact = 1f - bounce;
+            float sway = Mathf.Sin(phaseRadians);
+            float lift = Mathf.Abs(sway);
+            float contact = 1f - lift;
             // 慢速时保留一半形变量，避免小碎步看起来僵硬
             float effort = 0.5f + 0.5f * speed01;
 
             EggGaitPose pose;
-            pose.BobY = bounce * Mathf.Lerp(BobSlow, BobFast, speed01);
-            pose.RockDeg = Mathf.Sin(phaseRadians) * Mathf.Lerp(RockSlow, RockFast, speed01);
+            pose.BobY = lift * Mathf.Lerp(BobSlow, BobFast, speed01);
+            pose.RockDeg = sway * Mathf.Lerp(RockSlow, RockFast, speed01);
             pose.SquashY = 1f - SquashDepth * contact * effort;
             pose.SquashXZ = 1f + SquashBulge * contact * effort;
-            pose.ArmSwingDeg = Mathf.Sin(phaseRadians) * Mathf.Lerp(ArmSwingSlow, ArmSwingFast, speed01);
+            pose.ArmSwingDeg = sway * Mathf.Lerp(ArmSwingSlow, ArmSwingFast, speed01);
             return pose;
         }
     }

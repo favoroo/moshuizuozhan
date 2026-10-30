@@ -36,6 +36,7 @@ namespace P1.UI
         [SerializeField] private TMP_Text bannerMainText;
         [SerializeField] private TMP_Text bannerSubText;
         [SerializeField] private UIBurstGraphic burstGraphic;
+        [SerializeField] private ComicActionLinesGraphic actionLinesGraphic;
         [SerializeField] private UISpringMotion springMotion;
 
         private float _activeTimer;
@@ -84,23 +85,42 @@ namespace P1.UI
                 springMotion = rootGo.GetComponent<UISpringMotion>();
                 springMotion.SetTheme(resolved);
 
+                // 动作线
+                var linesGo = new GameObject("ActionLines", typeof(RectTransform), typeof(CanvasRenderer), typeof(ComicActionLinesGraphic));
+                linesGo.transform.SetParent(bannerRoot, false);
+                Stretch((RectTransform)linesGo.transform, -80f);
+                actionLinesGraphic = linesGo.GetComponent<ComicActionLinesGraphic>();
+                actionLinesGraphic.RayCount = 24;
+                actionLinesGraphic.Alpha = 0f;
+                actionLinesGraphic.color = ComicStyle.Yellow;
+                actionLinesGraphic.raycastTarget = false;
+
                 // 爆破光环
                 var burstGo = new GameObject("Burst", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIBurstGraphic));
                 burstGo.transform.SetParent(bannerRoot, false);
                 Stretch((RectTransform)burstGo.transform, -30f);
                 burstGraphic = burstGo.GetComponent<UIBurstGraphic>();
-                burstGraphic.Configure(0.7f, 12, resolved.readyGold);
+                burstGraphic.Configure(0.7f, 12, ComicStyle.Yellow);
                 burstGraphic.raycastTarget = false;
 
-                // 墨水炸开背景
+                // 漫画爆点背景（8px 粗墨边 + 实心硬阴影 + 半调网点）
                 var splatGo = new GameObject("SplatBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
                 splatGo.transform.SetParent(bannerRoot, false);
                 Stretch((RectTransform)splatGo.transform);
                 bannerSplatBg = splatGo.GetComponent<UIInkShapeGraphic>();
-                bannerSplatBg.Shape = UIInkShape.Blob;
-                bannerSplatBg.BorderWidth = 6f;
-                bannerSplatBg.BorderColor = resolved.outlineColor;
-                bannerSplatBg.color = resolved.teamAColor;
+                bannerSplatBg.Shape = UIInkShape.RoundedRect;
+                bannerSplatBg.CornerRadius = ComicStyle.CornerSharp;
+                bannerSplatBg.BorderWidth = ComicStyle.BorderHeavy;
+                bannerSplatBg.BorderColor = ComicStyle.Ink;
+                bannerSplatBg.HardShadow = true;
+                bannerSplatBg.ShadowOffset = new Vector2(8f, -8f);
+                bannerSplatBg.ShadowColor = ComicStyle.Ink;
+                bannerSplatBg.Halftone = true;
+                bannerSplatBg.HalftoneAlpha = 0.14f;
+                bannerSplatBg.GlossAlpha = 0f;
+                bannerSplatBg.DrawGloss = false;
+                bannerSplatBg.InnerRimAlpha = 0f;
+                bannerSplatBg.color = ComicStyle.Yellow;
                 bannerSplatBg.raycastTarget = false;
 
                 // 主标题文字
@@ -117,7 +137,7 @@ namespace P1.UI
                 bannerMainText.fontSize = 120f;
                 bannerMainText.fontStyle = FontStyles.Bold;
                 bannerMainText.alignment = TextAlignmentOptions.Center;
-                bannerMainText.color = Color.white;
+                bannerMainText.color = ComicStyle.Ink;
                 bannerMainText.raycastTarget = false;
 
                 // 副标题文字
@@ -135,7 +155,7 @@ namespace P1.UI
                 bannerSubText.fontSize = 24f;
                 bannerSubText.fontStyle = FontStyles.Bold;
                 bannerSubText.alignment = TextAlignmentOptions.Center;
-                bannerSubText.color = resolved.readyGold;
+                bannerSubText.color = ComicStyle.Ink;
                 bannerSubText.raycastTarget = false;
             }
 
@@ -182,29 +202,31 @@ namespace P1.UI
 
                 if (bannerSplatBg != null)
                 {
-                    bannerSplatBg.Shape = UIInkShape.Blob;
-                    bannerSplatBg.BorderWidth = 5f;
-                    bannerSplatBg.BorderColor = resolved.outlineColor;
-                    bannerSplatBg.color = new Color(0.12f, 0.10f, 0.18f, 0.95f);
-                    bannerSplatBg.PlayWobble(0.12f, 0.4f);
+                    bannerSplatBg.color = ComicStyle.Paper;
                 }
 
                 if (bannerMainText != null)
                 {
                     bannerMainText.fontSize = 140f;
                     bannerMainText.text = number.ToString();
-                    bannerMainText.color = Color.white;
+                    bannerMainText.color = ComicStyle.Ink;
                 }
 
                 if (bannerSubText != null)
                 {
                     bannerSubText.text = "READY...";
-                    bannerSubText.color = resolved.readyGold;
+                    bannerSubText.color = ComicStyle.Ink;
+                }
+
+                if (actionLinesGraphic != null)
+                {
+                    actionLinesGraphic.Alpha = 0.22f;
+                    actionLinesGraphic.color = ComicStyle.Yellow;
                 }
 
                 if (burstGraphic != null)
                 {
-                    burstGraphic.Configure(0.5f, 8, Color.white);
+                    burstGraphic.Configure(0.5f, 8, ComicStyle.Yellow);
                     burstGraphic.Play();
                 }
 
@@ -213,7 +235,6 @@ namespace P1.UI
                 {
                     springMotion.SnapHome();
                     springMotion.PlayIn(0f);
-                    springMotion.Punch(0.12f);
                 }
             }
             else
@@ -231,34 +252,36 @@ namespace P1.UI
             _activeTimer = 1.35f;
 
             bannerRoot.anchoredPosition = new Vector2(0f, 60f);
-            bannerRoot.localRotation = Quaternion.Euler(0f, 0f, -6f);
+            bannerRoot.localRotation = Quaternion.Euler(0f, 0f, -4f);
             bannerRoot.sizeDelta = new Vector2(720f, 280f);
 
             if (bannerSplatBg != null)
             {
-                bannerSplatBg.Shape = UIInkShape.Blob;
-                bannerSplatBg.BorderWidth = 7f;
-                bannerSplatBg.BorderColor = resolved.outlineColor;
-                bannerSplatBg.color = resolved.teamAColor;
-                bannerSplatBg.PlayWobble(0.18f, 0.6f);
+                bannerSplatBg.color = ComicStyle.Yellow;
             }
 
             if (bannerMainText != null)
             {
                 bannerMainText.fontSize = 150f;
                 bannerMainText.text = "GO!";
-                bannerMainText.color = resolved.readyGold;
+                bannerMainText.color = ComicStyle.Ink;
             }
 
             if (bannerSubText != null)
             {
                 bannerSubText.text = "TURF RIOT START!";
-                bannerSubText.color = Color.white;
+                bannerSubText.color = ComicStyle.Ink;
+            }
+
+            if (actionLinesGraphic != null)
+            {
+                actionLinesGraphic.Alpha = 0.35f;
+                actionLinesGraphic.color = ComicStyle.Yellow;
             }
 
             if (burstGraphic != null)
             {
-                burstGraphic.Configure(0.9f, 16, resolved.readyGold);
+                burstGraphic.Configure(0.9f, 16, ComicStyle.Yellow);
                 burstGraphic.Play();
             }
 
@@ -267,7 +290,6 @@ namespace P1.UI
             {
                 springMotion.SnapHome();
                 springMotion.PlayIn(0f);
-                springMotion.Punch(0.20f);
             }
         }
 
@@ -285,25 +307,26 @@ namespace P1.UI
 
             if (bannerSplatBg != null)
             {
-                bannerSplatBg.Shape = UIInkShape.RoundedRect;
-                bannerSplatBg.CornerRadius = 32f;
-                bannerSplatBg.BorderWidth = 5f;
-                bannerSplatBg.BorderColor = resolved.outlineColor;
-                bannerSplatBg.color = new Color(0.24f, 0.10f, 0.32f, 0.98f);
-                bannerSplatBg.PlayWobble(0.10f, 0.4f);
+                bannerSplatBg.color = ComicStyle.Red;
             }
 
             if (bannerMainText != null)
             {
                 bannerMainText.fontSize = 46f;
                 bannerMainText.text = "1:00 LEFT!";
-                bannerMainText.color = resolved.readyGold;
+                bannerMainText.color = ComicStyle.Paper;
             }
 
             if (bannerSubText != null)
             {
                 bannerSubText.text = "决 战 时 刻 · 加 速 涂 地 !";
-                bannerSubText.color = Color.white;
+                bannerSubText.color = ComicStyle.Yellow;
+            }
+
+            if (actionLinesGraphic != null)
+            {
+                actionLinesGraphic.Alpha = 0.25f;
+                actionLinesGraphic.color = ComicStyle.Red;
             }
 
             bannerRoot.gameObject.SetActive(true);
@@ -311,7 +334,6 @@ namespace P1.UI
             {
                 springMotion.SnapHome();
                 springMotion.PlayIn(0f);
-                springMotion.Punch(0.12f);
             }
         }
 
@@ -329,29 +351,31 @@ namespace P1.UI
 
             if (bannerSplatBg != null)
             {
-                bannerSplatBg.Shape = UIInkShape.Blob;
-                bannerSplatBg.BorderWidth = 7f;
-                bannerSplatBg.BorderColor = resolved.outlineColor;
-                bannerSplatBg.color = new Color(0.78f, 0.09f, 0.22f, 0.98f);
-                bannerSplatBg.PlayWobble(0.20f, 0.5f);
+                bannerSplatBg.color = ComicStyle.Red;
             }
 
             if (bannerMainText != null)
             {
                 bannerMainText.fontSize = 135f;
                 bannerMainText.text = "FINISH!";
-                bannerMainText.color = resolved.readyGold;
+                bannerMainText.color = ComicStyle.Yellow;
             }
 
             if (bannerSubText != null)
             {
                 bannerSubText.text = "TIME'S UP!";
-                bannerSubText.color = Color.white;
+                bannerSubText.color = ComicStyle.Paper;
+            }
+
+            if (actionLinesGraphic != null)
+            {
+                actionLinesGraphic.Alpha = 0.35f;
+                actionLinesGraphic.color = ComicStyle.Yellow;
             }
 
             if (burstGraphic != null)
             {
-                burstGraphic.Configure(1.2f, 18, resolved.readyGold);
+                burstGraphic.Configure(1.2f, 18, ComicStyle.Yellow);
                 burstGraphic.Play();
             }
 
@@ -360,7 +384,6 @@ namespace P1.UI
             {
                 springMotion.SnapHome();
                 springMotion.PlayIn(0f);
-                springMotion.Punch(0.22f);
             }
         }
 

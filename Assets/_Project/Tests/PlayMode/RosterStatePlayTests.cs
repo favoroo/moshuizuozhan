@@ -20,6 +20,7 @@ namespace P1.Tests
     /// 3. 4s 后自动复活 → 槽位切回 NormalAlive，死亡视觉全部收起；
     /// 4. 存活且大招就绪 → 金色旋转光环强度上升（SpecialReady）。
     /// </summary>
+    [Category("UI")]
     public class RosterStatePlayTests
     {
         private const string SceneName = "PhaseA_Playbox";
@@ -123,8 +124,8 @@ namespace P1.Tests
             Assert.AreEqual(AvatarSlotState.DeadRespawning,
                 TopRosterMath.DetermineSlotState(isAlive: false, isSpecialReady: false));
 
-            // 等待 4s 复活
-            yield return new WaitForSeconds(4.3f);
+            // 等待 4s 复活（8 倍时间倍率，约 0.5s 真实时间；复活计时走 Time.deltaTime）
+            yield return PlayModeTestKit.WaitGameSecondsAccelerated(4.3f);
             yield return null;
             yield return null;
 

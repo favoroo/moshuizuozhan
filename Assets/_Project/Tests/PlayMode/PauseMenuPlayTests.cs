@@ -13,6 +13,7 @@ namespace P1.Tests
     /// 暂停菜单、设置与无障碍屏幕震动运行时验证（PlayMode）。
     /// 严格遵循多 Agent 规范：自建独立测试 GameObject 并在 TearDown 中彻底清理，不污染全局环境。
     /// </summary>
+    [Category("UI")]
     public class PauseMenuPlayTests
     {
         [TearDown]

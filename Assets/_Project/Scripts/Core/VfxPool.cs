@@ -70,6 +70,26 @@ namespace P1.Core
         {
             if (Instance == this)
                 Instance = null;
+
+            DestroyObject(_sharedParticleMat);
+            _sharedParticleMat = null;
+
+            DestroyObject(_sharedRingMat);
+            _sharedRingMat = null;
+
+            DestroyObject(_discMesh);
+            _discMesh = null;
+        }
+
+        private static void DestroyObject(UnityEngine.Object obj)
+        {
+            if (obj == null)
+                return;
+
+            if (Application.isPlaying)
+                Destroy(obj);
+            else
+                DestroyImmediate(obj);
         }
 
         /// <summary>当前活跃的扩散环数量（测试/调试可观测，用于零泄露守门）。</summary>

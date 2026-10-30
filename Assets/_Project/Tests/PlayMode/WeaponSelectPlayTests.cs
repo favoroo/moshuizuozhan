@@ -16,6 +16,7 @@ namespace P1.Tests
     /// 2. Bot 的武器配置完全不受玩家换装影响；
     /// 3. 非法索引（负数/超范围）安全回落为合法武器（默认 Shooter）。
     /// </summary>
+    [Category("UI")]
     public class WeaponSelectPlayTests
     {
         private readonly List<GameObject> _createdObjects = new List<GameObject>();

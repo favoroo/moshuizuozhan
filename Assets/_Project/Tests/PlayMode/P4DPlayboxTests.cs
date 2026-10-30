@@ -10,6 +10,7 @@ using UnityEngine.TestTools;
 namespace P1.Tests
 {
     [TestFixture]
+    [Category("UI")]
     public class P4DPlayboxTests
     {
         private GameObject _canvasGo;

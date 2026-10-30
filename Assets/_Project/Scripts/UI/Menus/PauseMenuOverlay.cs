@@ -14,10 +14,12 @@ namespace P1.UI.Menus
     /// <summary>
     /// 全局暂停菜单与系统设置覆盖层（运行时程序化装配，零场景入侵）：
     /// 1. 独立 Overlay Canvas，sortingOrder = 100，高于 HUD 与触控层；
-    /// 2. 桌面端 Esc / 手柄 Start 键触发，移动端在 Playing 阶段显示 44x44 安全区暂停按钮；
-    /// 3. 暂停时：HitstopService.Cancel() → Time.timeScale = 0 → AudioListener.pause = true；
-    /// 4. 恢复时反向执行，确保 Time.timeScale 归位为 1.0；离开 Playing 阶段或销毁时强制关闭；
-    /// 5. 整合主音量、屏幕震动无障碍强度、帧率上限实时设置与持久化。
+    /// 2. 桌面端 Esc / 手柄 Start 键触发，移动端在 Playing 阶段显示 88x88 安全区暂停按钮（glyph_gear 图标或 ≡ 兜底）；
+    /// 3. 漫画风视觉重构：墨色全屏蒙层 + 半调网点、900x820 纸面板 + 6px 墨线粗边框 + 硬阴影；
+    /// 4. 彻底解决中文字体方块字：所有文本统一经 UIThemeSO.ResolveFont 获取 CJK 字体资产；
+    /// 5. 暂停时：HitstopService.Cancel() → Time.timeScale = 0 → AudioListener.pause = true；
+    /// 6. 恢复时反向执行，确保 Time.timeScale 归位为 1.0；离开 Playing 阶段或销毁时强制关闭；
+    /// 7. 整合主音量、屏幕震动无障碍强度、灵敏度、Y 轴反转与帧率上限实时设置。
     /// </summary>
     [DisallowMultipleComponent]
     public class PauseMenuOverlay : MonoBehaviour
@@ -37,10 +39,13 @@ namespace P1.UI.Menus
         private Vector2Int _lastScreenSize;
         private MatchManager _match;
         private readonly List<MatchManager> _matches = new List<MatchManager>(2);
+        private float _lastMatchSearchTime = -1f;
 
-        // 移动端常驻暂停小按钮 (44x44)
+        // 移动端常驻暂停小按钮 (88x88)
         private Button _mobilePauseButton;
         private RectTransform _mobilePauseButtonRt;
+        private Image _mobileGearIcon;
+        private TextMeshProUGUI _mobileFallbackText;
 
         // 模态弹窗与背景蒙层
         private GameObject _modalRoot;
@@ -63,6 +68,7 @@ namespace P1.UI.Menus
         private Slider _touchSensSlider;
         private TextMeshProUGUI _touchSensValueText;
         private Button _invertYButton;
+        private UIInkShapeGraphic _invertYShape;
         private TextMeshProUGUI _invertYText;
         private Button[] _fpsButtons;
         private UIInkShapeGraphic[] _fpsShapes;
@@ -157,9 +163,12 @@ namespace P1.UI.Menus
 
         private void Update()
         {
-            // 通常 Start 已经订阅；若菜单早于 MatchManager 创建，再做一次惰性挂接。
-            if (_matches.Count == 0)
+            // 通常 Start 已经订阅；若菜单早于 MatchManager 创建，再做一次惰性挂接（节流至少 0.5s 一次）。
+            if (_matches.Count == 0 && Time.unscaledTime - _lastMatchSearchTime >= 0.5f)
+            {
+                _lastMatchSearchTime = Time.unscaledTime;
                 SubscribeAllMatches();
+            }
 
             CheckScreenResolutionChange();
             HandleInput();
@@ -191,13 +200,11 @@ namespace P1.UI.Menus
 
         private void ResolveThemeAndFonts()
         {
-            // 独立包入口：从 Resources/P1RuntimeAssets 取 UI 主题与字体。
+            // 独立包入口：从 Resources/P1RuntimeAssets 取 UI 主题与字体
             RuntimeAssetLibrary library = RuntimeAssetLibrary.Load();
             if (library != null && library.uiTheme != null)
             {
                 _theme = library.uiTheme;
-                if (_displayFont == null) _displayFont = _theme.displayFont;
-                if (_bodyFont == null) _bodyFont = _theme.bodyFont;
             }
 
 #if UNITY_EDITOR
@@ -205,24 +212,13 @@ namespace P1.UI.Menus
             {
                 _theme = UnityEditor.AssetDatabase.LoadAssetAtPath<UIThemeSO>("Assets/_Project/ScriptableObjects/UITheme.asset");
             }
-            if (_theme != null)
-            {
-                if (_displayFont == null) _displayFont = _theme.displayFont;
-                if (_bodyFont == null) _bodyFont = _theme.bodyFont;
-            }
-
-            if (_displayFont == null)
-            {
-                _displayFont = UnityEditor.AssetDatabase.LoadAssetAtPath<TMP_FontAsset>("Assets/_Project/Art/Fonts/TMP/TitanOne-Regular SDF.asset");
-            }
-            if (_bodyFont == null)
-            {
-                _bodyFont = UnityEditor.AssetDatabase.LoadAssetAtPath<TMP_FontAsset>("Assets/_Project/Art/Fonts/TMP/Rubik-Bold SDF.asset");
-            }
 #endif
             _theme = UIThemeSO.Resolve(_theme);
-            if (_displayFont == null) _displayFont = _theme.GetFont(true);
-            if (_bodyFont == null) _bodyFont = _theme.GetFont(false);
+
+            // 严禁在此处通过 AssetDatabase 加载 TitanOne / Rubik，真机无法读取会导致所有中文回退为空变为方块字。
+            // 统一通过 UIThemeSO.ResolveFont 根据具体中英文字符串动态解析黄油体/快乐体/TitanOne。
+            _displayFont = _theme.GetFont(true);
+            _bodyFont = _theme.GetFont(false);
             if (_displayFont == null) _displayFont = TMP_Settings.defaultFontAsset;
             if (_bodyFont == null) _bodyFont = TMP_Settings.defaultFontAsset;
         }
@@ -264,7 +260,7 @@ namespace P1.UI.Menus
             _safeAreaRect = safeGo.GetComponent<RectTransform>();
             UpdateSafeArea();
 
-            // 3. 移动端左上角暂停小按钮 (44x44)
+            // 3. 移动端左上角暂停小按钮 (规范放大到 88x88，加入 glyph_gear / ≡ 兜底)
             BuildMobilePauseButton(_safeAreaRect);
 
             // 4. 模态暂停与设置全屏蒙层
@@ -273,22 +269,26 @@ namespace P1.UI.Menus
 
         private void BuildMobilePauseButton(Transform parent)
         {
-            var btnGo = new GameObject("MobilePauseButton", typeof(RectTransform), typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(UIJellyButton));
+            var btnGo = new GameObject("MobilePauseButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(UIJellyButton));
             btnGo.transform.SetParent(parent, false);
 
             _mobilePauseButtonRt = btnGo.GetComponent<RectTransform>();
             _mobilePauseButtonRt.anchorMin = new Vector2(0f, 1f);
             _mobilePauseButtonRt.anchorMax = new Vector2(0f, 1f);
             _mobilePauseButtonRt.pivot = new Vector2(0f, 1f);
-            _mobilePauseButtonRt.anchoredPosition = new Vector2(16f, -16f);
-            _mobilePauseButtonRt.sizeDelta = new Vector2(44f, 44f);
+            _mobilePauseButtonRt.anchoredPosition = new Vector2(24f, -24f);
+            _mobilePauseButtonRt.sizeDelta = new Vector2(88f, 88f);
 
             var shape = btnGo.GetComponent<UIInkShapeGraphic>();
             shape.Shape = UIInkShape.RoundedRect;
-            shape.CornerRadius = 12f;
-            shape.BorderWidth = 3f;
-            shape.BorderColor = _theme.outlineColor;
-            shape.color = new Color(0.12f, 0.10f, 0.18f, 0.92f);
+            shape.CornerRadius = 14f;
+            shape.BorderWidth = ComicStyle.Border;
+            shape.BorderColor = ComicStyle.Ink;
+            shape.color = ComicStyle.Paper;
+            shape.HardShadow = true;
+            shape.ShadowOffset = new Vector2(4f, -4f);
+            shape.ShadowColor = ComicStyle.Ink;
+            shape.Halftone = false;
 
             _mobilePauseButton = btnGo.GetComponent<Button>();
             _mobilePauseButton.onClick.AddListener(Pause);
@@ -299,13 +299,39 @@ namespace P1.UI.Menus
             var jelly = btnGo.GetComponent<UIJellyButton>();
             jelly.Configure(_theme, _mobilePauseButton, shape);
 
-            // 暂停符号 "❚❚"
-            var text = CreateTextMesh("PauseIcon", btnGo.transform, "\u275A\u275A", 16f, Color.white, _bodyFont);
-            var textRt = text.rectTransform;
+            // 图标：优先 glyph_gear，不存在时隐藏 Image 并使用 ≡ 文字兜底
+            Sprite gearSprite = UIIconLibrary.Get("glyph_gear");
+
+            var iconGo = new GameObject("GearIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            iconGo.transform.SetParent(btnGo.transform, false);
+            var iconRt = iconGo.GetComponent<RectTransform>();
+            iconRt.anchorMin = Vector2.zero;
+            iconRt.anchorMax = Vector2.one;
+            iconRt.offsetMin = new Vector2(16f, 16f);
+            iconRt.offsetMax = new Vector2(-16f, -16f);
+            _mobileGearIcon = iconGo.GetComponent<Image>();
+            _mobileGearIcon.preserveAspect = true;
+            _mobileGearIcon.raycastTarget = false;
+            _mobileGearIcon.color = ComicStyle.Ink;
+
+            _mobileFallbackText = CreateTextMesh("FallbackText", btnGo.transform, "\u2261", 42f, ComicStyle.Ink, isDisplay: true);
+            var textRt = _mobileFallbackText.rectTransform;
             textRt.anchorMin = Vector2.zero;
             textRt.anchorMax = Vector2.one;
             textRt.offsetMin = Vector2.zero;
             textRt.offsetMax = Vector2.zero;
+
+            if (gearSprite != null)
+            {
+                _mobileGearIcon.sprite = gearSprite;
+                _mobileGearIcon.gameObject.SetActive(true);
+                _mobileFallbackText.gameObject.SetActive(false);
+            }
+            else
+            {
+                _mobileGearIcon.gameObject.SetActive(false);
+                _mobileFallbackText.gameObject.SetActive(true);
+            }
 
             btnGo.SetActive(false);
         }
@@ -320,8 +346,8 @@ namespace P1.UI.Menus
             modalRt.offsetMin = Vector2.zero;
             modalRt.offsetMax = Vector2.zero;
 
-            // 半透明全屏遮罩，阻挡下方游戏内触控与准星射线
-            var backdropGo = new GameObject("Backdrop", typeof(RectTransform), typeof(Image));
+            // 1. 全屏背板 = 墨色 65%
+            var backdropGo = new GameObject("Backdrop", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
             backdropGo.transform.SetParent(_modalRoot.transform, false);
             var backdropRt = backdropGo.GetComponent<RectTransform>();
             backdropRt.anchorMin = Vector2.zero;
@@ -329,24 +355,46 @@ namespace P1.UI.Menus
             backdropRt.offsetMin = Vector2.zero;
             backdropRt.offsetMax = Vector2.zero;
             var backdropImg = backdropGo.GetComponent<Image>();
-            backdropImg.color = new Color(0.04f, 0.03f, 0.07f, 0.72f);
+            backdropImg.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.65f);
             backdropImg.raycastTarget = true;
 
-            // 居中弹窗卡片
-            var panelGo = new GameObject("PausePanel", typeof(RectTransform), typeof(UIInkShapeGraphic), typeof(UISpringMotion));
+            // 2. 全屏网点底 ComicHalftoneGraphic (墨色，alpha 0.08)
+            var halftoneGo = new GameObject("HalftoneBackdrop", typeof(RectTransform), typeof(CanvasRenderer), typeof(ComicHalftoneGraphic));
+            halftoneGo.transform.SetParent(_modalRoot.transform, false);
+            var halfRt = halftoneGo.GetComponent<RectTransform>();
+            halfRt.anchorMin = Vector2.zero;
+            halfRt.anchorMax = Vector2.one;
+            halfRt.offsetMin = Vector2.zero;
+            halfRt.offsetMax = Vector2.zero;
+            var halfGraphic = halftoneGo.GetComponent<ComicHalftoneGraphic>();
+            halfGraphic.color = ComicStyle.Ink;
+            halfGraphic.Alpha = 0.08f;
+            halfGraphic.Spacing = 14f;
+            halfGraphic.raycastTarget = false;
+
+            // 3. 居中弹窗主卡片 (900x820，纸面 + 6px 墨边 + 硬阴影 + 网点)
+            var panelGo = new GameObject("PausePanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(UISpringMotion));
             panelGo.transform.SetParent(_modalRoot.transform, false);
             _panelRect = panelGo.GetComponent<RectTransform>();
             _panelRect.anchorMin = new Vector2(0.5f, 0.5f);
             _panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             _panelRect.pivot = new Vector2(0.5f, 0.5f);
-            _panelRect.sizeDelta = new Vector2(560f, 660f);
+            _panelRect.sizeDelta = new Vector2(900f, 820f);
 
             _panelShape = panelGo.GetComponent<UIInkShapeGraphic>();
             _panelShape.Shape = UIInkShape.RoundedRect;
-            _panelShape.CornerRadius = 32f;
-            _panelShape.BorderWidth = 7f;
-            _panelShape.BorderColor = _theme.outlineColor;
-            _panelShape.color = _theme.panelColor;
+            _panelShape.CornerRadius = ComicStyle.CornerSharp;
+            _panelShape.BorderWidth = ComicStyle.Border;
+            _panelShape.BorderColor = ComicStyle.Ink;
+            _panelShape.color = ComicStyle.Paper;
+            _panelShape.HardShadow = true;
+            _panelShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            _panelShape.ShadowColor = ComicStyle.Ink;
+            _panelShape.Halftone = true;
+            _panelShape.HalftoneAlpha = ComicStyle.HalftoneAlpha;
+            _panelShape.GlossAlpha = 0f;
+            _panelShape.DrawGloss = false;
+            _panelShape.InnerRimAlpha = 0f;
 
             _panelMotion = panelGo.GetComponent<UISpringMotion>();
             _panelMotion.SetTheme(_theme);
@@ -373,133 +421,289 @@ namespace P1.UI.Menus
 
             _settingsViewContainer.SetActive(false);
             _modalRoot.SetActive(false);
+
+            ApplyResponsivePanelScale();
         }
 
         private void BuildMainViewContent(Transform parent)
         {
-            // 标题
-            var title = CreateTextMesh("Title", parent, "游戏暂停", 40f, _theme.readyGold, _displayFont);
+            // 标题气泡（下指尾 + 庆科黄油体 46px）
+            var bubbleGo = new GameObject("TitleBubble", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            bubbleGo.transform.SetParent(parent, false);
+            var bubbleRt = bubbleGo.GetComponent<RectTransform>();
+            bubbleRt.anchoredPosition = new Vector2(0f, 250f);
+            bubbleRt.sizeDelta = new Vector2(440f, 80f);
+
+            var bubbleShape = bubbleGo.GetComponent<UIInkShapeGraphic>();
+            bubbleShape.Shape = UIInkShape.SpeechBubble;
+            bubbleShape.CornerRadius = ComicStyle.CornerBubble;
+            bubbleShape.BorderWidth = ComicStyle.Border;
+            bubbleShape.BorderColor = ComicStyle.Ink;
+            bubbleShape.color = ComicStyle.Paper;
+            bubbleShape.HardShadow = true;
+            bubbleShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            bubbleShape.ShadowColor = ComicStyle.Ink;
+            bubbleShape.SpeechTail = true;
+            bubbleShape.TailSize = new Vector2(28f, 20f);
+            bubbleShape.TailAngle = 270f;
+            bubbleShape.GlossAlpha = 0f;
+            bubbleShape.DrawGloss = false;
+
+            var title = CreateTextMesh("TitleText", bubbleGo.transform, "游戏暂停", 46f, ComicStyle.Ink, isDisplay: true);
             var titleRt = title.rectTransform;
-            titleRt.anchoredPosition = new Vector2(0f, 175f);
+            titleRt.anchorMin = Vector2.zero;
+            titleRt.anchorMax = Vector2.one;
+            titleRt.offsetMin = Vector2.zero;
+            titleRt.offsetMax = Vector2.zero;
 
-            var subtitle = CreateTextMesh("Subtitle", parent, "PAUSED · 比赛已冻结", 18f, _theme.textMuted, _bodyFont);
+            var subtitle = CreateTextMesh("Subtitle", parent, "PAUSED · 比赛已冻结", 20f, ComicStyle.WithAlpha(ComicStyle.Ink, 0.8f), isDisplay: false);
             var subRt = subtitle.rectTransform;
-            subRt.anchoredPosition = new Vector2(0f, 132f);
+            subRt.anchoredPosition = new Vector2(0f, 142f);
+            subRt.sizeDelta = new Vector2(400f, 32f);
 
-            // 按钮：继续游戏
-            var resumeBtn = CreateStyledButton("ResumeBtn", parent, "继续游戏", _theme.teamAColor, Color.white, new Vector2(360f, 58f), _theme, _bodyFont, 18f, 5f);
+            // 主菜单按钮：高 88、宽 420，UIJellyButton 漫画墨印反馈
+            // 1. 继续游戏（黄底）
+            var resumeBtn = CreateStyledButton("ResumeBtn", parent, "继续游戏", ComicStyle.Yellow, ComicStyle.Ink, new Vector2(420f, 88f), _theme, 28f, ComicStyle.CornerSharp, ComicStyle.Border);
             var resumeRt = resumeBtn.GetComponent<RectTransform>();
-            resumeRt.anchoredPosition = new Vector2(0f, 45f);
+            resumeRt.anchoredPosition = new Vector2(0f, 65f);
             resumeBtn.onClick.AddListener(Resume);
 
-            // 按钮：设置
-            var settingsBtn = CreateStyledButton("SettingsBtn", parent, "设置", _theme.panelGlassColor, Color.white, new Vector2(360f, 56f), _theme, _bodyFont, 18f, 5f);
+            // 2. 设置（纸白）
+            var settingsBtn = CreateStyledButton("SettingsBtn", parent, "系统设置", ComicStyle.Paper, ComicStyle.Ink, new Vector2(420f, 88f), _theme, 28f, ComicStyle.CornerSharp, ComicStyle.Border);
             var setRt = settingsBtn.GetComponent<RectTransform>();
-            setRt.anchoredPosition = new Vector2(0f, -30f);
+            setRt.anchoredPosition = new Vector2(0f, -40f);
             settingsBtn.onClick.AddListener(OpenSettings);
 
-            // 按钮：重新开始
-            var restartBtn = CreateStyledButton("RestartBtn", parent, "重新开始比赛", _theme.panelGlassColor, _theme.dangerRed, new Vector2(360f, 54f), _theme, _bodyFont, 18f, 5f);
+            // 3. 重新开始比赛（红底白字）
+            var restartBtn = CreateStyledButton("RestartBtn", parent, "重新开始比赛", ComicStyle.Red, Color.white, new Vector2(420f, 88f), _theme, 28f, ComicStyle.CornerSharp, ComicStyle.Border);
             var restartRt = restartBtn.GetComponent<RectTransform>();
-            restartRt.anchoredPosition = new Vector2(0f, -105f);
+            restartRt.anchoredPosition = new Vector2(0f, -145f);
             restartBtn.onClick.AddListener(RestartMatch);
 
-            // 提示文案
-            var hint = CreateTextMesh("Hint", parent, "按 [ESC] 键或点击按钮继续", 15f, _theme.textMuted, _bodyFont);
+            // 提示文案（触屏设备没有 ESC 键，换成点击说明）
+            string hintLabel = Application.isMobilePlatform ? "点击上方按钮继续" : "按 [ESC] 键或点击按钮继续";
+            var hint = CreateTextMesh("Hint", parent, hintLabel, 18f, ComicStyle.WithAlpha(ComicStyle.Ink, 0.72f), isDisplay: false);
             var hintRt = hint.rectTransform;
-            hintRt.anchoredPosition = new Vector2(0f, -190f);
+            hintRt.anchoredPosition = new Vector2(0f, -240f);
+            hintRt.sizeDelta = new Vector2(500f, 30f);
         }
 
         private void BuildSettingsViewContent(Transform parent)
         {
-            // 标题
-            var title = CreateTextMesh("Title", parent, "系统设置", 34f, _theme.textPrimary, _displayFont);
+            // 标题气泡（系统设置）
+            var bubbleGo = new GameObject("SettingsTitleBubble", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            bubbleGo.transform.SetParent(parent, false);
+            var bubbleRt = bubbleGo.GetComponent<RectTransform>();
+            bubbleRt.anchoredPosition = new Vector2(0f, 335f);
+            bubbleRt.sizeDelta = new Vector2(400f, 68f);
+
+            var bubbleShape = bubbleGo.GetComponent<UIInkShapeGraphic>();
+            bubbleShape.Shape = UIInkShape.SpeechBubble;
+            bubbleShape.CornerRadius = ComicStyle.CornerBubble;
+            bubbleShape.BorderWidth = ComicStyle.Border;
+            bubbleShape.BorderColor = ComicStyle.Ink;
+            bubbleShape.color = ComicStyle.Paper;
+            bubbleShape.HardShadow = true;
+            bubbleShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            bubbleShape.ShadowColor = ComicStyle.Ink;
+            bubbleShape.SpeechTail = true;
+            bubbleShape.TailSize = new Vector2(24f, 16f);
+            bubbleShape.TailAngle = 270f;
+
+            var title = CreateTextMesh("Title", bubbleGo.transform, "系统设置", 38f, ComicStyle.Ink, isDisplay: true);
             var titleRt = title.rectTransform;
-            titleRt.anchoredPosition = new Vector2(0f, 268f);
+            titleRt.anchorMin = Vector2.zero;
+            titleRt.anchorMax = Vector2.one;
+            titleRt.offsetMin = Vector2.zero;
+            titleRt.offsetMax = Vector2.zero;
 
-            // 1. 主音量
-            var volLabel = CreateTextMesh("VolLabel", parent, "主音量", 18f, _theme.textPrimary, _bodyFont, TextAlignmentOptions.Left);
+            // 7 行设置列表容器（每行高 72，纸白/纸黄交替底色 + 4px 墨线分隔）
+            var tableGo = new GameObject("SettingsTable", typeof(RectTransform));
+            tableGo.transform.SetParent(parent, false);
+            var tableRt = tableGo.GetComponent<RectTransform>();
+            tableRt.anchoredPosition = new Vector2(0f, -25f);
+            tableRt.sizeDelta = new Vector2(820f, 504f);
+
+            // Row 0: 主音量
+            var row0 = CreateSettingRow(tableGo.transform, 0, 7);
+            var volLabel = CreateTextMesh("VolLabel", row0.transform, "主音量", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var volLabelRt = volLabel.rectTransform;
-            volLabelRt.anchoredPosition = new Vector2(-155f, 215f);
-            volLabelRt.sizeDelta = new Vector2(150f, 30f);
+            volLabelRt.anchorMin = new Vector2(0f, 0.5f);
+            volLabelRt.anchorMax = new Vector2(0f, 0.5f);
+            volLabelRt.pivot = new Vector2(0f, 0.5f);
+            volLabelRt.anchoredPosition = new Vector2(28f, 0f);
+            volLabelRt.sizeDelta = new Vector2(300f, 36f);
 
-            _volumeSlider = CreateStyledSlider("VolumeSlider", parent, 0f, 1f, GameSettingsService.MasterVolume, _theme, out _volumeValueText);
+            _volumeSlider = CreateStyledSlider("VolumeSlider", row0.transform, 0f, 1f, GameSettingsService.MasterVolume, _theme, out _volumeValueText);
             var volSliderRt = _volumeSlider.transform.parent.GetComponent<RectTransform>();
-            volSliderRt.anchoredPosition = new Vector2(0f, 183f);
+            volSliderRt.anchorMin = new Vector2(1f, 0.5f);
+            volSliderRt.anchorMax = new Vector2(1f, 0.5f);
+            volSliderRt.pivot = new Vector2(1f, 0.5f);
+            volSliderRt.anchoredPosition = new Vector2(-28f, 0f);
             _volumeSlider.onValueChanged.AddListener(OnVolumeSliderChanged);
             UpdateVolumeLabel(GameSettingsService.MasterVolume);
 
-            // 2. 屏幕震动无障碍
-            var shakeLabel = CreateTextMesh("ShakeLabel", parent, "屏幕震动 (无障碍减弱)", 18f, _theme.textPrimary, _bodyFont, TextAlignmentOptions.Left);
+            // Row 1: 屏幕震动
+            var row1 = CreateSettingRow(tableGo.transform, 1, 7);
+            var shakeLabel = CreateTextMesh("ShakeLabel", row1.transform, "屏幕震动 (无障碍减弱)", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var shakeLabelRt = shakeLabel.rectTransform;
-            shakeLabelRt.anchoredPosition = new Vector2(-80f, 140f);
-            shakeLabelRt.sizeDelta = new Vector2(300f, 30f);
+            shakeLabelRt.anchorMin = new Vector2(0f, 0.5f);
+            shakeLabelRt.anchorMax = new Vector2(0f, 0.5f);
+            shakeLabelRt.pivot = new Vector2(0f, 0.5f);
+            shakeLabelRt.anchoredPosition = new Vector2(28f, 0f);
+            shakeLabelRt.sizeDelta = new Vector2(320f, 36f);
 
-            _shakeSlider = CreateStyledSlider("ShakeSlider", parent, 0f, 1f, GameSettingsService.ShakeScale, _theme, out _shakeValueText);
+            _shakeSlider = CreateStyledSlider("ShakeSlider", row1.transform, 0f, 1f, GameSettingsService.ShakeScale, _theme, out _shakeValueText);
             var shakeSliderRt = _shakeSlider.transform.parent.GetComponent<RectTransform>();
-            shakeSliderRt.anchoredPosition = new Vector2(0f, 108f);
+            shakeSliderRt.anchorMin = new Vector2(1f, 0.5f);
+            shakeSliderRt.anchorMax = new Vector2(1f, 0.5f);
+            shakeSliderRt.pivot = new Vector2(1f, 0.5f);
+            shakeSliderRt.anchoredPosition = new Vector2(-28f, 0f);
             _shakeSlider.onValueChanged.AddListener(OnShakeSliderChanged);
             UpdateShakeLabel(GameSettingsService.ShakeScale);
 
-            // 3. 鼠标视角灵敏度
-            var mouseLabel = CreateTextMesh("MouseSensLabel", parent, "鼠标视角灵敏度", 18f, _theme.textPrimary, _bodyFont, TextAlignmentOptions.Left);
+            // Row 2: 鼠标视角灵敏度
+            var row2 = CreateSettingRow(tableGo.transform, 2, 7);
+            var mouseLabel = CreateTextMesh("MouseSensLabel", row2.transform, "鼠标视角灵敏度", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var mouseLabelRt = mouseLabel.rectTransform;
-            mouseLabelRt.anchoredPosition = new Vector2(-125f, 65f);
-            mouseLabelRt.sizeDelta = new Vector2(230f, 30f);
+            mouseLabelRt.anchorMin = new Vector2(0f, 0.5f);
+            mouseLabelRt.anchorMax = new Vector2(0f, 0.5f);
+            mouseLabelRt.pivot = new Vector2(0f, 0.5f);
+            mouseLabelRt.anchoredPosition = new Vector2(28f, 0f);
+            mouseLabelRt.sizeDelta = new Vector2(300f, 36f);
 
             _mouseSensSlider = CreateStyledSlider(
-                "MouseSensSlider", parent,
+                "MouseSensSlider", row2.transform,
                 GameSettingsMath.MinLookSensitivity, GameSettingsMath.MaxLookSensitivity,
                 GameSettingsService.MouseLookSensitivity, _theme, out _mouseSensValueText);
             var mouseSliderRt = _mouseSensSlider.transform.parent.GetComponent<RectTransform>();
-            mouseSliderRt.anchoredPosition = new Vector2(0f, 33f);
+            mouseSliderRt.anchorMin = new Vector2(1f, 0.5f);
+            mouseSliderRt.anchorMax = new Vector2(1f, 0.5f);
+            mouseSliderRt.pivot = new Vector2(1f, 0.5f);
+            mouseSliderRt.anchoredPosition = new Vector2(-28f, 0f);
             _mouseSensSlider.onValueChanged.AddListener(OnMouseSensChanged);
             UpdateLookSensitivityLabel(_mouseSensValueText, GameSettingsService.MouseLookSensitivity);
 
-            // 4. 触控视角灵敏度
-            var touchLabel = CreateTextMesh("TouchSensLabel", parent, "触控视角灵敏度", 18f, _theme.textPrimary, _bodyFont, TextAlignmentOptions.Left);
+            // Row 3: 触控视角灵敏度
+            var row3 = CreateSettingRow(tableGo.transform, 3, 7);
+            var touchLabel = CreateTextMesh("TouchSensLabel", row3.transform, "触控视角灵敏度", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var touchLabelRt = touchLabel.rectTransform;
-            touchLabelRt.anchoredPosition = new Vector2(-125f, -10f);
-            touchLabelRt.sizeDelta = new Vector2(230f, 30f);
+            touchLabelRt.anchorMin = new Vector2(0f, 0.5f);
+            touchLabelRt.anchorMax = new Vector2(0f, 0.5f);
+            touchLabelRt.pivot = new Vector2(0f, 0.5f);
+            touchLabelRt.anchoredPosition = new Vector2(28f, 0f);
+            touchLabelRt.sizeDelta = new Vector2(300f, 36f);
 
             _touchSensSlider = CreateStyledSlider(
-                "TouchSensSlider", parent,
+                "TouchSensSlider", row3.transform,
                 GameSettingsMath.MinLookSensitivity, GameSettingsMath.MaxLookSensitivity,
                 GameSettingsService.TouchLookSensitivity, _theme, out _touchSensValueText);
             var touchSliderRt = _touchSensSlider.transform.parent.GetComponent<RectTransform>();
-            touchSliderRt.anchoredPosition = new Vector2(0f, -42f);
+            touchSliderRt.anchorMin = new Vector2(1f, 0.5f);
+            touchSliderRt.anchorMax = new Vector2(1f, 0.5f);
+            touchSliderRt.pivot = new Vector2(1f, 0.5f);
+            touchSliderRt.anchoredPosition = new Vector2(-28f, 0f);
             _touchSensSlider.onValueChanged.AddListener(OnTouchSensChanged);
             UpdateLookSensitivityLabel(_touchSensValueText, GameSettingsService.TouchLookSensitivity);
 
-            // 5. 视角反转 Y
+            // Row 4: 视角反转 Y
+            var row4 = CreateSettingRow(tableGo.transform, 4, 7);
+            var invertLabel = CreateTextMesh("InvertYLabel", row4.transform, "视角垂直方向", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
+            var invertLabelRt = invertLabel.rectTransform;
+            invertLabelRt.anchorMin = new Vector2(0f, 0.5f);
+            invertLabelRt.anchorMax = new Vector2(0f, 0.5f);
+            invertLabelRt.pivot = new Vector2(0f, 0.5f);
+            invertLabelRt.anchoredPosition = new Vector2(28f, 0f);
+            invertLabelRt.sizeDelta = new Vector2(300f, 36f);
+
             _invertYButton = CreateStyledButton(
-                "InvertYBtn", parent, "视角反转 Y：关",
-                _theme.panelGlassColor, Color.white, new Vector2(360f, 42f),
-                _theme, _bodyFont, 15f, 4f);
+                "InvertYBtn", row4.transform, "视角反转 Y：关",
+                ComicStyle.Paper, ComicStyle.Ink, new Vector2(260f, 52f),
+                _theme, 20f, ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var invertRt = _invertYButton.GetComponent<RectTransform>();
-            invertRt.anchoredPosition = new Vector2(0f, -105f);
+            invertRt.anchorMin = new Vector2(1f, 0.5f);
+            invertRt.anchorMax = new Vector2(1f, 0.5f);
+            invertRt.pivot = new Vector2(1f, 0.5f);
+            invertRt.anchoredPosition = new Vector2(-28f, 0f);
+            _invertYShape = _invertYButton.GetComponent<UIInkShapeGraphic>();
             _invertYText = _invertYButton.GetComponentInChildren<TextMeshProUGUI>();
             _invertYButton.onClick.AddListener(OnInvertYToggled);
             UpdateInvertYLabel();
 
-            // 6. 帧率上限
-            var fpsLabel = CreateTextMesh("FpsLabel", parent, "帧率上限", 18f, _theme.textPrimary, _bodyFont, TextAlignmentOptions.Left);
+            // Row 5: 帧率上限
+            var row5 = CreateSettingRow(tableGo.transform, 5, 7);
+            var fpsLabel = CreateTextMesh("FpsLabel", row5.transform, "帧率上限", 24f, ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
             var fpsLabelRt = fpsLabel.rectTransform;
-            fpsLabelRt.anchoredPosition = new Vector2(-155f, -160f);
-            fpsLabelRt.sizeDelta = new Vector2(150f, 30f);
+            fpsLabelRt.anchorMin = new Vector2(0f, 0.5f);
+            fpsLabelRt.anchorMax = new Vector2(0f, 0.5f);
+            fpsLabelRt.pivot = new Vector2(0f, 0.5f);
+            fpsLabelRt.anchoredPosition = new Vector2(28f, 0f);
+            fpsLabelRt.sizeDelta = new Vector2(200f, 36f);
 
-            BuildFrameRateButtons(parent);
+            BuildFrameRateButtons(row5.transform);
 
-            // 底部控制按钮
-            var resetBtn = CreateStyledButton("ResetBtn", parent, "恢复默认", _theme.panelGlassColor, _theme.textMuted, new Vector2(160f, 44f), _theme, _bodyFont, 14f, 3f);
+            // Row 6: 快捷操作（恢复默认 + 返回）
+            var row6 = CreateSettingRow(tableGo.transform, 6, 7);
+            var resetBtn = CreateStyledButton("ResetBtn", row6.transform, "恢复默认", ComicStyle.Paper, ComicStyle.Ink, new Vector2(200f, 52f), _theme, 20f, ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var resetRt = resetBtn.GetComponent<RectTransform>();
-            resetRt.anchoredPosition = new Vector2(-115f, -285f);
+            resetRt.anchorMin = new Vector2(0f, 0.5f);
+            resetRt.anchorMax = new Vector2(0f, 0.5f);
+            resetRt.pivot = new Vector2(0f, 0.5f);
+            resetRt.anchoredPosition = new Vector2(28f, 0f);
             resetBtn.onClick.AddListener(OnResetDefaultsClicked);
 
-            var backBtn = CreateStyledButton("BackBtn", parent, "返回", _theme.readyGold, _theme.outlineColor, new Vector2(160f, 44f), _theme, _bodyFont, 14f, 3f);
+            var backBtn = CreateStyledButton("BackBtn", row6.transform, "返回", ComicStyle.Yellow, ComicStyle.Ink, new Vector2(200f, 52f), _theme, 20f, ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var backRt = backBtn.GetComponent<RectTransform>();
-            backRt.anchoredPosition = new Vector2(115f, -285f);
+            backRt.anchorMin = new Vector2(1f, 0.5f);
+            backRt.anchorMax = new Vector2(1f, 0.5f);
+            backRt.pivot = new Vector2(1f, 0.5f);
+            backRt.anchoredPosition = new Vector2(-28f, 0f);
             backBtn.onClick.AddListener(CloseSettings);
+        }
+
+        private GameObject CreateSettingRow(Transform parent, int index, int totalRows)
+        {
+            float rowHeight = 72f;
+            float totalHeight = rowHeight * totalRows;
+            float topY = totalHeight * 0.5f - rowHeight * 0.5f;
+            float y = topY - index * rowHeight;
+
+            var rowGo = new GameObject($"Row_{index}", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            rowGo.transform.SetParent(parent, false);
+            var rt = rowGo.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(820f, rowHeight);
+            rt.anchoredPosition = new Vector2(0f, y);
+
+            var shape = rowGo.GetComponent<UIInkShapeGraphic>();
+            shape.Shape = UIInkShape.RoundedRect;
+            shape.CornerRadius = 3f;
+            shape.BorderWidth = 0f;
+            // 纸白 / 纸黄交替行底
+            shape.color = index % 2 == 0 ? ComicStyle.Paper : ComicStyle.PaperAlt;
+            shape.HardShadow = false;
+            shape.Halftone = false;
+            shape.raycastTarget = false;
+
+            // 底部 4px 墨线分隔
+            if (index < totalRows - 1)
+            {
+                var lineGo = new GameObject("Separator", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                lineGo.transform.SetParent(rowGo.transform, false);
+                var lrt = lineGo.GetComponent<RectTransform>();
+                lrt.anchorMin = new Vector2(0f, 0f);
+                lrt.anchorMax = new Vector2(1f, 0f);
+                lrt.pivot = new Vector2(0.5f, 0f);
+                lrt.sizeDelta = new Vector2(0f, ComicStyle.BorderThin);
+                lrt.anchoredPosition = Vector2.zero;
+                var img = lineGo.GetComponent<Image>();
+                img.color = ComicStyle.Ink;
+                img.raycastTarget = false;
+            }
+
+            return rowGo;
         }
 
         private void BuildFrameRateButtons(Transform parent)
@@ -507,15 +711,18 @@ namespace P1.UI.Menus
             var rowGo = new GameObject("FpsButtonsRow", typeof(RectTransform));
             rowGo.transform.SetParent(parent, false);
             var rowRt = rowGo.GetComponent<RectTransform>();
-            rowRt.anchoredPosition = new Vector2(0f, -200f);
-            rowRt.sizeDelta = new Vector2(460f, 40f);
+            rowRt.anchorMin = new Vector2(1f, 0.5f);
+            rowRt.anchorMax = new Vector2(1f, 0.5f);
+            rowRt.pivot = new Vector2(1f, 0.5f);
+            rowRt.anchoredPosition = new Vector2(-28f, 0f);
+            rowRt.sizeDelta = new Vector2(460f, 50f);
 
             int[] rates = GameSettingsMath.AvailableFrameRates;
             _fpsButtons = new Button[rates.Length];
             _fpsShapes = new UIInkShapeGraphic[rates.Length];
             _fpsTexts = new TextMeshProUGUI[rates.Length];
 
-            float btnWidth = 106f;
+            float btnWidth = 104f;
             float spacing = 8f;
             float startX = -(btnWidth * 2f + spacing * 1.5f) + btnWidth * 0.5f;
 
@@ -524,7 +731,10 @@ namespace P1.UI.Menus
                 int fps = rates[i];
                 string label = GameSettingsMath.GetFrameRateLabel(fps);
 
-                var btn = CreateStyledButton($"FpsBtn_{fps}", rowGo.transform, label, _theme.panelGlassColor, Color.white, new Vector2(btnWidth, 38f), _theme, _bodyFont, 12f, 3f);
+                var btn = CreateStyledButton(
+                    $"FpsBtn_{fps}", rowGo.transform, label,
+                    ComicStyle.Paper, ComicStyle.Ink, new Vector2(btnWidth, 46f),
+                    _theme, 16f, ComicStyle.CornerSharp, ComicStyle.BorderThin);
                 var btnRt = btn.GetComponent<RectTransform>();
                 btnRt.anchoredPosition = new Vector2(startX + i * (btnWidth + spacing), 0f);
 
@@ -556,11 +766,12 @@ namespace P1.UI.Menus
                 bool isSelected = (rates[i] == currentFps);
                 if (_fpsShapes[i] != null)
                 {
-                    _fpsShapes[i].color = isSelected ? _theme.readyGold : _theme.panelGlassColor;
+                    _fpsShapes[i].color = isSelected ? ComicStyle.Yellow : ComicStyle.Paper;
                 }
                 if (_fpsTexts[i] != null)
                 {
-                    _fpsTexts[i].color = isSelected ? _theme.outlineColor : _theme.textPrimary;
+                    _fpsTexts[i].color = ComicStyle.Ink;
+                    _fpsTexts[i].fontStyle = isSelected ? FontStyles.Bold : FontStyles.Normal;
                 }
             }
         }
@@ -623,7 +834,13 @@ namespace P1.UI.Menus
         private void UpdateInvertYLabel()
         {
             if (_invertYText != null)
+            {
                 _invertYText.text = GameSettingsService.InvertLookY ? "视角反转 Y：开" : "视角反转 Y：关";
+            }
+            if (_invertYShape != null)
+            {
+                _invertYShape.color = GameSettingsService.InvertLookY ? ComicStyle.Yellow : ComicStyle.Paper;
+            }
         }
 
         private void OnResetDefaultsClicked()
@@ -713,6 +930,7 @@ namespace P1.UI.Menus
             // 4. 显示弹窗并播放弹簧展开动效
             _modalRoot.SetActive(true);
             ShowMainView();
+            ApplyResponsivePanelScale();
             if (_panelMotion != null)
             {
                 _panelMotion.PlayIn();
@@ -835,6 +1053,7 @@ namespace P1.UI.Menus
             if (Screen.width != _lastScreenSize.x || Screen.height != _lastScreenSize.y || Screen.safeArea != _lastSafeArea)
             {
                 UpdateSafeArea();
+                ApplyResponsivePanelScale();
             }
         }
 
@@ -863,14 +1082,41 @@ namespace P1.UI.Menus
             _safeAreaRect.offsetMax = Vector2.zero;
         }
 
-        private static TextMeshProUGUI CreateTextMesh(
+        /// <summary>
+        /// 屏幕高度不足时整体按可用高度等比缩放面板，保留安全区，绝不溢出屏幕边界。
+        /// </summary>
+        private void ApplyResponsivePanelScale()
+        {
+            if (_panelRect == null) return;
+
+            float canvasHeight = 1080f;
+            float safeRatio = Screen.height > 0 ? Screen.safeArea.height / Screen.height : 1f;
+            float availableHeight = canvasHeight * safeRatio;
+            const float targetHeight = 860f; // 820px 面板 + 留白
+
+            if (availableHeight < targetHeight && availableHeight > 100f)
+            {
+                float s = Mathf.Clamp(availableHeight / targetHeight, 0.5f, 1f);
+                _panelRect.localScale = new Vector3(s, s, 1f);
+            }
+            else
+            {
+                _panelRect.localScale = Vector3.one;
+            }
+        }
+
+        /// <summary>
+        /// 统一文本构造工厂：先通过 UIThemeSO.ResolveFont 解析对应字体，不设字体会导致方块字 □。
+        /// </summary>
+        private TextMeshProUGUI CreateTextMesh(
             string name,
             Transform parent,
             string text,
             float fontSize,
             Color color,
-            TMP_FontAsset font,
-            TextAlignmentOptions alignment = TextAlignmentOptions.Center)
+            TMP_FontAsset font = null,
+            TextAlignmentOptions alignment = TextAlignmentOptions.Center,
+            bool isDisplay = false)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(TextMeshProUGUI));
             go.transform.SetParent(parent, false);
@@ -878,9 +1124,18 @@ namespace P1.UI.Menus
             tmp.text = text;
             tmp.fontSize = fontSize;
             tmp.color = color;
-            if (font != null) tmp.font = font;
             tmp.alignment = alignment;
             tmp.raycastTarget = false;
+
+            // 核心修复：优先从主题解析含中文字符匹配的 CJK 字体资产，彻底解决真机与设置页文字方块字问题
+            UIThemeSO resolvedTheme = UIThemeSO.Resolve(_theme);
+            TMP_FontAsset resolvedFont = resolvedTheme.ResolveFont(isDisplay, text);
+            if (resolvedFont == null && font != null)
+                resolvedFont = font;
+            if (resolvedFont == null)
+                resolvedFont = TMP_Settings.defaultFontAsset;
+
+            tmp.font = resolvedFont;
             return tmp;
         }
 
@@ -892,12 +1147,13 @@ namespace P1.UI.Menus
             Color textColor,
             Vector2 size,
             UIThemeSO theme,
-            TMP_FontAsset font,
-            float cornerRadius = 16f,
-            float borderWidth = 4f)
+            float fontSize = 20f,
+            float cornerRadius = ComicStyle.CornerSharp,
+            float borderWidth = ComicStyle.Border)
         {
-            var go = new GameObject(name, typeof(RectTransform), typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(UIJellyButton));
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(UIJellyButton));
             go.transform.SetParent(parent, false);
+
             var rt = go.GetComponent<RectTransform>();
             rt.sizeDelta = size;
 
@@ -905,8 +1161,14 @@ namespace P1.UI.Menus
             shape.Shape = UIInkShape.RoundedRect;
             shape.CornerRadius = cornerRadius;
             shape.BorderWidth = borderWidth;
-            shape.BorderColor = theme.outlineColor;
+            shape.BorderColor = ComicStyle.Ink;
             shape.color = fillColor;
+            shape.HardShadow = true;
+            shape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            shape.ShadowColor = ComicStyle.Ink;
+            shape.Halftone = false;
+            shape.GlossAlpha = 0f;
+            shape.DrawGloss = false;
 
             var btn = go.GetComponent<Button>();
             var motion = go.GetComponent<UISpringMotion>();
@@ -914,12 +1176,24 @@ namespace P1.UI.Menus
             var jelly = go.GetComponent<UIJellyButton>();
             jelly.Configure(theme, btn, shape);
 
-            var text = CreateTextMesh("Label", go.transform, label, 20f, textColor, font);
-            var textRt = text.rectTransform;
+            // 构造文本（保证按钮中文同样走 CJK 字体）
+            UIThemeSO resolvedTheme = UIThemeSO.Resolve(theme);
+            var textGo = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            textGo.transform.SetParent(go.transform, false);
+            var textRt = textGo.GetComponent<RectTransform>();
             textRt.anchorMin = Vector2.zero;
             textRt.anchorMax = Vector2.one;
             textRt.offsetMin = Vector2.zero;
             textRt.offsetMax = Vector2.zero;
+
+            var tmp = textGo.GetComponent<TextMeshProUGUI>();
+            tmp.text = label;
+            tmp.fontSize = fontSize;
+            tmp.color = textColor;
+            tmp.fontStyle = FontStyles.Bold;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.raycastTarget = false;
+            tmp.font = resolvedTheme.ResolveFont(true, label);
 
             return btn;
         }
@@ -936,86 +1210,105 @@ namespace P1.UI.Menus
             var container = new GameObject(name, typeof(RectTransform));
             container.transform.SetParent(parent, false);
             var containerRt = container.GetComponent<RectTransform>();
-            containerRt.sizeDelta = new Vector2(460f, 32f);
+            containerRt.sizeDelta = new Vector2(460f, 48f);
 
             var sliderGo = new GameObject("Slider", typeof(RectTransform), typeof(Slider));
             sliderGo.transform.SetParent(container.transform, false);
             var sliderRt = sliderGo.GetComponent<RectTransform>();
             sliderRt.anchorMin = new Vector2(0f, 0.5f);
-            sliderRt.anchorMax = new Vector2(0.78f, 0.5f);
+            sliderRt.anchorMax = new Vector2(0.76f, 0.5f);
             sliderRt.pivot = new Vector2(0f, 0.5f);
-            sliderRt.sizeDelta = new Vector2(0f, 24f);
+            sliderRt.sizeDelta = new Vector2(0f, 28f);
 
             var slider = sliderGo.GetComponent<Slider>();
             slider.minValue = min;
             slider.maxValue = max;
             slider.value = current;
 
-            // Background
-            var bgGo = new GameObject("Background", typeof(RectTransform), typeof(UIInkShapeGraphic));
+            // 1. 滑条轨道 Background (28 高，纸灰/底色 + 4px 墨边)
+            var bgGo = new GameObject("Background", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             bgGo.transform.SetParent(sliderGo.transform, false);
             var bgRt = bgGo.GetComponent<RectTransform>();
-            bgRt.anchorMin = new Vector2(0f, 0.25f);
-            bgRt.anchorMax = new Vector2(1f, 0.75f);
-            bgRt.offsetMin = Vector2.zero;
-            bgRt.offsetMax = Vector2.zero;
+            bgRt.anchorMin = new Vector2(0f, 0.5f);
+            bgRt.anchorMax = new Vector2(1f, 0.5f);
+            bgRt.sizeDelta = new Vector2(0f, 28f);
             var bgShape = bgGo.GetComponent<UIInkShapeGraphic>();
             bgShape.Shape = UIInkShape.RoundedRect;
             bgShape.CornerRadius = 6f;
-            bgShape.BorderWidth = 2f;
-            bgShape.BorderColor = theme.outlineColor;
-            bgShape.color = new Color(0.18f, 0.16f, 0.26f, 1f);
+            bgShape.BorderWidth = ComicStyle.BorderThin;
+            bgShape.BorderColor = ComicStyle.Ink;
+            bgShape.color = ComicStyle.PaperAlt;
+            bgShape.HardShadow = false;
+            bgShape.Halftone = false;
 
-            // Fill Area
+            // 2. 填充区域 Fill
             var fillArea = new GameObject("Fill Area", typeof(RectTransform));
             fillArea.transform.SetParent(sliderGo.transform, false);
             var fillAreaRt = fillArea.GetComponent<RectTransform>();
-            fillAreaRt.anchorMin = new Vector2(0f, 0.25f);
-            fillAreaRt.anchorMax = new Vector2(1f, 0.75f);
-            fillAreaRt.offsetMin = new Vector2(5f, 0f);
-            fillAreaRt.offsetMax = new Vector2(-5f, 0f);
+            fillAreaRt.anchorMin = new Vector2(0f, 0.5f);
+            fillAreaRt.anchorMax = new Vector2(1f, 0.5f);
+            fillAreaRt.sizeDelta = new Vector2(0f, 28f);
+            fillAreaRt.offsetMin = new Vector2(4f, 0f);
+            fillAreaRt.offsetMax = new Vector2(-4f, 0f);
 
-            var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(UIInkShapeGraphic));
+            var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             fillGo.transform.SetParent(fillArea.transform, false);
             var fillRt = fillGo.GetComponent<RectTransform>();
             fillRt.sizeDelta = Vector2.zero;
             var fillShape = fillGo.GetComponent<UIInkShapeGraphic>();
             fillShape.Shape = UIInkShape.RoundedRect;
-            fillShape.CornerRadius = 6f;
-            fillShape.BorderWidth = 1f;
-            fillShape.BorderColor = theme.outlineColor;
-            fillShape.color = theme.teamAColor;
+            fillShape.CornerRadius = 5f;
+            fillShape.BorderWidth = 2f;
+            fillShape.BorderColor = ComicStyle.Ink;
+            fillShape.color = ComicStyle.Yellow;
+            fillShape.HardShadow = false;
+            fillShape.Halftone = false;
             slider.fillRect = fillRt;
 
-            // Handle Slide Area
+            // 3. 手柄区域 Handle (规范 48x48 圆块，墨边 + 硬阴影)
             var handleArea = new GameObject("Handle Slide Area", typeof(RectTransform));
             handleArea.transform.SetParent(sliderGo.transform, false);
             var handleAreaRt = handleArea.GetComponent<RectTransform>();
             handleAreaRt.anchorMin = Vector2.zero;
             handleAreaRt.anchorMax = Vector2.one;
-            handleAreaRt.offsetMin = new Vector2(12f, 0f);
-            handleAreaRt.offsetMax = new Vector2(-12f, 0f);
+            handleAreaRt.offsetMin = new Vector2(24f, 0f);
+            handleAreaRt.offsetMax = new Vector2(-24f, 0f);
 
-            var handleGo = new GameObject("Handle", typeof(RectTransform), typeof(UIInkShapeGraphic));
+            var handleGo = new GameObject("Handle", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             handleGo.transform.SetParent(handleArea.transform, false);
             var handleRt = handleGo.GetComponent<RectTransform>();
-            handleRt.sizeDelta = new Vector2(24f, 24f);
+            handleRt.sizeDelta = new Vector2(48f, 48f);
             var handleShape = handleGo.GetComponent<UIInkShapeGraphic>();
             handleShape.Shape = UIInkShape.RoundedRect;
-            handleShape.CornerRadius = 12f;
-            handleShape.BorderWidth = 3f;
-            handleShape.BorderColor = theme.outlineColor;
-            handleShape.color = Color.white;
+            handleShape.CornerRadius = 24f; // 48x48 圆块
+            handleShape.BorderWidth = ComicStyle.BorderThin;
+            handleShape.BorderColor = ComicStyle.Ink;
+            handleShape.color = ComicStyle.Paper;
+            handleShape.HardShadow = true;
+            handleShape.ShadowOffset = new Vector2(3f, -3f);
+            handleShape.ShadowColor = ComicStyle.Ink;
+            handleShape.Halftone = false;
+
             slider.handleRect = handleRt;
             slider.targetGraphic = handleShape;
 
-            // Value Text
-            valueLabel = CreateTextMesh("ValueText", container.transform, "", 18f, theme.textPrimary, theme.GetFont(false), TextAlignmentOptions.Right);
-            var valRt = valueLabel.rectTransform;
-            valRt.anchorMin = new Vector2(0.80f, 0f);
+            // 4. 数值标签 (字号 22，走 CJK/Latin 字体解析)
+            UIThemeSO resolvedTheme = UIThemeSO.Resolve(theme);
+            var valGo = new GameObject("ValueText", typeof(RectTransform), typeof(TextMeshProUGUI));
+            valGo.transform.SetParent(container.transform, false);
+            var valRt = valGo.GetComponent<RectTransform>();
+            valRt.anchorMin = new Vector2(0.78f, 0f);
             valRt.anchorMax = new Vector2(1f, 1f);
             valRt.offsetMin = Vector2.zero;
             valRt.offsetMax = Vector2.zero;
+
+            valueLabel = valGo.GetComponent<TextMeshProUGUI>();
+            valueLabel.fontSize = 22f;
+            valueLabel.fontStyle = FontStyles.Bold;
+            valueLabel.color = ComicStyle.Ink;
+            valueLabel.alignment = TextAlignmentOptions.Right;
+            valueLabel.raycastTarget = false;
+            valueLabel.font = resolvedTheme.ResolveFont(false, "100%");
 
             return slider;
         }

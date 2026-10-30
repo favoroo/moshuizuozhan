@@ -98,11 +98,11 @@ namespace P1.Editor
             SaveAsset(emissiveMesh, $"{MeshFolder}/arena_decor_emissive.asset");
             SaveAsset(clothMesh, $"{MeshFolder}/arena_decor_cloth.asset");
 
-            // 3. 创建子渲染对象 (近景装饰阴影开启)
-            CreateRendererChild(decorRoot.transform, "Decor_Matte", matteMesh, mats?.propMatte ?? mats?.concrete, true);
-            CreateRendererChild(decorRoot.transform, "Decor_Metal", metalMesh, mats?.propMetal ?? mats?.steel, true);
-            CreateRendererChild(decorRoot.transform, "Decor_Emissive", emissiveMesh, mats?.propEmissive ?? mats?.propMatte, true);
-            CreateRendererChild(decorRoot.transform, "Decor_Cloth", clothMesh, mats?.propCloth ?? mats?.propMatte, true);
+            // 3. 创建子渲染对象 (近景装饰阴影开启；Matte/Metal 挂载网格碰撞体以支持弹丸直击落墨与碰撞阻挡)
+            CreateRendererChild(decorRoot.transform, "Decor_Matte", matteMesh, mats?.propMatte ?? mats?.concrete, true, true);
+            CreateRendererChild(decorRoot.transform, "Decor_Metal", metalMesh, mats?.propMetal ?? mats?.steel, true, true);
+            CreateRendererChild(decorRoot.transform, "Decor_Emissive", emissiveMesh, mats?.propEmissive ?? mats?.propMatte, true, false);
+            CreateRendererChild(decorRoot.transform, "Decor_Cloth", clothMesh, mats?.propCloth ?? mats?.propMatte, true, false);
 
             // 4. 边界墙内侧图集横幅 (6-8 个 Quad，独占 mats.bannerAtlas)
             Mesh bannersMesh = BuildWallBannersMesh();
@@ -495,7 +495,7 @@ namespace P1.Editor
             AssetDatabase.CreateAsset(mesh, path);
         }
 
-        private static GameObject CreateRendererChild(Transform parent, string name, Mesh mesh, Material mat, bool castShadows)
+        private static GameObject CreateRendererChild(Transform parent, string name, Mesh mesh, Material mat, bool castShadows, bool addCollider = false)
         {
             if (mesh == null) return null;
 
@@ -513,6 +513,12 @@ namespace P1.Editor
 
             mr.shadowCastingMode = castShadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
             mr.receiveShadows = true;
+
+            if (addCollider)
+            {
+                var mc = go.AddComponent<MeshCollider>();
+                mc.sharedMesh = mesh;
+            }
 
             GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
             return go;

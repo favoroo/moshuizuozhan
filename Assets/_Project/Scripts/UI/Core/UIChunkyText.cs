@@ -48,6 +48,15 @@ namespace P1.UI
         [Tooltip("自动把父层 TMP 的文本/字号/对齐同步给填充层")]
         [SerializeField] private bool autoSync = true;
 
+        [Header("漫画风（P10）")]
+        [Tooltip("拉丁字母自动大写：漫画标题规范 uppercase font-black")]
+        [SerializeField] private bool uppercaseLatin = true;
+
+        [Tooltip("含汉字时自动切到 CJK 字体，保证描边材质对中文同样生效")]
+        [SerializeField] private bool autoCjkFont = true;
+
+        private string _lastText;
+
         private TMP_Text _fillLayer;
         private Material _outlineMaterial;
         private Material _fillMaterial;
@@ -179,6 +188,7 @@ namespace P1.UI
                 outlineWidth = resolved.chunkyOutlineWidth;
                 innerOutlineWidth = resolved.chunkyInnerOutlineWidth;
                 shadowOffsetY = resolved.chunkyShadowOffsetY;
+                shadowOffsetX = resolved.chunkyShadowOffsetX;
             }
 
             if (!Application.isPlaying)
@@ -224,23 +234,31 @@ namespace P1.UI
                 outlineWidth = resolved.chunkyOutlineWidth;
                 innerOutlineWidth = resolved.chunkyInnerOutlineWidth;
                 shadowOffsetY = resolved.chunkyShadowOffsetY;
+                shadowOffsetX = resolved.chunkyShadowOffsetX;
             }
 
-            TMP_FontAsset font = useDisplayFont ? resolved.displayFont : resolved.bodyFont;
+            TMP_FontAsset font = ResolveFontForText(resolved);
             if (font != null) source.font = font;
 
             source.extraPadding = true;
             source.raycastTarget = false;
+            ApplyUppercase();
 
-            if (source.font != null && (doubleLayer || outlined))
+            // 只有显式要求描边时才膨胀底层：CJK 笔画细，0.06em 以上的描边会把字糊成黑块。
+            float effectiveOutline = outlined ? outlineWidth : 0f;
+            if (source.font != null && effectiveOutline > 0.001f)
             {
-                _outlineMaterial = CreateOutlineMaterial(source.font, outlineColor, outlineWidth);
+                _outlineMaterial = CreateOutlineMaterial(source.font, outlineColor, effectiveOutline);
                 if (_outlineMaterial != null)
                 {
                     source.fontMaterial = _outlineMaterial;
                     source.outlineColor = outlineColor;
-                    source.outlineWidth = outlineWidth;
+                    source.outlineWidth = effectiveOutline;
                 }
+            }
+            else
+            {
+                source.outlineWidth = 0f;
             }
 
             source.color = doubleLayer ? outlineColor : fillColor;
@@ -293,11 +311,41 @@ namespace P1.UI
 
         private void Update()
         {
-            if (!autoSync || !_built) return;
+            if (!autoSync || !_built || source == null) return;
+
+            if (source.text != _lastText)
+            {
+                _lastText = source.text;
+                _dirty = true;
+
+                // 文案在「纯数字 ↔ 中文」之间切换时，字体必须跟着换，否则中文会掉回默认字体丢描边。
+                if (autoCjkFont)
+                {
+                    TMP_FontAsset want = ResolveFontForText(UIThemeSO.Resolve(theme));
+                    if (want != null && source.font != want) source.font = want;
+                }
+
+                ApplyUppercase();
+            }
+
             if (!_dirty && !NeedsSync()) return;
 
             SyncFillLayer();
             _dirty = false;
+        }
+
+        private TMP_FontAsset ResolveFontForText(UIThemeSO resolved)
+        {
+            if (autoCjkFont) return resolved.ResolveFont(useDisplayFont, source != null ? source.text : null);
+            return useDisplayFont ? resolved.displayFont : resolved.bodyFont;
+        }
+
+        private void ApplyUppercase()
+        {
+            if (source == null) return;
+            source.fontStyle = uppercaseLatin
+                ? source.fontStyle | FontStyles.UpperCase
+                : source.fontStyle & ~FontStyles.UpperCase;
         }
 
         private bool NeedsSync()
@@ -360,10 +408,10 @@ namespace P1.UI
             {
                 source.color = doubleLayer ? outlineColor : fillColor;
 
-                if (source.fontMaterial != null && (doubleLayer || outlined))
+                if (source.fontMaterial != null)
                 {
                     source.outlineColor = outlineColor;
-                    source.outlineWidth = outlineWidth;
+                    source.outlineWidth = outlined ? outlineWidth : 0f;
                 }
             }
 
@@ -396,10 +444,11 @@ namespace P1.UI
             if (source == null) return;
 
             UIThemeSO resolved = UIThemeSO.Resolve(theme);
-            TMP_FontAsset font = useDisplayFont ? resolved.displayFont : resolved.bodyFont;
+            TMP_FontAsset font = ResolveFontForText(resolved);
             if (font != null) source.font = font;
 
             source.extraPadding = true;
+            ApplyUppercase();
             source.color = fillColor;
         }
 

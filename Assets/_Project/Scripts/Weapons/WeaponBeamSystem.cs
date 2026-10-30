@@ -96,7 +96,7 @@ namespace P1.Weapons
                 if (hitWorld && worldCollider != null)
                 {
                     InkWallSurface wall = InkWallSurface.FindForCollider(worldCollider);
-                    if (wall != null)
+                    if (wall != null && worldNormal.y <= 0.55f)
                     {
                         painted += wall.PaintAtWorld(end, worldNormal, impactRadius, team);
                     }

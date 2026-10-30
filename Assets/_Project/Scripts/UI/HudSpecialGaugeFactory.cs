@@ -66,12 +66,21 @@ namespace P1.UI
             RectTransform pulse = NewRect("Pulse", orbRect);
             Stretch(pulse);
 
+            // 0) 满能放射动作线（漫画 POW! 能量感）
+            RectTransform linesRect = NewRect("ActionLines", pulse);
+            Stretch(linesRect, -32f);
+            var actionLines = linesRect.gameObject.AddComponent<ComicActionLinesGraphic>();
+            actionLines.raycastTarget = false;
+            actionLines.RayCount = 20;
+            actionLines.Alpha = 0f;
+            actionLines.color = ComicStyle.Yellow;
+
             // 1) 金色旋转光环（球体外围）
             RectTransform haloRect = NewRect("ReadyHalo", pulse);
             Stretch(haloRect);
             var halo = haloRect.gameObject.AddComponent<UIRotatingRingGraphic>();
             halo.raycastTarget = false;
-            halo.Configure(1.16f, 4.5f, style.haloDashCount, style.haloSpinDegreesPerSecond, themeResolved.readyGold);
+            halo.Configure(1.18f, 5f, style.haloDashCount, style.haloSpinDegreesPerSecond, themeResolved.readyGold);
 
             // 2) 满能爆闪（冲击波 + 射线）
             RectTransform burstRect = NewRect("ReadyBurst", pulse);
@@ -80,14 +89,23 @@ namespace P1.UI
             burst.raycastTarget = false;
             burst.Configure(style.burstDuration, style.burstRayCount, themeResolved.readyGold);
 
-            // 3) 球体底：深色墨底 + Chunky 黑边
+            // 3) 球体底：漫画气泡，粗墨边 6px + 硬阴影 (6,-6) + 半调网点
             RectTransform bodyRect = NewRect("Body", pulse);
             Stretch(bodyRect);
             UIInkShapeGraphic bodyShape = bodyRect.gameObject.AddComponent<UIInkShapeGraphic>();
             bodyShape.raycastTarget = false;
-            ApplyBlobStyle(bodyShape, seed: 17, borderWidth: 9f,
-                fill: themeResolved.panelColor, border: themeResolved.outlineColor,
-                wobble: 0.02f, glossAlpha: 0f, innerRimAlpha: 0f);
+            bodyShape.Shape = UIInkShape.Blob;
+            bodyShape.BorderWidth = ComicStyle.Border;
+            bodyShape.BorderColor = ComicStyle.Ink;
+            bodyShape.HardShadow = true;
+            bodyShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            bodyShape.ShadowColor = ComicStyle.Ink;
+            bodyShape.Halftone = true;
+            bodyShape.HalftoneAlpha = 0.14f;
+            bodyShape.GlossAlpha = 0f;
+            bodyShape.DrawGloss = false;
+            bodyShape.InnerRimAlpha = 0f;
+            bodyShape.color = themeResolved.panelColor;
 
             // 4) 球内液体
             RectTransform liquidRect = NewRect("Liquid", pulse);
@@ -107,20 +125,27 @@ namespace P1.UI
             iconRoot.sizeDelta = Vector2.one * style.specialIconSize;
             iconRoot.anchoredPosition = new Vector2(0f, style.specialIconOffsetY);
 
-            Image iconShadow = CreateIconImage("Shadow", iconRoot, themeResolved.outlineColor,
-                new Vector2(2.4f, -2.4f));
+            Image iconShadow = CreateIconImage("Shadow", iconRoot, ComicStyle.Ink,
+                new Vector2(2.5f, -2.5f));
             Image icon = CreateIconImage("Glyph", iconRoot, Color.white, Vector2.zero);
-            icon.sprite = style.GetSpecialIcon(SpecialKind.Slam);
-            iconShadow.sprite = icon.sprite;
+            Sprite initIcon = UIIconLibrary.Get("special_slam") ?? style.GetSpecialIcon(SpecialKind.Slam);
+            icon.sprite = initIcon;
+            iconShadow.sprite = initIcon;
+            icon.enabled = initIcon != null;
+            iconShadow.enabled = initIcon != null;
 
-            // 5) 白色内沿 + 玻璃质感高光
+            // 5) 漫画外环
             RectTransform rimRect = NewRect("Rim", pulse);
             Stretch(rimRect, 6f);
             UIInkShapeGraphic rimShape = rimRect.gameObject.AddComponent<UIInkShapeGraphic>();
             rimShape.raycastTarget = false;
-            ApplyBlobStyle(rimShape, seed: 17, borderWidth: 3f,
-                fill: new Color(1f, 1f, 1f, 0f), border: new Color(1f, 1f, 1f, 0.92f),
-                wobble: 0.02f, glossAlpha: 0.20f, innerRimAlpha: 0.22f);
+            rimShape.Shape = UIInkShape.Blob;
+            rimShape.BorderWidth = 2f;
+            rimShape.BorderColor = ComicStyle.Ink;
+            rimShape.GlossAlpha = 0f;
+            rimShape.DrawGloss = false;
+            rimShape.InnerRimAlpha = 0f;
+            rimShape.color = new Color(1f, 1f, 1f, 0f);
 
             // 6) 充能百分比
             TMP_Text percent = CreateChunkyTmp("Percent", orbRect, themeResolved, style.percentFontSize, "0%");
@@ -131,7 +156,7 @@ namespace P1.UI
             percentRect.sizeDelta = new Vector2(84f, 26f);
             percentRect.anchoredPosition = new Vector2(0f, 7f);
 
-            // 7) 满能按键提示（挂在球下方，默认隐藏）
+            // 7) 满能按键提示（漫画纸面气泡，朝上指尾）
             RectTransform hintRect = NewRect("ReadyHint", orbRect);
             hintRect.anchorMin = hintRect.anchorMax = new Vector2(0.5f, 0.5f);
             hintRect.pivot = new Vector2(0.5f, 1f);
@@ -140,10 +165,20 @@ namespace P1.UI
 
             UIInkShapeGraphic hintPill = hintRect.gameObject.AddComponent<UIInkShapeGraphic>();
             hintPill.raycastTarget = false;
-            ApplyPillStyle(hintPill, themeResolved);
+            hintPill.Shape = UIInkShape.SpeechBubble;
+            hintPill.CornerRadius = ComicStyle.CornerBubble;
+            hintPill.SpeechTail = true;
+            hintPill.TailSize = new Vector2(16f, 14f);
+            hintPill.TailAngle = 90f; // 尖角朝向上方大招球
+            hintPill.BorderWidth = ComicStyle.BorderThin;
+            hintPill.BorderColor = ComicStyle.Ink;
+            hintPill.HardShadow = true;
+            hintPill.ShadowOffset = new Vector2(3f, -3f);
+            hintPill.ShadowColor = ComicStyle.Ink;
+            hintPill.color = ComicStyle.Paper;
 
-            Text hintLabel = CreateLegacyText("HintLabel", hintRect, style.hintFontSize,
-                style.readyHintText, TextAnchor.MiddleCenter, new Color(0.06f, 0.05f, 0.09f, 1f));
+            Text hintLabel = CreateLegacyText("HintLabel", hintRect, Mathf.Max(16f, style.hintFontSize),
+                style.readyHintText, TextAnchor.MiddleCenter, ComicStyle.Ink);
             Stretch((RectTransform)hintLabel.transform, 4f, 8f, 2f, 2f);
 
             var hintMotion = hintRect.gameObject.AddComponent<UISpringMotion>();
@@ -215,23 +250,40 @@ namespace P1.UI
             CreateImage("ThresholdLine", marker, themeResolved.dangerRed,
                 new Vector2(style.tankSize.x - 1f, 3.4f));
 
-            // 5) 外框（透明填充 + Chunky 黑边，压住液体与刻度线）
+            // 5) 外框（漫画粗墨边 6px + 硬阴影，压住液体与刻度线）
             RectTransform frameRect = NewRect("Frame", tankRect);
             Stretch(frameRect);
             UIInkShapeGraphic frameShape = frameRect.gameObject.AddComponent<UIInkShapeGraphic>();
             frameShape.raycastTarget = false;
-            ApplyRectStyle(frameShape, corner, borderWidth: 6f, fill: new Color(1f, 1f, 1f, 0f),
-                border: themeResolved.outlineColor, glossAlpha: 0f, innerRimAlpha: 0.12f);
+            ApplyRectStyle(frameShape, corner, borderWidth: ComicStyle.Border, fill: new Color(1f, 1f, 1f, 0f),
+                border: ComicStyle.Ink, glossAlpha: 0f, innerRimAlpha: 0f);
+            frameShape.HardShadow = true;
+            frameShape.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            frameShape.ShadowColor = ComicStyle.Ink;
 
-            // 6) 百分比读数（罐体下方）
-            Text percent = CreateLegacyText("Percent", tankRect, Mathf.Max(12f, style.percentFontSize - 3f),
-                "100", TextAnchor.UpperCenter, themeResolved.textPrimary);
-            var percentRect = (RectTransform)percent.transform;
-            percentRect.anchorMin = new Vector2(0.5f, 0f);
-            percentRect.anchorMax = new Vector2(0.5f, 0f);
-            percentRect.pivot = new Vector2(0.5f, 1f);
-            percentRect.sizeDelta = new Vector2(80f, 22f);
-            percentRect.anchoredPosition = new Vector2(0f, -4f);
+            // 6) 百分比读数（纸面标牌：纸白底 + 墨线 + 硬阴影）
+            RectTransform plateRect = NewRect("PercentPlate", tankRect);
+            plateRect.anchorMin = new Vector2(0.5f, 0f);
+            plateRect.anchorMax = new Vector2(0.5f, 0f);
+            plateRect.pivot = new Vector2(0.5f, 1f);
+            plateRect.sizeDelta = new Vector2(74f, 26f);
+            plateRect.anchoredPosition = new Vector2(0f, -4f);
+
+            var plateShape = plateRect.gameObject.AddComponent<UIInkShapeGraphic>();
+            plateShape.raycastTarget = false;
+            plateShape.Shape = UIInkShape.RoundedRect;
+            plateShape.CornerRadius = ComicStyle.CornerSharp;
+            plateShape.BorderWidth = 2.5f;
+            plateShape.BorderColor = ComicStyle.Ink;
+            plateShape.HardShadow = true;
+            plateShape.ShadowOffset = new Vector2(2f, -2f);
+            plateShape.ShadowColor = ComicStyle.Ink;
+            plateShape.color = ComicStyle.Paper;
+
+            Text percent = CreateLegacyText("Percent", plateRect, 16f,
+                "100", TextAnchor.MiddleCenter, ComicStyle.Ink);
+            percent.fontStyle = FontStyle.Bold;
+            Stretch((RectTransform)percent.transform);
 
             var view = tankGo.AddComponent<InkTankView>();
             view.Configure(theme, style, liquid, marker, frameShape, bodyShape, warningGlow, percent,

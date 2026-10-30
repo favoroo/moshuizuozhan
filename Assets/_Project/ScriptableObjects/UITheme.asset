@@ -12,95 +12,134 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6274cf0dc97b744068a7c8fcfaf7f3dd, type: 3}
   m_Name: UITheme
   m_EditorClassIdentifier: P1.Game::P1.UI.UIThemeSO
-  outlineColor: {r: 0.082, g: 0.071, b: 0.11, a: 1}
-  outlineSoftColor: {r: 0.122, g: 0.102, b: 0.173, a: 1}
-  deepShadowColor: {r: 0, g: 0, b: 0, a: 0.35}
-  panelColor: {r: 0.098, g: 0.082, b: 0.145, a: 0.92}
-  panelGlassColor: {r: 0.149, g: 0.122, b: 0.227, a: 0.9}
-  textPrimary: {r: 1, g: 1, b: 1, a: 1}
-  textMuted: {r: 0.765, g: 0.741, b: 0.839, a: 1}
-  highlightColor: {r: 1, g: 1, b: 1, a: 0.16}
-  readyGold: {r: 1, g: 0.835, b: 0.29, a: 1}
-  dangerRed: {r: 0.784, g: 0.09, b: 0.227, a: 1}
+  outlineColor: {r: 0.101960786, g: 0.101960786, b: 0.101960786, a: 1}
+  outlineSoftColor: {r: 0.44321567, g: 0.44321567, b: 0.44321567, a: 1}
+  deepShadowColor: {r: 0.101960786, g: 0.101960786, b: 0.101960786, a: 1}
+  panelColor: {r: 1, g: 0.99607843, b: 0.9411765, a: 1}
+  panelGlassColor: {r: 0.9490196, g: 0.9372549, b: 0.84705883, a: 1}
+  textPrimary: {r: 0.101960786, g: 0.101960786, b: 0.101960786, a: 1}
+  textMuted: {r: 0.35341176, g: 0.35341176, b: 0.35341176, a: 1}
+  highlightColor: {r: 1, g: 0.8, b: 0, a: 1}
+  readyGold: {r: 1, g: 0.8, b: 0, a: 1}
+  dangerRed: {r: 1, g: 0.2, b: 0.2, a: 1}
   teamAColor: {r: 1, g: 0.44, b: 0.06, a: 1}
   teamALight: {r: 1, g: 0.769, b: 0.541, a: 1}
   teamADark: {r: 0.722, g: 0.384, b: 0.059, a: 1}
   teamBColor: {r: 0.15, g: 0.42, b: 1, a: 1}
   teamBLight: {r: 0.596, g: 0.69, b: 1, a: 1}
   teamBDark: {r: 0.141, g: 0.259, b: 0.706, a: 1}
-  neutralColor: {r: 0.42, g: 0.42, b: 0.46, a: 1}
+  neutralColor: {r: 0.45, g: 0.45, b: 0.45, a: 1}
   displayFont: {fileID: 11400000, guid: d1391858ac69144aaa3d5728591770e7, type: 2}
   bodyFont: {fileID: 11400000, guid: a2ec570fab3b14aacadea13f6f1ebfc7, type: 2}
   popSpring:
-    frequency: 3.8
-    damping: 0.55
+    frequency: 16
+    damping: 1
     maxSubSteps: 10
   pressSpring:
-    frequency: 7.5
-    damping: 0.78
+    frequency: 20
+    damping: 1
     maxSubSteps: 8
   followSpring:
-    frequency: 8.5
-    damping: 0.9
+    frequency: 14
+    damping: 1
     maxSubSteps: 8
   settleSpring:
-    frequency: 5.5
+    frequency: 12
     damping: 1
     maxSubSteps: 8
   entranceEasing:
-    x1: 0.34
-    y1: 1.56
-    x2: 0.64
+    x1: 0.22
+    y1: 1
+    x2: 0.36
     y2: 1
-  entranceFadeDuration: 0.26
-  chunkyOutlineWidth: 0.35
+  entranceFadeDuration: 0.1
+  chunkyOutlineWidth: 0.06
   chunkyInnerOutlineWidth: 0.05
-  chunkyShadowOffsetY: 0.05
+  chunkyShadowOffsetY: 0.045
+  chunkyShadowOffsetX: 0.03
+  inkColor: {r: 0.101960786, g: 0.101960786, b: 0.101960786, a: 1}
+  paperColor: {r: 1, g: 0.99607843, b: 0.9411765, a: 1}
+  paperAltColor: {r: 0.9490196, g: 0.9372549, b: 0.84705883, a: 1}
+  accentRed: {r: 1, g: 0.2, b: 0.2, a: 1}
+  accentYellow: {r: 1, g: 0.8, b: 0, a: 1}
+  accentBlue: {r: 0.2, g: 0.4, b: 1, a: 1}
+  accentGreen: {r: 0.2, g: 0.8, b: 0.2, a: 1}
+  inkBorderWidth: 6
+  inkBorderHeavyWidth: 8
+  hardShadowOffset: {x: 6, y: -6}
+  halftoneOnMobile: 1
+  halftoneSpacing: 8
+  halftoneDotRadius: 1.3
+  halftoneAlpha: 0.14
+  halftoneHoverAlpha: 0.22
+  pressDuration: 0.06
+  hoverDuration: 0.08
+  entranceDuration: 0.12
+  hoverScale: 1.06
+  hoverTiltDegrees: -3
+  pressScale: 0.97
+  displayCjkFont: {fileID: 11400000, guid: fc229e5d33bba4abf91eaab774ce81ac, type: 2}
+  bodyCjkFont: {fileID: 11400000, guid: 098f07be3104240bd8fff34b66914b93, type: 2}
   teamCard:
-    shape: 0
+    shape: 1
     fillColor: {r: 1, g: 0.44, b: 0.06, a: 1}
     fillUsesTeamColor: 1
-    borderColor: {r: 0.082, g: 0.071, b: 0.11, a: 1}
-    borderWidth: 8
-    cornerRadius: 40
-    wobble: 0.06
-    glossAlpha: 0.18
+    borderColor: {r: 0.101960786, g: 0.101960786, b: 0.101960786, a: 1}
+    borderWidth: 6
+    cornerRadius: 5
+    wobble: 0
+    glossAlpha: 0
     glossSlope: 0.3
     glossCenter: 0.72
     glossThickness: 0.16
-    innerRimAlpha: 0.12
+    innerRimAlpha: 0
     titleColor: {r: 1, g: 1, b: 1, a: 1}
     titleSize: 38
-    contentPadding: 26
+    contentPadding: 20
+    comicPanel: 1
+    shadowOffset: {x: 6, y: -6}
+    shadowPadding: 8
+    halftone: 1
+    speechTail: 0
   darkCard:
     shape: 1
     fillColor: {r: 0.098, g: 0.082, b: 0.145, a: 0.92}
     fillUsesTeamColor: 0
-    borderColor: {r: 0.122, g: 0.102, b: 0.173, a: 1}
-    borderWidth: 7
-    cornerRadius: 30
+    borderColor: {r: 0.101960786, g: 0.101960786, b: 0.101960786, a: 1}
+    borderWidth: 6
+    cornerRadius: 5
     wobble: 0
-    glossAlpha: 0.1
+    glossAlpha: 0
     glossSlope: 0.3
     glossCenter: 0.74
     glossThickness: 0.14
-    innerRimAlpha: 0.08
+    innerRimAlpha: 0
     titleColor: {r: 1, g: 1, b: 1, a: 1}
     titleSize: 36
-    contentPadding: 24
+    contentPadding: 20
+    comicPanel: 1
+    shadowOffset: {x: 6, y: -6}
+    shadowPadding: 8
+    halftone: 0
+    speechTail: 0
   lightCard:
     shape: 1
     fillColor: {r: 0.945, g: 0.933, b: 0.98, a: 1}
     fillUsesTeamColor: 0
-    borderColor: {r: 0.082, g: 0.071, b: 0.11, a: 1}
-    borderWidth: 7
-    cornerRadius: 30
+    borderColor: {r: 0.101960786, g: 0.101960786, b: 0.101960786, a: 1}
+    borderWidth: 6
+    cornerRadius: 5
     wobble: 0
-    glossAlpha: 0.35
+    glossAlpha: 0
     glossSlope: 0.3
     glossCenter: 0.74
     glossThickness: 0.16
     innerRimAlpha: 0
     titleColor: {r: 0.082, g: 0.071, b: 0.11, a: 1}
     titleSize: 36
-    contentPadding: 24
+    contentPadding: 20
+    comicPanel: 1
+    shadowOffset: {x: 6, y: -6}
+    shadowPadding: 8
+    halftone: 1
+    speechTail: 0

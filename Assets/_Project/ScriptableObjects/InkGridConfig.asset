@@ -19,6 +19,8 @@ MonoBehaviour:
   inkAtlasResolutionMobile: 1024
   inkDryingSeconds: 6
   splatGrowSeconds: 0.12
+  atlasWetClockPeriod: 32
+  atlasGrowShrinkMeters: 0.4
   splatToneStrength: 1
   maxSplatsPerFrame: 192
   atlasMipmaps: 1

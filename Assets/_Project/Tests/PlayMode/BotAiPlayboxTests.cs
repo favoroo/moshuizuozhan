@@ -28,13 +28,16 @@ namespace P1.Tests
             var match = MatchManager.Instance;
             Assert.IsNotNull(match, "场景里应存在 MatchManager");
 
+            // 压缩 3s 倒计时：Bot 行为断言发生在 Playing 之后，不依赖倒计时真实时长
+            PlayModeTestKit.ShortenMatchTimers();
+
             if (match.CurrentPhase == MatchManager.Phase.Ready ||
                 match.CurrentPhase == MatchManager.Phase.Result)
             {
                 match.StartMatch();
             }
 
-            // 等 3-2-1 倒计时结束，进入 Playing
+            // 等 3-2-1 倒计时结束，进入 Playing（已压缩到 0.4s）
             float timeout = 8f;
             while (!MatchManager.CombatAllowed && timeout > 0f)
             {

@@ -19,6 +19,11 @@ namespace P1.Core
         public WeaponConfigSO[] weaponConfigs;
         public Sprite[] weaponIcons;
 
+        [Header("UI 图标（按文件名索引，不含扩展名；菜单 11 自动收集）")]
+        [Tooltip("例如 mark_squid / mark_death / glyph_gear / special_slam")]
+        public string[] uiIconNames;
+        public Sprite[] uiIcons;
+
         [Header("音效（按文件名索引，不含扩展名）")]
         public string[] sfxNames;
         public AudioClip[] sfxClips;
@@ -73,6 +78,25 @@ namespace P1.Core
                 return null;
 
             return weaponIcons[index];
+        }
+
+        /// <summary>
+        /// 按文件名取 UI 图标（不含扩展名）。供 <see cref="P1.UI.UIIconLibrary"/> 调用：
+        /// 这是移动端/独立包唯一可靠的图标来源，缺了就会退回白块。
+        /// </summary>
+        public Sprite GetUiIcon(string iconName)
+        {
+            if (string.IsNullOrEmpty(iconName) || uiIconNames == null || uiIcons == null)
+                return null;
+
+            int count = Mathf.Min(uiIconNames.Length, uiIcons.Length);
+            for (int i = 0; i < count; i++)
+            {
+                if (uiIconNames[i] == iconName)
+                    return uiIcons[i];
+            }
+
+            return null;
         }
     }
 }

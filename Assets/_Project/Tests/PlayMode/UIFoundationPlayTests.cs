@@ -11,6 +11,7 @@ namespace P1.Tests
     /// <summary>
     /// P4-A 运行时验证：卡片自动装配 + 弹簧落地、队伍染色在真实 MonoBehaviour 生命周期下生效。
     /// </summary>
+    [Category("UI")]
     public class UIFoundationPlayTests
     {
         private static GameObject CreateCanvas()

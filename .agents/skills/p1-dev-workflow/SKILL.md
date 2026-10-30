@@ -170,6 +170,7 @@ grep -E "error CS|Compilation failed" Logs/compilecheck.log || echo "COMPILE OK"
   `python3 .agents/skills/media-gen/scripts/preview_alpha.py <out.png> <图...>`。
 - `MediaRaw/` 是原稿区（`Assets/` 之外，Unity 不扫描），**不要把整个 `MediaRaw` 拷进 `Assets/`**。
 - 音效不走网关：`python3 tools/bake_sfx.py`（`--list` 看音色族，`--only` 只烘指定族）。
-- BGM：`lyria-3.5` 2026-10-29 起被上游禁用（400 `PROXY_GENERATION_DISABLED`），
+- BGM：网关音乐模型 `lyria-3.5` 与其备用 `lyria-3-pro-preview` 于 2026-10-29 实测**都被上游禁用**
+  （400 `PROXY_GENERATION_DISABLED`；`gen_music.sh` 已内置「主用→备用」回退，恢复后原命令即可用），
   改用 `python3 tools/bake_bgm.py` 本地确定性合成两段 60s 循环（128 BPM 主阶段 / 160 BPM 决战段）；
   `--only main|final` 单段重烘、`--stats` 只看指标。生成后仍需 `Refresh` + 体检。

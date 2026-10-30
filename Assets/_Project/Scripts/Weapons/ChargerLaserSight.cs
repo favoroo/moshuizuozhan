@@ -16,6 +16,7 @@ namespace P1.Weapons
         private readonly MeshRenderer _lineRenderer;
         private readonly MeshRenderer _dotRenderer;
         private readonly Material _material;
+        private readonly Mesh _dotMesh;
         private readonly MaterialPropertyBlock _block;
 
         private static readonly int BaseColorProp = Shader.PropertyToID("_BaseColor");
@@ -46,7 +47,8 @@ namespace P1.Weapons
             var dotGo = new GameObject("AimDot");
             dotGo.transform.SetParent(_root, false);
             var dotFilter = dotGo.AddComponent<MeshFilter>();
-            dotFilter.sharedMesh = VfxPool.BuildRingMesh(24, 0.62f, 1f);
+            _dotMesh = VfxPool.BuildRingMesh(24, 0.62f, 1f);
+            dotFilter.sharedMesh = _dotMesh;
             _dotRenderer = dotGo.AddComponent<MeshRenderer>();
             _dotRenderer.sharedMaterial = _material;
             _dotRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -105,6 +107,11 @@ namespace P1.Weapons
             if (_material != null)
             {
                 DestroySafe(_material);
+            }
+
+            if (_dotMesh != null)
+            {
+                DestroySafe(_dotMesh);
             }
         }
 

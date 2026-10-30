@@ -33,6 +33,10 @@ namespace P1.AI
             if (dt <= 0f)
                 return AngleDegrees;
 
+            // 大 dt（后台切回 / 长帧卡顿）时半隐式欧拉会发散：2ζω·h > 2 后速度符号翻转振荡。
+            // 子步数上限只有 8，h 压不住 ω 大的场合，直接把 dt 钉在稳定域内（本帧冻结瞄准，下帧恢复）。
+            dt = Mathf.Min(dt, 0.1f);
+
             omega = Mathf.Max(0.01f, omega);
             dampingRatio = Mathf.Max(0.05f, dampingRatio);
             maxRateDegrees = Mathf.Max(0.01f, maxRateDegrees);

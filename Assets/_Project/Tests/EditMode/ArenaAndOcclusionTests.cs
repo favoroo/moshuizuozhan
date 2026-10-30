@@ -198,5 +198,107 @@ namespace P1.Tests.EditMode
             // 位于掩体外部但在圆斑内部的点应当正常着色
             Assert.AreEqual(Team.TeamA, grid.InkAt(new Vector2(2.5f, 0f)), "掩体外部但在泼墨半径内的地面应正常涂色");
         }
+
+        [Test]
+        public void ArenaGeometry_AllObstaclesAndProps_HaveInkWallSurface_WithCorrectClimbRules()
+        {
+            // 验证中央高台花坛与女儿墙均有 InkWallSurface 且可攀爬
+            var planter = _testArena.transform.Find("Cover_Center_West_Planter")?.gameObject;
+            Assert.IsNotNull(planter, "中央花坛必须存在");
+            var planterWall = planter.GetComponent<InkWallSurface>();
+            Assert.IsNotNull(planterWall, "中央花坛必须挂载 InkWallSurface 组件");
+            Assert.IsTrue(planterWall.CanClimb, "中央花坛应允许攀爬");
+
+            var parapet = _testArena.transform.Find("Parapet_Center_SW")?.gameObject;
+            Assert.IsNotNull(parapet, "中央女儿墙必须存在");
+            var parapetWall = parapet.GetComponent<InkWallSurface>();
+            Assert.IsNotNull(parapetWall, "中央女儿墙必须挂载 InkWallSurface");
+            Assert.IsTrue(parapetWall.CanClimb, "女儿墙应允许攀爬");
+
+            // 验证延长区木箱与网关
+            var crate = _testArena.transform.Find("Crate_Extension_A")?.gameObject;
+            Assert.IsNotNull(crate, "延长区木箱 A 必须存在");
+            var crateWall = crate.GetComponent<InkWallSurface>();
+            Assert.IsNotNull(crateWall, "木箱必须挂载 InkWallSurface");
+            Assert.IsTrue(crateWall.CanClimb, "木箱应允许攀爬");
+
+            var gate = _testArena.transform.Find("SpawnGate_A")?.gameObject;
+            Assert.IsNotNull(gate, "网关 A 必须存在");
+            var gateWall = gate.GetComponent<InkWallSurface>();
+            Assert.IsNotNull(gateWall, "网关必须挂载 InkWallSurface");
+
+            // 验证四周边界墙可涂墨但绝对禁止攀爬越界
+            var boundaryS = _testArena.transform.Find("Boundary_South")?.gameObject;
+            Assert.IsNotNull(boundaryS, "南向边界围墙必须存在");
+            var boundaryWall = boundaryS.GetComponent<InkWallSurface>();
+            Assert.IsNotNull(boundaryWall, "边界围墙必须挂载 InkWallSurface 支持泼墨吸附");
+            Assert.IsFalse(boundaryWall.CanClimb, "边界围墙严禁攀爬（防翻出场外坠落）");
+
+            var boundaryN = _testArena.transform.Find("Boundary_North")?.gameObject;
+            Assert.IsNotNull(boundaryN?.GetComponent<InkWallSurface>(), "北向边界墙必须支持涂墨");
+            Assert.IsFalse(boundaryN.GetComponent<InkWallSurface>().CanClimb, "北向边界墙严禁攀爬");
+        }
+
+        [Test]
+        public void InkWallSurface_LazyRenderer_DisabledByDefault_AndEnabledOnPaint()
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            try
+            {
+                var wall = go.AddComponent<InkWallSurface>();
+                var cfg = ScriptableObject.CreateInstance<InkGridConfigSO>();
+                wall.Configure(go.GetComponent<BoxCollider>(), null, cfg, true);
+
+                // 运行时初始化生成 4 面（EditMode 下传入 force: true 强行构建 Quad 与贴图）
+                Assert.IsTrue(wall.InitializeIfNeeded(true));
+                Assert.AreEqual(4, wall.FaceCount);
+
+                // 初始状态下所有子 Renderer 均应为 enabled = false，实现 0 DrawCall 空闲开销
+                var childRenderers = go.GetComponentsInChildren<MeshRenderer>();
+                // 其中 1 个是物体自身 MeshRenderer，4 个是立面 Quad
+                int quadRenderers = 0;
+                for (int i = 0; i < childRenderers.Length; i++)
+                {
+                    if (childRenderers[i].gameObject != go)
+                    {
+                        quadRenderers++;
+                        Assert.IsFalse(childRenderers[i].enabled, "初始未涂色的立面 MeshRenderer 必须为 false 节省渲染开销");
+                    }
+                }
+                Assert.AreEqual(4, quadRenderers, "必须生成 4 个立面 Quad");
+
+                // 在南立面上涂墨
+                Vector3 southFacePoint = new Vector3(wall.WorldBounds.center.x, wall.WorldBounds.center.y, wall.WorldBounds.min.z);
+                int changed = wall.PaintAtWorld(southFacePoint, Vector3.back, 0.5f, Team.TeamA);
+                Assert.Greater(changed, 0, "涂墨必须成功写入格子");
+
+                // 命中面被激活
+                int activeCount = 0;
+                for (int i = 0; i < childRenderers.Length; i++)
+                {
+                    if (childRenderers[i].gameObject != go && childRenderers[i].enabled)
+                    {
+                        activeCount++;
+                    }
+                }
+                Assert.AreEqual(1, activeCount, "仅被涂墨的立面 Renderer 被激活开启");
+
+                // 重置后恢复禁用
+                wall.ResetPaint();
+                for (int i = 0; i < childRenderers.Length; i++)
+                {
+                    if (childRenderers[i].gameObject != go)
+                    {
+                        Assert.IsFalse(childRenderers[i].enabled, "ResetPaint 后所有立面 Renderer 必须恢复禁用");
+                    }
+                }
+
+                Object.DestroyImmediate(cfg);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
     }
 }

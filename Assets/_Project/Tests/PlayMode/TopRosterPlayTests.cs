@@ -12,6 +12,7 @@ namespace P1.Tests
     /// P4-B 顶部战况条与中央墨滴计时器的 PlayMode 运行时验证：
     /// 确保 4v4 头像槽位自动装配、中央墨滴计时球渲染、比分条弹簧平滑与 HudController 完整联动。
     /// </summary>
+    [Category("UI")]
     public class TopRosterPlayTests
     {
         private static GameObject CreateCanvas()

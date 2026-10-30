@@ -58,6 +58,11 @@ namespace P1.Weapons
         private static readonly int BaseColorProp = Shader.PropertyToID("_BaseColor");
         private static readonly int ColorProp = Shader.PropertyToID("_Color");
 
+        private static readonly float[] GroundStretchOffsets = { 0f, 0.38f, 0.78f, 1.18f, 1.55f };
+        private static readonly float[] GroundStretchScales = { 0.78f, 0.70f, 0.56f, 0.40f, 0.24f };
+        private static readonly float[] WallStretchOffsets = { -0.35f, 0f, 0.45f, 0.9f, 1.3f };
+        private static readonly float[] WallStretchScales = { 0.40f, 0.62f, 0.55f, 0.40f, 0.24f };
+
         private void Awake()
         {
             Instance = this;
@@ -77,6 +82,12 @@ namespace P1.Weapons
         {
             if (Instance == this)
                 Instance = null;
+
+            if (_sharedMat != null)
+            {
+                Destroy(_sharedMat);
+                _sharedMat = null;
+            }
         }
 
         public void ClearAllProjectiles()
@@ -305,9 +316,10 @@ namespace P1.Weapons
             }
             else
             {
-                // 命中的是可涂墙面时涂在墙面上（地面占地本身不可涂），否则照旧涂落点地面
+                // 命中的是可涂墙面的侧立面（impactNormal.y <= 0.55f）时涂在墙面上；
+                // 命中顶面（如高台顶、集装箱顶、木箱顶等）走顶面图集涂墨
                 InkWallSurface wall = InkWallSurface.FindForCollider(hit.collider);
-                if (wall != null)
+                if (wall != null && impactNormal.y <= 0.55f)
                 {
                     int wallChanged = PaintWallStretchBlob(wall, impactPos, impactNormal, incomingDir, splatRadius, p.EndSplatStretch, p.Team);
                     if (wallChanged > 0)
@@ -416,12 +428,10 @@ namespace P1.Weapons
             // 主瓣：尾部短、前部沿入射方向拉长
             PaintGroundCircle(point - tangent * (radius * 0.38f), radius * 0.52f, team, onCellsPainted);
 
-            float[] offsets = { 0f, 0.38f, 0.78f, 1.18f, 1.55f };
-            float[] scales = { 0.78f, 0.70f, 0.56f, 0.40f, 0.24f };
-            for (int i = 0; i < offsets.Length; i++)
+            for (int i = 0; i < GroundStretchOffsets.Length; i++)
             {
-                Vector3 blobPoint = point + tangent * (radius * offsets[i] * stretch);
-                PaintGroundCircle(blobPoint, radius * scales[i], team, onCellsPainted);
+                Vector3 blobPoint = point + tangent * (radius * GroundStretchOffsets[i] * stretch);
+                PaintGroundCircle(blobPoint, radius * GroundStretchScales[i], team, onCellsPainted);
             }
 
             // 星状小射线
@@ -453,14 +463,11 @@ namespace P1.Weapons
             tangent.Normalize();
 
             // 墙面面积有限，拉伸幅度按 0.65 收敛，避免墨斑跑到墙外
-            float[] offsets = { -0.35f, 0f, 0.45f, 0.9f, 1.3f };
-            float[] scales = { 0.40f, 0.62f, 0.55f, 0.40f, 0.24f };
-
             int changed = 0;
-            for (int i = 0; i < offsets.Length; i++)
+            for (int i = 0; i < WallStretchOffsets.Length; i++)
             {
-                Vector3 blobPoint = point + tangent * (radius * offsets[i] * stretch * 0.65f);
-                changed += wall.PaintAtWorld(blobPoint, normal, radius * scales[i], team);
+                Vector3 blobPoint = point + tangent * (radius * WallStretchOffsets[i] * stretch * 0.65f);
+                changed += wall.PaintAtWorld(blobPoint, normal, radius * WallStretchScales[i], team);
             }
             return changed;
         }

@@ -33,12 +33,13 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
 
 | 项 | 规范 |
 |----|------|
-| 构建命令 | 调用 `python3 .agents/skills/p1-release/release.py build --version X.Y.Z`，内部通过 Unity CLI / Batchmode 导出 Release APK |
+| 构建命令 | 调用 `python3 .agents/skills/p1-release/release.py build --version X.Y.Z`。**默认自动判断**：检测到 GUI 编辑器占用工程锁时改走 Pipeline 触发菜单 `P1/构建/9` 出包；编辑器关闭时走 batchmode。`--batchmode` 可强制批处理，`--force` 忽略已有产物强制重建。 |
+| 产物校验 | `build` 用 aapt2 读取 APK 包内 `versionName/versionCode`，**旧包一律拒绝复用**并重新构建；无 Android build-tools 时退化为「文件名 + 时间戳」校验并告警。`publish` 会再次校验包内版本、重算 SHA-256、核对 `ProjectSettings.asset` 版本。 |
 | APK 命名 | `moshuizuozhan-v<version>-arm64-v8a.apk`（如 `moshuizuozhan-v0.1.0-arm64-v8a.apk`），**两端文件名完全一致** |
 | 产物目录 | `build/` |
 | Tag 命名 | `v<version>`（如 `v0.1.0`），使用 annotated tag |
 | 版本号递增 | **每次发布/打包 APK，版本号必须递增 +1**，禁止同版本覆盖发布。由 `release.py bump` 自动判断：读 `Assets/_Project/Scripts/Core/GameVersion.cs` 当前版本 X → 查 tag `vX` → 不存在直接用 X；已存在则 +1 到 X+1 并写回。 |
-| 版本来源 | `Assets/_Project/Scripts/Core/GameVersion.cs` 的 `APP_VERSION` 与 Unity `PlayerSettings.bundleVersion` 保持严格一致 |
+| 版本来源 | `Assets/_Project/Scripts/Core/GameVersion.cs` 的 `APP_VERSION` 与 Unity `PlayerSettings.bundleVersion` 保持严格一致；`publish` 读取 `ProjectSettings.asset` 校验两者，不一致直接拒绝 |
 | 两端一致性 | GitHub 与 Gitee 必须使用相同 Tag、相同 APK 文件名、同为正式 Release（非 draft / prerelease） |
 | 更新服务 | `Assets/_Project/Scripts/UI/UpdateManager.cs` 优先读 Gitee `/releases/latest`，备选 GitHub，并配合国内加速代理 |
 | 附件保留策略 | **发布后自动清理双端老 APK 附件**：GitHub 保留最近 10 个（`--keep-gh`）、Gitee 保留最近 3 个（`--keep-gitee`），控制仓库体积与 Gitee 1GB 附件配额 |
@@ -48,22 +49,27 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
 脚本：`.agents/skills/p1-release/release.py`（纯 Python 标准库）。
 
 ```text
-⓪ 发布前门禁:
+⓪ 发布前门禁（编辑器开着时）:
    U="$HOME/.unity/bin/unity"
    "$U" command script.recompile_status    # 编译是否成功（compilationFailed: false）
    "$U" command console.get --tail 50 --level error
+   编辑器关闭时改用 batchmode:
+   "$UNITY" -batchmode -nographics -quit -projectPath "$PWD" -logFile Logs/compilecheck.log
+   grep -E "error CS|Compilation failed" Logs/compilecheck.log || echo "COMPILE OK"
 ① 自动算版本号并写回:  python3 .agents/skills/p1-release/release.py bump --write
    —— 读 GameVersion.cs → 查 tag → 不存在直接用当前版本(预升未发布);已存在则 +1 写回 GameVersion.cs
 ② 执行构建:           python3 .agents/skills/p1-release/release.py build --version X.Y.Z
-③ 提交改动:           git add -A && git commit -m "feat(release): 发布墨水作战 vX.Y.Z"
+   —— 编辑器开着会自动走 Pipeline 菜单构建；产物必须通过包内版本校验
+③ 提交改动:           git add -A && git commit -m "<type>(<scope>): 发布墨水作战 vX.Y.Z"
+   —— 纯修复版本用 fix(ui)/fix(gameplay)，含新内容用 feat(release)
 ④ 撰写 Release 说明存为临时文件，执行发布:
    python3 .agents/skills/p1-release/release.py publish --version X.Y.Z --notes-file /tmp/notes.md
-   —— 写法见 §3；publish 会校验条数/字数/禁用词，不合规直接拒绝。
+   —— 写法见 §3；publish 会校验分段/条数/字数/禁用词，不合规直接拒绝。
 ⑤ 向用户汇报发布验证清单（含两端 URL、APK 附件状态与 SHA-256）
 ```
 
-- `build` 阶段：校验版本一致性 → Unity 导出 Release APK → SHA-256 计算 → 原子写 `build/release-meta.json`。
-- `publish` 阶段：等待构建元数据就绪 → 预检（工作树干净、tag 不存在）→ 创建 annotated tag → **并行**推送双端 → **并行**创建双端 Release → **并行**上传 APK → 幂等可重试 → 双端验证 → 自动清理双端老版本附件（GitHub 保留最近 10 个 / Gitee 保留最近 3 个）。
+- `build` 阶段：校验版本一致性 → 自动选择构建通道（GUI 编辑器在跑 → Pipeline；否则 batchmode）→ **校验 APK 包内 versionName/versionCode** → SHA-256 → 原子写 `build/release-meta.json`（含 git HEAD 与 dirty 标记）。
+- `publish` 阶段：等待构建元数据就绪 → 预检（工作树干净、tag 若已存在必须与 HEAD 一致）→ 重算 SHA-256 与包内版本 → 校验 PlayerSettings 版本 → 创建 annotated tag → **并行**推送双端 → **并行**创建双端 Release → **并行**上传 APK（同名旧附件按体积替换）→ 幂等可重试 → 双端验证（附件状态 + 体积）→ 自动清理双端老版本附件（GitHub 最近 10 个 / Gitee 最近 3 个）。
 
 ### 2. 令牌获取（严禁写入任何仓库文件）
 
@@ -79,16 +85,16 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
 硬约束：
 
 - 总条目 ≤5 条，每条 ≤25 字（中文计，含标点）。
-- 只用三段：`### 新增内容` / `### 调整` / `### 问题修复`。数值增强削弱进「调整」，不要塞进「问题修复」。
+- 只用三段：`### 新增内容` / `### 调整` / `### 问题修复`（出现其他 `###` 分段直接拒绝）。数值增强削弱进「调整」，不要塞进「问题修复」。
 - 每条写「玩家看到什么变了」，不写「代码怎么改的」；第一条放最值得玩家知道的变化。
-- 末尾 `**SHA-256**` 行保留（游戏内弹窗会自动隐藏）。
-- `publish` 调用 `validate_notes()` 校验条数、字数与禁用词，不合规直接拒绝发布；确需跳过加 `--skip-notes-check`。
+- **说明文件里不要写 SHA-256 行**——`publish` 会自动追加。校验器也会忽略 `**SHA-256**` 行与 `---` 分割线，不会误计为条目。
+- `publish` 调用 `validate_notes()` 校验分段、条数、字数与禁用词，不合规直接拒绝发布；确需跳过加 `--skip-notes-check`。
 
 禁用词（出现即说明写成了开发者视角）：
 
 `池化` `对象池` `节流` `信号` `节点` `await` `渲染器` `工厂` `口径` `探针` `HUD` `合批` `分帧` `重构` `缓存` `日志` `接口` `测试` `站点`
 
-模板：
+模板（不含 SHA-256 行）：
 
 ```markdown
 ## 墨水作战 vX.Y.Z
@@ -102,17 +108,33 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
 
 ### 问题修复
 - 修复偶发界面显示异常
-
-**SHA-256**: `<shasum -a 256 输出>`
 ```
 
 ### 4. 发布检查清单
 
 脚本自动完成：
 
-- [ ] Release 说明通过 `validate_notes()`（≤5 条 / ≤25 字 / 无禁用词）
-- [ ] GitHub Release 页面可见，APK 附件已上传（state=uploaded）
-- [ ] Gitee Release 页面可见，APK 附件已上传
-- [ ] 两端 Tag 一致（`v<version>`）、两端 APK 文件名一致
+- [ ] Release 说明通过 `validate_notes()`（仅三段 / ≤5 条 / ≤25 字 / 无禁用词）
+- [ ] APK 包内 `versionName` / `versionCode` 与目标版本一致（aapt2 校验）
+- [ ] `GameVersion.APP_VERSION`、`PlayerSettings.bundleVersion`、`AndroidBundleVersionCode` 三者一致
+- [ ] 构建元数据 SHA-256 与磁盘 APK 重算结果一致
+- [ ] 本地 tag 与 HEAD 一致（重试场景）；双端 tag 一致
+- [ ] GitHub Release 页面可见，APK 附件 `state=uploaded` 且体积与本地一致
+- [ ] Gitee Release 页面可见，APK 附件已上传且体积一致
+- [ ] 两端 APK 文件名完全一致
 - [ ] 两端 `/releases/latest` 均指向新 Tag（游戏内更新检测依赖）
 - [ ] 双端历史附件已按配额修剪（GitHub 最近 10 版 / Gitee 最近 3 版）
+
+### 5. 常见问题排查
+
+| 现象 | 原因 | 处理 |
+|----|----|----|
+| `unity build` 日志出现 `ExitDontLaunchBugReporter ... return code 1` | GUI 编辑器占用 `Temp/UnityLockfile`，batchmode 起不来 | `build` 现在会自动检测并改走 Pipeline；若仍失败，确认 Unity 版本与项目一致，或在编辑器内用菜单 `P1/构建/9` 出包后再跑 `build` 复用（会自动校验版本） |
+| 构建期间 `unity command ...` 全部 504 | 编辑器主线程被同步构建占满 | 正常现象，等待构建结束；不要 kill 编辑器 |
+| `未找到与目标版本一致的 APK 产物` | 复用的 APK 是旧版本（固定名 `InkTurfDemo.apk`） | 重新构建；确认 `GameVersion.cs` 与 PlayerSettings 已同步 |
+| `APK 版本不符: 包内 X ... 期望 Y` | 同上，或构建中途失败留下了旧包 | 用 `build --force` 重建 |
+| `未找到 aapt2/aapt` 警告 | 未安装 Android build-tools 或 SDK 路径未识别 | 安装 build-tools 或设置 `ANDROID_HOME`；脚本会退化用文件名 + 时间戳校验 |
+| `tag vX.Y.Z 已存在但指向 ... 与当前 HEAD 不一致` | 复用了旧 tag，却提交了新代码 | 递增版本号后重新发布，禁止覆盖旧 tag |
+| 构建日志写「APK 大小 808 MB」但 `build/` 里只有 42 MB | 那是 Unity `summary.totalSize`（未压缩总大小） | 以 `build` 脚本输出的实际文件大小为准 |
+| `build` 几秒就完成、APK 未重写 | Unity 增量构建命中缓存（无改动时正常复用） | 正常现象；脚本以编辑器日志的「构建成功」为准，不看文件时间 |
+| `编辑器日志显示构建失败`，脚本立即退出 | 代码编译错误或场景构建失败 | 先 `"$U" command script.recompile_status` 与 `console.get --level error` 查编译错误 |

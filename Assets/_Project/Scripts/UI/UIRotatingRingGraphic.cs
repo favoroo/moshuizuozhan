@@ -41,7 +41,7 @@ namespace P1.UI
             set
             {
                 float clamped = Mathf.Clamp01(value);
-                if (Mathf.Approximately(intensity, clamped)) return;
+                if (Mathf.Approximately(intensity, clamped) || (clamped > 0.001f && clamped < 0.999f && Mathf.Abs(intensity - clamped) < 0.02f)) return;
                 intensity = clamped;
                 SetVerticesDirty();
             }
@@ -69,7 +69,7 @@ namespace P1.UI
             if (_angle > 360f) _angle -= 360f;
             if (_angle < -360f) _angle += 360f;
 
-            SetVerticesDirty();
+            rectTransform.localRotation = Quaternion.Euler(0f, 0f, _angle);
         }
 
         protected override void OnPopulateMesh(VertexHelper vh)
@@ -105,7 +105,7 @@ namespace P1.UI
 
             for (int i = 0; i < dashes; i++)
             {
-                float start = _angle + sector * i;
+                float start = sector * i;
                 AddArc(vh, center, inner, outer, start, start + sweep, DashSamples, ringTint);
             }
         }

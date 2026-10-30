@@ -5,7 +5,7 @@ Shader "P1/InkGround"
         [Header(Base Ground Settings)]
         _BaseColor ("Base Ground Color", Color) = (0.20, 0.22, 0.26, 1)
         _GridLineColor ("Grid Line Color", Color) = (0.25, 0.28, 0.33, 1)
-        _InkTex ("Ink Atlas (R=team G=wet B=tone A=coverage)", 2D) = "black" {}
+        _InkTex ("Ink Atlas (R=team G=birth-ts*coverage B=tone A=coverage)", 2D) = "black" {}
         _InkMapOriginXZ ("Ink Map Origin XZ", Vector) = (-20, -28, 40, 56)
         _InkTexelSize ("Ink Texel Size", Vector) = (0.0002441406, 0.0002441406, 4096, 4096)
         _GroundTex ("Ground Albedo (Arena)", 2D) = "white" {}
@@ -44,6 +44,15 @@ Shader "P1/InkGround"
         _FocusRadius ("Focus Radius", Float) = 2.2
         _FocusMinAlpha ("Focus Min Alpha", Range(0.0, 1.0)) = 0.25
         _FocusWeight ("Focus Weight", Range(0.0, 1.0)) = 0.0
+
+        [Header(Toon Shading)]
+        _ShadeThreshold ("Ground Shade Threshold", Range(0.2, 0.8)) = 0.5
+        _ShadeSoftness ("Ground Shade Softness", Range(0.005, 0.2)) = 0.05
+        _ShadowTint ("Shadow Tint", Color) = (0.42, 0.47, 0.64, 1)
+        _ShadowFloor ("Ground Shadow Floor", Range(0.0, 1.0)) = 0.55
+        _InkShadeThreshold ("Ink Shade Threshold", Range(0.2, 0.8)) = 0.48
+        _InkShadeSoftness ("Ink Shade Softness", Range(0.005, 0.2)) = 0.08
+        _InkShadowFloor ("Ink Shadow Floor", Range(0.0, 1.0)) = 0.72
     }
 
     SubShader
@@ -69,6 +78,7 @@ Shader "P1/InkGround"
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "ToonLighting.hlsl"
 
             #define MAX_INK_RIPPLES 8
 
@@ -120,12 +130,35 @@ Shader "P1/InkGround"
                 float _FocusWeight;
                 half4 _CliffColor;
                 float _GroundTexStrength;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                float _InkShadeThreshold;
+                float _InkShadeSoftness;
+                float _InkShadowFloor;
+                // 墨迹图集写入端（InkAtlasPaint / InkAtlasStamp Pass）使用的映射参数；
+                // 加入同一 UnityPerMaterial 保证所有 Pass 布局一致（SRP Batcher 兼容）。
+                // ForwardLit / ShadowCaster / DepthNormals 不读取它们，数值不影响场景渲染。
+                float4 _InkMapSize;
+                float _InkTexelMeters;
+                float _InkYFlip;
             CBUFFER_END
 
             // 由 InkSurfaceController 每帧通过 MaterialPropertyBlock 传入的动态波纹数据与时间
             float4 _InkRipples[MAX_INK_RIPPLES];      // xyz = worldPos, w = birthTime
             float4 _InkRippleParams[MAX_INK_RIPPLES]; // x = amplitude, y = wavelength, z = speed, w = lifetime
             float _InkTime;
+
+            // ---- 湿润时间戳时钟（图集 G 通道新语义：G = 最新落墨时间戳×覆盖率，片元反预乘后现算）----
+            // 由 InkSurfaceController 每帧 SetGlobal；周期与 InkSplatAtlas 的落墨编码共用同一配置，
+            // 湿润度/烘干/生长全部由片元按 (_InkWetClockNorm - G) 现算，图集不再做周期性整图重绘。
+            float _InkWetClockNorm;      // (Time.time % 周期) / 周期 ∈ [0,1)
+            float _InkWetClockPeriod;    // 时间戳回绕周期（秒）
+            float _InkWetDryingSeconds;  // inkDryingSeconds：湿润→烘干时长
+            float _InkGrowSeconds;       // splatGrowSeconds：生长动画时长（0 = 无生长动画）
+            float _InkGrowShrinkMeters;  // 生长侵蚀最大回缩距离（米）
+            float _InkGrowActive;        // 1 = 本帧存在生长窗口内的墨斑（仅作快速剔除，正确性由纹素年龄保证）
 
             Varyings vert(Attributes input)
             {
@@ -203,17 +236,19 @@ Shader "P1/InkGround"
                 float4 sampU = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, saturate(inkUV + float2(0.0, uvOffset.y)));
                 float4 sampD = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, saturate(inkUV - float2(0.0, uvOffset.y)));
 
-                // 图集通道全部按覆盖率预乘，这里反预乘回真实数据
+                // R/G/B 均按覆盖率预乘，这里反预乘回真实数据：
+                // G = 最新落墨时间戳 × 覆盖率（InkAtlasStamp Pass 预乘后 Max 混合写入），
+                // 预乘保证双线性/mip 过滤下 G/A 恒等于真实时间戳（原始时间戳在墨斑边缘会被插值污染）。
                 float amt = inkSample.a;
                 float invA = 1.0 / max(amt, 0.02);
                 float tRaw = saturate(inkSample.r * invA);
-                float wetRaw = saturate(inkSample.g * invA);
                 float tone = saturate(inkSample.b * invA);
 
-                // 覆盖率边缘：图集内已有约 3 texel 的柔和过渡，这里只补一层屏幕空间抗锯齿
-                float fw = fwidth(amt);
-                float edgeWidth = clamp(fw * _EdgeSoftness, 0.012, 0.35);
-                float inkMask = smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, amt);
+                // 湿润度改为片元现算：age = (now − 落墨时间戳) mod 周期，
+                // 线性烘干曲线与旧「每 1/15s 整图 G−=步长」的烘干 Pass 数学等价，但不再重写图集。
+                float tsNewest = saturate(inkSample.g * invA);
+                float inkAgeSec = frac(_InkWetClockNorm - tsNewest + 1.0) * max(0.001, _InkWetClockPeriod);
+                float wetLinear = saturate(1.0 - inkAgeSec / max(0.25, _InkWetDryingSeconds));
 
                 // 队伍交界：用 R 通道（队伍占比）做 1 像素锐利过渡，绝不出现浑浊混色带
                 float wT = clamp(fwidth(tRaw) * 0.75, 0.012, 0.25);
@@ -223,6 +258,30 @@ Shader "P1/InkGround"
                 // 世界空间覆盖率梯度（单位：每米），保证任何图集分辨率下法线尺度都正确
                 float2 worldOffset = max(uvOffset * mapSize, float2(1e-5, 1e-5));
                 float2 gradAmt = float2(sampR.a - sampL.a, sampU.a - sampD.a) / (2.0 * worldOffset);
+
+                // 生长动画（片元侧）：新墨斑落墨即以最终形态写入图集，这里按时间戳把可见边缘
+                // 从最终轮廓向外偏移采样（形态学侵蚀）回缩 _InkGrowShrinkMeters，随生长进度松开，
+                // 观感等价旧的「生长期间每帧重画放大墨斑」，但图集只在落墨那一刻写一次。
+                // 额外的一次图集采样只发生在 age < grow*1.6 的新鲜纹素上，空闲时零开销。
+                float amtEff = amt;
+                if (_InkGrowActive > 0.5 && _InkGrowSeconds > 0.001 && inkAgeSec < _InkGrowSeconds * 1.6)
+                {
+                    float gTn = saturate(inkAgeSec / _InkGrowSeconds);
+                    float gTb = 1.0 - pow(1.0 - gTn, 4.0);   // 与旧 splat 写入端的 ease-out 铺开一致
+                    float shrinkM = (1.0 - gTb) * _InkGrowShrinkMeters;
+                    float gradMag = length(gradAmt);
+                    if (shrinkM > 0.001 && gradMag > 0.0001)
+                    {
+                        // gradAmt 指向覆盖率增大方向（墨内部），向外偏移采样即得侵蚀后的覆盖
+                        float2 erodeUV = saturate(inkUV - (gradAmt / gradMag) * (shrinkM / mapSize));
+                        amtEff = min(amtEff, SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, erodeUV).a);
+                    }
+                }
+
+                // 覆盖率边缘：图集内已有约 3 texel 的柔和过渡，这里只补一层屏幕空间抗锯齿
+                float fw = fwidth(amtEff);
+                float edgeWidth = clamp(fw * _EdgeSoftness, 0.012, 0.35);
+                float inkMask = smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, amtEff);
 
                 // 2m 混凝土板缝仅作为无贴图时的兜底；烘焙贴图已经包含板缝/标线/AO，优先级更高。
                 float2 gridCoord = abs(frac(input.positionWS.xz * 0.5) - 0.5);
@@ -236,7 +295,8 @@ Shader "P1/InkGround"
                 float heightFactor = saturate((input.positionWS.y - 0.05) / 1.05);
                 half3 elevatedGroundCol = groundCol + heightFactor * half3(0.06, 0.07, 0.08);
 
-                Light mainLight = GetMainLight();
+                float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
+                Light mainLight = GetMainLight(shadowCoord);
                 float shadowAtten = mainLight.shadowAttenuation;
                 float3 geomN = normalize(input.normalWS);
 
@@ -249,7 +309,7 @@ Shader "P1/InkGround"
                 // -------------------------------------------------------------
                 // 1. 边缘接触软阴影 (Contact Shadow)
                 // -------------------------------------------------------------
-                float contactHalo = smoothstep(0.04, 0.48, amt) * (1.0 - inkMask);
+                float contactHalo = smoothstep(0.04, 0.48, amtEff) * (1.0 - inkMask);
                 float2 outN = -gradAmt / max(length(gradAmt), 0.001);
                 float2 sunDirXZ = normalize(mainLight.direction.xz + float2(0.001, 0.001));
                 float shadowBias = clamp(0.65 - 0.75 * dot(outN, sunDirXZ), 0.25, 1.35);
@@ -257,16 +317,17 @@ Shader "P1/InkGround"
                 baseSurfaceCol *= (1.0 - contactShadow);
 
                 // -------------------------------------------------------------
-                // 2. 湿润度（图集 G 通道，随烘干 Pass 在约 6 秒内衰减）
+                // 2. 湿润度（G 通道时间戳片元现算，约 inkDryingSeconds 秒内线性烘干；
+                //    不再有烘干 Pass，图集在墨变干的全过程保持不变）
                 // -------------------------------------------------------------
-                float wetness = saturate(wetRaw * _WetnessFactor);
+                float wetness = saturate(wetLinear * _WetnessFactor);
                 float fresh = smoothstep(0.2, 0.95, wetness);
 
                 // -------------------------------------------------------------
                 // 3. 厚度剖面与边缘鼓起 (Meniscus Lip)
                 //    s: 边缘 0 -> 内部 1；hs: 圆滑高程轮廓
                 // -------------------------------------------------------------
-                float s = saturate((amt - 0.5) * _LipSoftness);
+                float s = saturate((amtEff - 0.5) * _LipSoftness);
                 float hs = 1.0 - (1.0 - s) * (1.0 - s);
                 float lipSlope = 2.0 * (1.0 - s) * _LipSoftness;
                 float thick = 1.0 + 0.5 * fresh;
@@ -297,12 +358,16 @@ Shader "P1/InkGround"
                     float e1 = exp(-x * x * 2.2);
                     float e2 = exp(-x * x * 4.8);
 
-                    // 较湿的新墨水微骑在旧墨水上方
-                    float wetR = sampR.g / aR;
-                    float wetL = sampL.g / aL;
-                    float wetU = sampU.g / aU;
-                    float wetD = sampD.g / aD;
-                    float2 gradWet = float2(wetR - wetL, wetU - wetD) * 0.5;
+                    // 新墨水微骑在旧墨水上方：G 通道是「时间戳×覆盖率」（预乘），先反预乘再用环形差分
+                    // 取「更新方向」，并按 周期/烘干秒数 换算回旧湿润度梯度的量纲，符号语义与旧实现一致。
+                    float tsR = sampR.g / aR;
+                    float tsL = sampL.g / aL;
+                    float tsU = sampU.g / aU;
+                    float tsD = sampD.g / aD;
+                    float2 gradTs = float2(tsR - tsL, tsU - tsD) * 0.5;
+                    gradTs = (frac(gradTs + 0.5) - 0.5) * 2.0;
+                    float wetScale = max(0.001, _InkWetClockPeriod) / max(0.25, _InkWetDryingSeconds);
+                    float2 gradWet = gradTs * wetScale;
                     float newer = clamp(dot(gradWet, sn) / max(gTl, 0.001) * 2.0, -1.0, 1.0);
 
                     float dhSeam = newer * 1.6 * e1 + 1.1 * x * e2 * (1.0 - 0.5 * abs(newer));
@@ -393,9 +458,10 @@ Shader "P1/InkGround"
 
                 float finalClearcoat = directSpec * F * _ClearcoatStrength * NdotL * inkMask;
 
-                // 漫反射光照（暗部补光，绝不出现脏暗黑褐；阴影只做温和压暗，保留墨色辨识度）
-                float shadowFill = lerp(0.55, 1.0, shadowAtten);
-                float diffuseLight = (NdotL * 0.52 + 0.48) * lerp(0.74, 1.0, shadowAtten);
+                // 漫反射光照（三渲二色阶）
+                half inkBand = P1ToonBand(NdotL, _InkShadeThreshold, _InkShadeSoftness);
+                half inkShadow = P1ToonShadowTerm(shadowAtten, _InkShadowFloor, _InkShadeSoftness);
+                float diffuseLight = lerp(0.72, 1.0, inkBand * inkShadow);
 
                 // 墨水颜色：队伍色 × 单斑色调微差 × 低频色相起伏（取代旧的逐格马赛克噪声）
                 half3 inkColor = teamCol * (0.93 + 0.13 * tone * _ToneStrength);
@@ -418,7 +484,10 @@ Shader "P1/InkGround"
                 litInkColor += inkColor * _InkGlow * (0.75 + 0.35 * hs) * (1.0 - NdotL * 0.5);
 
                 // 最终混合地面石板基底与果冻立体墨水
-                float baseDiffuse = (saturate(dot(geomN, L)) * 0.48 + 0.52) * shadowFill;
+                half groundBand = P1ToonBand(dot(geomN, L), _ShadeThreshold, _ShadeSoftness);
+                half groundShadow = P1ToonShadowTerm(shadowAtten, _ShadowFloor, _ShadeSoftness);
+                half3 groundAmbient = SampleSH(geomN) * 0.35 + _ShadowTint.rgb * 0.18;
+                half3 baseDiffuse = groundAmbient + lerp(_ShadowTint.rgb, half3(1,1,1), groundBand) * groundShadow * 0.85;
                 half3 finalRgb = lerp(baseSurfaceCol * baseDiffuse, litInkColor, inkMask);
                 finalRgb = MixFog(finalRgb, input.fogFactor);
 
@@ -486,6 +555,19 @@ Shader "P1/InkGround"
                 float _FocusWeight;
                 half4 _CliffColor;
                 float _GroundTexStrength;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                float _InkShadeThreshold;
+                float _InkShadeSoftness;
+                float _InkShadowFloor;
+                // 墨迹图集写入端（InkAtlasPaint / InkAtlasStamp Pass）使用的映射参数；
+                // 加入同一 UnityPerMaterial 保证所有 Pass 布局一致（SRP Batcher 兼容）。
+                // ForwardLit / ShadowCaster / DepthNormals 不读取它们，数值不影响场景渲染。
+                float4 _InkMapSize;
+                float _InkTexelMeters;
+                float _InkYFlip;
             CBUFFER_END
 
             float3 _LightDirection;
@@ -540,6 +622,333 @@ Shader "P1/InkGround"
                     }
                 }
                 return 0;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthNormals"
+            Tags { "LightMode" = "DepthNormals" }
+
+            ZWrite On
+            ZTest LEqual
+            Cull Back
+
+            HLSLPROGRAM
+            #pragma vertex DepthNormalsVertex
+            #pragma fragment DepthNormalsFragment
+            #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct DepthNormalsAttributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS   : NORMAL;
+            };
+
+            struct DepthNormalsVaryings
+            {
+                float4 positionCS : SV_POSITION;
+                float3 positionWS : TEXCOORD0;
+                float3 normalWS   : TEXCOORD1;
+            };
+
+            CBUFFER_START(UnityPerMaterial)
+                half4 _BaseColor;
+                half4 _GridLineColor;
+                float4 _InkMapOriginXZ;
+                float4 _InkTexelSize;
+                half4 _TeamAColor;
+                half4 _TeamBColor;
+                float _LipHeight;
+                float _LipSoftness;
+                float _ContactShadowStrength;
+                float _EdgeSoftness;
+                float _WetGloss;
+                float _DryGloss;
+                float _ClearcoatStrength;
+                float _WetnessFactor;
+                float _InkGlow;
+                float _GelNoiseScale;
+                float _GelNoiseStrength;
+                float _ToneStrength;
+                float _SeamLipHeight;
+                float _SeamShadowStrength;
+                float _DitherAlpha;
+                float4 _FocusPos;
+                float _FocusRadius;
+                float _FocusMinAlpha;
+                float _FocusWeight;
+                half4 _CliffColor;
+                float _GroundTexStrength;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                float _InkShadeThreshold;
+                float _InkShadeSoftness;
+                float _InkShadowFloor;
+                // 墨迹图集写入端（InkAtlasPaint / InkAtlasStamp Pass）使用的映射参数；
+                // 加入同一 UnityPerMaterial 保证所有 Pass 布局一致（SRP Batcher 兼容）。
+                // ForwardLit / ShadowCaster / DepthNormals 不读取它们，数值不影响场景渲染。
+                float4 _InkMapSize;
+                float _InkTexelMeters;
+                float _InkYFlip;
+            CBUFFER_END
+
+            DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)
+            {
+                DepthNormalsVaryings output;
+                VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
+                VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
+
+                output.positionCS = posInputs.positionCS;
+                output.positionWS = posInputs.positionWS;
+                output.normalWS = normInputs.normalWS;
+                return output;
+            }
+
+            half4 DepthNormalsFragment(DepthNormalsVaryings input) : SV_Target
+            {
+                // 俯视角网点半透明遮挡剔除 (Screen-Door Dither Occlusion)
+                float effectiveAlpha = _DitherAlpha;
+                if (_FocusWeight > 0.001)
+                {
+                    float d = length(input.positionWS.xz - _FocusPos.xz);
+                    float focusFade = saturate(d / max(0.1, _FocusRadius));
+                    effectiveAlpha = lerp(_FocusMinAlpha, _DitherAlpha, focusFade);
+                }
+
+                if (effectiveAlpha < 0.999)
+                {
+                    static const float4x4 _BayerMatrix4x4 = float4x4(
+                         0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
+                        12.0/16.0,  4.0/16.0, 14.0/16.0,  6.0/16.0,
+                         3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
+                        15.0/16.0,  7.0/16.0, 13.0/16.0,  5.0/16.0
+                    );
+                    float2 screenPixel = input.positionCS.xy;
+                    int bx = int(fmod(screenPixel.x, 4.0));
+                    int by = int(fmod(screenPixel.y, 4.0));
+                    if (_BayerMatrix4x4[by][bx] >= effectiveAlpha)
+                    {
+                        discard;
+                    }
+                }
+
+                #if defined(_GBUFFER_NORMALS_OCT)
+                float3 normalWS = normalize(input.normalWS);
+                float2 octNormalWS = PackNormalOctQuadEncode(normalWS);
+                float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5);
+                half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);
+                return half4(packedNormalWS, 0.0);
+                #else
+                float3 normalWS = NormalizeNormalPerPixel(input.normalWS);
+                return half4(normalWS, 0.0);
+                #endif
+            }
+            ENDHLSL
+        }
+
+        // =====================================================================
+        // 墨迹图集写入端：由 InkSplatAtlas 通过 CommandBuffer 直接绘制进图集 RT。
+        // 两个 Pass 使用自定义 LightMode，URP 主循环不认识这些 tag，
+        // 永远不会把它们当场景几何执行；只会通过 CommandBuffer.DrawMesh(材质, passIndex) 调用。
+        //
+        // 时间驱动的外观演化全部「存时刻、片元现算」：
+        //   InkAtlasPaint —— R=队伍 B=色调 A=覆盖率（混合与旧 P1/InkSplat Pass0 完全一致；不写 G）
+        //   InkAtlasStamp —— G=最新落墨时间戳×覆盖率（预乘），Max 混合 → 覆盖同一纹素的最新墨斑获胜；
+        //                    预乘保证双线性/mip 下片元 G/A 恒等于真实时间戳
+        // 湿度烘干与生长动画由 ForwardLit 片元按 (_InkWetClockNorm − G/A) 现算，
+        // 图集因此只在有新墨斑时增量绘制，没有任何周期性整图重绘（旧版为 15Hz 全屏烘干 Pass）。
+        // =====================================================================
+        Pass
+        {
+            Name "InkAtlasPaint"
+            Tags { "LightMode" = "P1InkAtlasPaint" }
+            ZTest Always
+            ZWrite Off
+            Cull Off
+            BlendOp Add, Max
+            Blend SrcAlpha OneMinusSrcAlpha, One One
+            ColorMask RBA
+
+            HLSLPROGRAM
+            #pragma vertex P1InkAtlasVert
+            #pragma fragment P1InkAtlasPaintFrag
+            #pragma target 3.5
+
+            // 与场景 Pass 完全一致的 UnityPerMaterial 布局（SRP Batcher 兼容）；
+            // 本 Pass 实际只使用 _InkMapSize / _InkTexelMeters / _InkYFlip。
+            CBUFFER_START(UnityPerMaterial)
+                half4 _BaseColor;
+                half4 _GridLineColor;
+                float4 _InkMapOriginXZ;
+                float4 _InkTexelSize;
+                half4 _TeamAColor;
+                half4 _TeamBColor;
+                float _LipHeight;
+                float _LipSoftness;
+                float _ContactShadowStrength;
+                float _EdgeSoftness;
+                float _WetGloss;
+                float _DryGloss;
+                float _ClearcoatStrength;
+                float _WetnessFactor;
+                float _InkGlow;
+                float _GelNoiseScale;
+                float _GelNoiseStrength;
+                float _ToneStrength;
+                float _SeamLipHeight;
+                float _SeamShadowStrength;
+                float _DitherAlpha;
+                float4 _FocusPos;
+                float _FocusRadius;
+                float _FocusMinAlpha;
+                float _FocusWeight;
+                half4 _CliffColor;
+                float _GroundTexStrength;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                float _InkShadeThreshold;
+                float _InkShadeSoftness;
+                float _InkShadowFloor;
+                float4 _InkMapSize;
+                float _InkTexelMeters;
+                float _InkYFlip;
+            CBUFFER_END
+
+            // 共享的有机墨斑 SDF 与顶点结构（additive 追加在 InkSurfaceOverlay.hlsl）。
+            // P1InkAtlasVert 需要读 UnityPerMaterial 的 _InkMapSize/_InkYFlip，因此在各 Pass 内定义。
+            #include "InkSurfaceOverlay.hlsl"
+
+            P1InkAtlasVaryings P1InkAtlasVert(P1InkAtlasAttributes v)
+            {
+                P1InkAtlasVaryings o;
+                float2 quad = v.positionOS.xy;
+                float2 offsetMeters = quad * v.splatA.z * v.splatB.w;
+                float2 uv = v.splatA.xy + offsetMeters / max(_InkMapSize.xy, float2(0.001, 0.001));
+                float2 clipPos = uv * 2.0 - 1.0;
+                // 渲染目标原点在左上时（D3D / Metal / Vulkan），clip Y 与纹理 V 反向
+                clipPos.y *= _InkYFlip;
+                o.positionCS = float4(clipPos, 0.0, 1.0);
+                o.local = offsetMeters;
+                o.splatA = v.splatA;
+                o.splatB = v.splatB;
+                return o;
+            }
+
+            float4 P1InkAtlasPaintFrag(P1InkAtlasVaryings input) : SV_Target
+            {
+                float radius = input.splatA.z;
+                if (radius <= 0.0) discard;
+
+                float sd = P1InkSplatDistance(input.local, radius, input.splatB.x, input.splatB.y, _InkTexelMeters);
+                float a = P1InkSplatCoverage(sd, _InkTexelMeters);
+                if (a <= 0.003) discard;
+
+                float tone = P1InkSplatTone(input.splatB.x);
+                // G 通道不写（ColorMask RBA）；落墨时间戳由 InkAtlasStamp Pass 负责
+                return float4(input.splatA.w, 0.0, tone, a);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "InkAtlasStamp"
+            Tags { "LightMode" = "P1InkAtlasStamp" }
+            ZTest Always
+            ZWrite Off
+            Cull Off
+            BlendOp Max, Add
+            Blend One One, One One
+            ColorMask G
+
+            HLSLPROGRAM
+            #pragma vertex P1InkAtlasVert
+            #pragma fragment P1InkAtlasStampFrag
+            #pragma target 3.5
+
+            // 与场景 Pass 完全一致的 UnityPerMaterial 布局（SRP Batcher 兼容）；
+            // 本 Pass 实际只使用 _InkMapSize / _InkTexelMeters / _InkYFlip。
+            CBUFFER_START(UnityPerMaterial)
+                half4 _BaseColor;
+                half4 _GridLineColor;
+                float4 _InkMapOriginXZ;
+                float4 _InkTexelSize;
+                half4 _TeamAColor;
+                half4 _TeamBColor;
+                float _LipHeight;
+                float _LipSoftness;
+                float _ContactShadowStrength;
+                float _EdgeSoftness;
+                float _WetGloss;
+                float _DryGloss;
+                float _ClearcoatStrength;
+                float _WetnessFactor;
+                float _InkGlow;
+                float _GelNoiseScale;
+                float _GelNoiseStrength;
+                float _ToneStrength;
+                float _SeamLipHeight;
+                float _SeamShadowStrength;
+                float _DitherAlpha;
+                float4 _FocusPos;
+                float _FocusRadius;
+                float _FocusMinAlpha;
+                float _FocusWeight;
+                half4 _CliffColor;
+                float _GroundTexStrength;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
+                float _ShadowFloor;
+                float _InkShadeThreshold;
+                float _InkShadeSoftness;
+                float _InkShadowFloor;
+                float4 _InkMapSize;
+                float _InkTexelMeters;
+                float _InkYFlip;
+            CBUFFER_END
+
+            #include "InkSurfaceOverlay.hlsl"
+
+            P1InkAtlasVaryings P1InkAtlasVert(P1InkAtlasAttributes v)
+            {
+                P1InkAtlasVaryings o;
+                float2 quad = v.positionOS.xy;
+                float2 offsetMeters = quad * v.splatA.z * v.splatB.w;
+                float2 uv = v.splatA.xy + offsetMeters / max(_InkMapSize.xy, float2(0.001, 0.001));
+                float2 clipPos = uv * 2.0 - 1.0;
+                // 渲染目标原点在左上时（D3D / Metal / Vulkan），clip Y 与纹理 V 反向
+                clipPos.y *= _InkYFlip;
+                o.positionCS = float4(clipPos, 0.0, 1.0);
+                o.local = offsetMeters;
+                o.splatA = v.splatA;
+                o.splatB = v.splatB;
+                return o;
+            }
+
+            float4 P1InkAtlasStampFrag(P1InkAtlasVaryings input) : SV_Target
+            {
+                float radius = input.splatA.z;
+                if (radius <= 0.0) discard;
+
+                // 与 InkAtlasPaint 逐位相同的 SDF/覆盖率 → 两个 Pass 足迹严格一致，
+                // 时间戳只会写进真正有墨覆盖的纹素。
+                float sd = P1InkSplatDistance(input.local, radius, input.splatB.x, input.splatB.y, _InkTexelMeters);
+                float a = P1InkSplatCoverage(sd, _InkTexelMeters);
+                if (a <= 0.003) discard;
+
+                // splatB.z = 归一化落墨时间戳；预乘覆盖率后 Max 混合 = 覆盖同一纹素的最新墨斑获胜。
+                // 预乘使双线性/mip 过滤下 G/A 恒等于真实时间戳（与 R/B 通道同一反预乘约定）。
+                float stamp = input.splatB.z * a;
+                return float4(stamp, stamp, stamp, a);
             }
             ENDHLSL
         }

@@ -21,6 +21,7 @@ namespace P1.Editor
         private const string ShooterConfigPath = "Assets/_Project/ScriptableObjects/WeaponConfig.asset";
         private const string WeaponsFolder = "Assets/_Project/ScriptableObjects/Weapons";
         private const string IconsFolder = "Assets/_Project/Art/Sprites/Icons/Weapons";
+        private const string AllIconsRoot = "Assets/_Project/Art/Sprites/Icons";
         private const string SfxFolder = "Assets/_Project/Audio/SFX";
 
         private static readonly string[] WeaponIconFileNames =
@@ -32,6 +33,27 @@ namespace P1.Editor
             "weapon_slosher",
             "weapon_blaster",
             "weapon_splatling"
+        };
+
+        /// <summary>
+        /// UI 必需图标：HUD 战况条、击杀播报、触控按键、特殊武器都靠它。
+        /// 少一个，真机上就会出现白方块（这正是 P10 修的 bug）。
+        /// </summary>
+        public static readonly string[] RequiredUiIcons =
+        {
+            "mark_squid",
+            "mark_death",
+            "mark_splat",
+            "special_slam",
+            "special_storm",
+            "sub_bomb",
+            "glyph_gear",
+            "glyph_gamepad",
+            "glyph_play",
+            "glyph_reset",
+            "glyph_close",
+            "rule_swim",
+            "rule_climb",
         };
 
         [MenuItem("P1/构建/11. 生成运行时资源库 (P1RuntimeAssets)", false, 83)]
@@ -55,6 +77,7 @@ namespace P1.Editor
             library.uiTheme = AssetDatabase.LoadAssetAtPath<UIThemeSO>(ThemePath);
             library.weaponConfigs = LoadWeaponConfigs();
             library.weaponIcons = LoadWeaponIcons();
+            LoadUiIcons(library);
             LoadSfx(library);
 
             EditorUtility.SetDirty(library);
@@ -62,7 +85,8 @@ namespace P1.Editor
             AssetDatabase.Refresh();
 
             int iconCount = library.weaponIcons != null ? library.weaponIcons.Count(i => i != null) : 0;
-            Debug.Log($"[P1][RuntimeAssets] 生成完成：{AssetPath}；武器 {library.weaponConfigs.Length}，图标 {iconCount}，音效 {library.sfxClips.Length}。");
+            int uiIconCount = library.uiIcons != null ? library.uiIcons.Count(i => i != null) : 0;
+            Debug.Log($"[P1][RuntimeAssets] 生成完成：{AssetPath}；武器 {library.weaponConfigs.Length}，武器图标 {iconCount}，UI 图标 {uiIconCount}，音效 {library.sfxClips.Length}。");
         }
 
         [MenuItem("P1/素材/6. 校验运行时资源库 (P1RuntimeAssets)", false, 6)]
@@ -91,8 +115,18 @@ namespace P1.Editor
                 }
             }
 
+            int missingUi = 0;
+            foreach (string name in RequiredUiIcons)
+            {
+                if (library.GetUiIcon(name) == null)
+                {
+                    missingUi++;
+                    Debug.LogError($"[P1][RuntimeAssets] 运行时资源库缺 UI 图标：{name}");
+                }
+            }
+
             Debug.Log($"[P1][RuntimeAssets] 校验：主题={(library.uiTheme != null ? "OK" : "缺失")}；" +
-                      $"武器/图标缺失 {missingWeapons}；音效 {library.sfxClips.Length} 条，缺失 {missingSfx}。");
+                      $"武器/图标缺失 {missingWeapons}；UI 图标缺失 {missingUi}；音效 {library.sfxClips.Length} 条，缺失 {missingSfx}。");
         }
 
         private static WeaponConfigSO[] LoadWeaponConfigs()
@@ -126,6 +160,40 @@ namespace P1.Editor
             }
 
             return icons;
+        }
+
+        private static void LoadUiIcons(RuntimeAssetLibrary library)
+        {
+            if (!AssetDatabase.IsValidFolder(AllIconsRoot))
+            {
+                Debug.LogWarning($"[P1][RuntimeAssets] 图标根目录不存在：{AllIconsRoot}");
+                library.uiIconNames = System.Array.Empty<string>();
+                library.uiIcons = System.Array.Empty<Sprite>();
+                return;
+            }
+
+            string[] guids = AssetDatabase.FindAssets("t:Sprite", new[] { AllIconsRoot });
+            var pairs = new List<(string Name, Sprite Sprite)>();
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (!path.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase)) continue;
+
+                Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                if (sprite == null) continue;
+
+                pairs.Add((Path.GetFileNameWithoutExtension(path), sprite));
+            }
+
+            pairs.Sort((a, b) => string.Compare(a.Name, b.Name, System.StringComparison.Ordinal));
+            library.uiIconNames = pairs.Select(p => p.Name).ToArray();
+            library.uiIcons = pairs.Select(p => p.Sprite).ToArray();
+
+            foreach (string required in RequiredUiIcons)
+            {
+                if (!library.uiIconNames.Contains(required))
+                    Debug.LogWarning($"[P1][RuntimeAssets] 缺少必需 UI 图标：{required}（真机会显示白块）");
+            }
         }
 
         private static void LoadSfx(RuntimeAssetLibrary library)

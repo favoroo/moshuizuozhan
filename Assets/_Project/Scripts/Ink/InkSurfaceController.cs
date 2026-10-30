@@ -25,15 +25,22 @@ namespace P1.Ink
         [Range(0f, 2f)]
         [SerializeField] private float wetnessFactor = 1.0f;
 
+        [Tooltip("胶质内发光强度：顶面/物件墨迹与地面 Mat_InkGround._InkGlow 对齐用，保证墨色暗部同样鲜艳")]
+        [Range(0f, 1f)]
+        [SerializeField] private float inkGlow = 0.2f;
+
         private InkGrid _grid;
         private Texture2D _inkTexture;
         private InkSplatAtlas _atlas;
         private MaterialPropertyBlock _surfaceBlock;
         private float _nextMinimapFlushTime;
 
-        // 8组动态波纹环形缓冲区
+        // 8组动态波纹环形缓冲区与脏检查缓存
         private readonly Vector4[] _ripplePositions = new Vector4[MaxRipples];
         private readonly Vector4[] _rippleParams = new Vector4[MaxRipples];
+        private readonly Vector4[] _cachedRipplePositions = new Vector4[MaxRipples];
+        private readonly Vector4[] _cachedRippleParams = new Vector4[MaxRipples];
+        private float _lastWrittenWetnessFactor = -1f;
         private int _rippleHead;
 
         private static readonly int InkTexProp = Shader.PropertyToID("_InkTex");
@@ -45,6 +52,23 @@ namespace P1.Ink
         private static readonly int RipplesProp = Shader.PropertyToID("_InkRipples");
         private static readonly int RippleParamsProp = Shader.PropertyToID("_InkRippleParams");
         private static readonly int InkTimeProp = Shader.PropertyToID("_InkTime");
+
+        // 湿润时间戳时钟（图集 G 通道 = 最新落墨时间戳，地面片元按 (_InkWetClockNorm - G) 现算湿润度）
+        private static readonly int WetClockNormProp = Shader.PropertyToID("_InkWetClockNorm");
+        private static readonly int WetClockPeriodProp = Shader.PropertyToID("_InkWetClockPeriod");
+        private static readonly int WetDryingSecondsProp = Shader.PropertyToID("_InkWetDryingSeconds");
+        private static readonly int GrowSecondsProp = Shader.PropertyToID("_InkGrowSeconds");
+        private static readonly int GrowShrinkMetersProp = Shader.PropertyToID("_InkGrowShrinkMeters");
+        private static readonly int GrowActiveProp = Shader.PropertyToID("_InkGrowActive");
+
+        // 全局专供顶面采样（防止材质本身的 _InkTex 属性遮蔽全局贴图）
+        private static readonly int GlobalInkAtlasTexProp = Shader.PropertyToID("_GlobalInkAtlasTex");
+        private static readonly int GlobalInkMapOriginProp = Shader.PropertyToID("_GlobalInkMapOriginXZ");
+        private static readonly int GlobalInkTexelSizeProp = Shader.PropertyToID("_GlobalInkTexelSize");
+        private static readonly int GlobalTeamAColorProp = Shader.PropertyToID("_GlobalTeamAColor");
+        private static readonly int GlobalTeamBColorProp = Shader.PropertyToID("_GlobalTeamBColor");
+        private static readonly int GlobalWetnessFactorProp = Shader.PropertyToID("_GlobalWetnessFactor");
+        private static readonly int GlobalInkGlowProp = Shader.PropertyToID("_GlobalInkGlow");
 
         public InkGrid Grid => _grid;
 
@@ -105,6 +129,7 @@ namespace P1.Ink
                 _rippleParams[i] = new Vector4(0f, 0.35f, 3.5f, 0.01f);
             }
             _rippleHead = 0;
+            _lastWrittenWetnessFactor = -1f;
         }
 
         public void Configure(InkGridConfigSO gridConfig, IEnumerable<Renderer> renderers, IEnumerable<Collider> obstacles)
@@ -121,7 +146,7 @@ namespace P1.Ink
 
         public void InitializeIfNeeded()
         {
-            if (_grid != null && _inkTexture != null)
+            if (_grid != null && _inkTexture != null && _atlas != null)
                 return;
 
             RebuildGridAndTexture();
@@ -170,8 +195,10 @@ namespace P1.Ink
             bool mipmaps = config == null || config.atlasMipmaps;
             float growSeconds = config != null ? config.splatGrowSeconds : 0.12f;
             float dryingSeconds = config != null ? config.inkDryingSeconds : 6f;
+            float wetClockPeriod = config != null ? config.atlasWetClockPeriod : InkSplatAtlas.DefaultWetClockPeriod;
 
-            _atlas = new InkSplatAtlas(mapSize, _grid.OriginXZ, atlasRes, mipmaps, growSeconds, dryingSeconds);
+            _atlas = new InkSplatAtlas(mapSize, _grid.OriginXZ, atlasRes, mipmaps, growSeconds, dryingSeconds,
+                wetClockPeriod: wetClockPeriod);
 
             // 图集内容不进序列化：重建后立刻清空一次，避免首帧读到未初始化显存
             _atlas.Clear();
@@ -307,6 +334,8 @@ namespace P1.Ink
 
         private void LateUpdate()
         {
+            InitializeIfNeeded();
+
             if (_grid != null && _grid.IsDirty && Time.unscaledTime >= _nextMinimapFlushTime)
             {
                 // CPU 贴图只服务小地图，没必要每帧全量上传
@@ -315,7 +344,7 @@ namespace P1.Ink
                 _nextMinimapFlushTime = hz > 0.01f ? Time.unscaledTime + 1f / hz : 0f;
             }
 
-            // 墨迹图集：推进生长动画 + 烘干 + 本帧所有落墨一次性提交
+            // 墨迹图集：仅在有新落墨 / 清屏 / mip 待更新时提交（烘干与生长由片元按时间戳现算）
             _atlas?.Advance();
 
             // 每帧同步动态波纹与时间给材质属性块
@@ -346,17 +375,53 @@ namespace P1.Ink
             }
         }
 
+        /// <summary>
+        /// 推送湿润时间戳时钟与生长全局（InkGround 片元与 InkSurfaceOverlay 顶面叠加共用）。
+        /// 时间基为 Time.time，与 InkSplatAtlas 的落墨编码一致：暂停（timeScale=0）时湿度同步冻结。
+        /// </summary>
+        private void PushWetClockGlobals()
+        {
+            float period = config != null ? Mathf.Max(1f, config.atlasWetClockPeriod) : InkSplatAtlas.DefaultWetClockPeriod;
+            float now = Time.time;
+            Shader.SetGlobalFloat(WetClockPeriodProp, period);
+            Shader.SetGlobalFloat(WetClockNormProp, Mathf.Repeat(now, period) / period);
+            Shader.SetGlobalFloat(WetDryingSecondsProp, config != null ? config.inkDryingSeconds : 6f);
+            Shader.SetGlobalFloat(GrowSecondsProp, config != null ? config.splatGrowSeconds : 0.12f);
+            Shader.SetGlobalFloat(GrowShrinkMetersProp, config != null ? config.atlasGrowShrinkMeters : 0.4f);
+            Shader.SetGlobalFloat(GrowActiveProp, _atlas != null && _atlas.HasGrowingSplats() ? 1f : 0f);
+        }
+
         private void UpdateDynamicMaterialProperties()
         {
+            float currentTime = Time.time;
+            Shader.SetGlobalFloat(InkTimeProp, currentTime);
+            Shader.SetGlobalFloat(WetnessFactorProp, wetnessFactor);
+            Shader.SetGlobalFloat(GlobalWetnessFactorProp, wetnessFactor);
+            Shader.SetGlobalFloat(GlobalInkGlowProp, inkGlow);
+            // 湿润时间戳时钟与生长全局：湿润度/生长全部由片元按时间戳现算，必须每帧刷新，
+            // 且要先于下方波纹脏检查的 early-return 推送。
+            PushWetClockGlobals();
+
+            Texture inkTexture = _atlas != null ? (Texture)_atlas.Atlas : _inkTexture;
+            if (inkTexture != null)
+            {
+                Shader.SetGlobalTexture(InkTexProp, inkTexture);
+                Shader.SetGlobalTexture(GlobalInkAtlasTexProp, inkTexture);
+            }
+
             if (inkableSurfaceRenderers == null || inkableSurfaceRenderers.Count == 0)
                 return;
+
+            if (!AreRipplesDirty())
+                return;
+
+            SyncRippleCache();
 
             if (_surfaceBlock == null)
             {
                 _surfaceBlock = new MaterialPropertyBlock();
             }
 
-            float currentTime = Time.time;
             for (int i = 0; i < inkableSurfaceRenderers.Count; i++)
             {
                 Renderer r = inkableSurfaceRenderers[i];
@@ -365,9 +430,34 @@ namespace P1.Ink
                 r.GetPropertyBlock(_surfaceBlock);
                 _surfaceBlock.SetVectorArray(RipplesProp, _ripplePositions);
                 _surfaceBlock.SetVectorArray(RippleParamsProp, _rippleParams);
-                _surfaceBlock.SetFloat(InkTimeProp, currentTime);
                 _surfaceBlock.SetFloat(WetnessFactorProp, wetnessFactor);
                 r.SetPropertyBlock(_surfaceBlock);
+            }
+        }
+
+        private bool AreRipplesDirty()
+        {
+            if (Mathf.Abs(wetnessFactor - _lastWrittenWetnessFactor) > 0.0001f)
+                return true;
+
+            for (int i = 0; i < MaxRipples; i++)
+            {
+                if (_ripplePositions[i] != _cachedRipplePositions[i] ||
+                    _rippleParams[i] != _cachedRippleParams[i])
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void SyncRippleCache()
+        {
+            _lastWrittenWetnessFactor = wetnessFactor;
+            for (int i = 0; i < MaxRipples; i++)
+            {
+                _cachedRipplePositions[i] = _ripplePositions[i];
+                _cachedRippleParams[i] = _rippleParams[i];
             }
         }
 
@@ -394,6 +484,22 @@ namespace P1.Ink
             int texHeight = inkTexture != null ? inkTexture.height : 1;
             Vector4 texelSize = new Vector4(1f / texWidth, 1f / texHeight, texWidth, texHeight);
 
+            // 同步全局墨水属性给所有着色器（如 ObstacleDitherLit 与 PropLit 的顶面墨迹采样）
+            Shader.SetGlobalTexture(InkTexProp, inkTexture);
+            Shader.SetGlobalTexture(GlobalInkAtlasTexProp, inkTexture);
+            Shader.SetGlobalVector(InkTexelSizeProp, texelSize);
+            Shader.SetGlobalVector(GlobalInkTexelSizeProp, texelSize);
+            Shader.SetGlobalVector(InkMapOriginProp, originAndSize);
+            Shader.SetGlobalVector(GlobalInkMapOriginProp, originAndSize);
+            Shader.SetGlobalColor(TeamAColorProp, colorA);
+            Shader.SetGlobalColor(GlobalTeamAColorProp, colorA);
+            Shader.SetGlobalColor(TeamBColorProp, colorB);
+            Shader.SetGlobalColor(GlobalTeamBColorProp, colorB);
+            Shader.SetGlobalFloat(WetnessFactorProp, wetnessFactor);
+            Shader.SetGlobalFloat(GlobalWetnessFactorProp, wetnessFactor);
+            Shader.SetGlobalFloat(InkTimeProp, Time.time);
+            PushWetClockGlobals();
+
             for (int i = 0; i < inkableSurfaceRenderers.Count; i++)
             {
                 Renderer r = inkableSurfaceRenderers[i];
@@ -408,9 +514,10 @@ namespace P1.Ink
                 _surfaceBlock.SetFloat(WetnessFactorProp, wetnessFactor);
                 _surfaceBlock.SetVectorArray(RipplesProp, _ripplePositions);
                 _surfaceBlock.SetVectorArray(RippleParamsProp, _rippleParams);
-                _surfaceBlock.SetFloat(InkTimeProp, Time.time);
                 r.SetPropertyBlock(_surfaceBlock);
             }
+
+            SyncRippleCache();
         }
     }
 }

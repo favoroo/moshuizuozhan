@@ -544,8 +544,21 @@ namespace P1.AI
 
         private void ExitRetreat()
         {
+            ExitRetreat(true);
+        }
+
+        private void ExitRetreat(bool allowReentryCooldown)
+        {
             State = BotState.Paint;
-            _retreatCooldown = config != null ? config.retreatReentryCooldown : 1.5f;
+            if (allowReentryCooldown)
+            {
+                _retreatCooldown = config != null ? config.retreatReentryCooldown : 1.5f;
+            }
+            else
+            {
+                // 没回满血就超时脱战：不惩罚再入冷却，否则残血 Bot 下次遇敌无法立即撤退
+                _retreatCooldown = 0f;
+            }
             _retreatTimer = 0f;
             _firingLatch = false;
             _chargerPaintPause = 0f;
@@ -570,7 +583,7 @@ namespace P1.AI
             {
                 if (!threatNearby)
                 {
-                    ExitRetreat();
+                    ExitRetreat(_health.CurrentHealth >= exitHealth);
                     return;
                 }
                 _retreatTimer = 1.2f;   // 还没脱离危险：继续边退边打
@@ -594,10 +607,17 @@ namespace P1.AI
             else
             {
                 // 没有可用撤退点：绝不能沿用 transform.forward 盲目前冲（可能正对威胁），
-                // 直接朝威胁的反方向撤离。
-                Vector3 away = transform.position - _threatPosition;
-                away.y = 0f;
-                steer = away.sqrMagnitude > 0.001f ? away.normalized : transform.forward;
+                // 有可信威胁方位时朝其反方向撤离；记忆已过期则没有可信方位，保持当前朝向。
+                if (_threatMemoryTimer > 0f)
+                {
+                    Vector3 away = transform.position - _threatPosition;
+                    away.y = 0f;
+                    steer = away.sqrMagnitude > 0.001f ? away.normalized : transform.forward;
+                }
+                else
+                {
+                    steer = transform.forward;
+                }
             }
 
             // 站在己方墨里就潜下去回血（60 HP/s），否则边跑边铺一条逃生墨道
@@ -817,6 +837,27 @@ namespace P1.AI
                     wantFire = !travelFast && _motor.CurrentInk > 6f;
                     wantsSwim = false;
                     break;
+
+                case WeaponKind.Splatling:
+                {
+                    // 加特林巡涂同样是“蓄到阈值松手才喷墨带”，缺了这支会永远端着蓄力不发一发
+                    float paintRelease = config != null ? Mathf.Clamp01(config.splatlingPaintReleaseCharge) : 0.6f;
+                    if (_weapon.IsCharging)
+                    {
+                        wantFire = _weapon.Charge01 < paintRelease;
+                        if (!wantFire)
+                        {
+                            _chargerPaintPause = config != null ? Mathf.Max(0f, config.chargerPaintPause) : 0.35f;
+                        }
+                    }
+                    else
+                    {
+                        wantFire = !travelFast && _aheadNeedsPaint && _chargerPaintPause <= 0f
+                                   && _motor.CurrentInk > 12f;
+                    }
+                    wantsSwim = !wantFire && travelFast;
+                    break;
+                }
 
                 default:
                     wantFire = !travelFast && _aheadNeedsPaint && _motor.CurrentInk > 12f;

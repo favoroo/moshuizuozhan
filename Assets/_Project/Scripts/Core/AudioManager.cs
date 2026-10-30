@@ -207,17 +207,7 @@ namespace P1.Core
             }
 
             StopMusicRoutine();
-            StopAllLoops();
-
-            foreach (var kvp in _loopChannels)
-            {
-                if (kvp.Value.Source != null)
-                {
-                    kvp.Value.Source.Stop();
-                    kvp.Value.Source.clip = null;
-                }
-            }
-            _loopChannels.Clear();
+            HardStopAllLoops();
 
             if (Instance == this)
                 Instance = null;
@@ -833,9 +823,9 @@ namespace P1.Core
         }
 
         /// <summary>
-        /// 停止指定类型的循环音效：带平滑淡出，音量归零后自动 Stop 释放硬件资源。
+        /// 停止指定类型的循环音效：带平滑淡出，音量归零后自动 Stop 释放硬件资源；immediate 为 true 时立即硬停。
         /// </summary>
-        public void StopLoop(LoopSfxKind kind)
+        public void StopLoop(LoopSfxKind kind, bool immediate = false)
         {
             EnsureLoopSources();
             if (!_loopChannels.TryGetValue(kind, out LoopChannel channel) || channel.Source == null)
@@ -853,7 +843,7 @@ namespace P1.Core
 
             channel.IsFadingIn = false;
             channel.TargetVolume = 0f;
-            if (Application.isPlaying && isActiveAndEnabled)
+            if (!immediate && Application.isPlaying && isActiveAndEnabled)
             {
                 channel.FadeRoutine = StartCoroutine(LoopFadeRoutine(channel, 0f, Mix.loopFadeSeconds, true));
             }
@@ -865,13 +855,40 @@ namespace P1.Core
             }
         }
 
-        public void StopAllLoops()
+        public void StopAllLoops(bool immediate = false)
         {
             EnsureLoopSources();
             foreach (var kvp in _loopChannels)
             {
-                StopLoop(kvp.Key);
+                StopLoop(kvp.Key, immediate);
             }
+        }
+
+        private void HardStopAllLoops()
+        {
+            foreach (var kvp in _loopChannels)
+            {
+                LoopChannel channel = kvp.Value;
+                if (channel == null)
+                    continue;
+
+                if (channel.FadeRoutine != null)
+                {
+                    StopCoroutine(channel.FadeRoutine);
+                    channel.FadeRoutine = null;
+                }
+
+                channel.IsFadingIn = false;
+                channel.TargetVolume = 0f;
+
+                if (channel.Source != null)
+                {
+                    channel.Source.Stop();
+                    channel.Source.clip = null;
+                    channel.Source.volume = 0f;
+                }
+            }
+            _loopChannels.Clear();
         }
 
         public bool IsLoopPlaying(LoopSfxKind kind)

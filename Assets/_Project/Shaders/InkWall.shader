@@ -7,6 +7,11 @@ Shader "P1/InkWall"
         _InkTex ("Ink Texture", 2D) = "black" {}
         _Tint ("Tint", Color) = (1, 1, 1, 1)
         _DitherAlpha ("Dither Alpha", Range(0.0, 1.0)) = 1.0
+
+        [Header(Toon Shading)]
+        _ShadeThreshold ("Shade Threshold", Range(0.2, 0.8)) = 0.5
+        _ShadeSoftness ("Shade Softness", Range(0.005, 0.2)) = 0.08
+        _ShadowTint ("Shadow Tint", Color) = (0.42, 0.47, 0.64, 1)
     }
 
     SubShader
@@ -32,10 +37,18 @@ Shader "P1/InkWall"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+
+            // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
+            #pragma target 4.5
+            #pragma multi_compile _ DOTS_INSTANCING_ON
+
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "ToonLighting.hlsl"
 
             struct Attributes
             {
@@ -47,9 +60,10 @@ Shader "P1/InkWall"
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
-                float3 normalWS   : TEXCOORD0;
-                float2 uv         : TEXCOORD1;
-                half   fogFactor  : TEXCOORD2;
+                float3 positionWS : TEXCOORD0;
+                float3 normalWS   : TEXCOORD1;
+                float2 uv         : TEXCOORD2;
+                half   fogFactor  : TEXCOORD3;
             };
 
             TEXTURE2D(_InkTex);
@@ -58,6 +72,9 @@ Shader "P1/InkWall"
             CBUFFER_START(UnityPerMaterial)
                 half4 _Tint;
                 float _DitherAlpha;
+                float _ShadeThreshold;
+                float _ShadeSoftness;
+                half4 _ShadowTint;
             CBUFFER_END
 
             Varyings vert(Attributes input)
@@ -67,6 +84,7 @@ Shader "P1/InkWall"
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
                 output.positionCS = posInputs.positionCS;
+                output.positionWS = posInputs.positionWS;
                 output.normalWS = normInputs.normalWS;
                 output.uv = input.uv;
                 output.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
@@ -103,12 +121,14 @@ Shader "P1/InkWall"
                 if (inkMask < 0.01)
                     discard;
 
-                Light mainLight = GetMainLight();
+                float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
+                Light mainLight = GetMainLight(shadowCoord);
                 float3 N = normalize(input.normalWS);
-                half ndotl = saturate(dot(N, normalize(mainLight.direction))) * 0.45 + 0.55;
-
-                // 轻微高光让墙面墨水看起来湿润
-                half3 inkColor = inkSample.rgb * _Tint.rgb * ndotl;
+                half band = P1ToonBand(dot(N, normalize(mainLight.direction)), _ShadeThreshold, _ShadeSoftness);
+                half shadowTerm = P1ToonShadowTerm(mainLight.shadowAttenuation, 0.55, _ShadeSoftness);
+                half ndotl = lerp(0.62, 1.0, band * shadowTerm);
+                half3 toonTint = lerp(_ShadowTint.rgb, half3(1,1,1), band);
+                half3 inkColor = inkSample.rgb * _Tint.rgb * ndotl * toonTint;
 
                 // 薄缘提亮：墨迹内侧一圈微微反光，边缘才有厚度感
                 float rim = smoothstep(0.52, 0.9, inkMask) * (1.0 - smoothstep(0.9, 0.995, inkMask));

@@ -3,6 +3,20 @@
 > 规则：任何 agent 修改本技能（脚本/参考文档/配置格式/C# 导入工具），必须在此追加一行：
 > `## 日期 摘要 (agent名)` + 要点列表。
 
+## 2026-10-29 gen_music.sh 增加音乐模型回退链 lyria-3.5 → lyria-3-pro-preview (ZCode)
+
+- **需求**：用户要求把 `lyria-3-pro-preview` 加成音乐生成工具的备用模型。
+- **脚本**：`scripts/gen_music.sh` 的 `MODEL` 改为 `MODELS` 链（默认
+  `lyria-3.5,lyria-3-pro-preview`），逐模型各重试 2 次、拿到音频即停；
+  `-m` 现接受逗号分隔的链覆盖；manifest 记录实际使用的模型；回退时 stderr 提示。
+- **诊断改进**：全部失败时打印每个模型的上游错误原文（此前只有「两次尝试均未拿到音频」，
+  看不到 400 原因），并提示改用 `tools/bake_bgm.py`。
+- **实测**：`lyria-3-pro-preview` 在网关 `/v1/models` 名单里，但 **2026-10-29 请求同样返回
+  400 `PROXY_GENERATION_DISABLED: generateContent is not supported`**（与 `lyria-3.5` 一致）。
+  两个模型当前都不可用；回退链路本身已实跑验证（失败→切换→汇总报错）。
+- **同步**：`selfcheck.sh` 名单与 `KNOWN_BROKEN` 加入 `lyria-3-pro-preview`；
+  `SKILL.md`、`references/api-music.md`、`references/usage-guide.md` 模型表更新。
+
 ## 2026-10-29 lyria-3.5 被上游禁用；新增本地双段 BGM 烘焙 (Sound-Director)
 
 - **实测**：`lyria-3.5` 请求返回 400 `PROXY_GENERATION_DISABLED: generateContent is not supported`

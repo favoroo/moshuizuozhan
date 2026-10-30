@@ -7,7 +7,7 @@ namespace P1.Player
 {
     /// <summary>
     /// 玩家与 Bot 共用的角色移动、墨水储罐、脚下墨色检测与潜行（乌贼）形态控制器。
-    /// 含俯视角潜墨隐匿（Stealth）：己方墨水中静止/极慢潜行时对敌方完全隐形（模型与头顶标记隐藏，
+    /// 含俯视角潜墨隐匿（Stealth）：己方墨水中静止/极慢潜行时对敌方完全隐形（模型隐藏，
     /// 己方半透明可见），高速潜墨在水面产生细微涟漪。
     /// </summary>
     [RequireComponent(typeof(CharacterController))]
@@ -40,14 +40,11 @@ namespace P1.Player
         // 高速潜墨涟漪触发计时
         private float _swimRippleTimer;
 
-        // 隐匿（Stealth）视觉状态：模型渲染器缓存 + 头顶标记 + 半透明材质实例
+        // 隐匿（Stealth）视觉状态：模型渲染器缓存 + 半透明材质实例
         private Renderer[] _bodyRenderers;
         private Material[] _bodyOriginalMats;
         private readonly System.Collections.Generic.Dictionary<Renderer, Material> _ghostMatCache
             = new System.Collections.Generic.Dictionary<Renderer, Material>();
-        private GameObject _headMarkerGo;
-        private Renderer _headMarkerRenderer;
-        private Material _headMarkerMat;
         private bool _stealthCachesBuilt;
         // 0 = 正常显示，1 = 己方半透明（幽灵），2 = 对敌方完全隐形
         private int _appliedVisualKind = -1;
@@ -80,7 +77,7 @@ namespace P1.Player
 
         /// <summary>
         /// 潜墨隐匿状态：在己方墨水中潜行且几乎静止时成立。
-        /// 对敌方视角完全隐形（模型 + 头顶标记隐藏），己方视角半透明可见。
+        /// 对敌方视角完全隐形（模型隐藏），己方视角半透明可见。
         /// </summary>
         public bool IsStealthed { get; private set; }
 
@@ -114,11 +111,6 @@ namespace P1.Player
             _health.OnRespawned += HandleRespawned;
         }
 
-        private void Start()
-        {
-            BuildHeadMarker();
-        }
-
         private void OnDestroy()
         {
             if (_health != null)
@@ -134,7 +126,6 @@ namespace P1.Player
                 }
                 _ghostMatCache.Clear();
             }
-            if (_headMarkerMat != null) Destroy(_headMarkerMat);
         }
 
         public void Configure(PlayerConfigSO playerConfig, Transform bodyVisual, GameObject gunVisual)
@@ -167,13 +158,12 @@ namespace P1.Player
             _isLockedBySpecial = false;
 
             // 复活清除隐匿 / 敌墨惩罚 / 涟漪与视觉残留（CombatantHealth 已重新启用其收集的渲染器，
-            // 这里把头顶标记与幽灵材质实例一并复位）
+            // 这里把幽灵材质实例一并复位）
             IsStealthed = false;
             _enemyInkGrip01 = 0f;
             _swimRippleTimer = 0f;
             _appliedVisualKind = -1;
             if (_stealthCachesBuilt) ApplyStealthVisuals();
-            else if (_headMarkerRenderer != null) _headMarkerRenderer.enabled = true;
 
             if (visualRoot != null) visualRoot.localScale = Vector3.one;
             if (weaponVisual != null) weaponVisual.SetActive(true);
@@ -237,9 +227,6 @@ namespace P1.Player
         {
             if (_health != null && !_health.IsAlive)
             {
-                // 阵亡：头顶标记不在 CombatantHealth 自己收集的渲染器里（Awake 后动态创建），需随尸体隐藏
-                if (_headMarkerRenderer != null && _headMarkerRenderer.enabled)
-                    _headMarkerRenderer.enabled = false;
                 return;
             }
 
@@ -558,7 +545,7 @@ namespace P1.Player
                 if (h.distance >= bestDist) continue;
 
                 InkWallSurface wall = InkWallSurface.FindForCollider(h.collider);
-                if (wall == null) continue;
+                if (wall == null || !wall.CanClimb) continue;
 
                 bestDist = h.distance;
                 _wallSurface = wall;
@@ -650,49 +637,6 @@ namespace P1.Player
 
         // ==================== 潜墨隐匿（Stealth）视觉系统 ====================
 
-        /// <summary>
-        /// 头顶队伍标记：悬浮压扁圆片（随角色但不受潜行压扁缩放影响），
-        /// 隐匿时对敌方完全隐藏、己方降为半透明。
-        /// </summary>
-        private void BuildHeadMarker()
-        {
-            if (_headMarkerGo != null) return;
-
-            var marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            marker.name = "HeadMarker";
-            marker.transform.SetParent(transform, false);
-            marker.transform.localPosition = new Vector3(0f, CharacterMetrics.HeadMarkerHeight, 0f);
-            marker.transform.localScale = new Vector3(0.18f, 0.07f, 0.18f);
-            Destroy(marker.GetComponent<Collider>());
-
-            Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
-            if (sh == null) sh = Shader.Find("Sprites/Default");
-            _headMarkerMat = new Material(sh) { name = "P1_HeadMarker_" + name };
-            MakeTransparent(_headMarkerMat);
-            _headMarkerMat.renderQueue = 3100; // 半透明队列靠后，悬在角色之上不被身体遮挡
-
-            Color teamCol = ResolveTeamMarkerColor();
-            teamCol.a = 1f;
-            _headMarkerMat.SetColor(BaseColorProp, teamCol);
-            _headMarkerMat.SetColor(ColorProp, teamCol);
-
-            _headMarkerRenderer = marker.GetComponent<Renderer>();
-            _headMarkerRenderer.sharedMaterial = _headMarkerMat;
-            _headMarkerRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            _headMarkerRenderer.receiveShadows = false;
-            _headMarkerGo = marker;
-        }
-
-        private Color ResolveTeamMarkerColor()
-        {
-            if (InkSurfaceController.Instance != null)
-            {
-                return InkSurfaceController.Instance.GetTeamColor(Team);
-            }
-            // 与 HUD 面板配色一致的兜底（场景初始化前的极早期 Start）
-            return Team == Team.TeamA ? new Color(1.0f, 0.45f, 0.08f) : new Color(0.16f, 0.42f, 1.0f);
-        }
-
         private void EnsureStealthCaches()
         {
             if (_stealthCachesBuilt) return;
@@ -728,8 +672,6 @@ namespace P1.Player
             if (kind == _appliedVisualKind) return;
             _appliedVisualKind = kind;
 
-            float allyAlpha = config != null ? config.stealthAllyAlpha : 0.35f;
-
             for (int i = 0; i < _bodyRenderers.Length; i++)
             {
                 Renderer r = _bodyRenderers[i];
@@ -753,18 +695,6 @@ namespace P1.Player
                     case 2: // 对敌方完全隐形
                         r.enabled = false;
                         break;
-                }
-            }
-
-            if (_headMarkerRenderer != null)
-            {
-                _headMarkerRenderer.enabled = kind != 2;
-                if (_headMarkerMat != null && kind != 2)
-                {
-                    Color c = _headMarkerMat.GetColor(BaseColorProp);
-                    c.a = kind == 1 ? allyAlpha * 0.9f : 1f;
-                    _headMarkerMat.SetColor(BaseColorProp, c);
-                    _headMarkerMat.SetColor(ColorProp, c);
                 }
             }
         }

@@ -60,3 +60,21 @@ TMP 生成的 SDF 资产是派生物，同样按 OFL 处理。
 可变字体在 Unity/TMP 里会按 Light 300 主实例渲染，是错的效果；最终收敛时这些文件已被清除，
 `Art/Fonts/` 现在只剩 4 个静态 TTF + 4 个 TMP 资产。同源文件可由
 `python3 tools/bake_fonts.py` 一键重建，没有备份损失。
+
+## MiSans 中文字体（2026-10-30 起替换站酷两款）
+
+- **来源**：小米官方 MiSans 全套（免费商用，含应用/游戏内嵌授权；协议原文见
+  <https://hyperos.mi.com/font/>，官方下载包内附《MiSans 字体知识产权许可协议》）。
+  本目录存放用户提供的**完整原版** `MiSans-Semibold.woff2` / `MiSans-Heavy.woff2`
+  （各 29571 字符 / 20976 汉字）。**不要**用其他项目（如 Godot `t-1/fonts/`）里的
+  subset 版——那是按彼项目文案裁剪的，仅 ~3783 汉字，本项目覆盖率自检会缺字。
+- **转换**：`python3 tools/bake_fonts.py`（与 TitanOne/Rubik 同一条管线；
+  MiSans 每档字重是独立静态文件，无需可变字体实例化）。
+- **产物与分工**：`Assets/_Project/Art/Fonts/MiSans-Semibold.ttf`（650，UI 正文）/
+  `MiSans-Heavy.ttf`（900，标题/大字显示），TMP 动态图集资产由菜单
+  `P1/画风/漫画风/0`（`ComicFontAssetBuilder`）生成并接管 fallback 链。
+- **授权留档**：`Assets/_Project/Art/Fonts/MiSans-LICENSE-NOTE.txt`（协议禁止字体文件
+  单独分发或售卖；游戏内嵌使用免费。正式发版前建议把官方协议 txt 落进 Fonts 目录）。
+- **前任字体**：站酷快乐体 / 站酷庆科黄油体（OFL），其 TTF 原件与 `ZCOOL-OFL.txt`
+  仍在本目录留档，回滚只需还原 `ComicFontAssetBuilder` / `ComicStyleInstaller` 的指向
+  并重跑菜单 0 / 1。

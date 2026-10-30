@@ -3,10 +3,26 @@
 > **2026-10-29 P5-C 实测：`lyria-3.5` 已被上游禁用。**
 > 请求返回 `400 {"code":400,"message":"Proxy browser error: Google API returned error:
 > 400 INVALID_ARGUMENT ... PROXY_GENERATION_DISABLED: generateContent is not supported"}`。
-> 重试两次、换更短提示词均失败；网关模型名单里也没有其它音乐模型。
+> 重试两次、换更短提示词均失败。
+> **备用模型 `lyria-3-pro-preview` 同日实测：同样的 400 `PROXY_GENERATION_DISABLED`**
+> （它确实在 `/v1/models` 名单里，只是通道同样被禁）。
 > **需要 BGM 时改用项目本地烘焙：`python3 tools/bake_bgm.py`**
 > （纯离线程序化合成，固定种子、零配额；产物 `MediaRaw/music/*.ogg` + `Assets/_Project/Audio/Music/*.ogg`）。
 > 网关恢复后再用 `gen_music.sh` 重新生成即可，脚本与 `--ogg` 流程保持有效。
+
+## 模型链与回退（2026-10-29 起）
+
+`gen_music.sh` 不再写死单个模型，默认按链尝试直到拿到音频：
+
+```
+lyria-3.5（主用） → lyria-3-pro-preview（备用）
+```
+
+- `-m` 可覆盖整条链，逗号分隔：`-m "lyria-3-pro-preview,lyria-3.5"`
+- 每个模型内部仍重试 2 次（间隔 2s），全部失败时脚本打印**每个模型的真实错误**
+  （以前只报「两次尝试均未拿到音频」，看不到上游 400 原因）
+- 成功时 `manifest.jsonl` 的 `model` 字段记录**实际出音频的那个模型**，不是链首
+- 回退发生时会往 stderr 打一行提示；`DONE:` 行仍是最后一行，调用方无需改动
 
 ## 结论速查
 
@@ -14,8 +30,11 @@
 |---|---|---|---|
 | `lyria-3.5` | `/v1/chat/completions` | MP3 192kbps 44.1kHz 立体声 | ~34s，单段约 2 分钟 |
 | ~~`lyria-3.5`（2026-10-29 起）~~ | ~~同上~~ | **400 `PROXY_GENERATION_DISABLED`，暂不可用** | 改用 `python3 tools/bake_bgm.py` 本地合成 |
+| ~~`lyria-3-pro-preview`（2026-10-29 起）~~ | ~~同上~~ | **同样 400 `PROXY_GENERATION_DISABLED`，暂不可用** | `gen_music.sh` 的备用模型，恢复后自动接管 |
 
 P1 复核（2026-10-28）：`lyria-3.5` 在网关 `/v1/models` 名单里，通道可用。
+2026-10-29 复核：名单里有 `lyria-3.5` 与 `lyria-3-pro-preview` 两个音乐模型，**两个通道都被禁**——
+说明「在名单里」不能当成可用性证据，实跑一次 400 才算数（`selfcheck.sh` 已把两者标为已知不可用）。
 
 > **它是「写歌」模型，不是音效模型。** 实测（2026-10-08）提示词写
 > `[0:00 - 0:01] a single 0.15 second UI button click sound only, ... then silence`，

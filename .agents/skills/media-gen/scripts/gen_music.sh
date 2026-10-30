@@ -1,14 +1,19 @@
 #!/bin/bash
-# gen_music.sh —— 生成 BGM 配乐（lyria-3.5，输出 44.1kHz 立体声 MP3，单段约 2 分钟）
+# gen_music.sh —— 生成 BGM 配乐（默认 lyria-3.5，失败自动回退 lyria-3-pro-preview，
+#                 输出 44.1kHz 立体声 MP3，单段约 2 分钟）
 #
 # 用法:
-#   gen_music.sh -p "音乐描述" [-o 输出前缀] [-m 模型] [--ogg] [--timeout 秒]
+#   gen_music.sh -p "音乐描述" [-o 输出前缀] [-m 模型链] [--ogg] [--timeout 秒]
 #
 # 参数:
 #   -p        音乐描述（必填）。写清：曲风/情绪/节奏BPM/主要乐器；
 #             BGM 加 "instrumental only, no vocals"；结构可用 [Verse]/[Chorus] 等段落标签
 #   -o        输出前缀（默认 MediaRaw/music/bgm_时间戳）
-#   -m        模型（默认 lyria-3.5，网关当前唯一音乐模型）
+#   -m        模型链，逗号分隔，按顺序尝试直到出音频
+#             （默认 "lyria-3.5,lyria-3-pro-preview"）
+#             ⚠️ 2026-10-29 实测这两个模型都被上游禁用（400 PROXY_GENERATION_DISABLED）；
+#             全链失败时脚本会打印每个模型的真实错误，BGM 改用 tools/bake_bgm.py。
+#             网关恢复后无需改脚本，原命令重跑即可。
 #   --ogg     额外用 ffmpeg 转一份 OGG(Vorbis)，供 Unity 无缝循环用（见下）
 #             编码器按优先级自动探测：oggenc > ffmpeg libvorbis > ffmpeg 内置 vorbis。
 #             实测本机 ffmpeg 8.1.2 无 libvorbis，只能走内置 vorbis（需 -ac 2，音质略低）；
@@ -29,17 +34,21 @@
 set -eo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_common.sh"
 
-MODEL="lyria-3.5"; PROMPT=""; OUT=""; TIMEOUT=300; WANT_OGG=0
+# 模型链：主用 lyria-3.5，不可用时自动回退 lyria-3-pro-preview。
+# 网关历史上会「名单里有但通道被禁」，所以按链逐个试比写死单模型稳。
+MODELS=("lyria-3.5" "lyria-3-pro-preview")
+PROMPT=""; OUT=""; TIMEOUT=300; WANT_OGG=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -p) PROMPT="$2"; shift 2 ;;
     -o) OUT="$2"; shift 2 ;;
-    -m) MODEL="$2"; shift 2 ;;
+    -m) IFS=',' read -r -a MODELS <<< "$2"; shift 2 ;;
     --ogg) WANT_OGG=1; shift ;;
     --timeout) TIMEOUT="$2"; shift 2 ;;
     *) echo "未知参数: $1（用法见文件头注释）" >&2; exit 2 ;;
   esac
 done
+[ "${#MODELS[@]}" -gt 0 ] || { echo "-m 至少给一个模型" >&2; exit 2; }
 [ -n "$PROMPT" ] || { echo "缺少 -p 音乐描述" >&2; exit 2; }
 [ -n "$OUT" ] || OUT="$RAW/music/bgm_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$(dirname "$OUT")"
@@ -74,7 +83,11 @@ fi
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 
-MODEL="$MODEL" PROMPT="$PROMPT" python3 - > "$T/payload.json" <<'PY'
+GOT=""
+MODEL_USED=""
+FAILED=()
+for M in "${MODELS[@]}"; do
+  MODEL="$M" PROMPT="$PROMPT" python3 - > "$T/payload.json" <<'PY'
 import json, os
 print(json.dumps({
     "model": os.environ["MODEL"],
@@ -82,17 +95,64 @@ print(json.dumps({
 }))
 PY
 
-GOT=""
-for ATTEMPT in 1 2; do
-  curl -s -m "$TIMEOUT" --noproxy '*' "$MEDIA_API_BASE/v1/chat/completions" \
-    -H "Authorization: Bearer $MEDIA_API_KEY" -H "Content-Type: application/json" \
-    -d @"$T/payload.json" -o "$T/resp.json" || true
-  GOT="$(python3 "$SCRIPT_DIR/lib_extract.py" "$T/resp.json" "$T/media" audio 2>/dev/null | head -1 || true)"
-  [ -n "$GOT" ] && break
-  echo "第 $ATTEMPT 次尝试未返回音频，重试中..." >&2
-  sleep 2
+  for ATTEMPT in 1 2; do
+    curl -s -m "$TIMEOUT" --noproxy '*' "$MEDIA_API_BASE/v1/chat/completions" \
+      -H "Authorization: Bearer $MEDIA_API_KEY" -H "Content-Type: application/json" \
+      -d @"$T/payload.json" -o "$T/resp.json" || true
+    GOT="$(python3 "$SCRIPT_DIR/lib_extract.py" "$T/resp.json" "$T/media" audio 2>"$T/extract.err" | head -1 || true)"
+    [ -n "$GOT" ] && break
+    echo "[$M] 第 $ATTEMPT 次尝试未返回音频，重试中..." >&2
+    sleep 2
+  done
+  if [ -n "$GOT" ]; then
+    MODEL_USED="$M"
+    break
+  fi
+  REASON="$(python3 - "$T/resp.json" "$T/extract.err" <<'PY'
+import json, sys
+resp, errfile = sys.argv[1], sys.argv[2]
+try:
+    doc = json.load(open(resp, encoding='utf-8', errors='replace'))
+except Exception:
+    print('响应不是合法 JSON（网关不可达或请求超时？）')
+    raise SystemExit
+err = doc.get('error') if isinstance(doc, dict) else None
+if isinstance(err, dict):
+    print(str(err.get('message', err))[:300])
+    raise SystemExit
+if isinstance(err, str):
+    print(err[:300])
+    raise SystemExit
+try:
+    content = doc['choices'][0]['message'].get('content')
+    if content:
+        print('只回了文本: %s' % str(content)[:200])
+        raise SystemExit
+except (KeyError, IndexError, TypeError):
+    pass
+try:
+    tail = [l for l in open(errfile, encoding='utf-8', errors='replace').read().splitlines() if l.strip()]
+    if tail:
+        print(tail[-1][:300])
+except OSError:
+    pass
+PY
+)"
+  [ -n "$REASON" ] || REASON="未返回音频"
+  FAILED+=("$M: $REASON")
+  echo "[$M] 生成失败：$REASON" >&2
 done
-[ -n "$GOT" ] || { echo "生成失败：两次尝试均未拿到音频" >&2; exit 1; }
+
+[ -n "$GOT" ] || {
+  echo "生成失败：候选模型全部未拿到音频（${MODELS[*]}）" >&2
+  for F in "${FAILED[@]}"; do echo "  - $F" >&2; done
+  echo "  若为 400 PROXY_GENERATION_DISABLED，说明上游禁用了音乐通道；BGM 改用 python3 tools/bake_bgm.py" >&2
+  exit 1
+}
+MODEL="$MODEL_USED"
+if [ "$MODEL" != "${MODELS[0]}" ]; then
+  echo "主模型 ${MODELS[0]} 不可用，已回退到备用模型 $MODEL" >&2
+fi
 
 SRC="$OUT.${GOT##*.}"
 cp "$GOT" "$SRC"

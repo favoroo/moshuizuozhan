@@ -34,6 +34,12 @@ namespace P1.Environment
         private Camera _cachedCamera;
         private readonly RaycastHit[] _hitBuffer = new RaycastHit[32];
 
+        private const double FallbackIntervalSeconds = 0.5;
+        private long _lastFallbackCombatantTicks;
+        private long _lastFallbackFaderTicks;
+        private CombatantHealth[] _cachedFallbackCombatants;
+        private OcclusionFader[] _cachedFallbackFaders;
+
         private void Awake()
         {
             if (Instance == null)
@@ -95,10 +101,13 @@ namespace P1.Environment
             Vector3 camPos = _cachedCamera.transform.position;
 
             PlayerController localPlayer = localPlayerOnly ? PlayerController.LocalPlayer : null;
-            if (localPlayer != null && localPlayer.Health != null && localPlayer.Health.IsAlive)
+            if (localPlayerOnly && localPlayer != null)
             {
-                // 第三人称：只保证镜头能看见本地玩家
-                CheckCombatant(camPos, localPlayer.Health);
+                // 第三人称：只要存在本地玩家就只追踪本地玩家；阵亡时跳过投射
+                if (localPlayer.Health != null && localPlayer.Health.IsAlive)
+                {
+                    CheckCombatant(camPos, localPlayer.Health);
+                }
             }
             else
             {
@@ -111,27 +120,45 @@ namespace P1.Environment
                         CheckCombatant(camPos, allCombatants[i]);
                     }
                 }
-                else
+                else if (!Application.isPlaying)
                 {
-                    // 编辑模式 / 初始阶段兜底
-                    var sceneCombatants = FindObjectsByType<CombatantHealth>(FindObjectsSortMode.None);
-                    for (int i = 0; i < sceneCombatants.Length; i++)
+                    // 编辑模式下兜底，节流到 >= 0.5s 一次
+                    long now = System.Diagnostics.Stopwatch.GetTimestamp();
+                    if (_cachedFallbackCombatants == null || (now - _lastFallbackCombatantTicks) / (double)System.Diagnostics.Stopwatch.Frequency >= FallbackIntervalSeconds)
                     {
-                        CheckCombatant(camPos, sceneCombatants[i]);
+                        _cachedFallbackCombatants = FindObjectsByType<CombatantHealth>(FindObjectsSortMode.None);
+                        _lastFallbackCombatantTicks = now;
+                    }
+
+                    if (_cachedFallbackCombatants != null)
+                    {
+                        for (int i = 0; i < _cachedFallbackCombatants.Length; i++)
+                        {
+                            CheckCombatant(camPos, _cachedFallbackCombatants[i]);
+                        }
                     }
                 }
             }
 
             // 驱动所有注册的 OcclusionFader 推进透明度插值
             IReadOnlyList<OcclusionFader> allFaders = OcclusionFader.All;
-            if (allFaders == null || allFaders.Count == 0)
+            if ((allFaders == null || allFaders.Count == 0) && !Application.isPlaying)
             {
-                allFaders = FindObjectsByType<OcclusionFader>(FindObjectsSortMode.None);
+                long now = System.Diagnostics.Stopwatch.GetTimestamp();
+                if (_cachedFallbackFaders == null || (now - _lastFallbackFaderTicks) / (double)System.Diagnostics.Stopwatch.Frequency >= FallbackIntervalSeconds)
+                {
+                    _cachedFallbackFaders = FindObjectsByType<OcclusionFader>(FindObjectsSortMode.None);
+                    _lastFallbackFaderTicks = now;
+                }
+                allFaders = _cachedFallbackFaders;
             }
-            float dt = Application.isPlaying ? Time.deltaTime : 0.05f;
-            for (int i = 0; i < allFaders.Count; i++)
+            if (allFaders != null)
             {
-                allFaders[i]?.EvaluateStep(dt);
+                float dt = Application.isPlaying ? Time.deltaTime : 0.05f;
+                for (int i = 0; i < allFaders.Count; i++)
+                {
+                    allFaders[i]?.EvaluateStep(dt);
+                }
             }
         }
 

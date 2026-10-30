@@ -39,6 +39,8 @@ NOTES_BANNED_TERMS = (
 
 UNITY_CLI = os.environ.get('UNITY_CLI', os.path.expanduser('~/.unity/bin/unity'))
 UNITY_EDITOR_BIN = os.environ.get('UNITY_EDITOR_BIN', '/Applications/Unity/Hub/Editor/6000.6.7f1/Unity.app/Contents/MacOS/Unity')
+ANDROID_BUILD_MENU = 'P1/构建/9. 构建 Android APK (ARM64 + Vulkan/GLES3) (P6-C)'
+MIN_APK_BYTES = 5 * 1024 * 1024
 
 GITHUB_OWNER, GITHUB_REPO = 'favoroo', 'moshuizuozhan'
 GITEE_OWNER, GITEE_REPO = 'favo9', 'moshuizuozhan'
@@ -211,7 +213,156 @@ def write_meta(meta: dict) -> None:
     os.replace(tmp, META_FILE)
 
 
+# ---------------------------------------------------------------- APK 身份校验
+
+def expected_version_code(ver: str) -> int:
+    parts = ver.split('.')
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        die(f'非法语义化版本号: {ver}（期望 X.Y.Z 格式）')
+    x, y, z = (int(p) for p in parts)
+    return x * 10000 + y * 100 + z
+
+
+def find_android_tool() -> str | None:
+    """定位 aapt2 / aapt，用于读取 APK 包内 versionName / versionCode。"""
+    roots = [os.environ.get('ANDROID_HOME'), os.environ.get('ANDROID_SDK_ROOT'),
+             os.path.expanduser('~/Library/Android/sdk'),
+             os.path.expanduser('~/Android/Sdk')]
+    for root in roots:
+        if not root:
+            continue
+        bt = Path(root) / 'build-tools'
+        if not bt.is_dir():
+            continue
+        versions = sorted(bt.iterdir(), key=lambda p: _ver_key(p.name), reverse=True)
+        for v in versions:
+            for name in ('aapt2', 'aapt'):
+                cand = v / name
+                if cand.is_file() and os.access(cand, os.X_OK):
+                    return str(cand)
+    for name in ('aapt2', 'aapt'):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def read_apk_version(apk_path: Path) -> tuple[str, int] | None:
+    """读取 APK 包内 versionName / versionCode；无 Android 工具链时返回 None。"""
+    tool = find_android_tool()
+    if not tool:
+        return None
+    cmd = [tool, 'dump', 'badging', str(apk_path)]
+    r = run(cmd)
+    if r.returncode != 0:
+        return None
+    m_name = re.search(r"versionName='([^']*)'", r.stdout)
+    m_code = re.search(r"versionCode='(\d+)'", r.stdout)
+    if not m_name or not m_code:
+        return None
+    return m_name.group(1).strip(), int(m_code.group(1))
+
+
+def newest_source_mtime() -> float:
+    """仓库内受版本控制的最新源码/配置修改时间，用于无 aapt 时判断产物是否陈旧。"""
+    r = run(['git', 'ls-files', '-z'])
+    newest = 0.0
+    for rel in r.stdout.split('\0'):
+        if not rel:
+            continue
+        p = REPO_ROOT / rel
+        try:
+            newest = max(newest, p.stat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
+def verify_apk_identity(apk_path: Path, target_ver: str) -> None:
+    """确认 APK 是目标版本，防止把旧包当新版本发出去。"""
+    if not apk_path.exists():
+        die(f'APK 不存在: {apk_path}')
+    if apk_path.stat().st_size <= MIN_APK_BYTES:
+        die(f'APK 体积异常（可能构建失败）: {apk_path.stat().st_size} 字节')
+
+    identity = read_apk_version(apk_path)
+    if identity is None:
+        # 没有 Android 工具链：退化为时间戳校验，并明确告知风险
+        src_mtime = newest_source_mtime()
+        if src_mtime and apk_path.stat().st_mtime + 1 < src_mtime:
+            die(f'APK 比最新源码还旧，疑似陈旧产物: {apk_path}\n'
+                f'  请重新构建，或安装 Android build-tools 以便精确校验版本号。')
+        log('⚠ 未找到 aapt2/aapt，按时间戳判断 APK 新鲜度（建议安装 Android build-tools）')
+        return
+
+    ver_name, ver_code = identity
+    want_code = expected_version_code(target_ver)
+    if ver_name != target_ver or ver_code != want_code:
+        die(f'APK 版本不符: 包内 {ver_name} ({ver_code})，期望 {target_ver} ({want_code})\n'
+            f'  产物: {apk_path}\n'
+            f'  这说明复用了旧包。请重新构建，或确认 GameVersion.cs / PlayerSettings 是否已同步。')
+    log(f'APK 版本校验通过: {ver_name} (versionCode {ver_code})')
+
+
+def editor_is_running() -> bool:
+    """GUI 编辑器是否正在占用工程锁。"""
+    if not (REPO_ROOT / 'Temp' / 'UnityLockfile').exists():
+        return False
+    try:
+        r = run([UNITY_CLI, 'status'], timeout=20)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+    out = (r.stdout or '') + (r.stderr or '')
+    return 'ready' in out and str(REPO_ROOT) in out
+
+
+def wait_for_editor_build(log_path: Path, log_offset: int, timeout: int = 1200) -> bool:
+    """轮询编辑器日志的新增内容，等待菜单构建结束。
+
+    不能用 APK 的修改时间判断：Unity 增量构建在无改动时会直接复用缓存，
+    只把上一次的 APK 原样保留（mtime 不变）并仍然报告构建成功。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if log_path.exists():
+            try:
+                with open(log_path, 'rb') as f:
+                    f.seek(log_offset)
+                    tail = f.read().decode('utf-8', errors='ignore')
+            except OSError:
+                tail = ''
+            if 'Android 构建失败' in tail or 'Android build failed' in tail:
+                log('编辑器日志显示构建失败')
+                return False
+            if '[P6-C][Build] Android APK 构建成功' in tail:
+                return True
+        time.sleep(2)
+    return False
+
+
 # ---------------------------------------------------------------- build 阶段
+
+def pick_verified_apk(candidates: list, target_ver: str, stage_label: str) -> Path | None:
+    """从候选产物中挑出包内版本与目标一致的 APK；固定名旧包会被跳过。"""
+    for cand in candidates:
+        if not cand.exists() or cand.stat().st_size <= MIN_APK_BYTES:
+            continue
+        identity = read_apk_version(cand)
+        if identity is None:
+            # 无 Android 工具链时只能信任带目标版本号的文件名
+            if target_ver in cand.name:
+                log(f'复用候选（{stage_label}，无 aapt 校验，文件名含目标版本）: {cand}')
+                return cand
+            log(f'跳过无法校验版本的候选 {cand.name}（缺少 aapt2/aapt）')
+            continue
+        ver_name, ver_code = identity
+        if ver_name == target_ver and ver_code == expected_version_code(target_ver):
+            log(f'候选版本校验通过（{stage_label}）: {cand} -> {ver_name} ({ver_code})')
+            return cand
+        log(f'跳过版本不符的候选（{stage_label}）: {cand.name} '
+            f'实际 {ver_name} ({ver_code})，目标 {target_ver} ({expected_version_code(target_ver)})')
+    return None
+
 
 def cmd_build(args) -> None:
     cur_ver = read_current_version()
@@ -225,7 +376,7 @@ def cmd_build(args) -> None:
 
     log(f'开始构建 Release APK ({apk_name})...')
 
-    # 优先检查是否已有构建产物（避免重复耗时构建）
+    # 候选产物：版本命名产物优先；Unity 固定输出名只有通过包内版本校验才可复用。
     candidates = [
         dst,
         REPO_ROOT / 'Builds' / 'Android' / apk_name,
@@ -233,72 +384,118 @@ def cmd_build(args) -> None:
         REPO_ROOT / 'Builds' / 'Android' / 'moshuizuozhan.apk'
     ]
 
-    found_apk = None
-    for cand in candidates:
-        if cand.exists() and cand.stat().st_size > 5 * 1024 * 1024:
-            found_apk = cand
-            break
+    def pick_verified(stage_label: str) -> Path | None:
+        return pick_verified_apk(candidates, target_ver, stage_label)
 
-    if not found_apk or args.force:
-        log('正在调用 Unity 构建 Android APK...')
-        # 尝试调用 Unity CLI 或 batchmode
-        build_output_arg = str(dst)
+    found_apk = None if args.force else pick_verified('已有产物')
+
+    if found_apk is None:
         build_log = REPO_ROOT / 'Logs' / 'build_android_release.log'
 
-        # 方式 1: unity build 命令
-        cmd = [
-            UNITY_CLI, 'build',
-            '--target', 'Android',
-            '--execute-method', 'P1.Editor.BuildAndProfilerSuite.BuildAndroid',
-            '--output-path', build_output_arg,
-            '--allow-dirty-build',
-            '--no-tail',
-            '-l', str(build_log)
-        ]
-        log(f'执行命令: {" ".join(cmd)}')
-        r = run(cmd)
-        if r.returncode != 0:
-            log(f'unity build 返回非 0 ({r.returncode})，尝试检查是否有输出或备用方案...')
+        if editor_is_running() and not args.batchmode:
+            # GUI 编辑器持有工程锁，batchmode 必然启动失败；改走 Pipeline 触发同一构建方法
+            log('检测到 GUI 编辑器正在运行，改用 Pipeline 菜单构建（避开工程锁）...')
+            log(f'菜单: {ANDROID_BUILD_MENU}')
+            editor_log = REPO_ROOT / 'Logs' / 'Editor.log'
+            log_offset = editor_log.stat().st_size if editor_log.exists() else 0
+            try:
+                r = run([UNITY_CLI, 'command', '--timeout', str(args.build_timeout),
+                         'editor', 'invoke_menu', '--path', ANDROID_BUILD_MENU],
+                        timeout=args.build_timeout + 60)
+                out = (r.stdout or '') + (r.stderr or '')
+                if 'No command named' in out or 'Command Not Found' in out:
+                    die(f'Pipeline 不可用，无法在编辑器内构建:\n{out[-1000:]}')
+                if r.returncode != 0 or 'Executed menu item' not in out:
+                    log(f'Pipeline 调用返回异常，继续等待编辑器日志:\n{out[-1000:]}')
+            except subprocess.TimeoutExpired:
+                log('Pipeline 调用超时，继续等待编辑器日志...')
+            if not wait_for_editor_build(editor_log, log_offset, timeout=args.build_timeout):
+                die('编辑器内构建未在超时内完成。\n'
+                    f'  请查看 {editor_log}，或手动执行菜单 {ANDROID_BUILD_MENU} 后重跑 build。')
+        else:
+            log('调用 Unity CLI 以 batchmode 构建 Android APK...')
+            cmd = [
+                UNITY_CLI, 'build',
+                '--target', 'Android',
+                '--execute-method', 'P1.Editor.BuildAndProfilerSuite.BuildAndroid',
+                '--output-path', str(dst),
+                '--allow-dirty-build',
+                '--no-tail',
+                '-l', str(build_log)
+            ]
+            log(f'执行命令: {" ".join(cmd)}')
+            r = run(cmd, timeout=args.build_timeout + 120)
+            if r.returncode != 0:
+                tail = ''
+                if build_log.exists():
+                    tail = build_log.read_text(encoding='utf-8', errors='ignore')[-1500:]
+                hint = ''
+                if 'ExitDontLaunchBugReporter' in tail:
+                    hint = ('\n  日志显示工程锁冲突：GUI 编辑器正在占用工程。'
+                            '关闭编辑器，或让 build 自动走 Pipeline（去掉 --batchmode）。')
+                die(f'unity build 失败(return {r.returncode})。{hint}\n日志尾部:\n{tail}')
 
-        for cand in candidates:
-            if cand.exists() and cand.stat().st_size > 5 * 1024 * 1024:
-                found_apk = cand
-                break
+        found_apk = pick_verified('本次构建')
 
-    if not found_apk:
-        die(f'未找到构建出的 APK 文件。请检查构建日志: {REPO_ROOT}/Logs/build_android_release.log')
+    if found_apk is None:
+        die('未找到与目标版本一致的 APK 产物。\n'
+            f'  期望: {target_ver} (versionCode {expected_version_code(target_ver)})\n'
+            '  请检查构建日志，或确认 GameVersion.cs / ApplyAndroidPlayerSettings 是否同步。')
 
     if found_apk != dst:
         log(f'拷贝 APK 产物: {found_apk} -> {dst}')
         shutil.copy2(found_apk, dst)
 
+    verify_apk_identity(dst, target_ver)
+
     digest = sha256_file(dst)
+    head = run(['git', 'rev-parse', 'HEAD']).stdout.strip()
+    dirty = bool(run(['git', 'status', '--porcelain']).stdout.strip())
     meta = {
         'status': 'success',
         'version': target_ver,
+        'version_code': expected_version_code(target_ver),
         'tag': f'v{target_ver}',
         'apk_name': apk_name,
         'apk_path': str(dst),
         'sha256': digest,
         'size': dst.stat().st_size,
         'timestamp': int(time.time()),
+        'git_head': head,
+        'git_dirty': dirty,
     }
     write_meta(meta)
     log(f'构建完成: {apk_name} ({dst.stat().st_size} 字节, {dst.stat().st_size / (1024 * 1024):.1f} MB)')
     log(f'SHA-256: {digest}')
+    log(f'构建来源: {head[:8]}{" (工作区有未提交改动)" if dirty else ""}')
 
 
 # ---------------------------------------------------------------- publish 阶段
 
 def validate_notes(notes: str) -> None:
-    lines = [ln.strip() for ln in notes.splitlines() if ln.strip()]
-    items = [ln for ln in lines if ln.startswith(('-', '*'))]
+    raw_lines = [ln.strip() for ln in notes.splitlines() if ln.strip()]
+
+    # 脚本会自动追加 **SHA-256** 行；它和 markdown 水平分割线都不算发布条目
+    lines = [
+        ln for ln in raw_lines
+        if not re.match(r'^\*\*SHA-256', ln, re.I) and not re.fullmatch(r'-{3,}', ln)
+    ]
+
+    for ln in lines:
+        if ln.startswith('### '):
+            section = ln[4:].strip()
+            if section not in NOTES_ALLOWED_SECTIONS:
+                die(f'Release 说明出现不允许的分段「{section}」，'
+                    f'只允许: {" / ".join(NOTES_ALLOWED_SECTIONS)}')
+
+    # 条目必须形如 "- 文本" / "* 文本"（排除 **加粗** 行）
+    items = [ln for ln in lines if re.match(r'^[-*]\s+\S', ln)]
 
     if not (1 <= len(items) <= NOTES_MAX_ITEMS):
         die(f'Release 说明条数不合规: 当前 {len(items)} 条（要求 1~{NOTES_MAX_ITEMS} 条）')
 
     for it in items:
-        clean = re.sub(r'^[-*]\s*', '', it)
+        clean = re.sub(r'^[-*]\s+', '', it)
         if len(clean) > NOTES_MAX_CHARS:
             die(f'Release 说明单条超长（>{NOTES_MAX_CHARS}字）: "{clean}"')
         for banned in NOTES_BANNED_TERMS:
@@ -326,6 +523,24 @@ def wait_for_build(target_ver: str, timeout: int = 300) -> dict:
     die(f'等待构建超时（{timeout}s）。检查 build 进程是否完成。')
 
 
+def verify_project_settings(target_ver: str) -> None:
+    """AGENTS.md 规则 9：GameVersion.APP_VERSION 必须与 PlayerSettings.bundleVersion 一致。"""
+    ps_path = REPO_ROOT / 'ProjectSettings' / 'ProjectSettings.asset'
+    if not ps_path.exists():
+        die(f'未找到 {ps_path}')
+    text = ps_path.read_text(encoding='utf-8')
+    m_ver = re.search(r'^\s*bundleVersion:\s*(\S+)\s*$', text, re.M)
+    m_code = re.search(r'^\s*AndroidBundleVersionCode:\s*(\d+)\s*$', text, re.M)
+    want_code = expected_version_code(target_ver)
+    if not m_ver or m_ver.group(1) != target_ver:
+        die(f'PlayerSettings.bundleVersion ({m_ver.group(1) if m_ver else "缺失"}) '
+            f'与目标版本 {target_ver} 不一致，请先执行 ApplyAndroidPlayerSettings')
+    if not m_code or int(m_code.group(1)) != want_code:
+        die(f'PlayerSettings.AndroidBundleVersionCode ({m_code.group(1) if m_code else "缺失"}) '
+            f'与目标 {want_code} 不一致，请先执行 ApplyAndroidPlayerSettings')
+    log(f'PlayerSettings 版本校验通过: {m_ver.group(1)} ({m_code.group(1)})')
+
+
 def preflight(tag: str, tokens: dict) -> None:
     r = run(['git', 'status', '--porcelain'])
     if r.stdout.strip():
@@ -333,15 +548,20 @@ def preflight(tag: str, tokens: dict) -> None:
         if lines:
             die('工作树不干净，先提交全部改动再 publish:\n' + '\n'.join(lines[:10]))
 
+    head = run(['git', 'rev-parse', 'HEAD']).stdout.strip()
     r = run(['git', 'rev-parse', '--verify', f'refs/tags/{tag}'])
     if r.returncode == 0:
+        tag_commit = run(['git', 'rev-parse', f'{tag}^{{commit}}']).stdout.strip()
+        if tag_commit != head:
+            die(f'tag {tag} 已存在但指向 {tag_commit[:8]}，与当前 HEAD {head[:8]} 不一致。\n'
+                f'  禁止把新代码的包发到旧 tag 上；请递增版本号后重新发布。')
         st_gh, d_gh = http_json(f'{GITHUB_API}/releases/tags/{tag}', headers=gh_headers(tokens['gh']))
         st_gt, d_gt = http_json(f'{GITEE_API}/releases/tags/{tag}?access_token={tokens["gitee"]}')
         gh_apks = [a for a in (d_gh.get('assets', []) if st_gh == 200 and d_gh else []) if str(a.get('name', '')).endswith('.apk')]
         gt_apks = [a for a in (d_gt.get('assets', []) if st_gt == 200 and d_gt else []) if str(a.get('name', '')).endswith('.apk')]
         if gh_apks and gt_apks:
             die(f'tag {tag} 已在双端完整发布过 Release 与 APK，禁止同版本覆盖发布。请先运行 bump 递增版本号。')
-        log(f'本地 tag {tag} 已存在，远端 Release/APK 尚未全部就绪，将复用该 tag（重试场景）')
+        log(f'本地 tag {tag} 已存在且与 HEAD 一致，远端 Release/APK 尚未全部就绪，将复用该 tag（重试场景）')
     else:
         log(f'创建本地 annotated tag: {tag}')
         r = run(['git', 'tag', '-a', tag, '-m', f'Moshuizuozhan {tag}'])
@@ -474,6 +694,22 @@ def upload_apks(release_ids: dict, apk_path: Path, apk_name: str, tokens: dict) 
         log(f"GitHub 上传完成: {d['name']} ({d['size']} 字节)")
 
     def upload_gitee():
+        # 先查已挂附件：同名同体积跳过；同名不同体积删除后重传
+        st_list, d_list = http_json(
+            f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files'
+            f'?access_token={tokens["gitee"]}')
+        if st_list == 200 and isinstance(d_list, list):
+            for item in d_list:
+                if item.get('name') != apk_name:
+                    continue
+                if item.get('size') == len(file_bytes):
+                    log(f'Gitee 附件已存在且体积一致 ({len(file_bytes)} 字节)，跳过上传')
+                    return
+                log(f'Gitee 存在同名旧附件 ({item.get("size")} 字节)，删除后重传...')
+                http_json(f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files/{item["id"]}'
+                          f'?access_token={tokens["gitee"]}', method='DELETE')
+                break
+
         body, ctype = multipart_body({'name': apk_name}, 'file', apk_name, file_bytes)
         st, d = http_json(
             f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files',
@@ -482,7 +718,7 @@ def upload_apks(release_ids: dict, apk_path: Path, apk_name: str, tokens: dict) 
             data=body, timeout=600)
         if st not in (200, 201) or not d:
             if st == 400 and 'already exists' in str(d):
-                log('Gitee 附件已存在，跳过重复上传')
+                log('Gitee 附件已存在（接口返回），跳过重复上传')
                 return
             raise RuntimeError(f'Gitee 上传 APK 失败({st}): {d}')
         log(f"Gitee 上传完成: {apk_name}")
@@ -494,23 +730,43 @@ def upload_apks(release_ids: dict, apk_path: Path, apk_name: str, tokens: dict) 
         f2.result()
 
 
-def verify_releases(tag: str, apk_name: str, tokens: dict) -> None:
+def verify_releases(tag: str, apk_name: str, tokens: dict, expected_size: int | None = None) -> None:
     log('开始发布后双端验证...')
     st_gh, d_gh = http_json(f'{GITHUB_API}/releases/tags/{tag}', headers=gh_headers(tokens['gh']))
     if st_gh != 200 or not d_gh:
         die(f'GitHub 验证失败({st_gh})')
-    gh_assets = [a['name'] for a in d_gh.get('assets', [])]
-    if apk_name not in gh_assets:
-        die(f'GitHub Release 缺少附件 {apk_name}，现有: {gh_assets}')
+    gh_asset = None
+    for a in d_gh.get('assets', []):
+        if a.get('name') == apk_name:
+            gh_asset = a
+            break
+    if gh_asset is None:
+        die(f'GitHub Release 缺少附件 {apk_name}，现有: {[a.get("name") for a in d_gh.get("assets", [])]}')
+    if gh_asset.get('state') != 'uploaded':
+        die(f'GitHub 附件状态异常: {gh_asset.get("state")}')
+    if expected_size and gh_asset.get('size') != expected_size:
+        die(f'GitHub 附件体积不符: {gh_asset.get("size")} != {expected_size}')
     log(f'✓ GitHub Release 校验通过: {d_gh.get("html_url")}')
 
     st_gt, d_gt = http_json(f'{GITEE_API}/releases/tags/{tag}?access_token={tokens["gitee"]}')
     if st_gt != 200 or not d_gt:
         die(f'Gitee 验证失败({st_gt})')
-    gt_assets = [a['name'] for a in d_gt.get('assets', [])]
-    if apk_name not in gt_assets:
-        die(f'Gitee Release 缺少附件 {apk_name}，现有: {gt_assets}')
-    log(f'✓ Gitee Release 校验通过: {d_gt.get("html_url")}')
+    # Gitee Release 对象不含附件体积，需查 attach_files
+    st_list, d_list = http_json(
+        f'{GITEE_API}/releases/{d_gt["id"]}/attach_files?access_token={tokens["gitee"]}')
+    gt_asset = None
+    if st_list == 200 and isinstance(d_list, list):
+        for a in d_list:
+            if a.get('name') == apk_name:
+                gt_asset = a
+                break
+    if gt_asset is None:
+        die(f'Gitee Release 缺少附件 {apk_name}，现有: '
+            f'{[a.get("name") for a in (d_list or [])]}')
+    if expected_size and gt_asset.get('size') != expected_size:
+        die(f'Gitee 附件体积不符: {gt_asset.get("size")} != {expected_size}')
+    log(f'✓ Gitee Release 校验通过: '
+        f'https://gitee.com/{GITEE_OWNER}/{GITEE_REPO}/releases/tag/{tag}')
 
 
 def _ver_key(tag: str):
@@ -563,6 +819,15 @@ def cmd_publish(args) -> None:
     if not apk_path.exists():
         die(f'APK 文件不存在: {apk_path}')
 
+    # 产物一致性：文件内容必须与构建元数据一致，且包内版本必须是目标版本
+    actual_sha = sha256_file(apk_path)
+    if actual_sha != meta['sha256']:
+        die(f'APK 与构建元数据不一致（文件被替换或 meta 过期）:\n'
+            f'  文件: {actual_sha}\n  元数据: {meta["sha256"]}\n'
+            f'  请重新运行 build。')
+    verify_apk_identity(apk_path, target_ver)
+    verify_project_settings(target_ver)
+
     notes = ''
     if args.notes_file:
         p = Path(args.notes_file)
@@ -591,7 +856,7 @@ def cmd_publish(args) -> None:
     rel_ids = create_release(tag, rel_name, notes, tokens)
 
     upload_apks(rel_ids, apk_path, meta['apk_name'], tokens)
-    verify_releases(tag, meta['apk_name'], tokens)
+    verify_releases(tag, meta['apk_name'], tokens, expected_size=meta['size'])
 
     prune_old_assets(tokens, keep_gh=args.keep_gh, keep_gitee=args.keep_gitee)
 
@@ -626,7 +891,11 @@ def main() -> None:
     # build
     p_build = subparsers.add_parser('build', help='构建 Release APK')
     p_build.add_argument('--version', required=True, help='目标版本号')
-    p_build.add_argument('--force', action='store_true', help='强制重新构建')
+    p_build.add_argument('--force', action='store_true', help='忽略已有产物，强制重新构建')
+    p_build.add_argument('--batchmode', action='store_true',
+                         help='强制使用 batchmode 构建（默认检测到 GUI 编辑器时自动改走 Pipeline）')
+    p_build.add_argument('--build-timeout', type=int, default=1800,
+                         help='构建等待超时秒数（默认 1800）')
 
     # publish
     p_pub = subparsers.add_parser('publish', help='双端推送与发布')

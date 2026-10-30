@@ -80,27 +80,27 @@ namespace P1.Environment
 
             // 中央高台低矮掩体花坛（高 0.8m，置于高台两侧，保持原点 (0,0) 高台争夺圈开阔可涂）
             CreateCover(arenaRoot.transform, "Cover_Center_West_Planter", new Vector3(-2.6f, 1.5f, 0f), new Vector3(1.6f, 0.8f, 1.6f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Cover_Center_East_Planter", new Vector3(2.6f, 1.5f, 0f), new Vector3(1.6f, 0.8f, 1.6f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             // 2.1 中央高台顶女儿墙：8 段 0.5m 矮墙，留出四向 4.4m 坡道口
             CreateCover(arenaRoot.transform, "Parapet_Center_SW", new Vector3(-3.6f, 1.35f, -4.85f), new Vector3(2.8f, 0.5f, 0.32f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Parapet_Center_SE", new Vector3(3.6f, 1.35f, -4.85f), new Vector3(2.8f, 0.5f, 0.32f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Parapet_Center_NW", new Vector3(-3.6f, 1.35f, 4.85f), new Vector3(2.8f, 0.5f, 0.32f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Parapet_Center_NE", new Vector3(3.6f, 1.35f, 4.85f), new Vector3(2.8f, 0.5f, 0.32f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Parapet_Center_WS", new Vector3(-4.85f, 1.35f, -3.6f), new Vector3(0.32f, 0.5f, 2.8f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Parapet_Center_WN", new Vector3(-4.85f, 1.35f, 3.6f), new Vector3(0.32f, 0.5f, 2.8f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Parapet_Center_ES", new Vector3(4.85f, 1.35f, -3.6f), new Vector3(0.32f, 0.5f, 2.8f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Parapet_Center_EN", new Vector3(4.85f, 1.35f, 3.6f), new Vector3(0.32f, 0.5f, 2.8f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             // 3. 东西两侧侧翼高台（高 0.9m）与双向斜坡
             var westPlatform = CreateBox(arenaRoot.transform, "HighGround_West", new Vector3(-13.5f, 0.45f, 0f), new Vector3(4.5f, 0.9f, 9.0f), groundMat);
@@ -162,23 +162,23 @@ namespace P1.Environment
 
             // 6. 双方出生前沿战术掩体墙（z=±11.2 保留为进入中场的最后一道掩体）
             CreateCover(arenaRoot.transform, "Barrier_TeamA_Left", new Vector3(-4.5f, 0.75f, -11.2f), new Vector3(2.8f, 1.5f, 1.2f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Barrier_TeamA_Right", new Vector3(4.5f, 0.75f, -11.2f), new Vector3(2.8f, 1.5f, 1.2f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Parapet_TeamA_Exit", new Vector3(0f, 0.5f, -13.2f), new Vector3(2.6f, 1.0f, 0.8f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             CreateCover(arenaRoot.transform, "Barrier_TeamB_Right", new Vector3(4.5f, 0.75f, 11.2f), new Vector3(2.8f, 1.5f, 1.2f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Barrier_TeamB_Left", new Vector3(-4.5f, 0.75f, 11.2f), new Vector3(2.8f, 1.5f, 1.2f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCover(arenaRoot.transform, "Parapet_TeamB_Exit", new Vector3(0f, 0.5f, 13.2f), new Vector3(2.6f, 1.0f, 0.8f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             // 7. P7-B 延长区（z 12..24）：新增掩体与出生网关，全部以原点 180° 点对称布置
             // 7.1 出生网关：z=±21.4，两侧 1.5m 挡墙，中间留 7m 出口
             CreateCoverPair(arenaRoot.transform, "SpawnGate", new Vector3(5.0f, 0.75f, 21.4f), new Vector3(3.0f, 1.5f, 1.2f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             // 7.2 延长区集装箱：每半场两组，形成外侧 2.2m 高掩体与绕后路线
             CreateCoverPair(arenaRoot.transform, "Container_Extension_Teal", new Vector3(15.5f, 0.9f, 16.5f), new Vector3(2.4f, 1.8f, 4.6f),
@@ -188,41 +188,53 @@ namespace P1.Environment
 
             // 7.3 延长区花坛与木箱：低矮掩体，保持中路快速推进的节奏
             CreateCoverPair(arenaRoot.transform, "Planter_Extension", new Vector3(7.0f, 0.45f, 13.5f), new Vector3(1.8f, 0.9f, 1.8f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCoverPair(arenaRoot.transform, "Planter_Extension_Deep", new Vector3(7.0f, 0.45f, 19.0f), new Vector3(1.8f, 0.9f, 1.8f),
-                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCoverPair(arenaRoot.transform, "Crate_Extension", new Vector3(11.5f, 0.7f, 19.5f), new Vector3(1.6f, 1.4f, 1.6f),
-                woodMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                woodMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
             CreateCoverPair(arenaRoot.transform, "Crate_Extension_Outer", new Vector3(10.0f, 0.7f, 22.5f), new Vector3(1.6f, 1.4f, 1.6f),
-                woodMat, inkCfg, inkWallMat, blockedColliders, 0.35f, false);
+                woodMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             // 7.4 出生区后景台：z=±27，14×1.2×2.6，纯视觉后靠背，不参与出生点碰撞
             var terraceA = CreateBox(arenaRoot.transform, "SpawnTerrace_TeamA", new Vector3(0f, 0.6f, -27.0f), new Vector3(14f, 1.2f, 2.6f), groundMat);
             if (inkableRenderers != null) inkableRenderers.Add(terraceA.GetComponent<Renderer>());
             terraceA.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddInkWallSurface(terraceA, inkCfg, inkWallMat, true);
 
             var terraceB = CreateBox(arenaRoot.transform, "SpawnTerrace_TeamB", new Vector3(0f, 0.6f, 27.0f), new Vector3(14f, 1.2f, 2.6f), groundMat);
             if (inkableRenderers != null) inkableRenderers.Add(terraceB.GetComponent<Renderer>());
             terraceB.AddComponent<OcclusionFader>().MinAlpha = 0.35f;
+            AddInkWallSurface(terraceB, inkCfg, inkWallMat, true);
 
-            // 8. 四周边界围墙（Z 向随地图加长）
+            // 8. 四周边界围墙（可涂墨留痕，禁止攀爬越界）
             var southWall = CreateBox(arenaRoot.transform, "Boundary_South", new Vector3(0f, 0.275f, -ArenaLayoutV2.BoundaryZ), new Vector3(42f, 0.55f, 1f), boundaryMat);
             var southCol = southWall.GetComponent<BoxCollider>();
             if (southCol != null)
             {
-                southCol.center = new Vector3(0f, 1.5f, 0f);
-                southCol.size = new Vector3(42f, 3.0f, 1f);
+                // southWall 自身 localScale 已为 (42, 0.55, 1)，collider 本地 size 为 (1, 5.45, 1) 即对应世界尺寸 (42m, 3.0m, 1m)
+                southCol.center = new Vector3(0f, 2.227f, 0f);
+                southCol.size = new Vector3(1f, 5.454f, 1f);
             }
-            CreateBox(arenaRoot.transform, "Boundary_North", new Vector3(0f, 1.2f, ArenaLayoutV2.BoundaryZ), new Vector3(42f, 2.4f, 1f), boundaryMat);
-            CreateBox(arenaRoot.transform, "Boundary_West", new Vector3(-ArenaLayoutV2.BoundaryX, 1.2f, 0f), new Vector3(1f, 2.4f, 58f), boundaryMat);
-            CreateBox(arenaRoot.transform, "Boundary_East", new Vector3(ArenaLayoutV2.BoundaryX, 1.2f, 0f), new Vector3(1f, 2.4f, 58f), boundaryMat);
+            AddInkWallSurface(southWall, inkCfg, inkWallMat, false);
+
+            var northWall = CreateBox(arenaRoot.transform, "Boundary_North", new Vector3(0f, 1.2f, ArenaLayoutV2.BoundaryZ), new Vector3(42f, 2.4f, 1f), boundaryMat);
+            AddInkWallSurface(northWall, inkCfg, inkWallMat, false);
+
+            var westWall = CreateBox(arenaRoot.transform, "Boundary_West", new Vector3(-ArenaLayoutV2.BoundaryX, 1.2f, 0f), new Vector3(1f, 2.4f, 58f), boundaryMat);
+            AddInkWallSurface(westWall, inkCfg, inkWallMat, false);
+
+            var eastWall = CreateBox(arenaRoot.transform, "Boundary_East", new Vector3(ArenaLayoutV2.BoundaryX, 1.2f, 0f), new Vector3(1f, 2.4f, 58f), boundaryMat);
+            AddInkWallSurface(eastWall, inkCfg, inkWallMat, false);
 
             // 9. 双方安全出生台（8×6.5m，队色圆盘由 P1/SpawnPad Shader 绘制）
             var spawnPadA = CreateBox(arenaRoot.transform, "SafeSpawnPad_TeamA", new Vector3(0f, 0.08f, -ArenaLayoutV2.SpawnZ), new Vector3(8.0f, 0.16f, 6.5f), spawnMatA);
             if (blockedColliders != null) blockedColliders.Add(spawnPadA.GetComponent<Collider>());
+            AddInkWallSurface(spawnPadA, inkCfg, inkWallMat, true);
 
             var spawnPadB = CreateBox(arenaRoot.transform, "SafeSpawnPad_TeamB", new Vector3(0f, 0.08f, ArenaLayoutV2.SpawnZ), new Vector3(8.0f, 0.16f, 6.5f), spawnMatB);
             if (blockedColliders != null) blockedColliders.Add(spawnPadB.GetComponent<Collider>());
+            AddInkWallSurface(spawnPadB, inkCfg, inkWallMat, true);
 
             var spawnAnchorGo = new GameObject("TeamA_SpawnAnchor");
             spawnAnchorGo.transform.SetParent(arenaRoot.transform, false);
@@ -274,6 +286,8 @@ namespace P1.Environment
             go.transform.SetParent(parent, false);
             go.transform.localPosition = pos;
             go.transform.localScale = scale;
+            // 竞技场几何从不移动：整棵 arena 树标静态，构建期/运行期静态合批才能合并这几十个 Cube
+            go.isStatic = true;
             if (mat != null)
             {
                 go.GetComponent<Renderer>().sharedMaterial = mat;
@@ -328,17 +342,25 @@ namespace P1.Environment
             CreateCover(parent, namePrefix + "_B", new Vector3(-pos.x, pos.y, -pos.z), scale, mat, inkCfg, inkWallMat, blockedColliders, minAlpha, enableWallInk);
         }
 
-        public static void AddInkWallSurface(GameObject box, InkGridConfigSO inkCfg, Material inkWallMat)
+        public static void AddInkWallSurface(GameObject box, InkGridConfigSO inkCfg, Material inkWallMat, bool allowClimb = true)
         {
-            if (box == null || inkCfg == null || !inkCfg.enableWallInk)
+            if (box == null || (inkCfg != null && !inkCfg.enableWallInk))
                 return;
 
             var col = box.GetComponent<BoxCollider>();
             if (col == null)
+            {
+                var anyCol = box.GetComponent<Collider>();
+                if (anyCol != null)
+                {
+                    var wall = box.AddComponent<InkWallSurface>();
+                    wall.Configure(anyCol, inkWallMat, inkCfg, allowClimb);
+                }
                 return;
+            }
 
-            var wall = box.AddComponent<InkWallSurface>();
-            wall.Configure(col, inkWallMat, inkCfg);
+            var wallBox = box.AddComponent<InkWallSurface>();
+            wallBox.Configure(col, inkWallMat, inkCfg, allowClimb);
         }
     }
 }

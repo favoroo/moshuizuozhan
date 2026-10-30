@@ -14,7 +14,7 @@ namespace P1.Core
     public class PerformanceProfilerProbe : MonoBehaviour
     {
         [Serializable]
-        public class FrameSample
+        public struct FrameSample
         {
             public float DeltaTime;
             public float Fps;

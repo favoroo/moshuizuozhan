@@ -9,10 +9,14 @@ using UnityEngine.UI;
 namespace P1.UI.WeaponSelect
 {
     /// <summary>
-    /// 单张武器卡片视图（P8 选枪系统）：
-    /// - 包含武器图标、中英文名称、战术标签、四项关键数值（伤害/射程/射速/耗墨）及大招；
-    /// - 选中态：队伍墨色填充 + 墨汁晃动 + 果冻弹簧缩放 + 装备勋章；
-    /// - 未选态：暗黑深紫面板 + 细边框，鼠标悬停时微弹。
+    /// 单张武器卡片视图（P8 选枪系统，P10 漫画风重构）：
+    /// - 卡片高度 124px，纸面底色 + 6px 墨线粗边框 + 漫画硬阴影；
+    /// - 选中态：漫画明黄底色 + 倾斜 -1.5° + ComicBadge 弹出「已选定」；
+    /// - 悬停态：阴影减半 (3px) + 22% 半调网点浮现；
+    /// - 热键徽章 [1]~[7] 放大至 44×44 墨底白字；
+    /// - 武器名：中文 26px（黄油体）+ 英文 14px（TitanOne）；
+    /// - 属性条：5 段粗块（每段 4px 墨边），段内填充队伍色；
+    /// - 图标为空时隐藏 Image 组件，杜绝白块。
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     public class WeaponCardView : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
@@ -33,9 +37,18 @@ namespace P1.UI.WeaponSelect
         private Image _iconImage;
         private TextMeshProUGUI _indexBadgeText;
         private TextMeshProUGUI _titleText;
+        private TextMeshProUGUI _enTitleText;
+        private TextMeshProUGUI _roleTagText;
         private TextMeshProUGUI _statsText;
         private TextMeshProUGUI _specialText;
+
+        // 5 段粗块属性条
+        private readonly UIInkShapeGraphic[] _statSegments = new UIInkShapeGraphic[5];
+        private int _weaponRating = 3;
+
+        // ComicBadge「已选定」徽章
         private GameObject _equippedBadge;
+        private ComicBadge _comicBadge;
         private TextMeshProUGUI _equippedBadgeText;
         private UIInkShapeGraphic _equippedBadgeBg;
 
@@ -59,15 +72,32 @@ namespace P1.UI.WeaponSelect
             _theme = UIThemeSO.Resolve(themeAsset);
             _team = team;
             _onSelect = onSelect;
+            _weaponRating = GetWeaponRating(kind);
 
             BuildUIHierarchy();
             ApplyData(icon);
             SetSelected(false, animate: false);
         }
 
+        private static int GetWeaponRating(WeaponKind kind)
+        {
+            switch (kind)
+            {
+                case WeaponKind.Shooter: return 3;
+                case WeaponKind.Roller: return 4;
+                case WeaponKind.Charger: return 5;
+                case WeaponKind.Dualies: return 3;
+                case WeaponKind.Slosher: return 4;
+                case WeaponKind.Blaster: return 4;
+                case WeaponKind.Splatling: return 5;
+                default: return 3;
+            }
+        }
+
         public void SetTeam(Team team)
         {
             _team = team;
+            RefreshStatSegments();
             if (_isSelected)
             {
                 RefreshSelectedVisuals();
@@ -76,27 +106,27 @@ namespace P1.UI.WeaponSelect
 
         public void SetSelected(bool selected, bool animate = true)
         {
-            bool wasSelected = _isSelected;
             _isSelected = selected;
 
             if (selected)
             {
                 RefreshSelectedVisuals();
+                if (_comicBadge != null)
+                {
+                    if (animate) _comicBadge.Play();
+                    else _comicBadge.ShowImmediate();
+                }
                 if (animate && _motion != null)
                 {
-                    _motion.Punch(0.08f);
-                    if (_bgGraphic != null)
-                    {
-                        _bgGraphic.PlayWobble(0.08f, 0.38f);
-                    }
+                    _motion.Punch(0.06f);
                 }
             }
             else
             {
                 RefreshUnselectedVisuals();
-                if (wasSelected && animate && _motion != null)
+                if (_comicBadge != null)
                 {
-                    _motion.SnapHome();
+                    _comicBadge.HideImmediate();
                 }
             }
         }
@@ -104,22 +134,29 @@ namespace P1.UI.WeaponSelect
         private void BuildUIHierarchy()
         {
             _rectTransform = GetComponent<RectTransform>();
-            _rectTransform.sizeDelta = new Vector2(440f, 108f);
+            _rectTransform.sizeDelta = new Vector2(540f, 124f);
 
-            // 1. 卡片背景 (UIInkShapeGraphic)
+            // 1. 卡片背景 (纸面 + 6px 墨边 + 硬阴影)
             _bgGraphic = gameObject.GetComponent<UIInkShapeGraphic>();
             if (_bgGraphic == null)
             {
                 _bgGraphic = gameObject.AddComponent<UIInkShapeGraphic>();
             }
             _bgGraphic.Shape = UIInkShape.RoundedRect;
-            _bgGraphic.CornerRadius = 18f;
-            _bgGraphic.BorderWidth = 5f;
-            _bgGraphic.BorderColor = _theme.outlineColor;
-            _bgGraphic.color = new Color(0.11f, 0.10f, 0.16f, 0.94f);
+            _bgGraphic.CornerRadius = ComicStyle.CornerSharp;
+            _bgGraphic.BorderWidth = ComicStyle.Border;
+            _bgGraphic.BorderColor = ComicStyle.Ink;
+            _bgGraphic.color = ComicStyle.Paper;
+            _bgGraphic.HardShadow = true;
+            _bgGraphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+            _bgGraphic.ShadowColor = ComicStyle.Ink;
+            _bgGraphic.Halftone = false;
+            _bgGraphic.HalftoneAlpha = ComicStyle.HalftoneAlpha;
+            _bgGraphic.GlossAlpha = 0f;
+            _bgGraphic.DrawGloss = false;
             _bgGraphic.raycastTarget = true;
 
-            // 2. 弹簧交互控制器
+            // 2. 动效控制器 (严格遵守漫画动效规范，无弹簧回弹)
             _motion = gameObject.GetComponent<UISpringMotion>();
             if (_motion == null)
             {
@@ -138,22 +175,24 @@ namespace P1.UI.WeaponSelect
             _button.onClick.RemoveAllListeners();
             _button.onClick.AddListener(() => _onSelect?.Invoke(_index));
 
-            // 4. 左侧快捷键角标容器 (e.g. [1])
+            // 4. 左侧快捷键角标 [1]~[7] 放大到 44×44 墨底白字
             var badgeGo = new GameObject("HotkeyBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             badgeGo.transform.SetParent(transform, false);
             var badgeRect = badgeGo.GetComponent<RectTransform>();
             badgeRect.anchorMin = new Vector2(0f, 0.5f);
             badgeRect.anchorMax = new Vector2(0f, 0.5f);
             badgeRect.pivot = new Vector2(0f, 0.5f);
-            badgeRect.anchoredPosition = new Vector2(10f, 0f);
-            badgeRect.sizeDelta = new Vector2(24f, 24f);
+            badgeRect.anchoredPosition = new Vector2(12f, 0f);
+            badgeRect.sizeDelta = new Vector2(44f, 44f);
 
             var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
             badgeShape.Shape = UIInkShape.RoundedRect;
-            badgeShape.CornerRadius = 6f;
-            badgeShape.BorderWidth = 2.5f;
-            badgeShape.BorderColor = _theme.outlineColor;
-            badgeShape.color = new Color(0.18f, 0.17f, 0.25f, 0.95f);
+            badgeShape.CornerRadius = ComicStyle.CornerSharp;
+            badgeShape.BorderWidth = ComicStyle.BorderThin;
+            badgeShape.BorderColor = ComicStyle.Ink;
+            badgeShape.color = ComicStyle.Ink;
+            badgeShape.HardShadow = false;
+            badgeShape.Halftone = false;
             badgeShape.raycastTarget = false;
 
             var badgeTextGo = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -164,81 +203,169 @@ namespace P1.UI.WeaponSelect
             btr.sizeDelta = Vector2.zero;
             _indexBadgeText = badgeTextGo.GetComponent<TextMeshProUGUI>();
             _indexBadgeText.alignment = TextAlignmentOptions.Center;
-            _indexBadgeText.fontSize = 14f;
+            _indexBadgeText.fontSize = 24f;
             _indexBadgeText.fontStyle = FontStyles.Bold;
-            _indexBadgeText.color = _theme.readyGold;
+            _indexBadgeText.color = Color.white;
             _indexBadgeText.raycastTarget = false;
+            _indexBadgeText.font = _theme.ResolveFont(true, (_index + 1).ToString());
 
-            // 5. 图标背景与图标
+            // 5. 图标底框与图标
             var iconBgGo = new GameObject("IconBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             iconBgGo.transform.SetParent(transform, false);
             var iconBgRect = iconBgGo.GetComponent<RectTransform>();
             iconBgRect.anchorMin = new Vector2(0f, 0.5f);
             iconBgRect.anchorMax = new Vector2(0f, 0.5f);
             iconBgRect.pivot = new Vector2(0f, 0.5f);
-            iconBgRect.anchoredPosition = new Vector2(40f, 0f);
-            iconBgRect.sizeDelta = new Vector2(62f, 62f);
+            iconBgRect.anchoredPosition = new Vector2(66f, 0f);
+            iconBgRect.sizeDelta = new Vector2(76f, 76f);
 
             var iconBgShape = iconBgGo.GetComponent<UIInkShapeGraphic>();
             iconBgShape.Shape = UIInkShape.RoundedRect;
-            iconBgShape.CornerRadius = 12f;
-            iconBgShape.BorderWidth = 3f;
-            iconBgShape.BorderColor = _theme.outlineColor;
-            iconBgShape.color = new Color(0.06f, 0.05f, 0.09f, 0.85f);
+            iconBgShape.CornerRadius = ComicStyle.CornerSharp;
+            iconBgShape.BorderWidth = ComicStyle.BorderThin;
+            iconBgShape.BorderColor = ComicStyle.Ink;
+            // 武器图标是纯白剪影，底框必须用墨色，否则白图标贴在纸白底上等于隐形/白方块
+            iconBgShape.color = ComicStyle.Ink;
+            iconBgShape.HardShadow = false;
+            iconBgShape.Halftone = false;
             iconBgShape.raycastTarget = false;
 
-            var iconImgGo = new GameObject("IconImage", typeof(RectTransform), typeof(Image));
+            var iconImgGo = new GameObject("IconImage", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
             iconImgGo.transform.SetParent(iconBgGo.transform, false);
             var iconImgRect = iconImgGo.GetComponent<RectTransform>();
-            iconImgRect.anchorMin = new Vector2(0.08f, 0.08f);
-            iconImgRect.anchorMax = new Vector2(0.92f, 0.92f);
+            iconImgRect.anchorMin = new Vector2(0.06f, 0.06f);
+            iconImgRect.anchorMax = new Vector2(0.94f, 0.94f);
             iconImgRect.sizeDelta = Vector2.zero;
             _iconImage = iconImgGo.GetComponent<Image>();
             _iconImage.preserveAspect = true;
             _iconImage.raycastTarget = false;
 
-            // 6. 中部文字信息容器
+            // 6. 中部文字与属性容器
             var infoGo = new GameObject("InfoContainer", typeof(RectTransform));
             infoGo.transform.SetParent(transform, false);
             var infoRect = infoGo.GetComponent<RectTransform>();
             infoRect.anchorMin = new Vector2(0f, 0f);
             infoRect.anchorMax = new Vector2(1f, 1f);
-            infoRect.offsetMin = new Vector2(110f, 6f);
-            infoRect.offsetMax = new Vector2(-76f, -6f);
+            infoRect.offsetMin = new Vector2(152f, 8f);
+            infoRect.offsetMax = new Vector2(-100f, -8f);
 
-            // 6.1 标题行 (Title)
-            var titleGo = new GameObject("TitleText", typeof(RectTransform), typeof(TextMeshProUGUI));
-            titleGo.transform.SetParent(infoGo.transform, false);
-            var tr = titleGo.GetComponent<RectTransform>();
-            tr.anchorMin = new Vector2(0f, 1f);
-            tr.anchorMax = new Vector2(1f, 1f);
-            tr.pivot = new Vector2(0f, 1f);
-            tr.anchoredPosition = new Vector2(0f, 0f);
-            tr.sizeDelta = new Vector2(0f, 30f);
-            _titleText = titleGo.GetComponent<TextMeshProUGUI>();
-            _titleText.font = _theme.GetFont(true);
-            _titleText.fontSize = 19f;
+            // 6.1 标题行（中文 26px 庆科黄油体 + 英文 14px + 定位标签）
+            var titleRow = new GameObject("TitleRow", typeof(RectTransform));
+            titleRow.transform.SetParent(infoGo.transform, false);
+            var titleRowRt = titleRow.GetComponent<RectTransform>();
+            titleRowRt.anchorMin = new Vector2(0f, 1f);
+            titleRowRt.anchorMax = new Vector2(1f, 1f);
+            titleRowRt.pivot = new Vector2(0f, 1f);
+            titleRowRt.anchoredPosition = new Vector2(0f, 0f);
+            titleRowRt.sizeDelta = new Vector2(0f, 36f);
+
+            var cnNameGo = new GameObject("CnName", typeof(RectTransform), typeof(TextMeshProUGUI));
+            cnNameGo.transform.SetParent(titleRow.transform, false);
+            var cnNameRt = cnNameGo.GetComponent<RectTransform>();
+            cnNameRt.anchorMin = new Vector2(0f, 0.5f);
+            cnNameRt.anchorMax = new Vector2(0f, 0.5f);
+            cnNameRt.pivot = new Vector2(0f, 0.5f);
+            cnNameRt.anchoredPosition = new Vector2(0f, 0f);
+            cnNameRt.sizeDelta = new Vector2(118f, 32f);
+            _titleText = cnNameGo.GetComponent<TextMeshProUGUI>();
+            _titleText.fontSize = 24f;
             _titleText.fontStyle = FontStyles.Bold;
             _titleText.alignment = TextAlignmentOptions.Left;
+            _titleText.color = ComicStyle.Ink;
             _titleText.raycastTarget = false;
 
-            // 6.2 属性行 (Stats)
+            var enNameGo = new GameObject("EnName", typeof(RectTransform), typeof(TextMeshProUGUI));
+            enNameGo.transform.SetParent(titleRow.transform, false);
+            var enNameRt = enNameGo.GetComponent<RectTransform>();
+            enNameRt.anchorMin = new Vector2(0f, 0.5f);
+            enNameRt.anchorMax = new Vector2(0f, 0.5f);
+            enNameRt.pivot = new Vector2(0f, 0.5f);
+            enNameRt.anchoredPosition = new Vector2(122f, -3f);
+            enNameRt.sizeDelta = new Vector2(112f, 20f);
+            _enTitleText = enNameGo.GetComponent<TextMeshProUGUI>();
+            _enTitleText.fontSize = 11.5f;
+            _enTitleText.fontStyle = FontStyles.Bold;
+            _enTitleText.alignment = TextAlignmentOptions.Left;
+            _enTitleText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.65f);
+            _enTitleText.raycastTarget = false;
+
+            var roleGo = new GameObject("RoleTag", typeof(RectTransform), typeof(TextMeshProUGUI));
+            roleGo.transform.SetParent(titleRow.transform, false);
+            var roleRt = roleGo.GetComponent<RectTransform>();
+            roleRt.anchorMin = new Vector2(1f, 0.5f);
+            roleRt.anchorMax = new Vector2(1f, 0.5f);
+            roleRt.pivot = new Vector2(1f, 0.5f);
+            roleRt.anchoredPosition = new Vector2(0f, 0f);
+            roleRt.sizeDelta = new Vector2(88f, 22f);
+            _roleTagText = roleGo.GetComponent<TextMeshProUGUI>();
+            _roleTagText.fontSize = 11.5f;
+            _roleTagText.fontStyle = FontStyles.Bold;
+            _roleTagText.alignment = TextAlignmentOptions.Right;
+            _roleTagText.color = ComicStyle.Ink;
+            _roleTagText.raycastTarget = false;
+
+            // 6.2 5 段粗块属性条（每段 4px 墨边，段内填充队伍色）
+            var statBarRow = new GameObject("StatBarRow", typeof(RectTransform));
+            statBarRow.transform.SetParent(infoGo.transform, false);
+            var statBarRowRt = statBarRow.GetComponent<RectTransform>();
+            statBarRowRt.anchorMin = new Vector2(0f, 0.5f);
+            statBarRowRt.anchorMax = new Vector2(1f, 0.5f);
+            statBarRowRt.pivot = new Vector2(0f, 0.5f);
+            statBarRowRt.anchoredPosition = new Vector2(0f, -4f);
+            statBarRowRt.sizeDelta = new Vector2(0f, 28f);
+
+            var blocksGo = new GameObject("ChunkyBlocks", typeof(RectTransform));
+            blocksGo.transform.SetParent(statBarRow.transform, false);
+            var blocksRt = blocksGo.GetComponent<RectTransform>();
+            blocksRt.anchorMin = new Vector2(0f, 0.5f);
+            blocksRt.anchorMax = new Vector2(0f, 0.5f);
+            blocksRt.pivot = new Vector2(0f, 0.5f);
+            blocksRt.anchoredPosition = new Vector2(0f, 0f);
+            blocksRt.sizeDelta = new Vector2(136f, 20f);
+
+            float blockWidth = 23f;
+            float blockGap = 4f;
+            for (int b = 0; b < 5; b++)
+            {
+                var blockGo = new GameObject($"Block_{b}", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                blockGo.transform.SetParent(blocksGo.transform, false);
+                var brt = blockGo.GetComponent<RectTransform>();
+                brt.anchorMin = new Vector2(0f, 0.5f);
+                brt.anchorMax = new Vector2(0f, 0.5f);
+                brt.pivot = new Vector2(0f, 0.5f);
+                brt.anchoredPosition = new Vector2(b * (blockWidth + blockGap), 0f);
+                brt.sizeDelta = new Vector2(blockWidth, 18f);
+
+                var bshape = blockGo.GetComponent<UIInkShapeGraphic>();
+                bshape.Shape = UIInkShape.RoundedRect;
+                bshape.CornerRadius = 3f;
+                bshape.BorderWidth = ComicStyle.BorderThin;
+                bshape.BorderColor = ComicStyle.Ink;
+                bshape.color = ComicStyle.PaperAlt;
+                bshape.HardShadow = false;
+                bshape.Halftone = false;
+                bshape.raycastTarget = false;
+
+                _statSegments[b] = bshape;
+            }
+
+            // 属性文字（伤/距/频/耗）
             var statsGo = new GameObject("StatsText", typeof(RectTransform), typeof(TextMeshProUGUI));
-            statsGo.transform.SetParent(infoGo.transform, false);
+            statsGo.transform.SetParent(statBarRow.transform, false);
             var sr = statsGo.GetComponent<RectTransform>();
             sr.anchorMin = new Vector2(0f, 0.5f);
             sr.anchorMax = new Vector2(1f, 0.5f);
             sr.pivot = new Vector2(0f, 0.5f);
-            sr.anchoredPosition = new Vector2(0f, -2f);
-            sr.sizeDelta = new Vector2(0f, 24f);
+            sr.anchoredPosition = new Vector2(144f, 0f);
+            sr.sizeDelta = new Vector2(-144f, 26f);
             _statsText = statsGo.GetComponent<TextMeshProUGUI>();
-            _statsText.font = _theme.GetFont(false);
-            _statsText.fontSize = 13.5f;
+            _statsText.fontSize = 12f;
             _statsText.fontStyle = FontStyles.Normal;
             _statsText.alignment = TextAlignmentOptions.Left;
+            _statsText.color = ComicStyle.Ink;
             _statsText.raycastTarget = false;
 
-            // 6.3 大招行 (Special)
+            // 6.3 大招信息行
             var specialGo = new GameObject("SpecialText", typeof(RectTransform), typeof(TextMeshProUGUI));
             specialGo.transform.SetParent(infoGo.transform, false);
             var spr = specialGo.GetComponent<RectTransform>();
@@ -246,31 +373,37 @@ namespace P1.UI.WeaponSelect
             spr.anchorMax = new Vector2(1f, 0f);
             spr.pivot = new Vector2(0f, 0f);
             spr.anchoredPosition = new Vector2(0f, 2f);
-            spr.sizeDelta = new Vector2(0f, 22f);
+            spr.sizeDelta = new Vector2(0f, 24f);
             _specialText = specialGo.GetComponent<TextMeshProUGUI>();
-            _specialText.font = _theme.GetFont(false);
-            _specialText.fontSize = 12.5f;
+            _specialText.fontSize = 12f;
             _specialText.fontStyle = FontStyles.Normal;
             _specialText.alignment = TextAlignmentOptions.Left;
+            _specialText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.75f);
             _specialText.raycastTarget = false;
 
-            // 7. 右侧「已装备」徽章
-            _equippedBadge = new GameObject("EquippedBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            // 7. 右侧「已选定」ComicBadge 徽章
+            _equippedBadge = new GameObject("EquippedBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(ComicBadge));
             _equippedBadge.transform.SetParent(transform, false);
             var eqRect = _equippedBadge.GetComponent<RectTransform>();
             eqRect.anchorMin = new Vector2(1f, 0.5f);
             eqRect.anchorMax = new Vector2(1f, 0.5f);
             eqRect.pivot = new Vector2(1f, 0.5f);
-            eqRect.anchoredPosition = new Vector2(-10f, 0f);
-            eqRect.sizeDelta = new Vector2(62f, 32f);
+            eqRect.anchoredPosition = new Vector2(-14f, 0f);
+            eqRect.sizeDelta = new Vector2(84f, 36f);
 
             _equippedBadgeBg = _equippedBadge.GetComponent<UIInkShapeGraphic>();
             _equippedBadgeBg.Shape = UIInkShape.RoundedRect;
-            _equippedBadgeBg.CornerRadius = 8f;
-            _equippedBadgeBg.BorderWidth = 3f;
-            _equippedBadgeBg.BorderColor = _theme.outlineColor;
-            _equippedBadgeBg.color = _theme.readyGold;
+            _equippedBadgeBg.CornerRadius = ComicStyle.CornerSharp;
+            _equippedBadgeBg.BorderWidth = ComicStyle.BorderThin;
+            _equippedBadgeBg.BorderColor = ComicStyle.Ink;
+            _equippedBadgeBg.color = ComicStyle.Paper;
+            _equippedBadgeBg.HardShadow = true;
+            _equippedBadgeBg.ShadowOffset = new Vector2(3f, -3f);
+            _equippedBadgeBg.ShadowColor = ComicStyle.Ink;
+            _equippedBadgeBg.Halftone = false;
             _equippedBadgeBg.raycastTarget = false;
+
+            _comicBadge = _equippedBadge.GetComponent<ComicBadge>();
 
             var eqTextGo = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
             eqTextGo.transform.SetParent(_equippedBadge.transform, false);
@@ -279,13 +412,13 @@ namespace P1.UI.WeaponSelect
             eqtr.anchorMax = Vector2.one;
             eqtr.sizeDelta = Vector2.zero;
             _equippedBadgeText = eqTextGo.GetComponent<TextMeshProUGUI>();
-            _equippedBadgeText.font = _theme.GetFont(false);
             _equippedBadgeText.alignment = TextAlignmentOptions.Center;
-            _equippedBadgeText.fontSize = 12f;
+            _equippedBadgeText.fontSize = 15f;
             _equippedBadgeText.fontStyle = FontStyles.Bold;
-            _equippedBadgeText.color = _theme.outlineColor;
+            _equippedBadgeText.color = ComicStyle.Ink;
             _equippedBadgeText.text = "已选定";
             _equippedBadgeText.raycastTarget = false;
+            _equippedBadgeText.font = _theme.ResolveFont(false, "已选定");
         }
 
         private void ApplyData(Sprite icon)
@@ -295,19 +428,42 @@ namespace P1.UI.WeaponSelect
                 _indexBadgeText.text = (_index + 1).ToString();
             }
 
-            if (_iconImage != null && icon != null)
+            // 图标：存在时显示并上色，为空时隐藏 Image 组件杜绝白底空块
+            if (_iconImage != null)
             {
-                _iconImage.sprite = icon;
-                _iconImage.color = Color.white;
+                if (icon != null)
+                {
+                    _iconImage.sprite = icon;
+                    _iconImage.color = Color.white;
+                    _iconImage.gameObject.SetActive(true);
+                }
+                else
+                {
+                    _iconImage.gameObject.SetActive(false);
+                }
             }
 
             string enName = WeaponSelectMath.GetWeaponEnglishName(_kind);
             string cnName = WeaponSelectMath.GetWeaponChineseName(_kind);
             string role = WeaponSelectMath.GetWeaponRoleTag(_kind);
 
+            // 统一通过 theme.ResolveFont 绑定 OFL CJK 字体，彻底修掉方块字 □
             if (_titleText != null)
             {
-                _titleText.text = $"{enName} <size=14><color=#E0E4F0>{cnName}</color></size> <size=12><color=#FFD54F>【{role}】</color></size>";
+                _titleText.font = _theme.ResolveFont(true, cnName);
+                _titleText.text = cnName;
+            }
+
+            if (_enTitleText != null)
+            {
+                _enTitleText.font = _theme.GetFont(true);
+                _enTitleText.text = enName.ToUpperInvariant();
+            }
+
+            if (_roleTagText != null)
+            {
+                _roleTagText.font = _theme.ResolveFont(false, role);
+                _roleTagText.text = $"【{role}】";
             }
 
             string dmg = WeaponSelectMath.FormatDamage(_config, _kind);
@@ -317,13 +473,31 @@ namespace P1.UI.WeaponSelect
 
             if (_statsText != null)
             {
-                _statsText.text = $"伤:{dmg} · 距:{rng} · 频:{rate} · 耗:{ink}";
+                string text = $"伤{dmg} 距{rng} 频{rate} 耗{ink}";
+                _statsText.font = _theme.ResolveFont(false, text);
+                _statsText.text = text;
             }
 
             string ult = WeaponSelectMath.FormatSpecial(_config, _kind);
             if (_specialText != null)
             {
-                _specialText.text = $"大招: <color=#9EE8FF>{ult}</color>";
+                string text = $"大招: {ult}";
+                _specialText.font = _theme.ResolveFont(false, text);
+                _specialText.text = text;
+            }
+
+            RefreshStatSegments();
+        }
+
+        private void RefreshStatSegments()
+        {
+            Color teamColor = _theme.GetTeamColor(_team);
+            for (int b = 0; b < _statSegments.Length; b++)
+            {
+                if (_statSegments[b] == null) continue;
+                bool filled = b < _weaponRating;
+                _statSegments[b].color = filled ? teamColor : ComicStyle.PaperAlt;
+                _statSegments[b].Refresh();
             }
         }
 
@@ -331,69 +505,79 @@ namespace P1.UI.WeaponSelect
         {
             if (_bgGraphic != null)
             {
-                Color teamColor = _theme.GetTeamColor(_team);
-                _bgGraphic.color = teamColor;
-                _bgGraphic.BorderWidth = 6.5f;
-                _bgGraphic.BorderColor = _theme.outlineColor;
+                // 选中态：黄底 + 6px 墨边 + 硬阴影
+                _bgGraphic.color = ComicStyle.Yellow;
+                _bgGraphic.BorderWidth = ComicStyle.Border;
+                _bgGraphic.BorderColor = ComicStyle.Ink;
+                _bgGraphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+                _bgGraphic.Halftone = false;
                 _bgGraphic.Refresh();
             }
 
-            if (_equippedBadge != null)
+            // 倾斜 -1.5°，营造漫画贴纸活泼张力
+            if (_rectTransform != null)
             {
-                _equippedBadge.SetActive(true);
+                _rectTransform.localRotation = Quaternion.Euler(0f, 0f, -1.5f);
             }
 
-            if (_titleText != null)
-            {
-                _titleText.color = Color.white;
-            }
-
-            if (_statsText != null)
-            {
-                _statsText.color = new Color(0.98f, 0.98f, 1f, 1f);
-            }
+            if (_titleText != null) _titleText.color = ComicStyle.Ink;
+            if (_enTitleText != null) _enTitleText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.7f);
+            if (_roleTagText != null) _roleTagText.color = ComicStyle.Ink;
+            if (_statsText != null) _statsText.color = ComicStyle.Ink;
+            if (_specialText != null) _specialText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.85f);
         }
 
         private void RefreshUnselectedVisuals()
         {
             if (_bgGraphic != null)
             {
-                _bgGraphic.color = new Color(0.10f, 0.09f, 0.16f, 0.94f);
-                _bgGraphic.BorderWidth = 4.5f;
-                _bgGraphic.BorderColor = new Color(0.18f, 0.16f, 0.26f, 1f);
+                // 未选态：纸面白底 + 6px 墨边 + 硬阴影
+                _bgGraphic.color = ComicStyle.Paper;
+                _bgGraphic.BorderWidth = ComicStyle.Border;
+                _bgGraphic.BorderColor = ComicStyle.Ink;
+                _bgGraphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+                _bgGraphic.Halftone = false;
                 _bgGraphic.Refresh();
             }
 
-            if (_equippedBadge != null)
+            if (_rectTransform != null)
             {
-                _equippedBadge.SetActive(false);
+                _rectTransform.localRotation = Quaternion.identity;
             }
 
-            if (_titleText != null)
-            {
-                _titleText.color = _theme.textPrimary;
-            }
-
-            if (_statsText != null)
-            {
-                _statsText.color = _theme.textMuted;
-            }
+            if (_titleText != null) _titleText.color = ComicStyle.Ink;
+            if (_enTitleText != null) _enTitleText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.65f);
+            if (_roleTagText != null) _roleTagText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.75f);
+            if (_statsText != null) _statsText.color = ComicStyle.Ink;
+            if (_specialText != null) _specialText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.75f);
         }
 
         public void OnPointerEnter(PointerEventData eventData)
         {
+            if (!_isSelected && _bgGraphic != null)
+            {
+                // 悬停：硬阴影缩减一半 (3px) + 22% 半调网点浮现
+                _bgGraphic.ShadowOffset = new Vector2(ComicStyle.HoverShadowOffset, -ComicStyle.HoverShadowOffset);
+                _bgGraphic.Halftone = true;
+                _bgGraphic.HalftoneAlpha = ComicStyle.HalftoneHoverAlpha;
+                _bgGraphic.Refresh();
+            }
+
             if (_motion != null)
             {
                 _motion.SetHovered(true);
-            }
-            if (_bgGraphic != null)
-            {
-                _bgGraphic.PlayWobble(0.04f, 0.22f);
             }
         }
 
         public void OnPointerExit(PointerEventData eventData)
         {
+            if (!_isSelected && _bgGraphic != null)
+            {
+                _bgGraphic.ShadowOffset = new Vector2(ComicStyle.ShadowOffset, -ComicStyle.ShadowOffset);
+                _bgGraphic.Halftone = false;
+                _bgGraphic.Refresh();
+            }
+
             if (_motion != null)
             {
                 _motion.SetHovered(false);

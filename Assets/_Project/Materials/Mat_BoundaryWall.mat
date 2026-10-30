@@ -56,7 +56,7 @@ Material:
     - _CorrugationScale: 2.5
     - _Cull: 2
     - _Cutoff: 0.5
-    - _DetailNoiseStrength: 0.12
+    - _DetailNoiseStrength: 0.04
     - _DitherAlpha: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
@@ -68,17 +68,27 @@ Material:
     - _Metallic: 0.12
     - _PanelLineStrength: 0.35
     - _QueueOffset: 0
+    - _RimPower: 3
+    - _RimStrength: 0.18
     - _SampleGI: 0
+    - _ShadeSoftness: 0.03
+    - _ShadeThreshold: 0.5
+    - _ShadowFloor: 0.42
     - _Smoothness: 0.38
+    - _SpecSoftness: 0.02
+    - _SpecStrength: 0.5
+    - _SpecThreshold: 0.95
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Surface: 0
     - _XRMotionVectorsPass: 1
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.5382356, g: 0.50707865, b: 0.42003334, a: 1}
-    - _Color: {r: 0.5382356, g: 0.50707865, b: 0.42003334, a: 1}
+    - _BaseColor: {r: 0.6038274, g: 0.5704816, b: 0.47699985, a: 1}
+    - _Color: {r: 0.6038274, g: 0.5704816, b: 0.47699985, a: 1}
     - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
+    - _RimColor: {r: 0.5225216, g: 0.71056664, b: 1, a: 1}
+    - _ShadowTint: {r: 0.13286833, g: 0.17064494, b: 0.34239164, a: 1}
     - _TrimColor: {r: 0.26327342, g: 0.2428668, b: 0.19599415, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

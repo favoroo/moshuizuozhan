@@ -1010,6 +1010,375 @@
 
 ---
 
+### 角色外观重制 2：中性服装分层、光滑蛋体与站立稳定（P8-E，2026-10-29）
+
+> 用户反馈：角色身体表面不够光滑；全身都是队伍墨色，站在同色墨水上完全糊在一起；
+> 角色/Bot 站在原地也会一蹦一蹦。目标：参考 INKWAVE 的"中性服装 + 队伍墨色点缀"设计语言重做外观。
+
+- `[x]` **[P8-E] 角色外观二次重制 + 步态根因修复**
+  - **蛋体与着色**：轮廓从 10 个控制点 + 分段 SmoothStep 改为单一解析函数
+    `r(t)=sin(π·t^0.68)^0.5`（下段饱满、顶部圆顶、半径与切向连续），网格由 24×24 提升到
+    40 环 × 40 径向段并保持解析法线；`CharacterToon` / `CharacterToonOutlined` 新增 `_ShadeSoftness`，
+    蛋体明暗交界柔化到 0.10（旧版硬编码 0.02，曲面上的二分色阶会切出块状边界）。
+  - **服装分区（参考 INKWAVE）**：蛋体主体改为奶油白上衣，短裤与队伍色腰带改为沿表面外扩
+    5mm/9mm 的独立薄壳（上下沿带内收盖面），整颗蛋体只保留一条连续外描边，
+    解决多 submesh 各自描边在腰部切出细黑线的问题。黑色下摆换成深海军蓝 `#27304A`。
+    队伍色只保留在：腰带、三束墨焰、虹膜、墨罐液面、胸前墨渍、袖口。
+  - **面部与四肢**：两片眼罩 + 鼻梁桥合成连体面罩；眼睛改为白眼球 + 队伍色虹膜 +
+    深色瞳孔 + 双高光；胸章改用哑光队伍色墨渍（避免高光把墨点打成气泡）；
+    手臂改为浅灰拉格兰短袖 → 队伍色袖口 → 肤色小臂 → 肤色圆手，肘部移到体表之外；
+    单持武器时左手自然垂在身侧。武器挂点 Y 0.72→0.66、Z 1.30→1.55，枪不再埋进肚子。
+  - **步态根因修复**：`CharacterVisualController` 旧代码把 `motor.CurrentMoveSpeed`
+    （当前形态的**速度上限**，站立时仍是 6 m/s）当实际移速，导致角色只要落地就永远在走弹跳步态。
+    改为用每帧位移计算真实平面速度 `_planarSpeed`；步态阈值 1.0 m/s，起伏 4~8mm，
+    触地频率 1.35~2.2 次/秒，挤压 6%/膨胀 4%，摇摆 1.6~3.2°，手臂 6~14°；
+    待机呼吸只做缩放不做位移；落地弹簧仅在真实下落速度 >1.2 m/s 时触发。
+    滚筒自转也改用真实速度，站立时滚轴不再空转。
+  - **验证**：最终代码编译 `compilationFailed:false`（0 error CS）；EditMode **212/212** 通过
+    （含蛋形网格体裁、无腿层级、步态触地/最高点、双枪左手姿态等角色用例）；
+    `Logs/char_front_body.png` / `char_front_weapon.png` / `char_back_body.png` /
+    `char_side_body.png`（1280² 近景）、`Logs/char_ingame_player_back.png` /
+    `char_ingame_botB_front.png`（实机橙队/蓝队）确认轮廓光滑、服装分层与队伍识别；
+    Play 模式站立采样 `squashPosY=-0.05000`（默认位，无任何上下位移），实机运行 console error 为 0
+    （该项在最终手臂/袖子几何调整前完成；调整后已用离线渲染与 EditMode 装配复验）。
+    全量 PlayMode 套件在本轮末因并行 UI Agent 的 `CenterTimerView / PauseMenuOverlay / MobileUiMetrics`
+    编译错误占用了工程与测试运行器，未能完整复跑；最终的手臂/袖子改动仅涉及装配几何，
+    已通过 EditMode 层级测试与离线渲染验收，建议并行任务结束后补跑 PlayMode 基线。
+  - **影响文件**：`Assets/_Project/Scripts/Player/CharacterVisualAssembler.cs`、
+    `CharacterVisualController.cs`、`EggGaitSolver.cs`、`CharacterMetrics.cs`、
+    `Assets/_Project/Shaders/CharacterToon.shader`、`CharacterToonOutlined.shader`、
+    `CharacterToonCommon.hlsl`、`Assets/_Project/Materials/Characters/*`（新增服装/墨渍材质）、
+    `Assets/_Project/Scenes/PhaseA_Playbox.unity`（菜单 `P1/角色与武器/升级场景中所有角色模型 (P5-A)`
+    原地重建 8 名角色）。接口保持向后兼容：`Assemble` / `BindHierarchy` / `BindEggRig` 签名未变。
+  - **已知限制**：仍无骨骼/IK，双手持枪为近似姿态；手臂前伸比例偏卡通；
+    Bot 交火横移时仍有轻微贴地摇摆（这是刻意保留的"走路"，不是弹跳）。
+
+---
+
+### 三渲二画风与光影统一（P10-A，2026-10-29）
+
+> 目标：消除「角色卡通、环境拟真」的割裂感，把地面 / 掩体 / 道具 / 角色统一成
+> Splatoon 式二分色阶 + 冷暖分离阴影 + 卡通轮廓线，并修复地面与掩体不接收实时阴影的缺陷。
+
+- `[x]` **[P10-A] 全场景三渲二光照 + PC 全屏卡通描边 + 高饱和日光**
+  - **新增**：`Shaders/ToonLighting.hlsl`（二分色阶 / 阴影染色 / 硬边高光 / 轮廓光纯函数）、
+    `Shaders/ToonOutline.shader`（深度+法线全屏描边）、`Scripts/Editor/ToonStyleInstaller.cs`
+    （菜单 `P1/画风/1~3`：一键应用 / 开关描边 / Play 模式截图）。
+  - **改动**：`ObstacleDitherLit` `PropLit` `InkGround` `InkWall` `CharacterToonCommon`
+    `CharacterToon(.Outlined)` 全部接入三渲二光照；`ObstacleDitherLit` / `InkGround` / `PropLit`
+    新增 `DepthNormals` Pass（保留 Dither discard），供 SSAO 与全屏描边使用；
+    **修复** `InkGround` / `ObstacleDitherLit` 调用 `GetMainLight()` 未传 shadowCoord、导致地面/掩体
+    完全不接收实时阴影的问题；角色描边改为随距离补偿的稳定线宽。
+  - **画风参数**：`ArenaStyleSO` 新增 `shadeThreshold/shadeSoftness/shadowTint/shadowFloor/rim*/spec*`、
+    `inkShade*`、`tonemapMode`、`ssaoIntensity`、`sceneOutline*` 字段；`ArenaAtmosphereBuilder`
+    应用 `sun.shadowStrength`、`reflectionIntensity` 与 Neutral Tonemap；`ProjectScaffolder`
+    移除写死雾距，统一由 `ArenaStyleSO` 驱动。
+  - **PC 端**：`FullScreenPassRendererFeature`（注入 `BeforeRenderingTransparents`，
+    `Depth | Normal`，`fetchColorBuffer`）安装在 `Assets/Settings/PC_Renderer.asset`，
+    材质 `Mat_ToonOutline.mat`；移动端不启用全屏描边，仅保留角色描边以守住 30 FPS。
+  - **验收**：编译 `compilationFailed:false`；7 个自定义 Shader `ShaderUtil.GetShaderMessages` 全 OK；
+    EditMode **212/212**、PlayMode **70/70**；截图 `Logs/style_before_game.png` /
+    `style_after_game.png` / `style_after_ui2.png` / `style_after_match_ui2.png` /
+    `style_character_closeup2.png`（画面标准差 26.2→46.7、饱和度 0.19→0.51，描边/投影/角色
+    平涂色阶可见）。角色暗部单独使用 `characterShadowFloor=0.55` 并柔化阴影色，避免队伍色发褐。
+  - **性能实测**：Play 模式游戏视图 60.3 FPS（1650×768，编辑器内）；`UnityStats.drawCalls`
+    平均约 746。该绝对值主要来自既有 425 个渲染器 / 301 个阴影投影体的角色与道具批次，
+    本次新增全屏描边仅 1 个 Pass；后续若需压到红线 120，应单独立项做静态合批与微部件阴影裁剪，
+    不在本次画风任务范围内。
+  - **回退**：菜单 `P1/画风/2. 开关全屏卡通描边`；修改前已备份 `Logs/PC_Renderer.backup.asset`。
+
+- `[x]` **[P10-B] 全物件与全表面喷墨系统全面升级（顶面墨迹采样 + 全掩体立面涂墨 + 0 DrawCall 惰性开销）** (Agent: Ink-System, Completed: 2026-10-29)
+  - **交付简述**：
+    1. **全局顶面墨水采样 (`Shaders/InkSurfaceOverlay.hlsl`)**：
+       - 当几何体表面法线朝上（$N_y > 0.3$）时，统一采样全局 `_InkTex` 顶视墨水图集；
+       - 采用屏幕空间导数做 3-texel 柔和抗锯齿边缘（无方块锯齿阶梯）、二分卡通漫反射与湿润度镜面反光；
+       - `ObstacleDitherLit.shader` 与 `PropLit.shader` 全面接入顶面墨水叠加，场内所有集装箱顶面、木箱顶面、护栏顶面、花坛顶面、出生台顶面与近景道具均可自然受墨。
+    2. **全局 Shader 属性推送 (`InkSurfaceController`)**：
+       - `BindSurfaceMaterials` 与 `UpdateDynamicMaterialProperties` 同步设置全局 Shader 参数（`_InkTex`、`_InkMapOriginXZ`、`_InkTexelSize`、`_TeamAColor`、`_TeamBColor`、`_WetnessFactor`、`_InkTime`），所有物件着色器零 MaterialPropertyBlock 即可实时采样同一张墨水图集。
+    3. **全场景掩体立面装配 (`ArenaGeometryBuilder`)**：
+       - 场内 51 个掩体（含中央中立高台、东西侧翼高台、4 侧各色集装箱群、中路掩体墙、8 段中央女儿墙、花坛、战术挡墙、出生网关、延长区木箱、4 周边界围墙、出生后景台与安全出生台）全部装配 `InkWallSurface`；
+       - 边界围墙显式配置 `CanClimb = false`：支持弹丸/爆墨上墙吸附留痕，但严禁角色攀爬（彻底杜绝翻越出界掉出地图）。
+    4. **立面 0 DrawCall 惰性渲染 (`InkWallSurface`)**：
+       - 立面 Quad 的 `MeshRenderer` 初始状态为 `enabled = false`，未涂墨墙面不产生任何 DrawCall 与光栅化开销；
+       - 当弹丸、爆墨或滚筒触及墙面（`changed > 0`）时，实时将命中立面的 `MeshRenderer.enabled` 置为 true；`ResetPaint` 自动恢复禁用。全场 51 座掩体空闲状态 DrawCall 增量为 0！
+    5. **贴图尺寸安全上限与泛型碰撞体适配 (`InkWallFace` & `InkWallSurface`)**：
+       - `InkWallFace` 贴图宽高设置 1024 像素硬上限，杜绝边界墙 Transform 缩放产生 17640 像素越界贴图；
+       - `InkWallSurface` 兼容 `BoxCollider`、`MeshCollider` 与 `Renderer.bounds`，不局限于单一 Collider 类型。
+    6. **弹道与武器涂墨路由修复**：
+       - `InkProjectilePool` 与 `WeaponBeamSystem`：命中侧立面（$N_y \le 0.55$）时涂立面，命中顶面（$N_y > 0.55$）自动路由至顶面图集；
+       - `WeaponBlasterSystem`：爆裂点调用 `PaintSphereWithWalls`，爆斑与冲击波同步覆盖地面与周边立面；
+       - `WeaponRollSystem`：滚筒向前推抵墙面时同步对触及立面下沿涂墨；
+       - `InkCharacterMotor`：墙面攀爬探针检查 `wall.CanClimb`，跳过边界围墙。
+    7. **近景道具碰撞体装配 (`ArenaDecorationBuilder`)**：
+       - 为 `Decor_Matte` 与 `Decor_Metal` 添加网格碰撞体，近景木箱堆、花坛与街灯可真实阻拦弹丸并受墨。
+  - **验证**：
+    - 编译状态：`script.recompile_status` → `compilationFailed: false`，0 error CS；
+    - 单元测试：全量 EditMode **217/217 100% Passed**（包含新增 `ArenaGeometry_AllObstaclesAndProps_HaveInkWallSurface_WithCorrectClimbRules` 与 `InkWallSurface_LazyRenderer_DisabledByDefault_AndEnabledOnPaint` 8/8 全绿）；
+    - 运行测试：`WallInkPlayboxTests` **5/5 全绿**（掩体立面生成、受墨、手雷爆墨波及、主武器弹丸击中、己方墨墙潜行上爬）；
+    - 视觉留底：`Logs/ink_all_objects_test.png`、`Logs/ink_firing_wall_test.png`、`Logs/ink_firing_top_test.png`、`Logs/ink_bomb_splash_all_test.png` 实机多角度确认：木箱、掩体墙、集装箱、高台顶面与侧面均可饱满着墨。
+  - **接口影响（全部向后兼容）**：
+    - `InkWallSurface.Configure` 增加可选参数 `bool allowClimb = true`，新增 `CanClimb` 属性；
+    - `InkWallFace` 新增 `HasInk` 只读属性；
+    - `ArenaGeometryBuilder.AddInkWallSurface` 增加可选参数 `bool allowClimb = true`。
+
+---
+
+### UI 漫画风全面重构（P10-C，2026-10-29）
+
+- `[x]` **[P10-C] 全 UI 漫画风化 + 三个移动端 UI Bug 修复** (Agent: ComicUI, Completed: 2026-10-29)
+  - **字体**：项目原有字体（TitanOne / Rubik）全是 Google Fonts latin 子集，**0 个汉字**，
+    设置页中文全部渲染成 □。新增两款 SIL OFL 字体并烧成 TMP 动态资产：
+    标题 `ZCOOL QingKe HuangYou`（庆科黄油体）、正文 `ZCOOL KuaiLe`（快乐体）；
+    写入 TMP Settings 全局 fallback + 每个字体资产 fallback 链；
+    `ComicFontAssetBuilder` 自动扫描 UI 源码里的 1212 个汉字做覆盖率自检（当前 100%）。
+  - **视觉语言**：墨线 `#1A1A1A` / 纸面 `#FFFEF0` / 红黄蓝绿强调；6~8px 粗墨边、实心偏移硬阴影、
+    半调网点、对话气泡尖角、放射动作线；禁用渐变高光/柔边阴影/大圆角/弹簧回弹；
+    动效统一 60~120ms ease-out 且走 `unscaledDeltaTime`（暂停菜单 timeScale=0 也有效）。
+  - **绘制引擎**：`UIInkShapeGraphic` 增量扩展（硬阴影、网点、气泡尾），保留全部旧字段与调用签名，
+    19 个调用方零改动换肤；新增 `ComicStyle / ComicMotion / ComicHalftoneGraphic /
+    ComicActionLinesGraphic / ComicBadge / UIIconLibrary`。
+  - **Bug 修复 1（方块字）**：设置页/暂停页/选枪/更新弹窗全部改为 `theme.ResolveFont(display, text)`。
+  - **Bug 修复 2（顶部 8 个白方块）**：头像图标原先只在 `#if UNITY_EDITOR` 用 AssetDatabase 加载，
+    真机 sprite 为空 → Image 渲染纯白矩形。新增 `UIIconLibrary`（运行时资源库 → Resources → 编辑器兜底），
+    `P1RuntimeAssets` 打包 66 个 UI 图标；取不到时隐藏 Image + 程序化剪影兜底。
+  - **Bug 修复 3（按钮拖不动）**：① 全屏背板 `raycastTarget=false` + 每项独立命中层；
+    ② 摇杆 `blocksRaycasts` 编辑期临时开启并在退出还原；③ 拖拽改为 anchoredPosition 增量 + 锚点感知钳制
+    （旧实现混用父级中心坐标与右下角锚点，按钮会飞出屏幕）。
+  - **移动端**：5 个操作键 148/118/110/112/124 → 176/140/132/132/148 并重新排布（无重叠），
+    摇杆半径 170、齿轮 132×64；新增 `MobileUiMetrics` 按 DPI 把按键物理尺寸钳在 9~13mm；
+    桌面/移动共用 `MobileTouchUI.DefaultLayout`，测试读同一份数据。
+  - **验收**：编译 0 error；EditMode **217/217**、PlayMode **73/73** 全绿（基线 209/70）；
+    桌面 + 移动截图逐屏检查无方块、无白块、无溢出。
+
+### 主菜单重做与首页净化（P11-A，2026-10-29）
+
+- `[x]` **[P11-A] 真正的主菜单 + HUD 阶段门控 + 抽屉页签化** (Agent: ComicUI, Completed: 2026-10-29)
+  - **玩家反馈**：① 首页不像正常游戏主菜单，开始按钮看不见（根因：标题对话气泡 1020×360 恰好
+    整个罩住 (0,-20) 的开赛按钮）；② 武器抽屉展开时旁边突出一个「< 收起」块，反直觉；
+    ③ 首页不应露出操作按钮/HUD；④ 标题改成「墨水大作战」；⑤ 移动端字号偏小。
+  - **主菜单重做**（`MatchFlowUI.EnsureReadyVisuals`）：ReadyPanel 底改为**不透明纸面**（不再透出 3D 场景，
+    点开始才进对局）；构图自上而下＝「4v4 涂地对战」墨底标签 + 倾斜 -2° 纸面标题贴纸
+    （橙色 chunky「墨水大作战」+ 墨线硬阴影 + 背后放射动作线）+ INK TURF WAR 拉丁副题 +
+    **560×140 黄色大开始按钮** + 键盘提示行 + 检查更新/自定义按键纸面小方块行 + 右下角版本号；
+    队伍色墨渍（右上橙/左下蓝 Blob）+ 半调网点铺底。
+  - **移动端字号**：`aspect ≥ 1.9` 或真机时整体放大一档（标题 132→158、开始键 560×140→600×170、
+    次级键 68→80 高、抽屉文案 14~20→17~24）。
+  - **HUD 阶段门控**（`HudController`）：战斗 HUD 画布只在 Countdown/Playing/Finished 启用，
+    Ready（主菜单）与 Result（结算页）整张关掉——首页不再露出小地图/阵容条/墨罐/READY 气泡，
+    也不会挡菜单点击；触控层原有 Ready 隐藏逻辑保持。
+  - **抽屉页签化**（`WeaponSelectView`）：展开时不再显示外挂「< 收起」块（头部已有「收起」）；
+    收起时黄色「武器整备 >」页签贴屏幕左缘；**默认收起**（展开 620/720 宽会压住居中标题贴纸），
+    键盘 1~7 自动展开；抽屉头部/页签/底注移动端字号加大。
+  - **改名**：`GameVersion.APP_NAME` → 「墨水大作战」（版本号、检查更新等 UI 同步生效）。
+  - **验收**：编译 0 error；EditMode **219/219** 全绿；运行时 0 error；主菜单（抽屉收起/展开）、
+    对局内 HUD 回归截图各 1 张确认。
+
+### 墙面喷墨「边喷边消失」根因修复（P11-B，2026-10-29）
+
+- `[x]` **[P11-B] 墙面/物件墨迹被自己擦掉的根因修复** (Agent: Ink-Fix, Completed: 2026-10-29)
+  - **玩家反馈**：「喷一下能打上颜色，喷好几下颜色就没了」——掩体立面墨迹随连续喷涂被擦除。
+  - **根因**（两级连锁）：
+    1. `InkWallFace.PaintCircle` 的圆外一圈「亚格子过渡环」（alpha ≤ 0.5）只保护了**敌方**格子，
+       己方已涂实心格（alpha ≥ 158）会被后续任何重叠墨斑的过渡环直接改写为 10%~50% alpha；
+    2. `InkWall.shader` 用 `smoothstep(0.5 - fw, 0.5 + fw, a)` 收边，alpha < 0.5 的格子**整格不渲染**——
+       于是每多喷一发，先前墨斑边界一圈就被降透明到不可见。连续扫射时新墨斑的过渡环不断盖过旧墨斑边界，
+       视觉上等于一边喷一边擦。地面 `InkGrid` 无过渡环逻辑（且 GPU 图集 A 通道为 `Max` 幂等并集），
+       故只有墙面/物件立面有此症。
+  - **修复**（`Scripts/Ink/InkWallFace.cs`，C# 单文件，无 Shader/接口改动）：
+    1. 过渡环改为**只写未涂格**（`_owners[idx] != Neutral` 一律跳过，敌我墨水都不许动像素）；
+    2. 圆内己方已涂格的亚格子覆盖率**只升不降**：反复补喷把边缘虚格逐渐补成实心（喷涂=固化，与 Splatoon 一致）；
+    3. 移除随之失效的 `enemyByte` 局部变量（避免 CS0219）。
+  - **回归测试**（`Tests/EditMode/InkWallFaceTests.cs` 新增 2 项，总数 217→219）：
+    `PaintCircle_RepeatedOverlappingSplats_NeverDemoteExistingInk`（8 发中心错开重叠喷涂，己方实心格 alpha
+    不允许被压低——旧代码在第 7 发必现 255→44 的降级）、`PaintCircle_RepeatedSpraysOnSameSpot_SolidifyCoverage`
+    （同点补喷覆盖率只升不降、归属不变）。
+  - **验证**：`script.recompile_status` → `compilationFailed: false`；全量 EditMode **219/219**、
+    PlayMode **73/73** 全绿（含 `WallInkPlayboxTests` 5/5 与 `ZeroLogErrorGatePlayTests` 零运行时报错）；
+    实机 Play 模式对 `Barrier_TeamA_Left` 朝玩家立面连续 14 发重叠喷涂（模拟扫射手感）：
+    喷后 3s 再采样 35/35 格仍为 TeamA；直接读墙面墨格贴图 alpha 直方图 `Z-` 面
+    **solid(≥158)=365 / 过渡环(11~157)=17**（旧代码该分布会变成 ring≈数百、solid≈0）；
+    留档 `Logs/ink_wall_repeat_spray.png`。
+  - **接口影响**：无（`InkWallFace.PaintCircle` 签名与计数语义完全不变，`changed` 仍只统计归属变化格）。
+  - **遗留观察**：`InkAtlasRenderPlayTests.DryingPass…` 在后台不聚焦编辑器下偶发 RT 读回为空
+    （本轮 3 次全量运行 2 绿 1 红，与本次改动无关，疑似后台编辑器 GPU 资源回收时序），后续如复现可加
+    重试或改用 `AsyncGPUReadback`。
+
+### 顶面墨色与地面不一致修复（P11-C，2026-10-29）
+
+- `[x]` **[P11-C] 顶面/物件墨迹配色管线对齐地面「果冻墨水」** (Agent: Ink-Fix, Completed: 2026-10-29)
+  - **玩家反馈**：「顶部的颜色跟地面喷的漆颜色不一样」——同一片墨落在箱顶/集装箱顶比地面暗淡发灰。
+  - **根因**：`InkSurfaceOverlay.hlsl` 只做了 `teamCol × ndotl` 的朴素光照，而 `InkGround.shader` 的墨水段
+    是一整套果冻管线：单斑色调微差（0.93+0.13·tone）、薄缘提亮/厚体压暗、湿度提亮（+7%·fresh²）、
+    漫反射阴影底线 `lerp(0.72,1.0,…)`（叠加层旧值 0.65/0.68 偏暗）、**胶质内发光 `_InkGlow=0.2`**
+    （暗部鲜艳的关键项，叠加层完全没有）、清漆高光（`_WetGloss=0.88/_DryGloss=0.52/_ClearcoatStrength=1.4`）。
+    顶面缺 glow 与湿度提亮 → 系统性比地面暗 ~15-25%。
+  - **修复**：
+    1. `InkSurfaceOverlay.hlsl`：`ApplyTopInkOverlay` 逐项复刻地面配色管线（同参复刻材质默认值，
+       注释标明来源），含队伍 1px 锐利交界、lip 厚度剖面、fresh 曲线、`_InkShadowFloor=0.72` 底线、
+       胶质内发光与地面同款 clearcoat 高光；
+    2. `InkSurfaceController`：新增可调字段 `inkGlow`（默认 0.2，与 `Mat_InkGround._InkGlow` 对齐），
+       经 `Shader.SetGlobalFloat(_GlobalInkGlow)` 每帧推送（新增全局属性，向后兼容）；
+    3. `ObstacleDitherLit.shader` / `PropLit.shader` 已 `ImportAsset(ForceUpdate)` 强制重导入（防 hlsl 缓存）；
+    4. **追加（玩家复检「顶面发黄」后的第二根因）**：地面墨斑的装饰性外缘（射线/卫星墨滴/细雾）是
+       半覆盖墨雾，投到木箱/集装箱的暖色底上混成土黄（地面为中性灰底无此问题）。顶面可见边界从
+       `smoothstep(0.5±ew)` 收紧为 `smoothstep(0.55, 0.72)`——0.72 以上为完全实色，半覆盖雾区在顶面
+       不渲染，只留一条窄的有机墨边；实战 Bot 乱战 1 分 44 秒后全场顶面只呈现裸木色/纯橙/纯蓝三态。
+  - **验证**：编译 0 error / 无 shader 报错；实机 Play 模式对玩家前方地面与木箱顶喷同源墨斑后
+    `ScreenCapture` 截图，四块内部区域众数色全部为 `#f870xx` 同一量化桶
+    （地面 `#f87020/#f87018`，木箱顶 `#f87008`，小箱顶 `#f87008`；队伍基准色 RGB(255,112,15)），
+    顶面不再偏灰；阈值收紧后复测：木箱顶裸区众数色回到木色 `#f8b048`（无橙木混合带），
+    墨迹区 `#f87008` 与地面 `#f87020` 同族；留档 `Logs/ink_top_color_match.png`、
+    `Logs/ink_top_no_yellow.png`、`Logs/ink_top_full_orange.png`（含 Bot 乱战末段全场顶面三态验证）。
+    全量回归：EditMode **219/219**、PlayMode **73/73** 全绿。
+  - **接口影响**：`InkSurfaceController` 新增序列化字段 `inkGlow`（默认值即旧行为以外的对齐值，
+    不改任何既有签名）。
+
+### UI 中文字体全量换装 MiSans（P12-A，2026-10-30）
+
+- `[x]` **[P12-A] 中文字体替换：站酷快乐体/庆科黄油体 → MiSans（Semibold 正文 / Heavy 标题）** (Agent: Font-Swap, Completed: 2026-10-30)
+  - **玩家诉求**：「现在的字体感觉很丑」——正文站酷快乐体偏幼态卡通，与整体 UI 观感脱节；
+    换更干净、可读性更好的现代无衬线。
+  - **选型**：MiSans（小米官方免费商用，授权含应用/游戏内嵌）；Semibold(650) 正文 / Heavy(900) 标题，
+    延续 dudu-cocos 项目的分工经验。**弃用 Godot t-1 项目里的 subset 版**（按彼项目文案裁剪仅 ~3783 汉字），
+    取完整原版（29571 字符 / 20976 汉字），源件归档 `MediaRaw/fonts/MiSans-*.woff2`。
+  - **改动**：
+    1. `tools/bake_fonts.py`：新增 `MISANS_FONT_PLAN`（MediaRaw 源），与 TitanOne/Rubik 同管线转静态 TTF；
+    2. `ComicFontAssetBuilder.cs`：CJK 字体四常量改指 `MiSans-Heavy / MiSans-Semibold`（含注释与日志文案）；
+    3. `ComicStyleInstaller.cs`：UITheme 的 `displayCjkFont/bodyCjkFont` 改绑新 SDF；
+    4. 新增 `Assets/_Project/Art/Fonts/MiSans-LICENSE-NOTE.txt`（来源与授权摘要，官方协议 txt 发版前补齐）；
+    5. 删除站酷两款 TTF/SDF 与 `ZCOOL-OFL.txt`（TTF 原件 + OFL 文本已归档 `MediaRaw/fonts/`，可回滚）。
+  - **验证**：编译 0 error；菜单 0 覆盖率自检「1245 个唯一汉字全部可渲染，缺字 0」；菜单 1 重写 UITheme
+    （对比度校验 ✓）；TMP Settings 全局 fallback 与 TitanOne/Rubik 资产内 fallback 链全部改指 MiSans；
+    GUID 引用面复查无场景/预制体残留；`P1/构建/11` 运行时资源库重建正常（只打包武器/图标/音效，不含字体）；
+    回归：PlayMode **73/73** 全绿（含 30s 全系统零 log-error 门禁）+ EditMode **219/219** 全绿
+    （本轮回归与 P11-C 收尾共用一次全量运行，运行时工作区已含本改动）；
+    实机 Play 截图 `Logs/ui_misans2.png`：中文（武器整备按钮/队伍名）以 MiSans 渲染，无 □ 缺字。
+  - **接口影响**：无运行时接口变化；`ComicFontAssetBuilder` 4 个公共常量值更新（引用方仅 Editor 域内）。
+  - **包体**：新 TTF 合计 13.2MB（旧站酷两款 9.8MB，净 +3.4MB）；TMP 动态图集按需栅格化，运行时显存不受字库大小影响。
+
+### 全项目整体审计与优化（P12-B，2026-10-29）
+
+- `[x]` **[P12-B] 全项目性能/正确性整体优化：5 域并行审计 → 30+ 文件修复** (Agent: 总控 + Core/Ink + Player/Weapons + UI 三实现实例，Completed: 2026-10-29)
+  - **背景**：P1~P11 各阶段一天内并行完成，缺少整体交叉审计。本轮用 5 个只读审计实例扫 Core/Ink/Environment、
+    Player/Weapons、AI、UI、渲染配置五域，逐条验证后集中修复。EditMode/PlayMode 基线 219/73。
+  - **正确性修复（4 项，全部实测复现后修）**：
+    1. `InkSplatAtlas.Advance`：生长中墨斑与即时墨斑同帧出现时，两次 `BuildMesh` 复用同一 `_quadMesh`，
+       CommandBuffer 里先记录的 DrawMesh 被覆写 → 拆分独立 `_instantQuadMesh`；
+    2. `TopDownOcclusionManager`：本地玩家阵亡时回退成"全场 8 人 × 每帧 2 次 SphereCast"（阵亡瞬间 CPU 尖刺 +
+       全图掩体误透视）；注册表为空时每帧 `FindObjectsByType` → 恒走本地玩家分支（阵亡只跳过投射），
+       Find 兜底仅限编辑模式并节流 0.5s；
+    3. `BotController.TickPaint` 缺 `WeaponKind.Splatling` 分支：加特林 Bot 巡涂时永远蓄力、
+       永不开火涂地（`splatlingPaintReleaseCharge` 配置失效）→ 补"蓄到阈值松手喷墨带"分支；
+    4. `HumanAimSpring.Step` 大 dt（后台切回/长帧 ≥0.6s）时半隐式欧拉发散（Bot 瞄准角剧烈振荡）→ dt 钉在 0.1s 内。
+  - **AI 域（最大单项性能收益）**：
+    5. `NavGrid.TryFindPath` 零 GC 重写：原实现每次寻路 new 两个全尺寸 Dictionary（80×112=8960 格）+ HashSet +
+       MinHeap + 临时容器 ≈ **375KB/次**，7 Bot × 1.8 次/秒 ≈ **5MB/秒持续 GC 垃圾**；
+       改为平坦数组（`_gScore/_cameFrom/_openStamp/_closedStamp`）+ 递增访问令牌 + 数组版二叉堆 + 复用路径缓冲，
+       寻路全程 0 分配；公共签名不变，`BotAiTests` 加权 A* 用例全绿证明行为一致；
+    6. 残血撤退两处缺陷：超时脱战但未回血时不再施加 1.5s 再入冷却（原逻辑会让残血 Bot 无法再次撤退送命）；
+       威胁记忆过期时不再朝陈旧威胁坐标/原点反方向盲跑。
+  - **Player/Weapons 域**：
+    7. **相机枢轴对齐新体型**：蛋形角色身高 1.25m（P8-D），但 `tpsPivotHeight` 仍是旧人形的 1.85/1.30m，
+       镜头中心悬空 60cm（P8-D 交接建议未被 P9-A 落实）→ `GameConfigSO` 默认值与 `GameConfig.asset`、
+       `TopDownCameraFollow` fallback 统一改为 **1.45/1.05m**；
+    8. 弹丸爆斑 `PaintStretchBlob/PaintWallStretchBlob` 每发 new float[] → static readonly；
+    9. 泼桶每发 `new SlosherVolley()`（内含 HashSet）→ 策略实例持有复用（`Clear()` 后重用）；
+    10. 蓄力狙线圈 `sharedMaterial.SetColor` 污染共享材质/资产 → MaterialPropertyBlock；
+    11. `InkWallSurface` 增加静态 Collider 查表（`InkCharacterMotor` 每帧墙面探针不再 GetComponentInParent）；
+        `CombatantHealth` 增加懒缓存 `Motor` 属性（移动端辅助瞄准每帧不再 GetComponent）；
+    12. 7 处运行时创建的原生 Material/Mesh 补齐 `OnDestroy` 销毁（VfxPool/弹丸池/炸弹池/风暴云/警示环/
+        地面准星/激光瞄准点/乌贼网格加静态缓存）；乌贼网格 `CreateSquidMesh` 加静态缓存。
+  - **UI 域（HUD 每帧 GC 与 Canvas 重建风暴）**：
+    13. 每帧字符串拼接全部加脏标记：HudController（比分/计时/状态栏 4 处）、CenterTimerView（计时/比分）、
+        MobileTouchUI 大招按钮、RosterAvatarSlot 阵亡倒计时、MatchFlowUI 结算数字滚动（结束后停更）；
+    14. 每帧 GetComponent 全部缓存：WeaponReticleUI 刻度 Image[]、MinimapView 箭头/光环 + 战斗人员 Motor 查表；
+        小地图每帧双驱动（HudController + 自身 Update）去重；
+    15. Canvas 重建风暴治理：`UILiquidFillGraphic` 液面动画隔离到嵌套 Canvas（不再每帧重建整张 HUD 批次）；
+        `UIRotatingRingGraphic` 旋转从每帧重建顶点改为 `localRotation` 硬件旋转；
+        `ComicActionLinesGraphic`/`ComicHalftoneGraphic` setter 加守卫；墨罐低墨告警 4 档量化步进；
+    16. 受击方向弧对象池化（原每次受击 new GameObject + Destroy）；HudController 非 Playing 阶段整帧跳过；
+        墨水红线硬编码 55f 改读 `bombInkCost`（回退 70f 统一）；
+    17. 泼桶/暂停菜单/武器抽屉订阅等小分配清理（TopRosterBarView 复用列表、PauseMenu Find 节流、
+        WeaponSelectBootstrap 持引用退订、WeaponReticleUI 程序化贴图 OnDestroy 销毁）。
+  - **Core/Ink/Environment 域**：
+    18. `InkSurfaceController` 每帧对 14 个 renderer 重复写 MPB（波纹数组）→ 波纹脏检查 + `_InkTime` 改全局推送；
+    19. `PerformanceProfilerProbe.FrameSample` class → struct（探针自身每帧 new 污染 GC 统计）；
+    20. `AudioManager.OnDestroy` 不再在销毁对象上启动淡出协程（`StopAllLoops(immediate)` 重载，向后兼容）。
+  - **渲染层（DrawCalls ~746 vs 红线 120/150，见 P10-A 遗留）**：
+    21. 新增编辑器菜单 `P1/性能/2`：平台静态合批启用（原本 Standalone/Android 全关！）+ 场景 60 个环境对象
+        BatchingStatic + **微部件阴影裁剪（440 → 151 个投影体，-289）**；
+    22. 新增菜单 `P1/性能/3`：PC 阴影级联 4→2、距离 50→40m（原值备份 `Logs/PC_RPAsset.backup.asset`）；
+        预期阴影 Pass 绘制约减半，综合 DrawCalls 从 ~746 预计降至 ~300-400（全网格合并属后续专项）；
+    23. 新增菜单 `P1/性能/9` 渲染统计报告；`ArenaGeometryBuilder.CreateBox` 统一 `isStatic=true`（未来重建免打标）；
+    24. `OcclusionFader` 完全恢复不透明后清除 MPB（shader 默认 `_DitherAlpha=1` 已核实），掩体回归 SRP Batcher 批处理。
+  - **测试稳健性**：`InkAtlasRenderPlayTests.DryingPass` 空读重试（P11-B 遗留观察项，后台编辑器 RT 读回偶发为空）。
+  - **未做/后续专项**：7 类武器静态构件网格合并（收益 ~80-100 DrawCalls，需保证测试锚点 Transform 路径，风险中等）；
+    GPU Resident Drawer（自研 Shader 均未接 DOTS_INSTANCING_ON + MPB 冲突，需专项改造）；
+    烘干 Pass 改片元计算（移动端 GPU 带宽）；BGM 占位质量人耳验收。
+  - **验证**：编译 `compilationFailed:false`（0 error）；EditMode **219/219** 全绿；
+    PlayMode 全量回归见本轮交付记录（含 30s 全系统零 log-error 门禁）；场景优化菜单执行留档见控制台日志。
+
+### 渲染 DrawCall 深度优化三连（P12-C，2026-10-30）
+
+- `[x]` **[P12-C] 武器静态构件网格合并 + 烘干/生长 Pass 片元化 + GPU Resident Drawer** (Agent: 总控 + 武器视觉 + 墨迹图集 + Shader 三实现实例并行（文件集互不相交），Completed: 2026-10-30)
+  - **背景**：P12-B 遗留三项专项一次做完；总控统一编译、双套测试、渲染截图与 Profiler 采样验收。
+  - **武器网格合并（Player/CharacterVisualAssembler.cs 单文件）**：
+    1. 装配期（步骤 5.2）把每把武器的「相对武器根静止、非测试锚点、无逐帧动画/MPB」部件按
+       sharedMaterial 分组 CombineMeshes（矩阵烘焙到合并根），源部件仅禁用 renderer、GameObject 全保留；
+       每角色 7 把武器 renderer 数 **80 → 36**（Roller/Splatling 14→5、Blaster 13→5、Dualies 12→5、Charger 13→7），战斗中预计省 **50-90 DrawCall**（含阴影 Pass）；
+    2. 测试锚点全保：`Swell_Roller/RollerDrum`、`Gyre_Splatling/RotatingBarrelsCluster`（动态簇改为以枢轴为二级合并根，动画表现不变）、8 个 `Muzzle`（收集器按名字防御性跳过）；Charger 线圈因逐帧写自发光 MPB 保留独立 renderer；
+    3. 顶点布局组内校验（subMesh/Normal/TexCoord0/Tangent 不一致则 LogWarning 放弃合并），整段 try/catch 降级不影响装配；
+       合并网格按 `WeaponKind` 静态缓存跨实例/跨队伍复用，永不销毁（确定性几何）。
+  - **烘干/生长 Pass 片元化（Ink 域 5 文件）**：
+    4. 原实现：每 1/15s 对整张图集跑全屏烘干 Pass（桌面 4096² ≈ **2.0 GB/s**、移动 1024² ≈ **126 MB/s** 写带宽）+
+       新墨斑 ~12 帧逐帧重建 mesh 重栅格化 + 每 0.25s 无条件 GenerateMips；
+    5. 新表示法：图集 G 通道改存**归一化落墨时间戳（32s 周期，预乘覆盖率防双线性/mip 边缘伪影）**，
+       InkGround 片元按 `_InkWetClockNorm - ts` 现算湿润度（与旧 15Hz 烘干曲线数学等价），
+       生长动画改为片元侧新鲜纹素沿覆盖率梯度侵蚀回缩；图集只在有新墨时增量重绘、mip 只在内容变化后重建，
+       空闲帧零命令缓冲零 GPU 提交；**烘干带宽归零，生长重绘降 6-12×**；
+    6. 写入端从 `Resources/InkSplat.shader`（退役不再引用，文件保留）移植为 InkGround 两个自定义 LightMode Pass
+       （P1InkAtlasPaint 写队伍/色调/覆盖率 + P1InkAtlasStamp Max 写时间戳），共享 SDF 代码以纯增量放入
+       `InkSurfaceOverlay.hlsl`（InkWall/PropLit/ObstacleDitherLit include 不受影响）；
+    7. 新增配置字段 `atlasWetClockPeriod`(32s)/`atlasGrowShrinkMeters`(0.4m)，默认值保持视觉语义；
+       已知近似：薄墨重涂在实墨上时外缘约 1px 湿度不刷新（≤周期自愈）、暂停时湿度随 Time.time 冻结（与画面一致）。
+  - **GPU Resident Drawer（Shader 域 5 文件 + 编辑器菜单）**：
+    8. 5 个自研 shader 共 12 个场景几何 pass 补 `#pragma target 4.5` + `#pragma multi_compile _ DOTS_INSTANCING_ON`
+       （InkWall/PropLit/ObstacleDitherLit/CharacterToon/CharacterToonOutlined；include 链经 URP 源码核实已含 UnityInstancing.hlsl；
+       ToonOutline 是全屏 Blit 材质不经 GRD，明确不加；SkyGradient/Water/DecalUnlit/SpawnPad 全屏类不加省变体）；
+    9. 新增菜单 `P1/性能/4. GPU Resident Drawer：PC 启用/停用切换 (P12-C)`：SerializedObject 写
+       `m_GPUResidentDrawerMode`（枚举经 core RP 源码核实 0=Disabled/1=InstancedDrawing，旧文档字段名 m_GPUResidentDrawer 已废弃），
+       启用时自动把 Graphics > BatchRendererGroup Variants 设为 **Keep All**（`m_BrgStripping=2`，
+       否则出包时 DOTS 变体全被剥离、玩家包 GRD 静默失效——实测触发过 Unity 警告后修复）；PC_RPAsset 已启用，Mobile 明确不动
+       （GLES3 UBO 路径开销高，DOTS 变体已随 shader 进包，真机验证后再单独开）；
+    10. MPB renderer 自动回退普通路径（OcclusionFader 不透明时已清 MPB，掩体恢复后自动重回 GRD）。
+  - **验证**：编译 `compilationFailed:false`；EditMode **219/219**；PlayMode **73/73 跑了两遍**（第二遍在 GRD+网格合并+新烘干全部生效后，含 30s 零 log-error 门禁）；
+    战斗冒烟截图（`Logs/p12c_combat_camera2.png`）：地面+墙面涂墨（墙面走新时间戳 overlay）、合并武器、阴影、无粉色 shader，全程 consoleErrors=0；
+    `P1/性能/1` 120 秒双分辨率仿真采样（`Docs/ProfilerReport_P6C.md`）：桌面 **60.1 FPS** / **GC 0 B/帧** / 纹理上传均值 **0.118ms**（P99 0.997ms），
+    **Batches 45~75**（红线桌面 120 / 移动 150 达标）。
+  - **风险与遗留**：shader `#pragma target 4.5` 要求 Android GLES3.1+（minSdk 26 设备几乎全覆盖，Vulkan 不受影响）；
+    `Resources/InkSplat.shader` 已退役但未删除（可后续删除给包体瘦身）；移动端 GRD 待真机采样后再评估开启。
+
+### 移动端 UI 适配修整（P13-A，2026-10-30，Agent: UI-Review）
+
+- [x] **P13-A 移动端 UI 审查发现项修复（触控布局 / 安全区 / 旧面板清理 / 文案与响应式）**
+  - **触控层（`MobileTouchUI` / `MobileLayoutCustomizer`）**：
+    键位入口从左上 (25,-25) 下移到暂停按钮（88×88 @24,-24）正下方 (24,-124)，修复真机对局中暂停键盖住键位键并吃掉点击；
+    `ApplyDpiScale` 改为位置与尺寸同步乘比例（基准取 `DefaultLayout`，幂等），修复 1.25× 时大招↔手雷重叠 ~19px、射击↔潜行 ~10px；
+    DPI 适配增加首次可见时的一次性补算（Awake 阶段 Overlay Canvas 的 scaleFactor 尚未就绪）；
+    键位编辑层改挂到 SafeArea 内（原挂画布根，刘海横屏会切掉顶栏「保存/关闭」）。
+  - **HUD（`HudController` / `KillFeedView`）**：
+    运行时新增 `HudSafeArea` 内容根并挂 `SafeAreaFitter`，画布既有面板与所有自动生成视图统一收进安全区（桌面 safeArea=全屏视觉零变化，EditMode 无 Awake 场景回退画布根查找）；
+    `HideLegacyGauges` 增加隐藏旧 `TopCoveragePanel`（此前与新阵容条/计时器三层叠加，旧百分比与计时文字透出）；
+    `ApplyMobileLayout` 增加分辨率/安全区变化后的重应用；击杀播报默认起点 -230 → -260，不再压住小地图底边。
+  - **主菜单/结算（`MatchFlowUI`）**：新增 `MatchFlowSafeArea` 内容根；移动端判定改用 `Application.isMobilePlatform || IsTouchSimulationActive`（修正 21:9 桌面被误判、16:10 平板不放大）；
+    触屏隐藏「按空格/回车开始」提示并跳过键盘重开快捷键。
+  - **选枪/暂停/更新弹窗**：触屏下选枪副标题与页脚改用点击文案、抽屉宽度注释与实现对齐；暂停面板提示触屏改「点击上方按钮继续」；
+    更新弹窗根节点挂 SafeArea 并补 `ApplyResponsivePanelScale`（与暂停面板同规则）。
+  - **Player**：触屏视角增量按 `Screen.dpi` 归一到 400dpi 基准（clamp 0.6–1.6），同样物理滑动在高/低 DPI 屏上转角一致。
+  - **验证**：编译 `compilationFailed:false`；EditMode **219/219**；PlayMode **70/73**（3 项 `InkAtlasRenderPlayTests` 失败为并行 Ink/Shader WIP 的
+    `InkGround.shader` metal Pass 编译错误所致，与 UI 无关；首轮完整跑中的 2 项 Bot 用例失败亦确认为该 WIP 的编译中间态，单独复跑 2/2 通过）；
+    运行时截图 `Logs/ui_verify_menu.png` / `ui_verify_ingame.png` / `ui_verify_mobile.png`：旧顶部面板已消失、移动端模拟下键位键位于暂停键正下方无重叠。
+
 ## 5. 验收标准与风控纪律
 
 1. **零外部破坏与回退机制**：

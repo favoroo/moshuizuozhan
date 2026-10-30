@@ -70,7 +70,11 @@ def run(cmd: list, **kw) -> subprocess.CompletedProcess:
 
 def http_json(url: str, method: str = 'GET', headers: dict = None,
               data=None, timeout: int = 30):
-    """返回 (status, 解析后的JSON或None)。HTTPError 不抛出，返回错误码与响应体。"""
+    """返回 (status, 解析后的JSON或None)。HTTPError 不抛出，返回错误码与响应体。
+
+    显式跟随 3xx 重定向：Gitee 上传接口偶发返回 308（Location 指向实际存储节点），
+    Python 3.9 的 urlopen 默认不跟随后续重定向，直接按 HTTPError 处理会误判为失败。
+    """
     req = urllib.request.Request(url, method=method,
                                  headers=headers or {}, data=data)
     for attempt in range(3):
@@ -81,9 +85,17 @@ def http_json(url: str, method: str = 'GET', headers: dict = None,
         except urllib.error.HTTPError as e:
             body = e.read()
             try:
-                return e.code, (json.loads(body) if body else None)
+                parsed = json.loads(body) if body else None
             except Exception:
-                return e.code, None
+                parsed = None
+            # 3xx 且带 Location：按重定向重新请求（保留 method/headers/data）
+            if 300 <= e.code < 400 and e.headers.get('Location'):
+                url = urllib.parse.urljoin(url, e.headers['Location'])
+                req = urllib.request.Request(url, method=method,
+                                             headers=headers or {}, data=data)
+                if attempt < 2:
+                    continue
+            return e.code, parsed
         except Exception:
             if attempt == 2:
                 raise
@@ -797,10 +809,18 @@ def prune_old_assets(tokens: dict, keep_gh: int = 10, keep_gitee: int = 3) -> No
             apk_releases = [r for r in rels if any(str(a.get('name', '')).endswith('.apk') for a in r.get('assets', []))]
             apk_releases.sort(key=lambda r: _ver_key(r.get('tag_name', '')), reverse=True)
             for old_rel in apk_releases[keep_gitee:]:
-                for asset in old_rel.get('assets', []):
-                    if str(asset.get('name', '')).endswith('.apk'):
-                        log(f'Gitee 删除老版本 {old_rel.get("tag_name")} 附件: {asset.get("name")}')
-                        http_json(f'{GITEE_API}/releases/{old_rel["id"]}/attach_files/{asset["id"]}?access_token={tokens["gitee"]}', method='DELETE')
+                # Gitee 的 release.assets 只有 name/url，没有附件 id；必须查 attach_files 才能删除
+                st_files, files = http_json(
+                    f'{GITEE_API}/releases/{old_rel["id"]}/attach_files'
+                    f'?access_token={tokens["gitee"]}')
+                if st_files != 200 or not isinstance(files, list):
+                    continue
+                for f in files:
+                    if not str(f.get('name', '')).endswith('.apk'):
+                        continue
+                    log(f'Gitee 删除老版本 {old_rel.get("tag_name")} 附件: {f.get("name")}')
+                    http_json(f'{GITEE_API}/releases/{old_rel["id"]}/attach_files/{f["id"]}'
+                              f'?access_token={tokens["gitee"]}', method='DELETE')
     except Exception as ex:
         log(f'Gitee 老版本附件清理跳过: {ex}')
 

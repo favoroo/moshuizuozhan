@@ -57,6 +57,16 @@ namespace P1.Player
         [Tooltip("高速潜墨涟漪触发间隔 (秒)")]
         public float swimRippleInterval = 0.16f;
 
+        [Header("超速惯性滑行与急转弯甩墨 (Swim-Exit Glide)")]
+        [Tooltip("超速惯性衰减 (m/s²)：出水/出敌墨瞬间保留滑行动量，按该减速度自然衰减（对齐 Inkwave swimDecel = 42，约 1.5m 滑行）")]
+        public float swimExitGlideDecel = 42f;
+        [Tooltip("高速潜墨急转弯甩墨的最小游速 (m/s)")]
+        public float swimCarveMinSpeed = 4.5f;
+        [Tooltip("高速潜墨急转弯甩墨的最小角速度 (rad/s，对齐 Inkwave fxHooks carve 阈值 3.2)")]
+        public float swimCarveTurnRate = 3.2f;
+        [Tooltip("急转弯甩墨冷却 (秒)")]
+        public float swimCarveCooldown = 0.22f;
+
         [Header("出水过渡与开火缓冲 (Fire Buffer)")]
         [Tooltip("潜墨钻出人形后的快速过渡时长 (秒)，对齐 Inkwave emergeDelay = 0.07")]
         public float emergeTransitionTime = 0.07f;
@@ -82,6 +92,20 @@ namespace P1.Player
         public float localHitTraumaMin = 0.3f;
         [Tooltip("自身受击时的最高 Camera Trauma（满额 100 伤害时取该值）")]
         public float localHitTraumaMax = 1.0f;
+
+        [Header("击杀反馈 P6-B（对齐 Inkwave 打击感）")]
+        [Tooltip("本地玩家击杀敌方时的额外 Camera Trauma（受无障碍震屏滑杆门控）")]
+        public float killTrauma = 0.35f;
+        [Tooltip("本地玩家击杀敌方时的 FOV 微踢角度（读作「命中确认」的镜头冲击，0 = 关闭）")]
+        public float killFovPunchDegrees = 2.2f;
+        [Tooltip("击杀屏幕边缘闪光的基础时长（秒），连杀时强度逐层加码")]
+        public float killFlashSeconds = 0.30f;
+        [Tooltip("连杀判定窗口（秒）：窗口内再次击杀则连杀数 +1，边缘闪光与击杀琶音逐层加码")]
+        public float killStreakWindowSeconds = 4.0f;
+        [Tooltip("命中墨花的伤害基准：该伤害值时墨花达到最大规模（对齐 Inkwave amount/60）")]
+        public float hitSplashDamageRef = 60f;
+        [Tooltip("受击闪白时长（秒）")]
+        public float hitFlashSeconds = 0.09f;
 
         [Header("瞄准姿态 (Aim Pose)")]
         [Tooltip("武器模型承担相机俯仰的权重：1 = 完全跟随准星，枪口指向瞄准点")]

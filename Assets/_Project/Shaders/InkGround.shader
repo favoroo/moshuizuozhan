@@ -34,7 +34,7 @@ Shader "P1/InkGround"
         _DryGloss ("Dry Smoothness", Range(0.2, 0.9)) = 0.52
         _ClearcoatStrength ("Clearcoat Specular Strength", Range(0.0, 3.0)) = 1.4
         _WetnessFactor ("Wetness Multiplier", Range(0.0, 2.0)) = 1.0
-        _InkGlow ("Subsurface Gel Glow", Range(0.0, 1.0)) = 0.16
+        _InkGlow ("Subsurface Gel Glow", Range(0.0, 1.0)) = 0.06
 
         [Header(Gel Micro Surface)]
         _GelNoiseScale ("Gel Noise Scale", Range(0.2, 12.0)) = 2.2
@@ -59,7 +59,22 @@ Shader "P1/InkGround"
         _ShadowFloor ("Ground Shadow Floor", Range(0.0, 1.0)) = 0.55
         _InkShadeThreshold ("Ink Shade Threshold", Range(0.2, 0.8)) = 0.48
         _InkShadeSoftness ("Ink Shade Softness", Range(0.005, 0.2)) = 0.08
-        _InkShadowFloor ("Ink Shadow Floor", Range(0.0, 1.0)) = 0.72
+        _InkShadowFloor ("Ink Shadow Floor", Range(0.0, 1.0)) = 0.55
+
+        [Header(Ink Wet Quality P18)]
+        _InkGrainN ("Ink Grain Normal", 2D) = "bump" {}
+        _InkGrainRMO ("Ink Grain RMO (G=ring A=rough)", 2D) = "black" {}
+        _InkGrainScale ("Ink Grain Scale (periods/m)", Range(0.2, 8)) = 1.6
+        _InkGrainStrength ("Ink Grain Strength", Range(0, 1)) = 0.35
+        _InkRoughVarStrength ("Ink Roughness Variation", Range(0, 2)) = 0.5
+        _CoffeeRingStrength ("Coffee Ring Strength", Range(0, 1)) = 0.45
+        _EdgeSpeckleStrength ("Edge Speckle Strength", Range(0, 1)) = 0.3
+
+        [Header(Ground Surface PBR P18)]
+        _GroundTexN ("Ground Normal", 2D) = "bump" {}
+        _GroundTexRMO ("Ground RMO (G=AO A=Smooth)", 2D) = "black" {}
+        _GroundNormalStrength ("Ground Normal Strength", Range(0, 1.5)) = 0.6
+        _GroundAOStrength ("Ground AO Strength", Range(0, 1.5)) = 0.7
     }
 
     SubShader
@@ -82,10 +97,12 @@ Shader "P1/InkGround"
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #pragma multi_compile_fog
+            #pragma multi_compile _ P1_INK_HIGH
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "ToonLighting.hlsl"
+            #include "InkWetShading.hlsl"
 
             #define MAX_INK_RIPPLES 8
 
@@ -112,8 +129,26 @@ Shader "P1/InkGround"
             float4 _GlobalInkMapOriginXZ;
             float4 _GlobalInkTexelSize;
 
+            // 队伍色改为吃全局：InkSurfaceController 每帧推送的 _GlobalTeamA/BColor 已做过
+            // sRGB→Linear 转换（见 UpdateDynamicMaterialProperties 注释）。材质里的 _TeamAColor
+            // 是未转换的原始值，在线性管线里会把鲜艳橙输出成浅鲑鱼色 —— 这正是旧版
+            // "地面墨比墙面墨淡一截、颜色对不上"的根因。全局 alpha=0（编辑器未进入对局）时
+            // 回退材质值，保证编辑器场景视图不黑屏。
+            float4 _GlobalTeamAColor;
+            float4 _GlobalTeamBColor;
+
             TEXTURE2D(_GroundTex);
             SAMPLER(sampler_GroundTex);
+
+            TEXTURE2D(_InkGrainN);
+            SAMPLER(sampler_InkGrainN);
+            TEXTURE2D(_InkGrainRMO);
+            SAMPLER(sampler_InkGrainRMO);
+
+            TEXTURE2D(_GroundTexN);
+            SAMPLER(sampler_GroundTexN);
+            TEXTURE2D(_GroundTexRMO);
+            SAMPLER(sampler_GroundTexRMO);
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -156,6 +191,13 @@ Shader "P1/InkGround"
                 float4 _InkMapSize;
                 float _InkTexelMeters;
                 float _InkYFlip;
+                float _InkGrainScale;
+                float _InkGrainStrength;
+                float _InkRoughVarStrength;
+                float _CoffeeRingStrength;
+                float _EdgeSpeckleStrength;
+                float _GroundNormalStrength;
+                float _GroundAOStrength;
             CBUFFER_END
 
             // 由 InkSurfaceController 每帧通过 MaterialPropertyBlock 传入的动态波纹数据与时间
@@ -169,6 +211,7 @@ Shader "P1/InkGround"
             float _InkWetClockNorm;      // (Time.time % 周期) / 周期 ∈ [0,1)
             float _InkWetClockPeriod;    // 时间戳回绕周期（秒）
             float _InkWetDryingSeconds;  // inkDryingSeconds：湿润→烘干时长
+            float _InkSheenSeconds;       // 缎面余晖时长（秒，默认 22）
             float _InkGrowSeconds;       // splatGrowSeconds：生长动画时长（0 = 无生长动画）
             float _InkGrowShrinkMeters;  // 生长侵蚀最大回缩距离（米）
             float _InkGrowActive;        // 1 = 本帧存在生长窗口内的墨斑（仅作快速剔除，正确性由纹素年龄保证）
@@ -260,15 +303,19 @@ Shader "P1/InkGround"
                 float tone = saturate(inkSample.b * invA);
 
                 // 湿润度改为片元现算：age = (now − 落墨时间戳) mod 周期，
-                // 线性烘干曲线与旧「每 1/15s 整图 G−=步长」的烘干 Pass 数学等价，但不再重写图集。
+                // 经 P1InkWetProfile 计算三段曲线 (wet 镜面期, sheen 缎面余晖)
                 float tsNewest = saturate(inkSample.g * invA);
                 float inkAgeSec = frac(_InkWetClockNorm - tsNewest + 1.0) * max(0.001, _InkWetClockPeriod);
-                float wetLinear = saturate(1.0 - inkAgeSec / max(0.25, _InkWetDryingSeconds));
+                float2 wetSheen = P1InkWetProfile(inkAgeSec, _InkWetDryingSeconds, _InkSheenSeconds);
+                float wet = saturate(wetSheen.x * _WetnessFactor);
+                float sheen = saturate(wetSheen.y * _WetnessFactor);
 
                 // 队伍交界：用 R 通道（队伍占比）做 1 像素锐利过渡，绝不出现浑浊混色带
                 float wT = clamp(fwidth(tRaw) * 0.75, 0.012, 0.25);
                 float tm = smoothstep(0.5 - wT, 0.5 + wT, tRaw);
-                half3 teamCol = lerp(_TeamAColor.rgb, _TeamBColor.rgb, tm);
+                half3 colA = _GlobalTeamAColor.a > 0.5 ? _GlobalTeamAColor.rgb : _TeamAColor.rgb;
+                half3 colB = _GlobalTeamBColor.a > 0.5 ? _GlobalTeamBColor.rgb : _TeamBColor.rgb;
+                half3 teamCol = lerp(colA, colB, tm);
 
                 // 世界空间覆盖率梯度（单位：每米），保证任何图集分辨率下法线尺度都正确
                 float2 worldOffset = max(uvOffset * mapSize, float2(1e-5, 1e-5));
@@ -298,6 +345,17 @@ Shader "P1/InkGround"
                 float edgeWidth = clamp(fw * _EdgeSoftness, 0.012, 0.35);
                 float inkMask = smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, amtEff);
 
+                // 墨缘碎墨（P1_INK_HIGH）：在 amtEff < 0.5 的外缘环带用程序噪声调制细碎墨点
+                #if defined(P1_INK_HIGH)
+                if (_EdgeSpeckleStrength > 0.001)
+                {
+                    float edgeZone = smoothstep(0.22, 0.42, amtEff) * (1.0 - smoothstep(0.48, 0.52, amtEff));
+                    float speckleN = vnoise(input.positionWS.xz * 30.0);
+                    float speckle = smoothstep(0.58, 0.75, speckleN) * edgeZone * _EdgeSpeckleStrength;
+                    inkMask = saturate(inkMask + speckle);
+                }
+                #endif
+
                 // 2m 混凝土板缝仅作为无贴图时的兜底；烘焙贴图已经包含板缝/标线/AO，优先级更高。
                 float2 gridCoord = abs(frac(input.positionWS.xz * 0.5) - 0.5);
                 float gridLine = smoothstep(0.47, 0.495, max(gridCoord.x, gridCoord.y));
@@ -326,6 +384,22 @@ Shader "P1/InkGround"
                 half3 cliffCol = lerp(_CliffColor.rgb, elevatedGroundCol * 0.62, 0.55);
                 half3 baseSurfaceCol = lerp(cliffCol, elevatedGroundCol, upness);
 
+                // 地面基底 PBR（P1_INK_HIGH）：法线与 AO 贴图
+                #if defined(P1_INK_HIGH)
+                float4 groundNormSample = SAMPLE_TEXTURE2D(_GroundTexN, sampler_GroundTexN, inkUV);
+                float3 groundTn = UnpackNormal(groundNormSample);
+                float4 groundRMO = SAMPLE_TEXTURE2D(_GroundTexRMO, sampler_GroundTexRMO, inkUV);
+                float groundAO = lerp(1.0, groundRMO.g, _GroundAOStrength);
+                float groundSmoothness = groundRMO.a;
+                float3 groundNormalWS = P1InkApplyTangentPerturb(groundTn, geomN, float3(1.0, 0.0, 0.0), float3(0.0, 0.0, 1.0), (half)(_GroundNormalStrength * upness));
+                #else
+                float groundAO = 1.0;
+                float groundSmoothness = 0.0;
+                float3 groundNormalWS = geomN;
+                #endif
+
+                baseSurfaceCol *= groundAO;
+
                 // -------------------------------------------------------------
                 // 1. 边缘接触软阴影 (Contact Shadow)
                 // -------------------------------------------------------------
@@ -337,11 +411,9 @@ Shader "P1/InkGround"
                 baseSurfaceCol *= (1.0 - contactShadow);
 
                 // -------------------------------------------------------------
-                // 2. 湿润度（G 通道时间戳片元现算，约 inkDryingSeconds 秒内线性烘干；
-                //    不再有烘干 Pass，图集在墨变干的全过程保持不变）
+                // 2. 湿润度与新鲜度（三段曲线，wet 控制镜面，sheen 控制缎面余晖）
                 // -------------------------------------------------------------
-                float wetness = saturate(wetLinear * _WetnessFactor);
-                float fresh = smoothstep(0.2, 0.95, wetness);
+                float fresh = smoothstep(0.15, 0.90, wet);
 
                 // -------------------------------------------------------------
                 // 3. 厚度剖面与边缘鼓起 (Meniscus Lip)
@@ -350,7 +422,7 @@ Shader "P1/InkGround"
                 float s = saturate((amtEff - 0.5) * _LipSoftness);
                 float hs = 1.0 - (1.0 - s) * (1.0 - s);
                 float lipSlope = 2.0 * (1.0 - s) * _LipSoftness;
-                float thick = 1.0 + 0.5 * fresh;
+                float thick = 1.0 + 0.5 * max(wet, sheen * 0.7);
                 float2 lipNormalOffsetXZ = -gradAmt * lipSlope * _LipHeight * thick;
 
                 // -------------------------------------------------------------
@@ -429,26 +501,40 @@ Shader "P1/InkGround"
                 }
 
                 // -------------------------------------------------------------
-                // 6. 胶体微表面：细碎起伏让湿面反射碎开，而不是一块镜面塑料
-                //    （按世界空间像素足迹淡出，远处自动趋平）
+                // 6. 胶体与颗粒微表面 (P1_INK_HIGH vs 移动端程序化噪声)
                 // -------------------------------------------------------------
                 float gelFade = 1.0 - smoothstep(0.02, 0.14, length(fwidth(input.positionWS.xz)));
+                float2 baseLipOffsetXZ = (lipNormalOffsetXZ + seamNormalOffsetXZ + rippleNormalOffsetXZ) * inkMask;
+                float3 baseNormalWS = normalize(geomN + float3(baseLipOffsetXZ.x, 0.0, baseLipOffsetXZ.y));
+
+                #if defined(P1_INK_HIGH)
+                float2 grainUV = input.positionWS.xz * _InkGrainScale;
+                float4 grainNormSample = SAMPLE_TEXTURE2D(_InkGrainN, sampler_InkGrainN, grainUV);
+                float3 grainTn = UnpackNormal(grainNormSample);
+                float4 grainRMO = SAMPLE_TEXTURE2D(_InkGrainRMO, sampler_InkGrainRMO, grainUV);
+
+                // 干墨颗粒显形、湿墨液体张力压平拉直
+                float grainDamp = lerp(1.0, 0.25, wet) * inkMask * gelFade;
+                float3 finalNormalWS = P1InkApplyTangentPerturb(grainTn, baseNormalWS, float3(1.0, 0.0, 0.0), float3(0.0, 0.0, 1.0), (half)(_InkGrainStrength * grainDamp));
+                float grainRoughOffset = (grainRMO.a - 0.53) * _InkRoughVarStrength;
+                float ringMask = saturate(hs * (1.0 - hs) * 4.0) * grainRMO.g * _CoffeeRingStrength * inkMask;
+                #else
                 float2 gp = input.positionWS.xz * _GelNoiseScale;
                 gp += float2(_InkTime * 0.02, -_InkTime * 0.013)
-                    + fresh * fresh * 0.03 * float2(sin(_InkTime * 2.3), cos(_InkTime * 1.9));
+                    + wet * wet * 0.03 * float2(sin(_InkTime * 2.3), cos(_InkTime * 1.9));
                 float2 q = gp * 2.2;
                 const float ge = 0.12;
                 float hx = vnoise(q + float2(ge, 0.0)) - vnoise(q - float2(ge, 0.0));
                 float hy = vnoise(q + float2(0.0, ge)) - vnoise(q - float2(0.0, ge));
                 float2 gelSlope = float2(hx, hy) * (1.0 / (2.0 * ge))
-                                * _GelNoiseStrength * gelFade * inkMask * (0.5 + 0.5 * (1.0 - fresh));
-
-                // 汇总法线微扰
-                float2 totalOffsetXZ = (lipNormalOffsetXZ + seamNormalOffsetXZ + rippleNormalOffsetXZ + gelSlope) * inkMask;
-                float3 finalNormalWS = normalize(geomN + float3(totalOffsetXZ.x, 0.0, totalOffsetXZ.y));
+                                * _GelNoiseStrength * gelFade * inkMask * (0.5 + 0.5 * (1.0 - wet));
+                float3 finalNormalWS = normalize(baseNormalWS + float3(gelSlope.x, 0.0, gelSlope.y));
+                float grainRoughOffset = 0.0;
+                float ringMask = 0.0;
+                #endif
 
                 // -------------------------------------------------------------
-                // 7. 光照、清漆镜面高光与缎面干墨衰减
+                // 7. 光照、清漆镜面高光、环境镜面反射与明暗重定标
                 // -------------------------------------------------------------
                 float3 L = normalize(mainLight.direction);
                 float3 V = normalize(GetWorldSpaceViewDir(input.positionWS));
@@ -458,8 +544,10 @@ Shader "P1/InkGround"
                 float NdotV = saturate(dot(finalNormalWS, V));
                 float NdotH = saturate(dot(finalNormalWS, H));
 
-                float baseSmoothness = lerp(_DryGloss, _WetGloss, fresh);
-                float smoothness = saturate(baseSmoothness + rippleGloss * 0.15 * inkMask);
+                // 三段湿润插值粗糙度，融入颗粒扰动与边缘咖啡环
+                float rough = P1InkRoughness(wet, sheen, saturate(1.0 - _WetGloss), saturate(1.0 - _DryGloss));
+                rough = saturate(rough + grainRoughOffset + ringMask * 0.20);
+                float smoothness = saturate(1.0 - rough + rippleGloss * 0.15 * inkMask);
 
                 // 法线变化快于像素网格的地方展宽高光 —— 消除边缘/远处的碎钻闪点
                 float3 cdu = ddx(finalNormalWS);
@@ -469,21 +557,25 @@ Shader "P1/InkGround"
 
                 float specPower = exp2(10.0 * effSmooth + 1.0);
                 float specNorm = (specPower + 8.0) / 8.0;
-                float directSpec = pow(NdotH, specPower) * specNorm * (0.04 + 0.08 * fresh);
+                float directSpec = pow(NdotH, specPower) * specNorm * (0.04 + 0.08 * wet);
 
                 // 针对俯视角调优的掠射菲涅尔（保证大角度不发白，锁住纯净鲜艳的队伍墨色）
                 float fresnel = pow(1.0 - NdotV, 3.5);
-                float clearcoatF0 = lerp(0.035, 0.065, fresh);
+                float clearcoatF0 = lerp(0.035, 0.065, wet);
                 float F = clearcoatF0 + (0.35 - clearcoatF0) * fresnel;
+                half3 directTerm = _MainLightColor.rgb * (half)(directSpec * F * NdotL);
 
-                float finalClearcoat = directSpec * F * _ClearcoatStrength * NdotL * inkMask;
+                // 解析天空环境镜面（含掠射角抑制）
+                float3 R = reflect(-V, finalNormalWS);
+                half glanceDamp = (half)(1.0 - 0.75 * pow(saturate(1.0 - NdotV), 2.0));
+                half3 envSpec = P1InkEnvSpecular(R, rough, NdotV) * glanceDamp;
 
-                // 漫反射光照（三渲二色阶）
+                // 漫反射光照（三渲二色阶，重定标下限 0.40）
                 half inkBand = P1ToonBand(NdotL, _InkShadeThreshold, _InkShadeSoftness);
                 half inkShadow = P1ToonShadowTerm(shadowAtten, _InkShadowFloor, _InkShadeSoftness);
-                float diffuseLight = lerp(0.72, 1.0, inkBand * inkShadow);
+                float diffuseLight = lerp(0.40, 1.0, inkBand * inkShadow);
 
-                // 墨水颜色：队伍色 × 单斑色调微差 × 低频色相起伏（取代旧的逐格马赛克噪声）
+                // 墨水颜色：队伍色 × 单斑色调微差 × 低频色相起伏
                 half3 inkColor = teamCol * (0.93 + 0.13 * tone * _ToneStrength);
                 inkColor *= 1.0 + 0.06 * (vnoise(input.positionWS.xz * 0.55 + 11.3) - 0.5) * _ToneStrength;
 
@@ -493,10 +585,25 @@ Shader "P1/InkGround"
                 inkColor *= 1.0 - 0.05 * hs;
 
                 // 新鲜湿润状态轻微提亮与增加通透度
-                inkColor *= 1.0 + 0.07 * fresh * fresh;
+                inkColor *= 1.0 + 0.07 * wet * wet;
+
+                // 咖啡环积墨：在边缘带加深墨色并提升饱和度
+                #if defined(P1_INK_HIGH)
+                if (ringMask > 0.001)
+                {
+                    half lum = Luminance(inkColor);
+                    half3 satColor = max(half3(0.0, 0.0, 0.0), lerp(half3(lum, lum, lum), inkColor, 1.30));
+                    inkColor = lerp(inkColor, satColor * 0.82, ringMask);
+                }
+                #endif
 
                 // 扣减重叠交界缝暗影
                 inkColor *= 1.0 - 0.3 * seamShadow * inkMask;
+
+                // 清漆合成（在 inkColor 之后）：环境反射按墨色自身染色 80%（颜料液体的反射
+                // 本就带涂层色，同时锁死队色纯度），太阳直射 glint 保持白色。
+                half3 envTint = lerp(half3(1.0, 1.0, 1.0), saturate(inkColor * 2.2), 0.80);
+                half3 finalClearcoat = (directTerm + envSpec * envTint) * (half)(_ClearcoatStrength * inkMask);
 
                 half3 litInkColor = inkColor * diffuseLight + finalClearcoat;
 
@@ -504,15 +611,28 @@ Shader "P1/InkGround"
                 litInkColor += inkColor * _InkGlow * (0.75 + 0.35 * hs) * (1.0 - NdotL * 0.5);
 
                 // 最终混合地面石板基底与果冻立体墨水
-                half groundBand = P1ToonBand(dot(geomN, L), _ShadeThreshold, _ShadeSoftness);
+                half groundBand = P1ToonBand(dot(groundNormalWS, L), _ShadeThreshold, _ShadeSoftness);
                 half groundShadow = P1ToonShadowTerm(shadowAtten, _ShadowFloor, _ShadeSoftness);
-                half3 groundAmbient = SampleSH(geomN) * 0.35 + _ShadowTint.rgb * 0.18;
-                half3 baseDiffuse = groundAmbient + lerp(_ShadowTint.rgb, half3(1,1,1), groundBand) * groundShadow * 0.85;
+                half3 groundAmbient = (SampleSH(groundNormalWS) * 0.35 + _ShadowTint.rgb * 0.18) * groundAO;
+                half3 baseDiffuse = groundAmbient + lerp(_ShadowTint.rgb, half3(1.0, 1.0, 1.0), groundBand) * groundShadow * 0.85;
                 // 垂直侧沿的环境保底：半球球谐在竖直法线方向本身取值很低，再叠上阴影项后
                 // 高台/坡道的裸露侧面会塌成纯黑。按 (1 - upness) 补一层极弱的冷色环境光，
                 // 让侧沿始终读作"深一号的混凝土"而不是一块黑边。
                 baseDiffuse += (1.0 - upness) * _ShadowTint.rgb * 0.55;
-                half3 finalRgb = lerp(baseSurfaceCol * baseDiffuse, litInkColor, inkMask);
+
+                #if defined(P1_INK_HIGH)
+                float3 groundH = normalize(L + V);
+                float gNdotH = saturate(dot(groundNormalWS, groundH));
+                float gNdotL = saturate(dot(groundNormalWS, L));
+                float gSpecPow = exp2(7.0 * groundSmoothness + 1.0);
+                float gSpec = pow(gNdotH, gSpecPow) * (groundSmoothness * 0.32) * gNdotL * groundShadow;
+                half3 groundSpecCol = _MainLightColor.rgb * (half)gSpec;
+                half3 finalGroundCol = baseSurfaceCol * baseDiffuse + groundSpecCol;
+                #else
+                half3 finalGroundCol = baseSurfaceCol * baseDiffuse;
+                #endif
+
+                half3 finalRgb = lerp(finalGroundCol, litInkColor, inkMask);
                 finalRgb = MixFog(finalRgb, input.fogFactor);
 
                 return half4(finalRgb, 1.0);
@@ -592,6 +712,13 @@ Shader "P1/InkGround"
                 float4 _InkMapSize;
                 float _InkTexelMeters;
                 float _InkYFlip;
+                float _InkGrainScale;
+                float _InkGrainStrength;
+                float _InkRoughVarStrength;
+                float _CoffeeRingStrength;
+                float _EdgeSpeckleStrength;
+                float _GroundNormalStrength;
+                float _GroundAOStrength;
             CBUFFER_END
 
             float3 _LightDirection;
@@ -701,6 +828,13 @@ Shader "P1/InkGround"
                 float4 _InkMapSize;
                 float _InkTexelMeters;
                 float _InkYFlip;
+                float _InkGrainScale;
+                float _InkGrainStrength;
+                float _InkRoughVarStrength;
+                float _CoffeeRingStrength;
+                float _EdgeSpeckleStrength;
+                float _GroundNormalStrength;
+                float _GroundAOStrength;
             CBUFFER_END
 
             DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)

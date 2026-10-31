@@ -111,6 +111,7 @@ Material:
     - _RimStrength: 0.55
     - _ScreenSpaceReflections: 1
     - _ScreenSpaceReflectionsContributeTransparent: 1
+    - _ShadeSoftness: 0.02
     - _ShadeThreshold: 0.5
     - _ShadowFloor: 0.55
     - _Smoothness: 0.55

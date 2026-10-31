@@ -80,10 +80,10 @@ namespace P1.Tests
         {
             // 小枪 Spritzer
             WeaponConfigSO shooter = CreateSpecConfig(WeaponKind.Shooter);
-            Assert.AreEqual(7.2f, shooter.maxRange, 0.0001f);
+            Assert.AreEqual(12f, shooter.maxRange, 0.0001f);
             Assert.AreEqual(36f, shooter.damage, 0.0001f);
             Assert.AreEqual(0.95f, shooter.inkCostPerShot, 0.0001f);
-            Assert.AreEqual(21f, shooter.projectileSpeed, 0.0001f);
+            Assert.AreEqual(34f, shooter.projectileSpeed, 0.0001f);
 
             // 滚筒 Swell Roller
             WeaponConfigSO roller = CreateSpecConfig(WeaponKind.Roller);

@@ -32,6 +32,7 @@ Material:
     - _Metallic: 0
     - _RimPower: 3
     - _RimStrength: 0.25
+    - _ShadeSoftness: 0.02
     - _ShadeThreshold: 0.5
     - _ShadowFloor: 0.55
     - _Smoothness: 0.35

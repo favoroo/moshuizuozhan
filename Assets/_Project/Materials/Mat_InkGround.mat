@@ -65,6 +65,22 @@ Material:
         m_Texture: {fileID: 2800000, guid: 0a6f124ebb40d4982a52771ad685eb3f, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _GroundTexN:
+        m_Texture: {fileID: 2800000, guid: 135668ac632334b95bb1da918eeca6cd, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _GroundTexRMO:
+        m_Texture: {fileID: 2800000, guid: d11e8c134ea124943bbeac7afa9a81e3, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _InkGrainN:
+        m_Texture: {fileID: 2800000, guid: ee58ac3a6b59b47cf976d8c66f0b7871, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _InkGrainRMO:
+        m_Texture: {fileID: 2800000, guid: 25bb8dac0d3fa4e698189a1550cd2be6, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _InkTex:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -112,6 +128,7 @@ Material:
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
     - _ClearcoatStrength: 1.4
+    - _CoffeeRingStrength: 0.4
     - _ContactShadowStrength: 0.45
     - _Cull: 2
     - _Cutoff: 0.5
@@ -123,6 +140,7 @@ Material:
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EdgeSoftness: 0.9
+    - _EdgeSpeckleStrength: 0.3
     - _EnvironmentReflections: 1
     - _FocusMinAlpha: 0.25
     - _FocusRadius: 2.2
@@ -132,11 +150,16 @@ Material:
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
+    - _GroundAOStrength: 0.45
+    - _GroundNormalStrength: 0.55
     - _GroundTexStrength: 1
-    - _InkGlow: 0.2
-    - _InkShadeSoftness: 0.08
+    - _InkGlow: 0.1
+    - _InkGrainScale: 1.6
+    - _InkGrainStrength: 0.35
+    - _InkRoughVarStrength: 0.5
+    - _InkShadeSoftness: 0.1
     - _InkShadeThreshold: 0.48
-    - _InkShadowFloor: 0.72
+    - _InkShadowFloor: 0.62
     - _InkTexelMeters: 0.01
     - _InkYFlip: 1
     - _LipHeight: 0.014

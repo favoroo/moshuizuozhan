@@ -10,6 +10,7 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 #include "ToonLighting.hlsl"
+#include "InkWetShading.hlsl"
 
 // 全局由 InkSurfaceController 驱动的墨水图集与参数
 TEXTURE2D(_GlobalInkAtlasTex);
@@ -28,6 +29,7 @@ float  _GlobalInkGlow;
 float  _InkWetClockNorm;      // (Time.time % 周期) / 周期 ∈ [0,1)
 float  _InkWetClockPeriod;    // 时间戳回绕周期（秒）
 float  _InkWetDryingSeconds;  // inkDryingSeconds：湿润→烘干时长
+float  _InkSheenSeconds;      // 缎面余晖时长（秒，默认 22）
 
 // 按时间戳现算湿润度（与 InkGround ForwardLit 同一公式）：
 // age = (now − 落墨时间戳) mod 周期，线性烘干曲线与旧整图烘干 Pass 数学等价。
@@ -190,18 +192,26 @@ struct P1InkAtlasVaryings
 };
 
 /// <summary>
-/// 对朝上表面采样并混合顶视墨迹（集装箱顶面、木箱顶面、护栏顶面、花坛顶面、各类近景道具）。
-/// 配色管线与 InkGround.shader 的墨水段逐项对齐（色调 / 湿度 / 阴影底线 / 胶质内发光 / 清漆高光），
-/// 保证同一片墨水落在顶面与落在地面时观感一致。
+/// 顶面/物体表面墨水完整物理求值函数（P18 画风重做）：
+/// 包含：队伍配色 + 三段湿润 (wet, sheen) + 胶质厚度 + 三渲二漫反射 (重定标 0.40)
+///       + 胶质内发光 + 太阳直射镜面 + 天空环境镜面 P1InkEnvSpecular (含掠射角抑制)。
 /// </summary>
-bool ApplyTopInkOverlay(
-    inout half3 surfaceColor,
+bool P1EvaluateTopInk(
     float3 positionWS,
     float3 normalWS,
     half shadowAtten,
     float3 mainLightDir,
-    float3 viewDirWS)
+    float3 viewDirWS,
+    float wetRough,
+    float dryRough,
+    float clearcoatStrength,
+    float inkGlow,
+    out float outInkMask,
+    out half3 outLitInkColor)
 {
+    outInkMask = 0.0;
+    outLitInkColor = half3(0.0, 0.0, 0.0);
+
     // 仅在朝上的面绘制顶视图形（避免垂直立面拉伸，立面由 InkWallSurface 负责）
     half upness = smoothstep(0.28, 0.68, normalWS.y);
     if (upness <= 0.002)
@@ -218,70 +228,119 @@ bool ApplyTopInkOverlay(
 
     float invA = 1.0 / max(amt, 0.02);
     float tRaw = saturate(inkSample.r * invA);
-    // G 通道 = 最新落墨时间戳 × 覆盖率（预乘，Max 混合写入），反预乘后用与地面相同的时间戳公式现算湿润度
     float inkTsNewest = saturate(inkSample.g * invA);
     float tone = saturate(inkSample.b * invA);
 
     // 屏幕空间边缘抗锯齿
     float fw = fwidth(amt);
-
-    // 顶面只铺「实墨」：地面墨斑的装饰性外缘（射线/卫星墨滴/细雾的半覆盖区）
-    // 投到木箱、集装箱的暖色底上会混成土黄（地面是中性灰底所以没有这个问题），
-    // 因此可见边界从地面的 amt=0.5 收紧到 0.55~0.72：0.72 以上为完全实色，
-    // 半覆盖雾区在顶面不渲染，只留一条窄的有机墨边。
     float maskEdge = clamp(fw * 1.2, 0.01, 0.06);
     float inkMask = smoothstep(0.55 - maskEdge, 0.72 + maskEdge, amt) * upness;
     if (inkMask <= 0.005)
         return false;
 
-    // ---- 以下与 InkGround.shader 墨水段同参 ----
-
-    // 队伍交界 1px 锐利过渡，绝不出现浑浊混色带
+    // 队伍交界 1px 锐利过渡
     float wT = clamp(fwidth(tRaw) * 0.75, 0.012, 0.25);
     float tm = smoothstep(0.5 - wT, 0.5 + wT, tRaw);
     half3 teamCol = lerp(_GlobalTeamAColor.rgb, _GlobalTeamBColor.rgb, tm);
 
-    // 湿度：与地面同一片元现算曲线（G 通道时间戳 → age，约 inkDryingSeconds 秒内线性烘干）
-    float wetness = P1InkTimestampWetness(inkTsNewest, _GlobalWetnessFactor);
-    float fresh = smoothstep(0.2, 0.95, wetness);
+    // 三段湿润：(wet, sheen)
+    float ageSec = frac(_InkWetClockNorm - inkTsNewest + 1.0) * max(0.001, _InkWetClockPeriod);
+    float2 wetSheen = P1InkWetProfile(ageSec, _InkWetDryingSeconds, _InkSheenSeconds);
+    float wet = saturate(wetSheen.x * _GlobalWetnessFactor);
+    float sheen = saturate(wetSheen.y * _GlobalWetnessFactor);
 
-    // 单斑色调微差 + 厚度剖面（地面 _ToneStrength=1 / _LipSoftness=1.7）：
-    // 薄缘半透明略亮更鲜活，厚体略深
+    // 单斑色调微差 + 厚度剖面
     half3 inkColor = teamCol * (0.93 + 0.13 * tone);
     float s = saturate((amt - 0.5) * 1.7);
     float hs = 1.0 - (1.0 - s) * (1.0 - s);
     inkColor = lerp(inkColor, inkColor * 1.16 + teamCol * 0.05, (1.0 - hs) * 0.35);
     inkColor *= 1.0 - 0.05 * hs;
-    // 新鲜湿润状态轻微提亮与增加通透度
-    inkColor *= 1.0 + 0.07 * fresh * fresh;
+    // 新鲜湿润状态轻微提亮
+    inkColor *= 1.0 + 0.07 * wet * wet;
 
-    // 漫反射光照（与地面 _InkShadeThreshold=0.48 / _InkShadowFloor=0.72 一致）
+    // 漫反射光照（三渲二色阶，重定标下限 0.40）
     float3 L = normalize(mainLightDir);
     float3 V = normalize(viewDirWS);
     float NdotL = saturate(dot(normalWS, L));
-    half inkBand = P1ToonBand(NdotL, 0.48, 0.08);
-    half inkShadow = P1ToonShadowTerm(shadowAtten, 0.72, 0.08);
-    float diffuseLight = lerp(0.72, 1.0, inkBand * inkShadow);
-
-    // 胶质内发光：地面靠该项保证墨色在背光/暗部也鲜艳通透，顶面缺它就会整体发灰发暗
-    half3 litInkColor = inkColor * diffuseLight
-                      + inkColor * _GlobalInkGlow * (0.75 + 0.35 * hs) * (1.0 - NdotL * 0.5);
-
-    // 清漆高光：复刻地面 clearcoat（_WetGloss=0.88 / _DryGloss=0.52 / _ClearcoatStrength=1.4）
-    float3 H = normalize(L + V);
     float NdotV = saturate(dot(normalWS, V));
-    float NdotH = saturate(dot(normalWS, H));
-    float smoothness = lerp(0.52, 0.88, fresh);
+    half inkBand = P1ToonBand(NdotL, 0.48, 0.08);
+    half inkShadow = P1ToonShadowTerm(shadowAtten, 0.55, 0.08);
+    float diffuseLight = lerp(0.40, 1.0, inkBand * inkShadow);
+
+    // 粗糙度与清漆镜面高光
+    float rough = P1InkRoughness(wet, sheen, wetRough, dryRough);
+    float smoothness = saturate(1.0 - rough);
     float specPower = exp2(10.0 * smoothness + 1.0);
     float specNorm = (specPower + 8.0) / 8.0;
-    float directSpec = pow(NdotH, specPower) * specNorm * (0.04 + 0.08 * fresh);
-    float fresnel = pow(1.0 - NdotV, 3.5);
-    float clearcoatF0 = lerp(0.035, 0.065, fresh);
-    float F = clearcoatF0 + (0.35 - clearcoatF0) * fresnel;
-    litInkColor += directSpec * F * 1.4 * NdotL;
+    float3 H = normalize(L + V);
+    float NdotH = saturate(dot(normalWS, H));
+    float directSpec = pow(NdotH, specPower) * specNorm * (0.04 + 0.08 * wet);
 
+    // 掠射菲涅尔
+    float fresnel = pow(1.0 - NdotV, 3.5);
+    float clearcoatF0 = lerp(0.035, 0.065, wet);
+    float F = clearcoatF0 + (0.35 - clearcoatF0) * fresnel;
+    half3 directTerm = _MainLightColor.rgb * (half)(directSpec * F * NdotL);
+
+    // 环境镜面（含掠射角抑制）
+    float3 R = reflect(-V, normalWS);
+    half glanceDamp = (half)(1.0 - 0.65 * pow(saturate(1.0 - NdotV), 2.5));
+    half3 envSpec = P1InkEnvSpecular(R, rough, NdotV) * glanceDamp;
+
+    half3 finalClearcoat = (directTerm + envSpec) * (half)clearcoatStrength;
+
+    // 胶质内发光
+    float effectiveGlow = (inkGlow > 0.0) ? inkGlow : _GlobalInkGlow;
+    half3 litInkColor = inkColor * diffuseLight + finalClearcoat;
+    litInkColor += inkColor * effectiveGlow * (0.75 + 0.35 * hs) * (1.0 - NdotL * 0.5);
+
+    outInkMask = inkMask;
+    outLitInkColor = litInkColor;
+    return true;
+}
+
+/// <summary>
+/// 扩展 PBR 接口：供道具/掩体顶面着色器显式调配粗糙度、清漆强度与内发光。
+/// </summary>
+bool ApplyTopInkOverlayPBR(
+    inout half3 surfaceColor,
+    float3 positionWS,
+    float3 normalWS,
+    half shadowAtten,
+    float3 mainLightDir,
+    float3 viewDirWS,
+    float wetRough,
+    float dryRough,
+    float clearcoatStrength,
+    float inkGlow)
+{
+    float inkMask;
+    half3 litInkColor;
+    if (!P1EvaluateTopInk(positionWS, normalWS, shadowAtten, mainLightDir, viewDirWS,
+                          wetRough, dryRough, clearcoatStrength, inkGlow,
+                          inkMask, litInkColor))
+    {
+        return false;
+    }
     surfaceColor = lerp(surfaceColor, litInkColor, inkMask);
     return true;
+}
+
+/// <summary>
+/// 对朝上表面采样并混合顶视墨迹（集装箱顶面、木箱顶面、护栏顶面、花坛顶面、各类近景道具）。
+/// 配色管线与 InkGround.shader 的墨水段逐项对齐（色调 / 湿度 / 阴影底线 / 胶质内发光 / 清漆高光），
+/// 保证同一片墨水落在顶面与落在地面时观感一致。
+/// </summary>
+bool ApplyTopInkOverlay(
+    inout half3 surfaceColor,
+    float3 positionWS,
+    float3 normalWS,
+    half shadowAtten,
+    float3 mainLightDir,
+    float3 viewDirWS)
+{
+    return ApplyTopInkOverlayPBR(surfaceColor, positionWS, normalWS, shadowAtten,
+                                 mainLightDir, viewDirWS, 0.06, 0.42, 1.4, 0.06);
 }
 
 #endif

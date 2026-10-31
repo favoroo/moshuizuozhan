@@ -155,8 +155,11 @@ namespace P1.Tests
                 bot.enabled = false;
             }
 
-            // 临时配置：零散布 + 关闭沿途滴墨，排除其它墨迹来源
+            // 临时配置：零散布 + 关闭沿途滴墨，排除其它墨迹来源；
+            // 射程/弹速钉死为 7.2m / 21m/s，让落点扇区断言独立于默认小枪的平衡数值。
             var config = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            config.maxRange = 7.2f;
+            config.projectileSpeed = 21f;
             config.spreadMinDegrees = 0f;
             config.spreadDegrees = 0f;
             config.trailStartDistance = 999f;

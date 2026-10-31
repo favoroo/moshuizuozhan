@@ -72,7 +72,7 @@ namespace P1.Tests
             config.inkCostPerShot = 0.1f;
             var host = new FakeHost { Config = config, CurrentInk = 1000f };
             var strategy = new ShooterWeaponStrategy(config);
-            WeaponAim aim = ForwardAim(7.2f);
+            WeaponAim aim = ForwardAim(12f);
 
             const float dt = 1f / 60f;
             for (int frame = 0; frame < 60; frame++)
@@ -88,7 +88,7 @@ namespace P1.Tests
             for (int i = 0; i < host.Shots.Count; i++)
             {
                 Assert.AreEqual(36f, host.Shots[i].Damage, 0.0001f, "单发伤害必须为 36");
-                Assert.AreEqual(7.2f, host.Shots[i].MaxRange, 0.0001f);
+                Assert.AreEqual(12f, host.Shots[i].MaxRange, 0.0001f);
                 Assert.AreEqual(0.18f, host.Shots[i].HitRadius, 0.0001f);
             }
         }

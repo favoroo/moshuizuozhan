@@ -2022,6 +2022,482 @@
 - **影响面**：仅墨色着色与全局属性推送；玩法网格、覆盖率、APIs 未改动；
   `tools/run_tests.sh fast` EditMode 262/262、PlayMode UI 1/1 通过。
 
+### 暂停菜单新增「返回主菜单」入口（2026-10-31）
+
+- [x] **用户反馈**：游玩过程中点暂停（齿轮）弹窗后，除了重开没有别的出口，「不知道怎么返回主菜单」。
+- **实现**：本项目的「主菜单」= 赛前 Ready 界面（同场景状态机），不是独立场景。
+  1. `Core/MatchManager.cs`：新增 `ReturnToMenu()`（增量公共 API，不改既有签名）——
+     复用 `ResetWorld()` 清墨水/弹丸/角色归位 + 复位计时（120s）与结算数据 + `SetPhase(Ready)`；已在 Ready 时静默忽略。
+  2. `UI/Menus/PauseMenuOverlay.cs`：暂停弹窗主视图加第 4 个按钮「返回主菜单」
+     （460×84 直角，白底墨字 + **红边**与红底「重新开始比赛」区分）；
+     按钮群 y 重排（90 / -10 / -110 / -210，提示文案移至 -295）；`ReturnToMainMenu()` = Resume + ReturnToMenu；
+     已在 Ready 时自动隐藏该按钮（`UpdateReturnMenuButtonVisibility`）。
+  3. `Core/AudioManager.cs`：`OnMatchPhaseChanged` 补 `Ready` 分支——停战斗 BGM 与循环音
+     （否则从对局返回主菜单后对战音乐继续放）。
+  4. `UI/MatchFlowUI.cs`：`HandlePhaseChanged` 补 `Ready` 分支——`bannerView.HideImmediate()`
+     （倒计时中返回时撤掉残留横幅）。
+  5. `Tests/PlayMode/MatchFlowTests.cs`：新增 `Match_ReturnToMenu_BackToReadyAndClearsWorld`
+     （Playing → ReturnToMenu → Ready + 计时/墨水/CombatAllowed 断言）。
+- **验证**：`compilationFailed:false`；`tools/run_tests.sh fast` EditMode **268/268** + PlayMode UI **46/46**；
+  实机 Play 验证：暂停弹窗 4 按钮渲染正常（`Logs/ui_returnmenu.png`）→ 点「返回主菜单」→
+  `phase=Ready, timeScale=1, remaining=120, coverage=0%`，首页正常显示（`Logs/ui_returnmenu_ready.png`）。
+- **已知边界**：批处理 `-nographics` 下 `InkGroundShaderTests` 的 `FindPass` 会误报缺 Pass（编辑器管线正常），与本次无关；
+  风暴云 VFX 不在 `ResetWorld` 清理范围（既有行为，与重开一致）。
+
+### 副武器手雷投掷系统重做：修「松开丢不出来」+「丢不远」（2026-10-31）
+
+- [x] **用户反馈**：①按住瞄准后松开，手雷有时丢不出来；②投掷距离极短（7.5m 硬钳制），无法往远处瞄。
+  参考 `inkwave-aah-research` 逆向源码（`src/game/weapons.js` 按住=瞄准 / 松开=投掷、弧线预览与实飞同参）。
+- **实现**：
+  1. 新增 `Player/SubBombThrowArbiter.cs`：纯逻辑「按住瞄准 / 松开投掷」状态机。
+     旧仲裁把按下沿当成立即投掷（`PlayerController.cs` 旧 206-210 行）——按 E 瞬间投出第 1 颗并扣 70 墨 + 0.6s 冷却，
+     松开沿投第 2 颗被墨水不足 / 冷却静默拒绝，即「丢不出来」假象；现按下沿只瞄准、松开沿才投，短按松手同样投出。
+  2. `Player/PlayerController.cs`：接入 arbiter；`ReadBombPressed()` 改纯桌面按下沿（触屏 `TouchBombTriggered`
+     在仲裁处消费，pointer-up 语义不变）；删除「swimHeld 取消瞄准」吞投掷逻辑（瞄准经 `wantsBombIntent`
+     压住潜行自动出水）；死亡 / 暂停早退分支同步 `_bombArbiter.Reset()`。
+  3. `Weapons/WeaponConfigSO.cs`：`bombMaxThrowDistance` 默认 7.5 → **12m**（对齐 GamePlan 设计稿）；
+     新增 `bombArcHeightNear=1.6 / bombArcHeightFar=3.8 / bombFlightSpeed=15`（弧高与飞行时长随落点距离动态插值，
+     远投更有力度感）；旧字段 `bombArcHeight/bombFlightDuration` 保留标记 legacy。
+  4. `Weapons/InkBombTrajectoryUtility.cs`：新增 `ComputeArcParams`（struct 零 GC）；
+     `ResolveLandingPosition` 无配置兜底 7.5 → 12。
+  5. `Weapons/InkBombPool.cs` + `Player/SubWeaponThrowTrajectory.cs`：实飞与 64 点预览共用 `ComputeArcParams`，
+     弧线与落点 100% 同参（inkwave 做法）。
+  6. `Weapons/WeaponController.cs`：新增 `GetSubBombMuzzlePosition()`，预览起点与实际出手点统一（`muzzleTransform`）。
+  7. `Editor/ProjectScaffolder.cs`：默认配置写入 `bombMaxThrowDistance = 12f`；`WeaponConfigSO.ApplyBombSpec`
+     同步新规范（12m + 弧线新字段）。
+- **测试**：新增 `Tests/EditMode/SubBombThrowArbiterTests.cs`（8 条：按下不立即投回归、按住→松开恰好一颗、
+  短按 / 同帧按下松开补投、触屏快投 / 长按投、大招屏蔽、Reset 恢复）；
+  `ReticleAndTrajectoryTests` 追加弧高随距离单调 + 飞行时长速度换算 / 下限钳制 2 条；
+  `SpecialSystemsTests.Config_BombDefaults_MatchP3BSpec` 增 12m 默认断言；
+  `PhaseAPlayboxSmokeTests` 新增触屏长按→松手全链路（真实 Update 仲裁，断言瞄准期不扣墨、松手恰好扣 70）。
+- **兼容性**：`TryThrowSubBomb` / `ThrowBomb` / `IsAimingBomb` / `TouchBombTriggered/Held` / `EvaluateArcPoint` /
+  `GenerateTrajectoryPoints` 签名全保留；伤害 / 耗墨 / 引信 / 半径数值不动。
+
+- [x] **第二轮（同日）用户反馈**：「彻底模仿 inkwave 的手雷机制——不要落点预判瞄准，整体投放机制重做」。
+  逆向确认 inkwave 真实模型（`weapons.js:995-999 throwVelocity / 1248-1300 _updateBombs / 1375-1405 updateArc` +
+  `config.js:170 SUB.bomb`）：手雷**不是丢到准星落点**，而是按相机俯仰以固定初速 13.5m/s 真实抛出
+  （重力 24、胸口 1.35m 出手、+1.5 上抛、0.4× 自身速度继承、pitch clamp [-0.3, 1.1]rad）；
+  撞墙反弹（反射 1.35× + 衰减 0.6），**落地才启动 0.95s 引信**；预览 = 同一套积分器逐步仿真
+  （64 点虚线 + 首接触点落点环，缺墨变灰）——远近由俯仰物理决定（平抛约 8m、满仰角约 10.5m 最远、
+  低头贴脚丢），**无落点钳制**。
+- **第二轮实现**：
+  1. `Weapons/WeaponConfigSO.cs`：新增 `bombThrowSpeed=13.5 / bombThrowGravity=24 / bombThrowUpBoost=1.5 /
+     bombThrowPitchOffsetDegrees=16 / bombThrowPitchMinDegrees=-17.2 / bombThrowPitchMaxDegrees=63`（inkwave 同值，
+     新资产字段走 C# 默认反序列化，无需改 .asset）；`bombMaxThrowDistance` 等旧字段标记 legacy（新模型无落点钳制）。
+  2. `Weapons/InkBombTrajectoryUtility.cs`：新增 `ComputeThrowVelocity`（俯仰→初速）与 `SimulateThrow`
+     （60Hz 半隐式欧拉 + 分段射线仿真，缓冲尾部折叠填充）与共享反弹常数（1.35/0.45/0.6）——预览与实飞同参。
+  3. `Weapons/InkBombPool.cs`：改速度制真实弹道飞行（积分 + 撞墙反弹、穿透投掷者与同队角色、
+     落地即引信并显示预警环；未引信超 8s 或坠落 y<-10 静默回收兜底）。
+  4. `Weapons/WeaponController.cs`：新增 `TryThrowSubBombBallistic(throwVelocity)`；旧 `TryThrowSubBomb(target)`
+     （BotController 与既有测试在用）经弹道学反解 `ComputeThrowVelocityToLandAt`（固定初速求命中目标点的低弧仰角，
+     够不到时 45° 全力抛）保持「指哪落哪」契约后转发，签名不动。
+  5. `Player/SubWeaponThrowTrajectory.cs`：新增 `UpdateTrajectorySim`（仿真 64 点 + 预测落点环，
+     未落到表面时环隐藏 = 「投不到」的诚实反馈）；旧 `UpdateTrajectory` 保留兼容。
+  6. `Player/PlayerController.cs`：预览与投掷改走「相机俯仰 → 初速」模型（`ComputeBombThrowVelocity`，
+     含 0.4× CharacterController 水平速度继承，跑动投掷顺势更远）。
+- **第二轮测试**：新增 `Tests/EditMode/SubBombBallisticTests.cs` 9 条（平抛 ≈8m 落点、俯仰钳制上下界、
+  0.4× 速度继承、null 配置兜底、仿真落地 / 贴脚 / 穿透自身、反解近投 4m / 满射程 8m 命中）；
+  `PhaseAPlayboxSmokeTests` 新增弹道投掷全链路（仿真落点 + 扣 70 墨 + 落地引信爆炸涂地），并修复 Touch 手雷用例相位门缺陷
+  （Ready 下 `InputAllowed=false` 使 `PlayerController.Update` 整帧早退 → 补 StartMatch + Playing；
+  另关 MobileTouchUI 防其每帧覆写 `TouchBombHeld`）。
+- **验证**：`compilationFailed:false`；`tools/run_tests.sh all` EditMode **328/328 全绿**
+  （基线 300 + 弹道 9 + 既有）；PlayMode **96/97**（含新增 2 条全过；唯一失败
+  `SpawnProtectionPlayTests` 属 Combat 域他人未提交改动（`CombatantHealth.cs` +101 行在途），
+  与本任务无关，未回滚他人代码）。
+- **已知边界**：①满仰角最远约 10.5m（inkwave 原值 13.5m/s），若实测还想更远，调
+  `WeaponConfigSO.bombThrowSpeed` 即可（每 +1 约 +0.7m）；②炸弹与角色不再碰撞
+  （inkwave 同语义，穿过敌我身体）；③风暴云大招仍走旧插值抛物线（`InkStormCloudPool` 自有节点），未在本轮范围。
+
+### 掩体边界线：墨色统一后掩体与地面不可辨（2026-10-31）
+
+- [x] **用户反馈**：v0.1.6 统一墙墨/地墨/顶墨明暗模型后（同色系，保留不回退），涂满墨的掩体与地面 RGB 几乎一致
+  （基色也几乎同明度：`concreteLight 0.80,0.78,0.72` vs `groundBase 0.76,0.74,0.68`），
+  玩家分不清掩体在哪、容易撞上；全屏 `ToonOutline` 深度检测对"掩体顶 vs 地面"的低高度差根本不触发，移动端也没有描边。
+  参考 `inkwave-aah-research` 逆向源码：INKWAVE 不用后处理描边，靠"边界感做进物体自身着色 + 涂墨后边界仍可读"
+  （`src/world/level.js` 几何倒角 / `levelMaterial.js` 墙脚接触暗带与压顶 / `inkShading.js` 墙墨更薄保留起伏）。
+- **实现**（掩体每个面四周一圈深色硬边线，压在墨水叠加之后）：
+  1. `Shaders/ObstacleDitherLit.shader`：vertex 用 `UNITY_MATRIX_M` 列向量长度取每轴世界尺度
+     （兼容 GRD/DOTS 实例化），算"到三条棱边组的米距离"传 interpolator；fragment 取 min 后
+     `smoothstep + fwidth` AA 画线，`lerp(shaded, _EdgeLineColor, lineMask * _EdgeLineStrength)`
+     应用点在 `ApplyTopInkOverlay` **之后**——涂满墨后轮廓仍可辨。新增
+     `_EdgeLineColor/_EdgeLineWidth(0.05m)/_EdgeLineStrength(0.85)/_TopLift(0.06)` 四属性
+     （三个 pass 的 CBUFFER 同步加，保 SRP Batcher）；`_TopLift` 只在 `geomN.y>0.5` 且墨水叠加前生效，
+     未涂墨顶面微提亮，墨覆盖区不受影响（不破坏墨色统一）。
+  2. 涂墨立面：`Ink/InkWallSurface.BuildFaceVisual` 写 `UV1=(面宽,面高)米`；`Shaders/InkWall.shader`
+     用 UV1 在 quad 四周画同款深色边线（quad 外扩 1cm 会盖住基面边线，涂满墨的立面必须自己保留轮廓；
+     无 UV1 数据退化为不画线）。
+  3. 参数走 SO：`Environment/ArenaStyleSO.cs` 新增 `coverEdgeLineColor/coverEdgeLineWidth/coverEdgeLineStrength/coverTopLift`
+     （新字段向后兼容）；`Editor/ToonStyleInstaller.cs` `WriteStylePreset` 写默认值（边线色与全屏描边同深色系）、
+     `SetObstacleMaterial`（13 个障碍/集装箱/木箱/边界墙材质）与 `SetInkWallMaterial` 用 `HasProperty` 守卫写入。
+  4. 回归护栏：新增 `Tests/EditMode/ObstacleEdgeLineRegressionTests.cs` 4 条——边线必须在墨水叠加之后、
+     距离必须按世界尺度换算、InkWall 必须保留立面边线、材质上边线强度不得被归零。
+- **验证**：`compilationFailed:false`；`tools/run_tests.sh fast` EditMode **272 用例 271 通过 0 失败**
+  （基线 268 + 新增 4，1 条材质断言按设计 Ignore）+ PlayMode UI **46/46**；
+  跑 `P1/画风/1` 后实读材质：`Mat_ObstacleWall / Mat_InkWall / Mat_Container_Teal` 边线参数全部落上
+  （线性色 `0.009,0.010,0.015` = sRGB `0.09,0.10,0.13`）；
+  实机 Play 截图自查（`Logs/p17a_unpainted.png` 广角对局、`Logs/p17a_top_ink4.png` 集装箱特写、
+  `Logs/p17a_plantertop.png` 低花坛）：未涂墨掩体边线+顶面提亮、涂墨立面完整深色描边框、
+  bot 涂蓝的顶面带深色边框在蓝墨地面上轮廓立现；纯 ALU 无新增 pass/drawcall/GC，PC 与 Mobile shader 同源生效。
+- **已知边界**：①高集装箱顶面经 `PaintSphereWithWalls` 涂不上墨（顶面格 blocked，弹丸直击顶面可涂）——
+  与下方待办 P16-C「掩体顶面计分口径统一」同源，归 Ink 域另行处理；②小地图「叠加不可涂掩体轮廓」
+  （GamePlan.md:168）本轮未做，记为后续任务；③边线宽度/强度/顶面提亮如需调整，改
+  `ArenaStyleSO.coverEdge*` 后重跑 `P1/画风/1` 即可。
+
+### 踩敌墨全屏边缘墨迹提示（P18-A，2026-10-31）
+
+- [x] **用户反馈**：踩到敌墨时只有减速 / 掉血 / 角色抖动 / 呲呲声，混战里容易忽略自己正站在敌墨里，
+  想参考 INKWAVE 做一个全屏边缘特效提示。
+- **参考**：`inkwave-aah-research/src/fx/screenfx.js` 的 `edgeInk`——
+  屏幕四边一圈黏液墨边（底边约屏高 8% 最厚，左右/顶边只留细线）、FBM 噪声抖动边界 + 湿润高光，
+  颜色直接用敌方队色；强度 9/s 淡入、3/s 淡出。它是后处理层，位于 3D 之上、HUD 之下。
+- **技术选型**：UI 全屏覆盖层 + 自定义 UI Shader，不用 URP 后处理——
+  `Mobile_Renderer.asset` 没有任何 Renderer Feature，后处理方案要改两份 Renderer 资产；
+  UI 层不碰场景/管线资产，空闲时整块 Graphic 关闭（零成本），效果期间只多 1 个 DrawCall。
+- **实现**：
+  1. 新增 `Resources/InkEdgeWarning.shader`（`P1/UI/InkEdgeWarning`，放 Resources 保证独立包不被剔除）：
+     圆角软边距 + 底边加权带宽 + 2/3 层 value-noise FBM 抖动 + 顶部垂滴 + 导数法线湿润高光；
+     移动端 `SHADER_API_MOBILE` 降到 2 octave，中心区先 `min(dx,dy)` early-out。
+  2. 新增 `UI/InkEdgeWarningStyleSO.cs`：淡入/淡出速率、底边/细边厚度、抖动、垂滴、最大不透明度、显隐阈值；
+     带 `Fallback`，资产缺失也能跑。`Editor/InkEdgeWarningStyleTools.cs` 菜单 `P1/UI/11` 生成
+     `Resources/InkEdgeWarningStyle.asset`（已存在不覆盖）。
+  3. 新增 `UI/InkEdgeWarningMath.cs`（纯逻辑：指数逼近 + 阈值显隐）与 `UI/InkEdgeWarningView.cs`
+     （全屏 Image + 运行时材质；读 `LocalPlayer.Motor.IsInEnemyInk && Health.IsAlive`；
+     墨色取 `InkSurfaceController.GetTeamColor(Health.Team.GetOpponent())` 并按 Linear 工程做 `.linear`；
+     低于阈值关闭 Image；HUD 画布局部关闭时立即退场）。
+  4. `UI/HudController.cs` 增量接线：`Awake` 自动装配到画布根并 `SetAsFirstSibling`（盖住 3D、
+     位于所有 HUD 控件之下、不拦截触控），新增只读属性与 `BindInkEdgeWarning` 测试/装配入口。
+  5. 规范：`Docs/UI-GeometricBold.md` 增加「屏幕特效例外（镜头层）」——仅该层允许有机抖动/高光/垂滴。
+- **测试**：新增 `Tests/EditMode/InkEdgeWarningMathTests.cs` 4 条 +
+  `Tests/PlayMode/InkEdgeWarningPlayTests.cs` 2 条（自动装配 / sibling 0 / raycastTarget=false /
+  淡入拉满后启用 Image / 淡出后自动关闭）。
+- **验证**：`compilationFailed:false`，改完无 `error CS`；
+  `tools/run_tests.sh edit` EditMode **319 用例 318 通过 0 失败 1 Ignore**（含新增 4 条全过）；
+  `tools/run_tests.sh ui` PlayMode UI **96 用例 93 通过 3 失败**——3 条均为并行任务
+  （`CharacterVisualPlayTests.Swimming_*`、`PhaseAPlayboxSmokeTests.Player_TouchBombHoldRelease_*`、
+  `SwimFormPlayTests.SwimPosture_*`），与本次无关；全量 PlayMode 中本次新增 2 条同样通过。
+- **实机验收**（Play 模式真实触发：在本地玩家脚下 `PaintCircle` 涂敌队墨）：
+  `motor.IsInEnemyInk=True` → `CurrentIntensity=1.000、IsShowing=True`；
+  离开后强度衰减至 ~0 且 `Image.enabled=False`（空闲零成本）。
+  冻结画面 A/B 像素对比（`Logs/ui_edge_off2.png` / `Logs/ui_edge_on2.png`）：
+  中心区域差异 **0.0000**（不遮挡战场），底边 0.242 / 左边 0.128 / 右边 0.155 / 顶边 0.037，
+  全屏仅 7.3% 像素被墨边覆盖；底边平均色 `(0.299,0.314,0.720)` = TeamB 蓝墨，带少量湿润高光。
+  真实对局截图 `Logs/ui_enemy_ink_edge_effect.png`（敌方队色蓝边）与基线
+  `Logs/ui_enemy_ink_edge_baseline.png`（无效果）。
+- **影响面**：仅新增 UI 全屏层与 HUD 自动装配字段，无玩法数值/接口破坏；
+  不在敌墨上时 Graphic 关闭，效果期间 DrawCall +1；Shader 在 Resources 内，独立包可用。
+
+### 准星与射击落点一致性（P18-B，2026-10-31）
+
+- [x] **状态**：实现完成；专项 PlayMode 与 EditMode 回归通过。
+- **用户反馈（Android 触屏 / 蓄力狙）**：准星瞄准的位置与激光、子弹实际落点偏差大，静止瞄准也偏。
+- **根因**：
+  1. `WeaponReticleUI` 由 `HudController` 建在 `HudSafeArea` 下；刘海/挖孔屏横屏时 SafeArea 内缩，
+     准星中心 ≠ 相机中心射线（静止也偏，蓄力狙变焦会放大角度误差）。
+  2. 触屏辅助瞄准在准星周围 0.5~1.2m 内把瞄准点吸到敌人胸口；瞄墙/地面时激光和子弹会拐向旁边敌人。
+  3. 蓄力狙在松手帧才发射，但 `_lastAim` 只在按住扳机的帧更新 → 松手光束永远慢一帧（甩枪/跟踪最明显）。
+  4. 长枪管近距离瞄准点落在枪口后方时，方向回退相机前向、光束仍从枪口出发 → 与屏幕中心射线平行偏移。
+  5. 瞄准射线用上一帧相机位置 + 本帧新朝向，快速甩枪时与渲染画面中心线错开。
+  6. 准星没有「超出射程 / 锁定敌人」状态。
+- **改动**：
+  - `UI/WeaponReticleUI.cs`：`EnsureInitialized` 把自身重挂到 Canvas 根（不再留在 SafeArea）；
+    新增超距（alpha 0.42 + 程序化虚线环 + 中心点 0.55）与锁定敌人（`ComicStyle.Red` + 1.14 倍）状态；
+    暴露 `IsOutOfRange / IsOnTarget`。`UI/HudController.cs` 创建时直接挂 Canvas 根。
+  - `Player/PlayerController.cs`：`TryApplyAimAssist` 收紧为「准星已压在敌人身上才微调胸部 / 射向天空才按半径吸附」，
+    射线落在墙体/地面时绝不吸附；新增 `AimTarget / AimFlatDistance`；瞄准射线改用
+    `TopDownCameraFollow.GetAimCameraPosition()` 的预测位姿。
+  - `Player/TopDownCameraFollow.cs`：新增 `GetAimCameraPosition()`（与 LateUpdate 同套枢轴/吊臂/肩部/地面保护，
+    不含震屏与开火后拉）。
+  - `Weapons/WeaponController.cs`：`LateUpdate` 在 `Tick` 前用本帧 `PlayerController.AimDirection/AimPoint`
+    刷新 `_lastAim`（修蓄力狙松手帧）；新增 `EffectiveRange`、`LastBeamResult`；蓄力狙激光线也走
+    `GetShotOrigin / GetShotDirection(0.2m)`。
+  - `Weapons/MainWeaponStrategy.cs`：`WeaponAim` 新增 `GetShotOrigin`、`GetRangeClampedTarget`，
+    `GetShotDirection` 增加可选 `minDistance`；`MainWeaponStrategy.EffectiveRange` 虚属性。
+  - `Weapons/ChargerWeaponStrategy.cs`：近距离/枪口后方改用胸口起点，光束收敛到准星。
+  - `Shooter / Dualies / Splatling / Slosher`：改用 `GetRangeClampedTarget`，超距不再反解到够不到的远点。
+  - `UI/ReticleStateMath.cs`（新增）：准星状态纯逻辑。
+  - 默认 Spritzer：`maxRange 7.2→12m`、`projectileSpeed 21→34m/s`（用户确认；文档/资产/选枪文案同步）。
+- **接口**：全部增量（`AimTarget`、`AimFlatDistance`、`GetAimCameraPosition`、`EffectiveRange`、
+  `GetRangeClampedTarget`、`GetShotOrigin`、`LastBeamResult`、`ReticleStateMath`），现有签名不变。
+- **测试**：新增 `ReticleStateMathTests`（6）、`WeaponAimRangeTests`（8）、
+  `ChargerAimPlayTests`（松手帧新准星）；扩展 `ThirdPersonCameraPlayTests`（Canvas 根/屏幕中心/甩枪中心线）；
+  更新 `WeaponArsenalContractTests`、`WeaponStrategyTests` 的 12m/34m/s 断言；天空落滴用例钉死 7.2m/21m/s。
+- **验证**：`compilationFailed:false`；EditMode **319 条 · 通过 318 · 失败 0**（1 条为环境显式跳过）；
+  PlayMode 专项 `ChargerAimPlayTests` **1/1**、`ThirdPersonCameraPlayTests` **1/1**；
+  PlayMode UI 分类 **48/49**（唯一失败是并发 Agent 的 P18-A `InkEdgeWarningPlayTests`
+  —— P19 的 `EnsureKillFlash` 也 `SetAsFirstSibling`，把边缘提示挤到 sibling 1，与本任务准星改动无关）。
+  全量 PlayMode 在共享编辑器上被 `ExitPlayModeTask` 卡死（并发测试/域重载），未能完整复跑；
+  本任务改动的两个专项用例与 UI 分类均已单独跑绿。
+
+### 击杀与命中打击感：完整对齐 Inkwave（P19，2026-10-31）
+
+- [x] **状态**：实现完成，双端编译与测试验证完成（视觉最终由人验收）。
+- **用户反馈**：击杀敌人没有任何手感，要求参考 INKWAVE 增加打击感（用户已确认：完整 inkwave 套餐 + 连杀加码；不做击退、不做伤害数字）。
+- **Inkwave 逆向结论**（`inkwave-aah-research/src/{main.js:406-458, fx/fx.js:1649, fx/screenfx.js:604-606, audio/audio.js:843-914, ui/hud.css:196-220}`）：
+  命中 = 方向性 hitSplash 墨花（2/3 顺弹道贯穿 + 1/3 回溅射击者，强度 amount/60）+ 受击点 3D `ink_hit_body`（重击 pitch 0.8）
+  + UI 层 `hit_marker` tick（连击每级升 1.5 半音、上限 8 级）；
+  击杀 = 准星击杀级标记（队伍色 + 扩散环 + 上方墨滴图标弹出）+ 准星 killflash（scale 1.45 弹回）
+  + 屏幕边缘 `uKill` 队伍色径向闪光 + FOV punch + `splat_enemy` 确认琶音（E 大调 sparkle）+ 死者位置 killed 版爆散 + 乌贼幽灵升起。
+- **改动**（全部增量，未改既有签名）：
+  - `Core/VfxPool.cs`：新增 `SpawnHitSplash`（方向性墨花：顺/逆弹道双层 + 卫星墨珠 + 0.08s 高光）、
+    `SpawnKillBurst`（killed 版方向性爆散 + 延迟第二层冲击环 + `SpawnGhostWisps` 墨魂上升）、全部走既有池（零 GC）。
+  - `Player/CombatantHealth.cs`：`TakeDamage` 统一接入命中墨花 + `AudioManager.PlayInkHitBody`（七类武器/手雷/大招/风暴一次全覆盖；
+    顺带修掉 hitPoint 一直被丢弃的问题）；闪白时长入配置；`ApplyImpactFeedback` 击杀分支补 kill Trauma + FOV 微踢；
+    `Die` 补方向性爆散；击杀音路由修正——旧逻辑按 `killerTeam == TeamA` 判定（队友 Bot 击杀也响 kill 音，稀释奖励感），
+    改为「本地玩家击杀 → PlayKill(连杀数)、本地玩家阵亡 → PlayDeath、队友阵亡 → 低音量提示、远处混战静默」（对齐 Inkwave）。
+  - `Core/AudioManager.cs`：新增 `PlayInkHitBody(worldPos, damage)`（26m 距离衰减 + 重击 pitch 0.8）、
+    `PlayKill(int streak)`（kill 音上叠 ui_confirm 琶音层，连杀逐层加量升调）、`PlayAllyDeath()`、
+    `PlayHitMarker(pitch, volume)`；`hitEnemyClips` 降级为身体音层，`hitMarkerClips`（原死资源）转为 UI tick 层。
+  - `UI/HitFeedbackMath.cs`：`ComboPitch` 改为每级 +1.5 半音（×2^(1.5/12)），上限 8 级一个八度（对齐 Inkwave hit_marker）。
+  - `UI/WeaponReticleUI.cs`：UI tick 换 `PlayHitMarker`；连击上限 6→8；新增击杀墨滴徽标
+    （`UIInkShapeGraphic` Blob，准星上方弹出过冲→回稳→上飘淡出 0.8s）与准星本体 killflash（scale 1.28→1.0 ease-out，0.45s），
+    均用真实时间推进（Hitstop 期间照常播放）。
+  - `UI/KillFeedEvent.cs`：新增 `KillFeedbackState`（本地玩家连杀窗口状态，纯静态零 GC）。
+  - `UI/KillFlashView.cs`（新增）+ `Resources/KillFlash.shader`（新增）：屏幕边缘队伍色径向闪光
+    （对齐 Inkwave `col += uKill.rgb * smoothstep(0.5,1.15,r)`，加法混合，硬切入场线性淡出），
+    连杀逐层加码（base 0.55 + 0.15/层，上限 +3 层），**受无障碍「屏幕震动」滑杆 `GameSettingsService.ShakeScale` 门控**
+    （对齐 Inkwave 把 flash 归入强反馈的做法）；跨局连杀清零（订阅 `MatchManager.PhaseChanged`）；try/catch 装饰性兜底。
+  - `UI/HudController.cs`：`EnsureKillFlash()` 自动装配（画布根 sibling 0，同 InkEdgeWarning 层级约定）+ `BindKillFlash` 入口。
+  - `Player/PlayerConfigSO.cs`：新增「击杀反馈 P6-B」参数组（killTrauma / killFovPunchDegrees / killFlashSeconds /
+    killStreakWindowSeconds / hitSplashDamageRef / hitFlashSeconds），字段带初始值，旧 .asset 无需迁移。
+  - `Tests/EditMode/HitFeedbackTests.cs`：`ComboPitch` 断言同步到半音曲线（6 连击 = 9 半音，8 级封顶 = 八度）。
+- **接口影响面**：仅新增重载与新 API，既有签名不变；KillFlashView/KillFeedbackState 为新类型；
+  击杀音路由语义修正属行为修复（旧判定把「任意 TeamA 击杀」当成本地玩家击杀）。
+- **验证**：
+  1. 编译：`script.recompile_status` → `compilationFailed:false`（0 error CS；期间唯一报错 `AndroidToolsSetup.cs`
+     来自并发 Agent，对方已自行修复）。
+  2. EditMode：**319 条 · 通过 318 · 失败 0**（1 条环境显式跳过），含 `HitFeedbackTests.ComboPitch` 半音曲线新断言。
+  3. PlayMode（主工程全量）：**97 条 · 通过 96 · 失败 1**。唯一失败为既有计时易抖用例
+     `SpawnProtectionPlayTests.Respawn_GrantsThreeSecondSpawnProtection`（期望 3.0±0.35s，实测 2.61s）：
+     用例以 8× timeScale 等待、容差仅 0.35 游戏秒，实时一帧 50ms 卡顿即超差（0.05×8=0.4 游戏秒）；
+     同一份代码在干净克隆中单跑 **通过**（3.0s）、在克隆全量中失败（2.60s），且本任务不触碰复活/出生保护计时，
+     判定为负载敏感的既有 flaky 用例，非本任务回归。
+  4. 并发环境变通验证：共享编辑器测试运行器被并发 Agent 反复抢占（互相把对方运行当「残留」取消、只读到对方 1 条过滤结果），
+     按 P6-B 先例改用 **APFS clone + 独立编辑器实例**全量复跑：**96 条 · 通过 92 · 失败 4**，
+     其中 3 条为并发 Agent 在途改动（`PhaseAPlayboxSmokeTests` 手雷仲裁、`SpecialWeaponsPlayTests` 手雷伤害、
+     `SwimFormPlayTests` 游动姿态），1 条即上述 flaky 用例（单跑通过）；本任务相关用例全绿。
+     注意：克隆实例 **必须去掉 `-batchmode`** 跑 PlayMode，否则无图形设备下 `P1/InkGround` 的
+     `InkAtlasPaint/InkAtlasStamp` Pass 不可见，会制造 53 条「缺少写入 Pass」假失败。
+  5. 过程中修掉的自有回归：`InkEdgeWarningPlayTests` 断言 `InkEdgeWarning` 在 sibling 0，
+     而 `EnsureKillFlash` 也 `SetAsFirstSibling` 把它挤到 1 → 调整 Awake 顺序（KillFlash 先建、边缘提示后建）后通过；
+     另将击杀墨滴徽标从 `_hitMarkerRoot` 改挂准星根（避免被 HitMarker 的 CanvasGroup 在 0.55s 后连带隐藏其 0.8s 动画尾部）。
+  6. 视觉自查：编辑模式渲染 `KillFlash.shader` 到 640×360 RT（`Logs/killflash_preview.png`）——
+     中心保持背景色、四周按径向 smoothstep 呈队伍色柔边，Pass 名查找正常；游戏内为加法混合会更亮。
+     完整「命中→击杀→连杀」手感与音频仍需人眼/人耳在 `PhaseA_Playbox` 实机复核（风控纪律：视觉最终由人验收）。
+  7. 资源库：本次**未新增**音频/图标/主题素材（全部复用既有 clip 与程序化 UI 形状），无需重建 `P1RuntimeAssets`；
+     `KillFlash.shader` 放 `Resources/` 保证独立包内 `Shader.Find` 可用。
+- **依赖**：`[P6-A]`、`[P18-B]`
+- **领域**：Combat/Player + UI/HUD + VFX + Audio
+
+### 应用内更新重做：下载进度 / 安装包体积 / 安装调起（P20，2026-10-31）
+
+- [x] **状态**：实现完成；编译干净、EditMode 318/0 通过、Android 清单自检通过。
+  **真机端到端「下载 → 安装」待人工验证**（本轮按用户选择未跑 Android 出包，见文末）。
+- **用户反馈**：游戏内下载完全不可用 —— ①下载完点安装没反应 ②下载中进度一直 99% ③安装包体积获取不到；
+  要求参考 `~/Documents/01Code/Godot/t-1` 的实现方式整体重做。
+- **三个根因（均有实测证据，非推测）**：
+  1. **体积拿不到 → 进度恒 99%**：Gitee Release API 的 `assets[]` 只有 `name` + `browser_download_url`，
+     **没有 `size` 字段**（拉线上 v0.1.6 真实 JSON 确认）。旧实现只从 `size` 取体积 → `fileSize = 0`，
+     下载循环里 `total = expectedSize > 0 ? expectedSize : downloaded` 退化成 `total = downloaded`，
+     于是 `Clamp(loaded/total*100, 0, 99)` **恒等于 99%**。GitHub 的 JSON 有 size，但 Gitee 命中即 `break`，永远走不到。
+     而真实响应的 `Content-Length: 57402487` 一直可用，只是旧代码没用它。
+  2. **点安装无反应**：用 aapt2 反查已发布 APK（`Builds/Android/InkTurfDemo.apk`，v0.1.6，targetSdk 34）——
+     合并清单里 `<provider>` 数量为 **0**，且**没有 `REQUEST_INSTALL_PACKAGES`**。于是
+     `androidx.core.content.FileProvider.getUriForFile` 因 authority 未声明必抛异常，异常被 catch 后走
+     `Application.OpenURL("file://…")`，Android 上等于什么都没发生；旧 `InstallApk` 还在 catch 里 `return true`，
+     等于对 UI 撒谎。`androidx.core` 本身已打进包（dex 里能查到 FileProvider），
+     **只缺清单声明，不需要任何三方库 / AAR / gradle 模板**；仓库此前根本没有 `Assets/Plugins` 目录。
+  3. **解析脆 + 假装成功**：`ParseReleaseJson` 全用正则抠 JSON（含 `Regex.Unescape`，非法转义会抛）。
+     GitHub 的 asset 对象内嵌 `uploader`，`[^\{\}]*` 跨不过嵌套括号 —— 实测这条正则匹配不到，只是被「Gitee 先生效」掩盖。
+     另外 `hasApk == false` 时会把发布页 URL 填进候选下载源，等于**把发布页 HTML 存成 `.apk` 并报告"下载完成"**。
+- **改动**：
+  - `UI/UpdateManager.cs`：解析改 `JsonUtility` + DTO（兼容 Gitee 缺 `size` 的形态）；
+    新增纯静态 `ResolveDownloadTotal` / `ComputeDownloadPercent` / `ParseContentLength` /
+    `LooksLikeApkHeader` / `IsApkPayload` / `ValidateDownloadedApk`；
+    检测后对缺体积的源补一次 **HEAD 探测**（回填体积并发 `OnUpdateInfoRefined` 让弹窗刷新「大小」；
+    若检测期那次也没成功，则下载前再补一次，保证进度从第一帧就有真分母）；
+    下载实时取**响应头 Content-Length** 作权威总量（对齐 Godot 的 `get_body_size()`），
+    总量未知时如实显示「已下载 X」而不是编一个假百分比；
+    新增下载前守卫（无 APK 直接失败，不再把 HTML 存成包）与下载后校验（ZIP 魔数 + 体积比对，挡住截断与错页）；
+    引入下载代际号，修掉「取消后旧协程把新下载的半截包删掉」的竞态；
+    `IsDownloading` 提前到完成事件之前落状态（原来 `Hide()` 会误取消一次已完成的下载）；
+    `InstallApk` 新增 `out reason` 重载 —— 先查 `canRequestPackageInstalls()`（未授权则拉起
+    `ACTION_MANAGE_UNKNOWN_APP_SOURCES` 引导授权），FileProvider content URI + `ACTION_VIEW`，
+    失败再退 `ACTION_INSTALL_PACKAGE`，**只有 startActivity 真的执行才返回 true**；
+    失败与异常日志统一改 `Debug.LogWarning`（原 `Debug.LogError` 会被 PlayMode 零错误门禁判红）。
+  - `UI/UpdateDialog.cs`：订阅 `OnUpdateInfoRefined` 刷新体积；总量未知时进度走「连接中… 已下载 X」；
+    安装失败把原因显示到副标题 + Toast（旧实现失败时一声不响）；`hasApk = false` 时主按钮置灰并提示走浏览器；
+    上次已下好的完整包直接给「立即安装」入口，不必重下几十 MB。
+  - `Assets/Plugins/Android/AndroidManifest.xml`（新增）：以 Unity 自带 `PlaybackEngines/AndroidPlayer/Apk/UnityManifest.xml`
+    为底稿（本项目 Application Entry = Activity），追加 `REQUEST_INSTALL_PACKAGES`、显式补 `INTERNET`、
+    以及 `androidx.core.content.FileProvider`（`android:authorities = ${applicationId}.fileprovider`）。
+  - `Assets/Plugins/Android/res/xml/p1_update_paths.xml`（新增）：FileProvider 路径白名单
+    （`external-files-path` 覆盖 `Application.persistentDataPath`）。
+  - `Editor/AndroidToolsSetup.cs`：开启 `useCustomMainManifest`（`PlayerSettings.Android` **没有**对应公开 API，
+    实测只能走 `SerializedObject`；且**在 `[InitializeOnLoad]` 阶段同步写会与域重载的序列化打架，
+    留下「磁盘 = 1 而内存 = False」的不一致状态**，随后编辑器任一次保存就会打回 0 —— 故改为 delayCall +
+    写完立即回读确认 + 失败时诚实告警）；新增菜单 `P1/构建/12. 校验 Android 更新安装清单配置`
+    （缺失时自动补齐，再逐项自检清单 / 路径表 / 开关）。
+  - `Tests/EditMode/UpdateSystemTests.cs`：+6 条回归用例（Gitee 无 size 形态、无 APK 不得给候选源、
+    未知总量不得报 99%、总量取值优先级、Content-Length 解析、APK 魔数与体积校验），既有 6 条不动。
+- **接口影响面**：`ParseReleaseJson` / `CheckForUpdate` / `StartDownload` / `CancelDownload` /
+  `InstallApk(string)` / `ShowToast` / `GetApkSavePath` 与既有事件签名全部保持；新增
+  `OnUpdateInfoRefined`、`InstallApk(string, out string)`、`HasReadyApk()` 及 6 个静态纯函数；
+  `UpdateInfo` 字段零增删。未动 `BuildAndProfilerSuite.cs` / `ProjectScaffolder.cs` / Release 流程 / 签名配置。
+- **验证**：`script.recompile_status` → `compilationFailed: false` 且 `P1.Game` / `P1.Editor` / `P1.Tests.EditMode`
+  三套汇编均在最后一次源码写入之后重新产出；`tools/run_tests.sh fast` → EditMode **319 条 / 318 通过 /
+  1 skipped（既有 `ObstacleMaterial_KeepsEdgeLineVisible`）/ 0 失败**，PlayMode UI 子集 1/1；
+  菜单 `P1/构建/12` 自检通过；内存与磁盘的 `useCustomMainManifest` 均已确认为 1。
+  **另用线上真实 Release JSON 实测解析器**：Gitee 真包 → `hasApk` / APK 链接 / 5 个候选源正确、`size = 0` 如预期、
+  `\n` 正确反转义；保真构造的 GitHub 嵌套 `uploader` 形态 → `size = 57402487` → `54.7 MB` 且正确跳过 `.sha256` 附件
+  （**旧正则在这个形态上匹配不到**，可见重写还顺手修掉了一个潜在缺陷）；GitHub 限流响应 → 不硬解析、转下一个端点。
+- **待人工验证（Agent 无法自查）**：真机端到端「下载 → 安装」需出一次包后装到设备上点一次。
+  出包后可用 `aapt2 dump xmltree --file AndroidManifest.xml <apk> | grep -i -A3 provider` 复核合并结果。
+  运行期关键节点已打日志（命中的候选源、响应头 Content-Length、真实 total、APK 校验结果、`InstallApk` 失败原因串），可对着 logcat 核对。
+- **已知限制（非缺陷，需知情）**：
+  - 安装包目前是 **Android Debug 签名**（工程未配 keystore，Unity 用 `~/.android/debug.keystore`；
+    已核对指纹与已出包一致：SHA-1 `91:CC:39:13:…`）。本机出的包可互相覆盖安装，
+    但设备上若装的是别处签名的同包名版本会被系统拒装（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
+    换正式 keystore 属发版决策，本任务不动。
+  - Gitee 下载源**不支持 Range**（实测 `Range: bytes=0-1023` 仍返回 200 全量），故不做断点续传；失败即切下一个候选源重下。
+- **依赖**：无（独立任务）
+- **领域**：UI/Update + Android 工程配置
+
+### 角色潜入/浮出/游动/滑行动画重做（P21，2026-10-31，参考 INKWAVE 源码）
+
+- [x] **形态手势**：`MoveTowards` 100ms 线性压扁 → `AnimSpring1D`（ω=18/ζ=0.35，约 0.42s 过冲回稳）
+  + `CharacterAnimConfigSO` 四条 AnimationCurve（kid/squid × Y/XZ）。过冲区编码表演：
+  f<0 浮出拉伸（kid Y≈1.30、XZ≈0.72），f>1 潜入回稳摆动（squid 1.05→0.97→1.0）；
+  快速连按翻转目标时弹簧状态天然连续，无 pop。武器显隐加迟滞（藏 f≥0.35 / 亮 f≤0.30）。
+- [x] **表演点缀**：潜入自由臂高举 55°/0.22s + 果冻下蹲冲量；浮出双臂弹开 35°/0.28s + 拉伸冲量 + 墨焰甩动。
+- [x] **乌贼游动姿态**（`SwimPoseSolver`，对齐 character.js L3550-3611）：身体起伏波（5→14 rad/s）+ 转向侧倾
+  banking（0.08 系数、钳 ±20° 保守版）+ 保体积速度拉伸（Z 1+0.2·sv，XZ=1/√，体积恒等）+ 头部点摆。
+- [x] **逐根触须行波**：4 根拖尾触须按相邻相位差 0.9rad 驱动（12+8·sv rad/s，摆幅 3°→14°），
+  `_squidTentacles`/`_squidTentacleBaseRots` **序列化**并在 Awake 重捕获基准（非序列化会导致进 Play 丢绑定）。
+- [x] **滑行**（motor 侧，对齐 config.js L60 swimDecel=42）：新增 `EffectiveMoveSpeed` 超速惯性衰减——
+  出水 11.8→6.0 不再瞬贴目标，约 1.5m 滑行；加速方向仍瞬时对齐（起步手感不变）。
+- [x] **急转弯甩墨**：游速≥4.5 且 |yawRate|≥3.2 rad/s 向转弯外侧喷一蓬墨滴（0.22s 冷却，复用 VfxPool）。
+- [x] **镜头速度感**：`tpsSpeedFovKick`（默认 +3.5°）随「跑速→潜墨全速」归一叠加，保守拉伸。
+- **数值来源**：`inkwave-aah-research/src/game/character.js` L383-386/1342-1358/3550-3611、`src/config.js` L52-86、
+  `src/fx/fxHooks.js` L354-360。
+- **影响面**：新增 `CharacterAnimConfigSO`（`ScriptableObjects/CharacterAnimConfig.asset`，菜单 `P1/角色动画/0` 生成）、
+  `AnimSpring1D`、`SwimPoseSolver`、`CharacterAnimConfigTools`；改 `CharacterVisualController` / `CharacterVisualAssembler` /
+  `InkCharacterMotor` / `PlayerConfigSO` / `GameConfigSO` / `TopDownCameraFollow` / `ProjectScaffolder`（角色装配处接线）。
+  公共接口全部增量（`BindHierarchy` 30 参签名未动，新增 `BindSquidTentacles` / `BindAnimationConfig` / `EffectiveMoveSpeed`）。
+  场景经菜单 `P1/角色与武器/升级场景中所有角色模型 (P5-A)` 重新装配并保存（8 个角色绑定触须+动画配置）。
+- **验证**：EditMode **326 条全绿**（新增 `FormMorphGestureTests` 7 条 + `SwimPoseSolverTests` 6 条）；
+  PlayMode 全量 **97 条 / 94 通过**——角色相关（`CharacterVisualPlayTests` 3 条 + 新增 `SwimFormPlayTests` 3 条）全绿，
+  剩 3 条失败属并发任务的 HUD 层级 / 出生保护计时 / 手雷伤害，与本任务无关。近景摆拍渲染确认
+  乌贼模型完好、游动姿态（触须扇形+拉伸侧倾）与浮出过冲（kid Y1.26/XZ0.76）观感正常。
+- **已知限制**：触须行波用骨骼相位差近似（无蒙皮顶点行波）；墨面身体隆起 shader、贴墙卧姿、音频 pitch 随速度未做。
+- **领域**：Player/Visual + Motor + Camera（增量）
+
+### 角色形象重制：圆钝蛋头 + 双腿双脚 + FK 步态动画（P22-A，2026-10-31，参考 INKWAVE 机制）
+
+- [x] **用户反馈**：① 角色"头尖尖的"不好看，要蛋仔式 Q 版圆润简洁；② 加双腿双脚 + 协调的移动动作；③ 参考 `inkwave-aah-research/` 的动作实现。
+- **设计决策（用户确认）**：移除头顶墨焰触须（"头尖"观感来源之一，队伍色由腰带/虹膜/袖口/胸渍/墨罐液面承担）；
+  短粗蛋仔腿（腿 0.22m、总高保持 1.12m → 碰撞体/相机/遮挡采样/武器挂点/瞄准高度零改动）；
+  单块蛋形躯干不拆头身，只改轮廓函数。
+- **根因（头尖）**：旧轮廓 `sin(π·t^0.68)^0.5` 上段 64% 持续收窄、顶端有效曲率半径仅 ≈0.18m（体宽 0.43m），
+  读成"洋葱尖"；InkCrest 三束触须从头顶立起进一步加重。
+- [x] **圆钝头顶**：`SampleEggRadius01` 重写为「下段饱满蛋形（α=0.72，最大半径 ~38%）+ 顶部椭圆圆穹
+  （t≥0.45，顶端曲率半径 ρ≈a²/b≈0.37m 与体宽同级）」，soft-max 混合保证 C1 无折痕；
+  95%/97.5% 高度保有 0.42x/0.30x 最大半径（旧版 0.27x/0.25x）。40×40 旋转体、解析法线管线不变。
+- [x] **躯干抬升**：`BodySquash` 下新增 `Torso` 节点（y=TorsoBaseY=0.22m），蛋体/短裤/腰带/面部/墨罐/Head 锚点
+  全部移入；`EggRadiusAt`/`EggFrontPoint` 切换到 TorsoHeight=0.90 躯干局部空间，五官 y 按 0.90/1.12 比例重映射。
+  挤压仍作用于 BodySquash（绕地面原点），躯干压进弯曲膝盖 = 落地缓冲的正确观感。
+- [x] **移除 InkCrest**：删除触须束构建与 `GetSideTentacleMesh`/`GetCenterTentacleMesh`/`CreateTentacleMesh`/`Bezier`
+  （仅被触须使用）；`leftHair/rightHair` 传 null 保持旧接口，控制器 `UpdateHairSway` 判空自动跳过。
+- [x] **双腿双脚**：`Chest/Hips/{LeftLeg,RightLeg}`（髋枢轴世界 y=0.27 藏在躯干下段），每腿
+  `LegRoot → Thigh(短裤蓝胶囊) + Knee → Calf(肤色胶囊) + Ankle → Foot(深色圆头靴)`，鞋底精确落在 y=0
+  （0.27−0.12−0.10−0.05=0）。腿挂 Hips（Chest 子树）而非 BodySquash：触地挤压不连带腿部。零新材质。
+- [x] **FK 步态**（`EggGaitSolver` 新增 `LegSwingDeg/KneeBendDeg/FootPitchDeg`，机制参考 character.js L1281-1288
+  的幅度随速度插值）：摆幅 8°→26°、膝弯 15°→45° 随 speed01 插值；左右腿与同侧手臂反相（交叉协同）；
+  膝弯窗口 = max(0,cos φ)（双腿穿过躯干下方时屈膝抬脚，与触地挤压同帧 → 收步与压扁一体）；
+  脚尖随动下垂 ≤10°（极简 toe-roll）。滞空收腿（_poseAir：前抬 22°/屈膝 48°，0.12s 淡入）、
+  落地屈膝吸收（随果冻弹簧负值，回弹伸直）、攀墙收拢悬挂。控制器新增 `BindLegRig`（可空参数，向后兼容）。
+- **不做**（记录取舍）：世界锁定落脚 IK（约 200 行，俯视角收益低，急转弯轻微滑步由摇摆掩盖）；
+  蒙皮/Animator（伪骨骼 FK 足够）；头身分离（用户选单块蛋形）；乌贼形态不动（KidRoot 整体 morph，腿自动隐藏）。
+- **验证**：`compilationFailed:false` 全程干净；EditMode **349/352**（本任务 3 条新增/改写用例
+  `KidHierarchy_HasStubbyLegs_AndKeepsControllerPaths` / `EggBodyMesh_HasEggSilhouetteAndPlantedBase` /
+  `GaitSolver_Legs*` 全绿；2 条失败为并发 UI 任务的 `ScreenInkTransitionTests`，与本次无关）；
+  PlayMode **99/100**（唯一失败 `Respawn_GrantsThreeSecondSpawnProtection` 为 P21 记录在案的并发既有失败）。
+  场景经 `P1/角色与武器/升级场景中所有角色模型 (P5-A)` 重建，脚底相对角色原点 −0.002m 贴地、
+  髋 0.27 / 膝 0.15 / 踝 0.05 全部按 CharacterMetrics 落位。
+  **视觉逐图验收**（本轮教训：截图必须看，节点数据不算数）：首版渲染发现① soft-max 亮脊线
+  （混合半宽 0.10 的交界隆起被 toon 着色显形）② 圆穹峰值=体宽导致 0.38–0.58 高度全宽"球"感
+  ③ 腿偏细——分别修为半宽 0.035 / 峰值 0.96 / 腿径 +17%；二次渲染 `Logs/p5a_character_kid_front|back.png`
+  确认脊线消失、蛋形轮廓成立、短腿墩实。步态序列 `Logs/p8d_gait_0~5.png`（工具扩展为同步摆腿）
+  确认收步屈膝压低 / 迈开伸直抬升 / 异侧手脚交叉协同。
+  实现期两个已修复的 bug 留痕：SmoothMin 的 lerp 参数序写反导致轮廓下段坍缩成"悬浮蘑菇伞"
+  （EditMode 轮廓用例抓到）；Hips 初版误挂 KidRoot（场景节点检查抓到，已归位 Chest/Hips）。
+- **领域**：Player/Visual + Editor 步态截图工具（增量，公共 API 全兼容；
+  `BuildKidHierarchy` 私有签名新增 6 个 out 参数、控制器新增 `BindLegRig`）
+
+### 结算页纯平化：去尖角 / 去渐变 / 纯色实心块（P14-J，2026-10-31）
+
+- [x] **用户反馈**：结算界面「不要尖尖的，不要渐变，要扁平的、纯色的」。
+- **根因**：
+  1. 两个覆盖率进度柱的填充 `Image` 仍用场景烘焙的内置九宫格 `UISprite`（`ProjectScaffolder.CreateSolidWhiteSprite()`），
+     在 24px 高的槽里露出圆角端帽与边缘灰阶——实机表现为「两头尖尖 + 左端一段由灰到橙的渐变」；
+  2. 四角装饰里有 3 枚旋转方块（45°/15°/30° = 菱形/斜块），是屏幕上仅剩的尖角；
+  3. 结算页形状（队伍卡、Tag、柱槽、徽章、按钮）未统一归零 `DrawGloss / GlossAlpha / InnerRimAlpha / ShadowOffset`，
+     依赖各调用点各自设置，存在旧参数漏网风险。
+- **修复**（只改 `UI/MatchFlowUI.cs`，公共签名零改动）：
+  1. `EnsureResultVisuals` 的 `resultBarA/B` 改走 `UIFlatSprite.MakeFlat(…, filled: true)`：
+     1×1 纯白精灵 + `Image.Type.Filled`，直角端头、边缘零灰阶，`fillAmount` 语义不变；
+  2. 四角 `ResultSquareTL/TR/BR` 旋转全部归零（0°），只保留轴对齐实心块；左下队色圆不变；
+  3. 新增 `FlattenShape()` 并在结算页构建末尾遍历所有 `UIInkShapeGraphic` 硬性归零
+     斜切高光 / 内沿墨光 / 网点 / 硬阴影 / 圆角。
+- **验证**：`compilationFailed:false`；Play 模式运行时断言 `FillA/FillB` 的 `sprite=UIFlatWhite`、四角 `rot=0.0`；
+  实机截图 `Logs/ui_result_fixed.png` 像素扫描：深橙渐变像素 0 个、柱条左缘 1px 硬切（`411 → (255,112,13)`）、
+  调色板仅剩白/墨/红/黄/队色橙/队色蓝。
+  `tools/run_tests.sh fast` EditMode 347/350、`ui` PlayMode 51/52；
+  两项/一项失败均来自并发任务新增的未跟踪文件（`ScreenInkTransitionTests`、`LensInkPlayTests`），与本次改动无关。
+- **影响面**：仅结算页运行时装配；无场景 / 预制体 / 资产改动；`FillA/FillB` 仍复用既有 Image 字段。
+
+### P18 画质增强（画风重做：保留明亮基调，只加质感）
+
+- [x] **[P18-A] 共享湿润着色库 + 环境全局推送 + 平台画质档**（领域 Shader/Ink/Core）
+  - 新增 `Shaders/InkWetShading.hlsl`（解析天空环境镜面 / 三段湿润曲线 / 切线微表面扰动）；
+  - 新增 `Core/RenderEnvGlobals.cs`（`_P1EnvSky*` 全局推送 + 桌面 `P1_INK_HIGH` 关键词，移动端自动降级）；
+  - `InkSurfaceController.PushWetClockGlobals` 接入推送；`InkGridConfigSO.inkSheenSeconds=22`（缎面余晖）。
+- [x] **[P18-B] 墨面光照重写（InkGround / InkSurfaceOverlay）**（领域 Shader/Ink）
+  - 湿墨获得解析天空环境反射（含太阳盘 glitter、掠射抑制、`min(spec,1)` 硬上限、**环境反射按墨色染色 80% 锁队色纯度**）；
+  - 墨面颗粒法线 / 粗糙度扰动（InkGrain_N/RMO 平铺）+ 咖啡环积墨 + 墨缘碎墨（均 `P1_INK_HIGH` 专属，移动端零新增采样）；
+  - 漫反射下限 0.72→0.40、`_InkGlow 0.20→0.10`、`_InkShadowFloor 0.72→0.62`，亮度改由真实反射承担；
+  - **修复老 bug**：地面墨改吃已转线性的 `_GlobalTeamA/BColor`（旧版读未转换材质值 → 地面墨恒比墙面/UI 淡一截，即"地面油漆发灰"根因之一）；下半球环境反射压暗（旧亮地平线把湿墨刷成鲑鱼色）。
+- [x] **[P18-C] 场景表面 PBR（ObstacleDitherLit / PropLit）**（领域 Shader/Environment）
+  - 世界空间双轴投影法线 + RMO（G=AO / A=Smoothness / R=金属）+ 接触遮蔽，混凝土族 / 钢板族分贴图；
+  - dither / 边线 / 顶面墨水 / DOTS 变体零回归；`P1_INK_HIGH` 门控采样。
+- [x] **[P18-D] 墙面墨质感 + 飞行墨体**（领域 Ink/Weapons/Shader）
+  - `InkWall`：环境镜面、各向异性颗粒法线、浸润暗 halo、重力流挂、per-face `_WallWetness`（独立材质实例，规避 OcclusionFader MPB 清空坑，零 GC）；
+  - 新 `P1/InkBody`：弹丸/炸弹/风暴云从 URP/Unlit 色块升级为假球法线 + 菲涅尔暗边 + 背光透光 + 环境反射，缺 shader 自动回退 Unlit；
+  - `GetTeamColorLinear`：修掉 MPB/材质塞原始 sRGB 队色的同款色偏（弹丸/特效）。
+- [x] **[P18-E] 程序化 PBR 贴图烘焙**（领域 素材管线）
+  - `tools/bake_arena_textures.py`（种子 20261029 可复现，9 张 7.68MB）：深炭紫 albedo V2（备选档）、地面 N/RMO、无缝墨面颗粒 N/RMO、混凝土/钢板 N/RMO；
+  - `MediaImportPolicy` 新增 `NormalMap/MaskMap` 后缀判定（`_N`→Normal+线性、`_RMO`→线性）；
+  - 地面 albedo 仍用原明亮版（用户决策：保留明亮基调，深炭紫仅作备选）。
+- [x] **[P18-F] 后处理 grade + 屏幕液体特效**（领域 UI/Editor）
+  - `ArenaAtmosphereBuilder`：SplitToning（冷紫阴影/暖高光）+ ColorCurves（压 toe/shoulder）；installer 菜单 4 写明亮基调 + 质感参数（菜单 1 = 旧扁平哑光档一键回退）；
+  - 新 `P1/UI/LensInk`（镜头墨滴 metaball，PC 折射/移动半透明，96 滴上限防 GLES3 uniform 爆炸）、
+    `P1/UI/ScreenInkTransition`（阵亡墨漫灌 + 复活虹膜开屏 + 受击形变/色差）、
+    升级 `P1/UI/InkEdgeWarning`（粘液带立体法线 + 顶部垂滴）、`P1/UI/KillFlash` 对齐 uKill 曲线；
+  - **修复真 bug**：`LensInkView.Tick` 门控只看 `_activeCount` 而 `AddRawDrop` 不改它 → 镜头墨滴实机永不显示（PlayMode 用例逮住）；
+  - **修复**：`InkEdgeWarningMath.CalculateBottomWeight` 误用 `Mathf.SmoothStep`（内部 Clamp01 → 顶部恒漏 0.4 底边厚度）。
+- [x] **[P18-G] 出生台队色转线性**（领域 Editor）：installer 补写 `Mat_SpawnPad_TeamA/B._BaseColor = Linear(teamPad)`（原为原始 sRGB 值 → 实机浅鲑鱼色）。
+- **验证**：编译 `compilationFailed:false`；`tools/run_tests.sh fast` EditMode 352/352 + PlayMode UI 52/52 全绿；
+  实机对照截图：旧扁平哑光档 `Logs/p17a_painted.png`（地面墨 #FF7811、湿墨无反光）→ 新档 `Logs/p18_v8.png`
+  （地面墨 #FF7B20 与墙面/UI 对齐 + 湿墨环境反光 + 明亮基调不变）；
+  二分定位留档：`Logs/p18_expK_*`（clearcoat=0 即恢复正橙）、`Logs/p18_expL_env0`（envspec=0 即恢复正橙）。
+- **影响面**：`Shaders/{InkGround,InkWall,ObstacleDitherLit,PropLit}.shader`、`Shaders/{InkWetShading,InkSurfaceOverlay}.hlsl`、
+  `Resources/{InkBody,LensInk,ScreenInkTransition,InkEdgeWarning,KillFlash}.shader`、
+  `Scripts/{Core/RenderEnvGlobals,Editor/{ToonStyleInstaller,ArenaAtmosphereBuilder,MediaImportPostprocessor}}.cs`、
+  `Scripts/Environment/ArenaStyleSO.cs`、`Scripts/Ink/{InkSurfaceController,InkWallSurface,InkGridConfigSO}.cs`、
+  `Scripts/Weapons/{InkProjectilePool,InkBombPool,InkStormCloudPool}.cs`、`Scripts/UI/{LensInk*,ScreenInkTransition*,InkEdgeWarning*,KillFlashView,HudController}.cs`、
+  `tools/bake_arena_textures.py`、`Art/Textures/{Arena,Ink,Surfaces}/`；公共 API 全部向后兼容（只加重载/新字段）。
+- **调参入口**：`ScriptableObjects/ArenaStyle.asset` 的「INKWAVE 质感」段（envSpecStrength / inkGrain* / coffeeRing / surface* / splitToning*），
+  改完跑菜单 `P1/画风/4`；移动端自动降级由 `RenderEnvGlobals` 按 `isMobilePlatform` 控制。
+
 ## 5. 验收标准与风控纪律
 
 1. **零外部破坏与回退机制**：

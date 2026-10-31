@@ -8,9 +8,10 @@ using UnityEngine;
 namespace P1.Weapons
 {
     /// <summary>
-    /// 副武器「抛物线延时墨水手雷」对象池（P3-B 精细化）：
-    /// 落地后 0.95s 警报引信 → 核心 180 秒杀（3.1m 伤害半径内平方衰减到 35）→ 2.7m 涂地。
-    /// 爆炸点仍与 64 点弹道预测线共享 <see cref="InkBombTrajectoryUtility"/>，落点完全吻合。
+    /// 副武器「弹道延时墨水手雷」对象池（对齐 inkwave 投掷模型）：
+    /// 手雷以出手初速做真实物理飞行（重力 + 撞墙反弹），接触地面后才启动 0.95s 警报引信
+    /// → 核心 180 秒杀（3.1m 伤害半径内平方衰减到 35）→ 2.7m 涂地。
+    /// 飞行常数与 <see cref="InkBombTrajectoryUtility.SimulateThrow"/> 预览仿真完全同参，所见即所得。
     /// </summary>
     public class InkBombPool : MonoBehaviour
     {
@@ -25,26 +26,33 @@ namespace P1.Weapons
             public Transform InnerFillTransform;
             public MeshRenderer InnerFillRenderer;
 
-            public Vector3 StartPos;
+            public Vector3 Position;
+            public Vector3 Velocity;
             public Vector3 LandingPos;
             public Team Team;
             public Color Color;
-            public float FlightDuration;
-            public float ArcHeight;
+            public float Gravity;
+            public float Age;
             public float FuseDelay;
+            public float Elapsed;
+            public bool Armed;
             public float SplatRadius;
             public float DamageRadius;
             public float InnerKillRadius;
             public float InnerDamage;
             public float OuterDamage;
-            public float Elapsed;
-            public bool HasLanded;
             public Action<int> OnCellsPainted;
             public CombatantHealth Attacker;
         }
 
+        /// <summary>未引信手雷的最长滞空时间（秒）：防极端地形无限反弹，超时静默回收。</summary>
+        private const float MaxAirLifetime = 8f;
+        /// <summary>引信启动后手雷球心离地高度（米）：与球体半径 0.24 对齐。</summary>
+        private const float ArmedRestHeight = 0.24f;
+
         private readonly List<ActiveBomb> _active = new List<ActiveBomb>(16);
         private readonly Queue<ActiveBomb> _pool = new Queue<ActiveBomb>(16);
+        private readonly RaycastHit[] _flightHits = new RaycastHit[8];
 
         private Material _sharedMat;
         private Mesh _ringMesh;
@@ -58,8 +66,13 @@ namespace P1.Weapons
             Instance = this;
             _propBlock = new MaterialPropertyBlock();
 
-            Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
-            if (sh == null) sh = Shader.Find("Sprites/Default");
+            Shader sh = Shader.Find("P1/InkBody");
+            if (sh == null)
+            {
+                Debug.LogWarning("[InkBombPool] 未找到 Shader 'P1/InkBody'，回退到 Unlit 材质。");
+                sh = Shader.Find("Universal Render Pipeline/Unlit");
+                if (sh == null) sh = Shader.Find("Sprites/Default");
+            }
             _sharedMat = new Material(sh) { name = "InkBombSharedMat" };
             _ringMesh = VfxPool.BuildRingMesh(36, 0.90f, 1.0f);
 
@@ -98,10 +111,13 @@ namespace P1.Weapons
             InkStormCloudPool.Instance?.ClearAllClouds();
         }
 
-        /// <summary>投掷手雷。attacker 为投掷者（P6-A 打击标记/击杀 Hitstop 归属，旧调用可省略）。</summary>
+        /// <summary>
+        /// 投掷手雷（inkwave 弹道模型）：以指定初速从 startPos 真实抛出，远近与反弹全部由物理决定。
+        /// attacker 为投掷者（P6-A 打击标记/击杀 Hitstop 归属，旧调用可省略）。
+        /// </summary>
         public void ThrowBomb(
             Vector3 startPos,
-            Vector3 targetGroundPos,
+            Vector3 throwVelocity,
             Team team,
             WeaponConfigSO config,
             Action<int> onCellsPainted,
@@ -109,18 +125,19 @@ namespace P1.Weapons
         {
             ActiveBomb b = _pool.Count > 0 ? _pool.Dequeue() : CreateBombNode(_active.Count + 16);
 
-            targetGroundPos = InkBombTrajectoryUtility.ResolveLandingPosition(startPos, targetGroundPos, config);
-
             Color teamCol = InkSurfaceController.Instance != null
-                ? InkSurfaceController.Instance.GetTeamColor(team)
-                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f) : new Color(0.15f, 0.42f, 1f));
+                ? InkSurfaceController.Instance.GetTeamColorLinear(team)
+                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f).linear : new Color(0.15f, 0.42f, 1f).linear);
 
-            b.StartPos = startPos;
-            b.LandingPos = targetGroundPos;
+            b.Position = startPos;
+            b.Velocity = throwVelocity;
+            b.LandingPos = startPos;
             b.Team = team;
             b.Color = teamCol;
-            b.FlightDuration = config != null ? config.bombFlightDuration : 0.45f;
-            b.ArcHeight = config != null ? config.bombArcHeight : 3.2f;
+            b.Gravity = config != null && config.bombThrowGravity > 0.1f ? config.bombThrowGravity : 24f;
+            b.Age = 0f;
+            b.Elapsed = 0f;
+            b.Armed = false;
             b.FuseDelay = config != null ? config.bombFuseDelay : 0.95f;
             b.SplatRadius = config != null ? config.bombSplatRadius : 2.7f;
             b.DamageRadius = config != null
@@ -129,8 +146,6 @@ namespace P1.Weapons
             b.InnerKillRadius = config != null ? config.bombInnerKillRadius : 1.2f;
             b.InnerDamage = config != null ? config.bombInnerDamage : 180f;
             b.OuterDamage = config != null ? config.bombOuterDamage : 35f;
-            b.Elapsed = 0f;
-            b.HasLanded = false;
             b.OnCellsPainted = onCellsPainted;
             b.Attacker = attacker;
 
@@ -158,43 +173,80 @@ namespace P1.Weapons
             for (int i = _active.Count - 1; i >= 0; i--)
             {
                 ActiveBomb b = _active[i];
-                b.Elapsed += dt;
 
-                if (!b.HasLanded)
+                if (!b.Armed)
                 {
-                    float t = Mathf.Clamp01(b.Elapsed / Mathf.Max(0.05f, b.FlightDuration));
-                    Vector3 pos = InkBombTrajectoryUtility.EvaluateArcPoint(b.StartPos, b.LandingPos, b.ArcHeight, t);
-                    b.BombTransform.position = pos;
-                    b.BombTransform.Rotate(Vector3.right * (540f * dt), Space.Self);
-
-                    if (t >= 1f)
+                    b.Age += dt;
+                    if (b.Age > MaxAirLifetime || b.Position.y < -10f)
                     {
-                        b.HasLanded = true;
-                        b.Elapsed = 0f;
-                        b.BombTransform.position = b.LandingPos + Vector3.up * 0.24f;
-
-                        Vector3 ringPos = b.LandingPos + Vector3.up * 0.05f;
-                        b.OuterRingTransform.position = ringPos;
-                        b.OuterRingTransform.localScale = new Vector3(b.DamageRadius, 1f, b.DamageRadius);
-                        b.OuterRingTransform.gameObject.SetActive(true);
-                        SetRendererColor(b.OuterRingRenderer, b.Color);
-
-                        b.InnerFillTransform.position = ringPos;
-                        b.InnerFillTransform.localScale = new Vector3(0.2f, 1f, 0.2f);
-                        b.InnerFillTransform.gameObject.SetActive(true);
-                        SetRendererColor(b.InnerFillRenderer, Color.Lerp(b.Color, Color.white, 0.45f));
-
-                        // 落地引信声：bomb_beep 音效
-                        if (AudioManager.Instance != null)
-                        {
-                            AudioManager.Instance.PlayBombBeep();
-                        }
+                        // 极端地形兜底：无限反弹或飞出地图时静默回收，不引信不爆
+                        RecycleAt(i);
+                        continue;
                     }
 
+                    // 半隐式欧拉积分 + 分段射线：与 SimulateThrow 预览同常数，所见即所得
+                    b.Velocity = new Vector3(b.Velocity.x, b.Velocity.y - b.Gravity * dt, b.Velocity.z);
+                    Vector3 next = b.Position + b.Velocity * dt;
+                    Vector3 delta = next - b.Position;
+                    float dist = delta.magnitude;
+
+                    bool hitWorld = false;
+                    RaycastHit hit = default;
+                    if (dist > 0.0001f)
+                    {
+                        Vector3 dir = delta / dist;
+                        hitWorld = CastBombSegment(b.Position, dir, dist, b, out hit);
+                    }
+
+                    if (hitWorld)
+                    {
+                        bool isFloor = hit.normal.y > 0.6f;
+                        if (isFloor)
+                        {
+                            // 落地即引信：停在接触点旁，进入 0.95s 警报（inkwave bomb:arm 语义）
+                            b.Position = hit.point + hit.normal * ArmedRestHeight;
+                            b.LandingPos = b.Position;
+                            b.Armed = true;
+                            b.Elapsed = 0f;
+
+                            b.BombTransform.position = b.Position;
+                            Vector3 ringPos = hit.point + Vector3.up * 0.05f;
+                            b.OuterRingTransform.position = ringPos;
+                            b.OuterRingTransform.localScale = new Vector3(b.DamageRadius, 1f, b.DamageRadius);
+                            b.OuterRingTransform.gameObject.SetActive(true);
+                            SetRendererColor(b.OuterRingRenderer, b.Color);
+
+                            b.InnerFillTransform.position = ringPos;
+                            b.InnerFillTransform.localScale = new Vector3(0.2f, 1f, 0.2f);
+                            b.InnerFillTransform.gameObject.SetActive(true);
+                            SetRendererColor(b.InnerFillRenderer, Color.Lerp(b.Color, Color.white, 0.45f));
+
+                            if (AudioManager.Instance != null)
+                            {
+                                AudioManager.Instance.PlayBombBeep();
+                            }
+                        }
+                        else
+                        {
+                            // 撞墙反弹：vn' = -vn * 1.35，整体衰减 0.6（inkwave 同参数）
+                            b.Position = hit.point + hit.normal * ArmedRestHeight;
+                            float vn = Vector3.Dot(b.Velocity, hit.normal);
+                            b.Velocity += hit.normal * (-vn * InkBombTrajectoryUtility.BounceReflect);
+                            b.Velocity *= InkBombTrajectoryUtility.BounceDampWall;
+                        }
+                    }
+                    else
+                    {
+                        b.Position = next;
+                    }
+
+                    b.BombTransform.position = b.Position;
+                    b.BombTransform.Rotate(Vector3.right * (540f * dt), Space.Self);
                     _active[i] = b;
                 }
                 else
                 {
+                    b.Elapsed += dt;
                     float fuseT = Mathf.Clamp01(b.Elapsed / Mathf.Max(0.05f, b.FuseDelay));
                     float curRingRadius = Mathf.Lerp(0.2f, b.DamageRadius, fuseT);
                     b.InnerFillTransform.localScale = new Vector3(curRingRadius, 1f, curRingRadius);
@@ -216,6 +268,37 @@ namespace P1.Weapons
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 弹道分段射线：命中最近的世界表面，穿透投掷者与同队角色（inkwave 炸弹不与角色碰撞）。
+        /// </summary>
+        private bool CastBombSegment(Vector3 origin, Vector3 direction, float distance, in ActiveBomb b, out RaycastHit hit)
+        {
+            int hitCount = Physics.RaycastNonAlloc(
+                origin, direction, _flightHits, distance, ~0, QueryTriggerInteraction.Ignore);
+            float nearest = float.PositiveInfinity;
+            bool found = false;
+            hit = default;
+            for (int bix = 0; bix < hitCount; bix++)
+            {
+                RaycastHit candidate = _flightHits[bix];
+                if (candidate.collider == null || candidate.distance > nearest)
+                    continue;
+
+                Transform candidateRoot = candidate.collider.transform.root;
+                if (b.Attacker != null && candidateRoot == b.Attacker.transform.root)
+                    continue;
+
+                CombatantHealth body = candidate.collider.GetComponentInParent<CombatantHealth>();
+                if (body != null && body.Team == b.Team)
+                    continue;
+
+                nearest = candidate.distance;
+                hit = candidate;
+                found = true;
+            }
+            return found;
         }
 
         private void DetonateBomb(in ActiveBomb b)

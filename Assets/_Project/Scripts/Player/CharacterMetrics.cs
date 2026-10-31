@@ -13,6 +13,20 @@ namespace P1.Player
         public const float BodyHeight = 1.12f;
         public const float BodyMaxRadius = 0.43f;
 
+        // ---- 圆头蛋形躯干 + 短粗腿（P22-A）----
+        // 总视觉高度保持 1.12m 不变：躯干 0.90m + 腿 0.22m，
+        // 因此碰撞体 / 相机枢轴 / 遮挡采样 / 武器挂点全部不受影响。
+        public const float TorsoHeight = 0.90f;
+        /// <summary>躯干底面（大腿根上方）的世界高度，BodySquash 下的 Torso 节点偏移。</summary>
+        public const float TorsoBaseY = 0.22f;
+        /// <summary>髋枢轴世界高度（藏在躯干下段内）：0.27 - 0.12 - 0.10 - 0.05 = 0，脚底正好贴地。</summary>
+        public const float HipPivotY = 0.27f;
+        /// <summary>髋枢轴横向半间距（±X）。</summary>
+        public const float HipOffsetX = 0.15f;
+        public const float ThighLength = 0.12f;
+        public const float CalfLength = 0.10f;
+        public const float FootHeight = 0.05f;
+
         // ---- 躯干枢轴 ----
         // 枢轴贴地：前倾与左右摇摆会像"蛋在原地摇"，而不是上半身单独折叠。
         public const float ChestPivotY = 0.05f;

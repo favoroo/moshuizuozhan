@@ -49,10 +49,10 @@ namespace P1.Editor
             EditorUtility.SetDirty(inkCfg);
 
             // 同步最新紧凑参数到资产
-            weaponCfg.maxRange = 7.2f;
+            weaponCfg.maxRange = 12f;
             weaponCfg.trailDropDistance = 1.05f;
-            weaponCfg.projectileSpeed = 21f;
-            weaponCfg.bombMaxThrowDistance = 7.5f;
+            weaponCfg.projectileSpeed = 34f;
+            weaponCfg.bombMaxThrowDistance = 12f;
             EditorUtility.SetDirty(weaponCfg);
 
             gameCfg.usePerspective = true;
@@ -822,6 +822,7 @@ namespace P1.Editor
                     weapon.Configure(weapon.Config, visualCtrl.ActiveMuzzle, visualRoot);
                 }
                 visualCtrl.Initialize(motor, weapon, team);
+                BindCharacterAnimConfig(visualCtrl);
                 EditorUtility.SetDirty(motor.gameObject);
                 count++;
             }
@@ -955,6 +956,14 @@ namespace P1.Editor
                 Transform chest = ctrl.KidRoot.transform.Find("Chest");
                 Transform leftArm = chest != null ? chest.Find("LeftArm") : null;
                 Transform rightArm = chest != null ? chest.Find("RightArm") : null;
+                // P22-A：双腿 FK 链（旧场景可能没有，逐节点判空）
+                Transform hips = chest != null ? chest.Find("Hips") : null;
+                Transform leftLeg = hips != null ? hips.Find("LeftLeg") : null;
+                Transform rightLeg = hips != null ? hips.Find("RightLeg") : null;
+                Transform leftKnee = leftLeg != null ? leftLeg.Find("Knee") : null;
+                Transform rightKnee = rightLeg != null ? rightLeg.Find("Knee") : null;
+                Transform leftAnkle = leftKnee != null ? leftKnee.Find("Ankle") : null;
+                Transform rightAnkle = rightKnee != null ? rightKnee.Find("Ankle") : null;
                 if (bodySquash == null || chest == null)
                 {
                     Debug.LogError("[ProjectScaffolder] 蛋形骨架节点缺失，无法生成步态序列图");
@@ -966,6 +975,12 @@ namespace P1.Editor
                 Quaternion chestBaseRot = chest.localRotation;
                 Quaternion leftBaseRot = leftArm != null ? leftArm.localRotation : Quaternion.identity;
                 Quaternion rightBaseRot = rightArm != null ? rightArm.localRotation : Quaternion.identity;
+                Quaternion leftLegBaseRot = leftLeg != null ? leftLeg.localRotation : Quaternion.identity;
+                Quaternion rightLegBaseRot = rightLeg != null ? rightLeg.localRotation : Quaternion.identity;
+                Quaternion leftKneeBaseRot = leftKnee != null ? leftKnee.localRotation : Quaternion.identity;
+                Quaternion rightKneeBaseRot = rightKnee != null ? rightKnee.localRotation : Quaternion.identity;
+                Quaternion leftAnkleBaseRot = leftAnkle != null ? leftAnkle.localRotation : Quaternion.identity;
+                Quaternion rightAnkleBaseRot = rightAnkle != null ? rightAnkle.localRotation : Quaternion.identity;
 
                 var camGo = new GameObject("GaitCam");
                 camGo.transform.SetParent(showcaseGo.transform, false);
@@ -990,6 +1005,14 @@ namespace P1.Editor
                     chest.localRotation = chestBaseRot * Quaternion.Euler(leanPitch, 0f, pose.RockDeg);
                     if (leftArm != null) leftArm.localRotation = leftBaseRot * Quaternion.Euler(pose.ArmSwingDeg, 0f, 0f);
                     if (rightArm != null) rightArm.localRotation = rightBaseRot * Quaternion.Euler(-pose.ArmSwingDeg, 0f, 0f);
+                    // P22-A：腿部与控制器 UpdateBodyPose 相同的符号约定（X 正 = 后摆/屈膝/脚尖下垂；
+                    // 左腿与左臂反相），膝弯峰值落在双腿穿过躯干下方的收步相位
+                    if (leftLeg != null) leftLeg.localRotation = leftLegBaseRot * Quaternion.Euler(-pose.LegSwingDeg, 0f, 0f);
+                    if (rightLeg != null) rightLeg.localRotation = rightLegBaseRot * Quaternion.Euler(pose.LegSwingDeg, 0f, 0f);
+                    if (leftKnee != null) leftKnee.localRotation = leftKneeBaseRot * Quaternion.Euler(pose.KneeBendDeg, 0f, 0f);
+                    if (rightKnee != null) rightKnee.localRotation = rightKneeBaseRot * Quaternion.Euler(pose.KneeBendDeg, 0f, 0f);
+                    if (leftAnkle != null) leftAnkle.localRotation = leftAnkleBaseRot * Quaternion.Euler(pose.FootPitchDeg, 0f, 0f);
+                    if (rightAnkle != null) rightAnkle.localRotation = rightAnkleBaseRot * Quaternion.Euler(pose.FootPitchDeg, 0f, 0f);
 
                     RenderCameraToPng(cam, $"Logs/p8d_gait_{frame}.png", 900, 900);
                 }
@@ -1111,6 +1134,7 @@ namespace P1.Editor
             weapon.Configure(weaponCfg, visualCtrl.ActiveMuzzle, visualRoot.transform);
 
             visualCtrl.Initialize(motor, weapon, team);
+            BindCharacterAnimConfig(visualCtrl);
 
             if (isLocalPlayer)
             {
@@ -1124,6 +1148,19 @@ namespace P1.Editor
             }
 
             return root;
+        }
+
+        /// <summary>
+        /// 绑定角色动画调参配置（CharacterAnimConfig.asset）：资产存在则绑定，缺失时跳过——
+        /// CharacterVisualController 运行时回退到 INKWAVE 数值的共享默认实例，绝不因缺资产起不来。
+        /// </summary>
+        private static void BindCharacterAnimConfig(CharacterVisualController visualCtrl)
+        {
+            var animCfg = AssetDatabase.LoadAssetAtPath<CharacterAnimConfigSO>(CharacterAnimConfigTools.AnimConfigPath);
+            if (animCfg != null)
+            {
+                visualCtrl.BindAnimationConfig(animCfg);
+            }
         }
 
         private static void BuildHudCanvas()

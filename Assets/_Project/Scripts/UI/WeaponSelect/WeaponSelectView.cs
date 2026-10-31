@@ -63,6 +63,7 @@ namespace P1.UI.WeaponSelect
         private float _targetDrawerX = 24f;
         private float _drawerWidth = 620f;
         private bool _built;
+        private Rect _lastSafeArea;
 
         public event Action<int, WeaponConfigSO> OnWeaponSelected;
 
@@ -653,7 +654,7 @@ namespace P1.UI.WeaponSelect
         public void SetDrawerOpen(bool open)
         {
             _isDrawerOpen = open;
-            _targetDrawerX = open ? 24f : -(_drawerWidth + 40f);
+            _targetDrawerX = open ? 24f : ClosedDrawerX();
             if (_backdropGo != null)
             {
                 _backdropGo.SetActive(open);
@@ -664,6 +665,26 @@ namespace P1.UI.WeaponSelect
             {
                 _toggleMotion.Punch(0.06f);
             }
+        }
+
+        /// <summary>
+        /// 抽屉收起时的 X：必须整块退出<画布>左缘，而不是只退出 SafeArea 左缘。
+        /// 横屏刘海/挖孔设备的 SafeArea 左侧有内缩（实测约 130px），抽屉挂在 SafeArea 下，
+        /// 若只退 drawerWidth+40，内缩量会把抽屉右缘顶回屏幕内，留下一条白纸+黑边的竖条压住主菜单。
+        /// </summary>
+        private float ClosedDrawerX()
+        {
+            return -(_drawerWidth + 40f + SafeAreaLeftInCanvasUnits());
+        }
+
+        /// <summary>SafeArea 左侧内缩换算成画布单位（0 = 屏幕左缘没有内缩）。</summary>
+        private float SafeAreaLeftInCanvasUnits()
+        {
+            if (_safeAreaRoot == null) return 0f;
+            var canvasRect = _safeAreaRoot.parent as RectTransform;
+            if (canvasRect == null) return 0f;
+            float left = canvasRect.rect.width * _safeAreaRoot.anchorMin.x + _safeAreaRoot.offsetMin.x;
+            return Mathf.Max(0f, left);
         }
 
         private void UpdateToggleButtonState()
@@ -754,6 +775,7 @@ namespace P1.UI.WeaponSelect
         {
             if (_safeAreaRoot == null) return;
             Rect safe = Screen.safeArea;
+            _lastSafeArea = safe;
             Vector2 min = safe.position;
             Vector2 max = min + safe.size;
 
@@ -766,10 +788,28 @@ namespace P1.UI.WeaponSelect
             _safeAreaRoot.anchorMax = max;
             _safeAreaRoot.offsetMin = Vector2.zero;
             _safeAreaRoot.offsetMax = Vector2.zero;
+
+            // 刘海内缩变了（旋转/进出全屏）时，收起中的抽屉必须跟着重新算退出位置，
+            // 否则旧位置会在新的内缩区里露出一截。
+            if (!_isDrawerOpen)
+            {
+                _targetDrawerX = ClosedDrawerX();
+                _currentDrawerX = _targetDrawerX;
+                if (_drawerRoot != null)
+                {
+                    _drawerRoot.anchoredPosition = new Vector2(_currentDrawerX, 0f);
+                }
+            }
         }
 
         private void Update()
         {
+            Rect safe = Screen.safeArea;
+            if (safe != _lastSafeArea)
+            {
+                ApplySafeArea();
+            }
+
             if (!Mathf.Approximately(_currentDrawerX, _targetDrawerX))
             {
                 _currentDrawerX = Mathf.Lerp(_currentDrawerX, _targetDrawerX, Time.unscaledDeltaTime * 24f);

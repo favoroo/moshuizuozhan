@@ -73,6 +73,7 @@ namespace P1.Ink
         private static readonly int WetClockNormProp = Shader.PropertyToID("_InkWetClockNorm");
         private static readonly int WetClockPeriodProp = Shader.PropertyToID("_InkWetClockPeriod");
         private static readonly int WetDryingSecondsProp = Shader.PropertyToID("_InkWetDryingSeconds");
+        private static readonly int SheenSecondsProp = Shader.PropertyToID("_InkSheenSeconds");
         private static readonly int GrowSecondsProp = Shader.PropertyToID("_InkGrowSeconds");
         private static readonly int GrowShrinkMetersProp = Shader.PropertyToID("_InkGrowShrinkMeters");
         private static readonly int GrowActiveProp = Shader.PropertyToID("_InkGrowActive");
@@ -417,6 +418,17 @@ namespace P1.Ink
             };
         }
 
+        /// <summary>
+        /// 线性空间的队伍色：专供 MaterialPropertyBlock / 材质 SetColor 使用。
+        /// MPB 与材质颜色都不会像 Shader.SetGlobalColor 那样自动做 sRGB→Linear 转换，
+        /// 直接塞原始值会把鲜艳橙渲染成浅鲑鱼色（P18 修正飞行墨体/弹丸/特效同款色偏）。
+        /// </summary>
+        public Color GetTeamColorLinear(Team team)
+        {
+            Color c = GetTeamColor(team);
+            return QualitySettings.activeColorSpace == ColorSpace.Linear ? c.linear : c;
+        }
+
         private void LateUpdate()
         {
             InitializeIfNeeded();
@@ -471,6 +483,9 @@ namespace P1.Ink
             Shader.SetGlobalFloat(WetClockPeriodProp, period);
             Shader.SetGlobalFloat(WetClockNormProp, Mathf.Repeat(now, period) / period);
             Shader.SetGlobalFloat(WetDryingSecondsProp, config != null ? config.inkDryingSeconds : 6f);
+            Shader.SetGlobalFloat(SheenSecondsProp, config != null ? config.inkSheenSeconds : 22f);
+            // 环境镜面全局 + 平台画质档位（P18）：地面/顶面/墙面/墨体共享同一套湿润反光参数。
+            RenderEnvGlobals.Pump();
             Shader.SetGlobalFloat(GrowSecondsProp, config != null ? config.splatGrowSeconds : 0.12f);
             Shader.SetGlobalFloat(GrowShrinkMetersProp, config != null ? config.atlasGrowShrinkMeters : 0.4f);
             Shader.SetGlobalFloat(GrowActiveProp, _atlas != null && _atlas.HasGrowingSplats() ? 1f : 0f);

@@ -116,6 +116,44 @@ namespace P1.Environment
         public float outlineFadeStart = 25f;
         public float outlineFadeEnd = 65f;
 
+        [Header("掩体边界线（P17-A）")]
+        [Tooltip("掩体每个面四周的深色硬边线：墨色统一后掩体与地面同色，靠这圈线辨认轮廓；压在墨水叠加之后，涂满墨仍可见")]
+        public Color coverEdgeLineColor = new Color(0.09f, 0.10f, 0.13f, 1f);
+        [Tooltip("边线宽度（米）")]
+        [Range(0.01f, 0.2f)] public float coverEdgeLineWidth = 0.05f;
+        [Tooltip("边线强度：0 = 关闭（会退回『掩体消失』问题）")]
+        [Range(0f, 1f)] public float coverEdgeLineStrength = 0.85f;
+        [Tooltip("未涂墨顶面提亮幅度：把可站立的掩体顶从地面里分出来")]
+        [Range(0f, 0.5f)] public float coverTopLift = 0.06f;
+
+        [Header("INKWAVE 质感（P18 画风重做）")]
+        [Tooltip("解析环境镜面总强度：湿墨照出天空与周围物体的核心开关，0 = 回到旧扁平观感")]
+        [Range(0f, 3f)] public float envSpecStrength = 1f;
+        [Tooltip("环境太阳盘锐度：湿面窄亮（~900），干面由着色器自动拉宽")]
+        [Range(64f, 4096f)] public float envSunDiscPower = 900f;
+        [Tooltip("墨面颗粒法线平铺密度（周期/米）")]
+        [Range(0.2f, 8f)] public float inkGrainScale = 1.6f;
+        [Tooltip("墨面颗粒法线强度：干墨的胶质表皮感")]
+        [Range(0f, 1f)] public float inkGrainStrength = 0.35f;
+        [Tooltip("墨面粗糙度扰动强度（与颗粒贴图 A 通道配合）")]
+        [Range(0f, 2f)] public float inkRoughVarStrength = 0.5f;
+        [Tooltip("墨缘咖啡环积墨强度：边缘厚度与饱和度上扬")]
+        [Range(0f, 1f)] public float coffeeRingStrength = 0.45f;
+        [Tooltip("场景表面法线强度（混凝土/钢板平铺贴图）")]
+        [Range(0f, 1.5f)] public float surfaceNormalStrength = 0.6f;
+        [Tooltip("场景表面遮蔽强度（RMO 的 G 通道）")]
+        [Range(0f, 1.5f)] public float surfaceAOStrength = 0.7f;
+        [Tooltip("场景表面光滑度缩放（RMO 的 A 通道）")]
+        [Range(0f, 2f)] public float surfaceSmoothnessScale = 1f;
+        [Tooltip("地面改用重烘的深炭紫 albedo V2（false = 保留旧浅暖灰贴图，用于一键回退对比）")]
+        public bool useInkwaveGround = true;
+        [Tooltip("分离调色：阴影染色（冷紫）")]
+        public Color splitShadowColor = new Color(0.30f, 0.28f, 0.44f, 1f);
+        [Tooltip("分离调色：高光染色（暖）")]
+        public Color splitHighlightColor = new Color(1.05f, 0.98f, 0.90f, 1f);
+        [Tooltip("分离调色强度")]
+        [Range(0f, 1f)] public float splitToningStrength = 0.35f;
+
         [Header("装饰密度")]
         [Tooltip("1 = 完整道具；0.5 = 只保留主要掩体与出生区道具（移动端可降）")]
         [Range(0f, 1f)] public float decorationDensity = 1f;

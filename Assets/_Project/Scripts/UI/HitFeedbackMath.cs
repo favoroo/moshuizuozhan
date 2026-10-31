@@ -45,11 +45,12 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 连击音高：从 1.0 每级 +5%（上限 6 连击 ≈ 1.30），击杀再额外 +6%，读作「越打越顺」。
+        /// 连击音高（P6-B 对齐 Inkwave hit_marker）：每级升 1.5 半音（×2^(1.5/12) ≈ +8.9%），
+        /// 上限 8 级（一个八度内），击杀再额外 +6%，读作「越打越顺、越打越亮」。
         /// </summary>
         public static float ComboPitch(int combo, bool killed)
         {
-            float pitch = 1f + Mathf.Clamp(combo, 0, 6) * 0.05f;
+            float pitch = Mathf.Pow(2f, Mathf.Clamp(combo, 0, 8) * 1.5f / 12f);
             if (killed) pitch += 0.06f;
             return pitch;
         }

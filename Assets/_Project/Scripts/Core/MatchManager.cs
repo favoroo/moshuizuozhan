@@ -132,6 +132,24 @@ namespace P1.Core
             }
         }
 
+        /// <summary>
+        /// 返回赛前主菜单（Ready 阶段）：清场、复位计时与结算数据。
+        /// 供暂停菜单「返回主菜单」入口调用；已在 Ready 时静默忽略。
+        /// </summary>
+        public void ReturnToMenu()
+        {
+            if (CurrentPhase == Phase.Ready) return;
+
+            ResetWorld();
+            _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
+            _countdown = 0f;
+            _lastCountdownShown = -1;
+            _freeze = 0f;
+            _finalA = 0f;
+            _finalB = 0f;
+            SetPhase(Phase.Ready);
+        }
+
         private void BeginPlaying()
         {
             _countdown = 0f;

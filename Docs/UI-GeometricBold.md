@@ -129,6 +129,16 @@
 - ❌ 对称居中堆叠的"常规后台"布局（标题+列表居中排列）：用色块错位、超大字、左右分栏制造张力
 - ❌ 旧 API `UnityEngine.Input.GetKeyDown`（项目只启用新 Input System）
 
+## 屏幕特效例外（镜头层）
+
+**不是 UI 面板、而是屏幕/镜头反馈**的图层可以打破上面的「纯色直角」规则：
+
+- `UI/InkEdgeWarningView`（P18-A 踩敌墨全屏边缘墨迹）：对齐 INKWAVE `src/fx/screenfx.js` 的 edgeInk，
+  允许**有机噪声抖动边界、湿润高光、顶部垂滴**，颜色用敌方队色；
+- 该层由 `HudController` 自动装配到 HUD 画布 `sibling 0`（盖住 3D、位于所有 HUD 控件之下），
+  不在 SafeArea 内；空闲时整块 Graphic 关闭，效果期间只多 1 个 DrawCall；
+- 例外仅限这一层。菜单、按钮、面板、HUD 读数、进度条仍然必须遵守纯色直角、无渐变、无 wobble。
+
 ## 形状基元（`UIInkShapeGraphic`）
 
 | Shape | 用途 |
@@ -144,6 +154,7 @@
 ## 交付自检清单
 
 - [ ] 无渐变 / 无阴影 / 无网点 / 无气泡尾 / 无 wobble
+  （唯一例外：`InkEdgeWarningView` 屏幕边缘敌墨反馈，见「屏幕特效例外」）
 - [ ] 进度条 = 纯色直角 + `UIFlatSprite.White`，无圆角 / 渐变 / 两端尖角
 - [ ] 底部仪表全部横向、落在血条正上方且不伸进左右触控区
 - [ ] 首页/武器栏走 `MenuLayoutMath` 的移动端盒子（CTA ≥820×200、抽屉 ≥80% 宽、卡片双列 ≥700 宽），不是桌面盒子 + 放大字号

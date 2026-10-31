@@ -24,6 +24,33 @@ namespace P1.Editor
             Sprite,
             PixelSprite,   // 将来若定像素风，把图放 Art/Sprites/Pixel/ 即自动最近邻
             WorldTexture,
+            NormalMap,     // 文件名以 _N 结尾：法线贴图（线性 + Normal 类型，P18 画风重做）
+            MaskMap,       // 文件名以 _RMO / _Mask 结尾：线性通道打包掩码（P18 画风重做）
+        }
+
+        /// <summary>
+        /// 按文件名后缀判定 PBR 辅助贴图：_N = 法线，_RMO / _Mask = 线性掩码。
+        /// 只对 Art/Textures/ 下的世界贴图生效，避免误伤 UI 图标。
+        /// </summary>
+        public static bool TryClassifyPbrSuffix(string assetPath, out TextureKind kind)
+        {
+            kind = TextureKind.Ignore;
+            if (string.IsNullOrEmpty(assetPath) || !assetPath.StartsWith(TexturesFolder, System.StringComparison.Ordinal))
+                return false;
+
+            string name = System.IO.Path.GetFileNameWithoutExtension(assetPath);
+            if (name.EndsWith("_N", System.StringComparison.Ordinal))
+            {
+                kind = TextureKind.NormalMap;
+                return true;
+            }
+            if (name.EndsWith("_RMO", System.StringComparison.Ordinal) ||
+                name.EndsWith("_Mask", System.StringComparison.Ordinal))
+            {
+                kind = TextureKind.MaskMap;
+                return true;
+            }
+            return false;
         }
 
         public enum AudioKind
@@ -54,7 +81,12 @@ namespace P1.Editor
                 return TextureKind.Ignore;
 
             if (assetPath.StartsWith(TexturesFolder, System.StringComparison.Ordinal))
+            {
+                // P18：法线 / RMO 掩码按后缀走线性导入，其余（albedo 等）仍是 sRGB 世界贴图
+                if (TryClassifyPbrSuffix(assetPath, out TextureKind pbrKind))
+                    return pbrKind;
                 return TextureKind.WorldTexture;
+            }
 
             if (assetPath.StartsWith(SpritesFolder, System.StringComparison.Ordinal))
             {
@@ -97,6 +129,24 @@ namespace P1.Editor
 
             // 读取设置：UI/世界贴图都不需要 CPU 侧像素访问
             s.readable = false;
+
+            if (kind == TextureKind.NormalMap || kind == TextureKind.MaskMap)
+            {
+                // P18 PBR 辅助贴图：必须线性 + 无 sRGB，否则法线/粗糙度/AO 全部失真
+                s.textureType = kind == TextureKind.NormalMap
+                    ? TextureImporterType.NormalMap
+                    : TextureImporterType.Default;
+                s.mipmapEnabled = true;
+                s.wrapMode = TextureWrapMode.Repeat;
+                s.filterMode = FilterMode.Bilinear;
+                s.npotScale = TextureImporterNPOTScale.None;   // 2048/1024/512 均为 POT，保持原尺寸
+                s.sRGBTexture = false;
+                s.alphaIsTransparency = false;
+                importer.maxTextureSize = 2048;
+                importer.textureCompression = TextureImporterCompression.CompressedHQ;
+                importer.SetTextureSettings(s);
+                return;
+            }
 
             if (kind == TextureKind.WorldTexture)
             {

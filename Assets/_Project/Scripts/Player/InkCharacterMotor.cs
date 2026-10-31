@@ -40,6 +40,11 @@ namespace P1.Player
         // 高速潜墨涟漪触发计时
         private float _swimRippleTimer;
 
+        // 超速惯性滑行（INKWAVE swim-exit glide）与高速急转弯甩墨状态
+        private float _glideSpeed;
+        private float _prevYaw;
+        private float _swimCarveCooldown;
+
         // 隐匿（Stealth）视觉状态：模型渲染器缓存 + 半透明材质实例
         private Renderer[] _bodyRenderers;
         private Material[] _bodyOriginalMats;
@@ -73,6 +78,13 @@ namespace P1.Player
         public bool IsInEnemyInk => FootInkTeam == Team.GetOpponent();
         public bool IsInOwnInk => FootInkTeam == Team;
         public float CurrentMoveSpeed { get; private set; }
+
+        /// <summary>
+        /// 实际生效的平面移速 (m/s)：超速惯性滑行（swim-exit glide）期间高于
+        /// <see cref="CurrentMoveSpeed"/> 并按 swimExitGlideDecel 衰减回目标值。
+        /// 相机 FOV 速度感与测试断言读取此值。
+        /// </summary>
+        public float EffectiveMoveSpeed { get; private set; }
         public Vector3 AimDirection => _aimDirectionWorld;
 
         /// <summary>
@@ -109,6 +121,10 @@ namespace P1.Player
             _enemyInkRecoveryRatePerSec = config != null ? config.enemyInkRecoveryRatePerSec : 2.0f;
 
             _health.OnRespawned += HandleRespawned;
+
+            _prevYaw = transform.eulerAngles.y;
+            EffectiveMoveSpeed = config != null ? config.normalMoveSpeed : 6.0f;
+            _glideSpeed = EffectiveMoveSpeed;
         }
 
         private void OnDestroy()
@@ -163,6 +179,10 @@ namespace P1.Player
             _enemyInkGrip01 = 0f;
             _swimRippleTimer = 0f;
             _appliedVisualKind = -1;
+            _glideSpeed = 0f;
+            EffectiveMoveSpeed = 0f;
+            _prevYaw = transform.eulerAngles.y;
+            _swimCarveCooldown = 0f;
             if (_stealthCachesBuilt) ApplyStealthVisuals();
 
             if (visualRoot != null) visualRoot.localScale = Vector3.one;
@@ -385,6 +405,21 @@ namespace P1.Player
                 }
             }
 
+            // 4.5 超速惯性滑行（INKWAVE swim-exit glide，config.js L60：swimDecel=42，注释 "1.6 m glide to a stop"）：
+            // 形态切换/离开敌墨瞬间当前速度可能远高于新目标（潜墨 11.8 → 人形 6.0），不瞬间贴回目标，
+            // 而是按 swimExitGlideDecel 自然衰减 —— 出水后保留约 1.5m 滑行动量。
+            // 加速方向瞬时对齐（起步/正常手感不变），只有超速方向走衰减曲线。
+            if (_glideSpeed > CurrentMoveSpeed)
+            {
+                float glideDecel = config != null ? config.swimExitGlideDecel : 42f;
+                _glideSpeed = Mathf.Max(CurrentMoveSpeed, _glideSpeed - Mathf.Max(1f, glideDecel) * dt);
+            }
+            else
+            {
+                _glideSpeed = CurrentMoveSpeed;
+            }
+            EffectiveMoveSpeed = _glideSpeed;
+
             // 5. 执行位移与跳跃/重力物理（支持斜坡贴合与空中控制；攀墙时走墙面专用位移）
             if (_cc != null && _cc.enabled && !_isLockedBySpecial)
             {
@@ -427,7 +462,8 @@ namespace P1.Player
                     }
 
                     float airControl = isGrounded ? 1.0f : (config != null ? config.airControl : 0.95f);
-                    Vector3 horizontalVel = _moveInputWorld * (CurrentMoveSpeed * airControl);
+                    // 位移用 EffectiveMoveSpeed（含超速滑行惯性），而非直接贴目标值的 CurrentMoveSpeed
+                    Vector3 horizontalVel = _moveInputWorld * (EffectiveMoveSpeed * airControl);
                     Vector3 step = horizontalVel * dt + Vector3.up * (_verticalVelocity * dt);
                     _cc.Move(step);
                 }
@@ -457,6 +493,25 @@ namespace P1.Player
                 float rotSpeed = config != null ? config.rotationLerpSpeed : 22f;
                 Quaternion targetRot = Quaternion.LookRotation(desiredForward, Vector3.up);
                 transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, Mathf.Clamp01(rotSpeed * dt));
+            }
+
+            // 5.5 高速潜墨急转弯甩墨（INKWAVE fxHooks.js L354-360：游速 >4.5 且 |角速度| >3.2 rad/s 触发，
+            // 向转弯外侧甩出一蓬墨滴，读得出 "carving 过弯" 的速度感；冷却防连喷）
+            float yawNow = transform.eulerAngles.y;
+            float yawRateAbs = Mathf.Abs(Mathf.DeltaAngle(_prevYaw, yawNow)) / Mathf.Max(0.0001f, dt);
+            _prevYaw = yawNow;
+            if (_swimCarveCooldown > 0f) _swimCarveCooldown -= dt;
+            float carveMinSpeed = config != null ? config.swimCarveMinSpeed : 4.5f;
+            float carveTurnRate = config != null ? config.swimCarveTurnRate : 3.2f;
+            if (IsSwimming && !IsWallClimbing && _moveInputWorld.sqrMagnitude > 0.04f &&
+                EffectiveMoveSpeed >= carveMinSpeed && yawRateAbs >= carveTurnRate &&
+                _swimCarveCooldown <= 0f && VfxPool.Instance != null && InkSurfaceController.Instance != null)
+            {
+                _swimCarveCooldown = config != null ? config.swimCarveCooldown : 0.22f;
+                VfxPool.Instance.SpawnInkSplat(
+                    transform.position,
+                    InkSurfaceController.Instance.GetTeamColor(Team),
+                    0.45f, 6);
             }
 
             // 6. 潜行与人形视觉过渡（压扁贴地 vs 标准胶囊）

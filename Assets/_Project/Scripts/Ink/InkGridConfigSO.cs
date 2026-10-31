@@ -31,6 +31,11 @@ namespace P1.Ink
         [Range(0.5f, 30f)]
         public float inkDryingSeconds = 6f;
 
+        [Tooltip("缎面余晖秒数：镜面期结束后墨面仍保留低幅环境反射的时长（P18）。" +
+                 "应明显大于 inkDryingSeconds，否则战场上大部分墨会退化为哑光色块")]
+        [Range(0f, 120f)]
+        public float inkSheenSeconds = 22f;
+
         [Tooltip("单个墨斑铺开动画时长（秒）；0 = 立即出现")]
         [Range(0f, 0.5f)]
         public float splatGrowSeconds = 0.12f;

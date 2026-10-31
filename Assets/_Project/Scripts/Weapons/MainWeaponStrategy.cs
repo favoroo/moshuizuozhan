@@ -50,18 +50,60 @@ namespace P1.Weapons
         /// 枪口 → 准星命中点的 3D 单位方向（对齐 INKWAVE 的 <c>_aimFrom</c>）：
         /// 命中点过近或在枪口后方（贴墙/贴脸）时回退到相机瞄准方向。
         /// </summary>
-        public Vector3 GetShotDirection(Vector3 muzzle)
+        /// <param name="minDistance">
+        /// 低于该距离不做指向修正，默认 <see cref="MinAimPointDistance"/>。
+        /// 蓄力狙等长枪管武器可传更小值，让近距离光束仍从实际起点收敛到准星。
+        /// </param>
+        public Vector3 GetShotDirection(Vector3 muzzle, float minDistance = MinAimPointDistance)
         {
             if (!HasGroundPoint)
                 return Direction;
 
             Vector3 toTarget = GroundPoint - muzzle;
             float distance = toTarget.magnitude;
-            if (distance < MinAimPointDistance)
+            if (distance < Mathf.Max(0.01f, minDistance))
                 return Direction;
 
             toTarget /= distance;
             return Vector3.Dot(toTarget, Direction) < 0f ? Direction : toTarget;
+        }
+
+        /// <summary>
+        /// 枪口到瞄准点过近、或瞄准点已在枪口后方时（长枪管近距离贴墙/打地面），
+        /// 改用 <paramref name="fallbackChest"/> 作为射击起点。
+        /// 否则从枪口沿相机方向发射会与屏幕中心射线平行错开一个枪口横向偏移。
+        /// </summary>
+        public Vector3 GetShotOrigin(Vector3 muzzle, Vector3 fallbackChest, float minDistance = 0.35f)
+        {
+            if (!HasGroundPoint)
+                return muzzle;
+
+            Vector3 toTarget = GroundPoint - muzzle;
+            float min = Mathf.Max(0.01f, minDistance);
+            if (toTarget.sqrMagnitude >= min * min && Vector3.Dot(toTarget, Direction) >= 0f)
+                return muzzle;
+
+            return fallbackChest;
+        }
+
+        /// <summary>
+        /// 本次射击应瞄准的目标点：射程内原样返回准星命中点（落点严格贴合准星）；
+        /// 超出水平射程时沿「起点 → 命中点」方向截断到 maxRange，让弹丸朝准星方向飞到射程尽头，
+        /// 而不是按远处目标高度反解出一个更陡的下压角。
+        /// </summary>
+        public Vector3 GetRangeClampedTarget(Vector3 muzzle, float maxRange)
+        {
+            float range = Mathf.Max(0.1f, maxRange);
+            if (!HasGroundPoint)
+                return muzzle + Direction * range;
+
+            Vector3 toTarget = GroundPoint - muzzle;
+            float horizontal = new Vector2(toTarget.x, toTarget.z).magnitude;
+            if (horizontal <= range)
+                return GroundPoint;
+
+            Vector3 clamped = muzzle + toTarget * (range / Mathf.Max(0.0001f, horizontal));
+            return Vector3.Dot(clamped - muzzle, Direction) >= 0f ? clamped : GroundPoint;
         }
 
         /// <summary>
@@ -126,6 +168,9 @@ namespace P1.Weapons
 
         /// <summary>当前准星散布半角（度）；非连发武器为 0。</summary>
         public virtual float SpreadDegrees => 0f;
+
+        /// <summary>当前有效射程（米）：HUD 准星据此判断是否超出射程。默认取配置 maxRange。</summary>
+        public virtual float EffectiveRange => Config != null ? Mathf.Max(0.1f, Config.maxRange) : 0f;
 
         /// <summary>蓄力进度 0~1；非蓄力武器为 0。</summary>
         public virtual float Charge01 => 0f;

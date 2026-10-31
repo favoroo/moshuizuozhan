@@ -16,8 +16,8 @@ MonoBehaviour:
   displayName: Spritzer
   fireInterval: 0.1
   damage: 36
-  projectileSpeed: 21
-  maxRange: 7.2
+  projectileSpeed: 34
+  maxRange: 12
   spreadDegrees: 5.5
   spreadMinDegrees: 1.2
   bloomPerShot: 0.3
@@ -91,9 +91,12 @@ MonoBehaviour:
   splatlingMoveSpeedFiring: 3.4
   bombInkCost: 70
   bombCooldown: 0.6
-  bombMaxThrowDistance: 7.5
+  bombMaxThrowDistance: 12
   bombArcHeight: 2.6
   bombFlightDuration: 0.38
+  bombArcHeightNear: 1.6
+  bombArcHeightFar: 3.8
+  bombFlightSpeed: 15
   bombFuseDelay: 0.95
   bombSplatRadius: 2.7
   bombDamageRadius: 3.1

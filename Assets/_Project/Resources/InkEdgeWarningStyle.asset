@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 44dd9214f7197464e91fc2e204848123, type: 3}
+  m_Name: InkEdgeWarningStyle
+  m_EditorClassIdentifier: P1.Game::P1.UI.InkEdgeWarningStyleSO
+  fadeInRate: 9
+  fadeOutRate: 3
+  bottomBand: 0.078
+  edgeBand: 0.0025
+  wobble: 0.85
+  dripStrength: 0.55
+  maxAlpha: 0.94
+  visibleThreshold: 0.003

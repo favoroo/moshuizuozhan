@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  纯资源库清单：AGP8 不允许 package 属性（namespace 已写在同目录 build.gradle），
+  本库不声明任何组件，只随库携带 res/xml/p1_update_paths.xml。
+  主清单（Assets/Plugins/Android/AndroidManifest.xml）里的 FileProvider 引用 @xml/p1_update_paths。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

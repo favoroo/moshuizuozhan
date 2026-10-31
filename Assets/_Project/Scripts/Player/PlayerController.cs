@@ -29,11 +29,14 @@ namespace P1.Player
         private InkCharacterMotor _motor;
         private WeaponController _weapon;
         private CombatantHealth _health;
+        private CharacterController _cc;
 
         private Vector3 _aimPoint;
         private Vector3 _aimGroundPoint;
         private Vector3 _aimDirection = Vector3.forward;
         private Vector3 _aimDirectionFlat = Vector3.forward;
+        private float _aimFlatDistance;
+        private CombatantHealth _aimTarget;
 
         // 视角输入来源跟踪：辅助瞄准只在触屏/手柄驱动时生效，鼠标永不吸附
         private bool _lastLookWasGamepad;
@@ -48,6 +51,7 @@ namespace P1.Player
         private bool _isAimingBomb;
         private bool _cursorLockedByUs;
         private readonly SwimFormInputArbiter _swimInput = new SwimFormInputArbiter();
+        private readonly SubBombThrowArbiter _bombArbiter = new SubBombThrowArbiter();
         private readonly RaycastHit[] _aimHits = new RaycastHit[8];
 
         // 供移动端虚拟摇杆/滑屏注入的输入
@@ -75,6 +79,15 @@ namespace P1.Player
         /// <summary>屏幕中心射线命中的 3D 世界点（可能是地面、墙面或敌人身体）。</summary>
         public Vector3 AimPoint => _aimPoint;
 
+        /// <summary>瞄准点到玩家的水平距离（米）：与弹丸水平射程判定一致，供准星超距状态使用。</summary>
+        public float AimFlatDistance => _aimFlatDistance;
+
+        /// <summary>
+        /// 屏幕中心射线命中的存活敌方；射向天空时可能是辅助瞄准锁定的目标。
+        /// 跳过队友、自己与潜墨隐身目标。准星以此显示「锁定」状态。
+        /// </summary>
+        public CombatantHealth AimTarget => _aimTarget;
+
         /// <summary>含俯仰的 3D 瞄准方向（相机前向）；武器按它与 <see cref="AimPoint"/> 求实际弹道。</summary>
         public Vector3 AimDirection => _aimDirection;
 
@@ -93,6 +106,7 @@ namespace P1.Player
             _motor = GetComponent<InkCharacterMotor>();
             _weapon = GetComponent<WeaponController>();
             _health = GetComponent<CombatantHealth>();
+            _cc = GetComponent<CharacterController>();
             _propBlock = new MaterialPropertyBlock();
             _subTrajectory = gameObject.AddComponent<SubWeaponThrowTrajectory>();
             MovementAudioDriver.EnsureDriver(gameObject);
@@ -172,7 +186,10 @@ namespace P1.Player
             {
                 TouchLookDelta = Vector2.zero;
                 _swimInput.Reset();
+                _bombArbiter.Reset();
                 _isAimingBomb = false;
+                _aimTarget = null;
+                _aimFlatDistance = 0f;
                 if (_subTrajectory != null) _subTrajectory.Hide();
                 if (TopDownCameraFollow.Instance != null) TopDownCameraFollow.Instance.SetSubAimActive(false);
                 // 清空排队的一次性触控指令，避免复活/重开瞬间补触发
@@ -198,30 +215,22 @@ namespace P1.Player
             bool wantsJump = ReadJumpPressed();
             bool bombHeld = ReadBombHeld();
             bool bombReleased = ReadBombReleased();
-            bool bombTap = ReadBombPressed();
+            bool bombPressed = ReadBombPressed();
+            // 触屏「松手投掷」一次性事件在此消费（MobileTouchUI pointer-up 注入，语义与旧版一致）
+            bool touchBombThrow = TouchBombTriggered;
+            TouchBombTriggered = false;
             bool specialReadyPressed = ReadSpecialPressed() && _weapon.IsSpecialReady;
 
-            // 副武器手雷瞄准与松手投掷仲裁
-            bool executeBombThrow = false;
-            if (bombTap)
-            {
-                executeBombThrow = true;
-                _isAimingBomb = false;
-            }
-            else if (bombHeld && !_motor.IsSwimming && !_weapon.IsPerformingSpecial)
-            {
-                _isAimingBomb = true;
-            }
-            else if (_isAimingBomb && (bombReleased || !bombHeld))
-            {
-                executeBombThrow = true;
-                _isAimingBomb = false;
-            }
-
-            if (swimHeld && _isAimingBomb)
-            {
-                _isAimingBomb = false;
-            }
+            // 副武器手雷「按住瞄准 / 松开投掷」仲裁（状态机见 SubBombThrowArbiter）：
+            // 按下沿只瞄准，松开沿才投掷——修复「按下即投扣墨 + 松开补投被拒」的丢雷假象；
+            // 瞄准经 wantsBombIntent 压住潜行并自动出水，潜泳中按雷键不再吞投掷
+            bool executeBombThrow = _bombArbiter.Tick(
+                bombPressed,
+                bombHeld,
+                bombReleased,
+                touchBombThrow,
+                _weapon.IsPerformingSpecial);
+            _isAimingBomb = _bombArbiter.IsAiming;
 
             // 4. 屏幕中心射线瞄准（手雷瞄准时额外保留地面落点）
             UpdateAimPoint();
@@ -261,10 +270,8 @@ namespace P1.Player
             }
             else if (executeBombThrow)
             {
-                Vector3 throwTarget = _subTrajectory != null && _subTrajectory.IsShowing
-                    ? _subTrajectory.CurrentLandingPosition
-                    : _aimGroundPoint;
-                _weapon.TryThrowSubBomb(throwTarget);
+                // inkwave 弹道模型：以相机俯仰解算的初速真实抛出，远近由俯仰物理决定
+                _weapon.TryThrowSubBombBallistic(ComputeBombThrowVelocity());
                 isFiringOrActing = true;
             }
             else if (fireAllowed && !_isAimingBomb)
@@ -274,13 +281,14 @@ namespace P1.Player
                 isFiringOrActing = true;
             }
 
-            // 7. 副武器 64 点抛物线与 2.7m 爆炸红圈更新
+            // 7. 副武器 64 点弹道仿真预览与预测落点环（与实飞同常数，所见即所得）
             if (_isAimingBomb && _subTrajectory != null)
             {
-                Vector3 startPos = transform.position + Vector3.up * 0.8f;
-                float bombCost = _weapon.Config != null ? _weapon.Config.bombInkCost : 55f;
+                Vector3 startPos = _weapon.GetSubBombMuzzlePosition();
+                float bombCost = _weapon.Config != null ? _weapon.Config.bombInkCost : 70f;
                 bool enoughInk = _motor.CurrentInk >= bombCost;
-                _subTrajectory.UpdateTrajectory(startPos, _aimGroundPoint, _weapon.Config, enoughInk, _health.Team);
+                _subTrajectory.UpdateTrajectorySim(
+                    startPos, ComputeBombThrowVelocity(), _weapon.Config, enoughInk, _health.Team);
                 if (TopDownCameraFollow.Instance != null)
                 {
                     TopDownCameraFollow.Instance.SetSubAimActive(true);
@@ -424,12 +432,17 @@ namespace P1.Player
                 _aimDirectionFlat = transform.forward;
                 _aimPoint = transform.position + Vector3.up * AimChestHeight + _aimDirection * 6f;
                 _aimGroundPoint = ProjectGroundPoint(_aimPoint, _aimDirectionFlat);
+                _aimTarget = null;
+                _aimFlatDistance = FlatDistanceTo(_aimPoint);
                 return;
             }
 
             Vector3 forward = cameraFollow.LookForward;
             Vector3 chest = transform.position + Vector3.up * AimChestHeight;
-            Vector3 origin = ThirdPersonCameraMath.ComputeAimRayOrigin(camera.transform.position, forward, chest);
+            // 相机 LateUpdate 尚未执行：用同一套几何预测本帧渲染位姿，
+            // 否则快速甩枪时射线会与画面中心线错开（狙击枪最明显）。
+            Vector3 origin = ThirdPersonCameraMath.ComputeAimRayOrigin(
+                cameraFollow.GetAimCameraPosition(), forward, chest);
             float maxDistance = Mathf.Max(5f, cameraFollow.AimRayDistance);
 
             Vector3 hitPoint = origin + forward * maxDistance;
@@ -437,6 +450,8 @@ namespace P1.Player
                 origin, forward, _aimHits, maxDistance, ~0, QueryTriggerInteraction.Ignore);
 
             float nearest = float.PositiveInfinity;
+            bool rayHitWorld = false;
+            CombatantHealth rayTarget = null;
             for (int i = 0; i < hitCount; i++)
             {
                 RaycastHit hit = _aimHits[i];
@@ -449,12 +464,32 @@ namespace P1.Player
                 {
                     nearest = hit.distance;
                     hitPoint = hit.point;
+                    rayTarget = null;
+                    rayHitWorld = false;
+
+                    CombatantHealth candidate = hit.collider.GetComponentInParent<CombatantHealth>();
+                    bool candidateIsTarget = candidate != null &&
+                                             candidate != _health &&
+                                             candidate.IsAlive &&
+                                             candidate.Team.IsOpponentOf(_health.Team) &&
+                                             !IsStealthed(candidate);
+                    if (candidateIsTarget)
+                    {
+                        rayTarget = candidate;
+                    }
+                    else
+                    {
+                        rayHitWorld = true;
+                    }
                 }
             }
 
-            TryApplyAimAssist(origin, forward, ref hitPoint);
+            CombatantHealth assistedTarget = TryApplyAimAssist(
+                origin, forward, ref hitPoint, rayTarget, rayHitWorld);
 
+            _aimTarget = assistedTarget != null ? assistedTarget : rayTarget;
             _aimPoint = hitPoint;
+            _aimFlatDistance = FlatDistanceTo(hitPoint);
 
             // 3D 瞄准方向 = 相机前向（含俯仰）。武器再按「枪口 → 准星命中点」自行求解弹道，
             // 因此把准星抬到天上时，弹丸会真的朝天上飞，而不是被压平水平射出。
@@ -471,33 +506,76 @@ namespace P1.Player
             _aimGroundPoint = ProjectGroundPoint(hitPoint, _aimDirectionFlat);
         }
 
+        private float FlatDistanceTo(Vector3 worldPoint)
+        {
+            Vector3 delta = worldPoint - transform.position;
+            delta.y = 0f;
+            return delta.magnitude;
+        }
+
         /// <summary>
-        /// 轻量辅助瞄准（对齐 GamePlan「Android 一定角度内吸附最近敌人」）：
-        /// 档位 0 关闭；弱/中/强分别使用 0.5m / 0.8m / 1.2m 吸附半径。
-        /// 只在屏幕中心射线附近、且在武器射程内、Linecast 无遮挡时把瞄准点吸附到敌人胸口。
-        /// 仅对触屏与手柄生效（与 INKWAVE 一致：手柄开、鼠标关），鼠标永远不做自动锁定。
+        /// 按「相机俯仰 + 水平瞄准方向」解算手雷出手初速（inkwave throwVelocity 公式）：
+        /// 平抛约 8m、满仰角最远约 10.5m、低头贴脚丢；附带 0.4× 自身水平速度继承，
+        /// 跑动中投掷会顺势丢得更远。预览与实飞都走这里，保证所见即所得。
         /// </summary>
-        private void TryApplyAimAssist(Vector3 origin, Vector3 forward, ref Vector3 hitPoint)
+        private Vector3 ComputeBombThrowVelocity()
+        {
+            TopDownCameraFollow cameraFollow = TopDownCameraFollow.Instance;
+            float pitchDegrees = cameraFollow != null ? cameraFollow.PitchDegrees : 0f;
+            Vector3 carry = Vector3.zero;
+            if (_cc != null)
+            {
+                carry = _cc.velocity;
+                carry.y = 0f;
+            }
+            return InkBombTrajectoryUtility.ComputeThrowVelocity(_aimDirectionFlat, pitchDegrees, carry, _weapon.Config);
+        }
+
+        private static bool IsStealthed(CombatantHealth target)
+        {
+            InkCharacterMotor motor = target != null ? target.Motor : null;
+            return motor != null && motor.IsStealthed;
+        }
+
+        /// <summary>
+        /// 轻量辅助瞄准（触摸 / 手柄）：
+        /// 1. 准星已压在敌人身上 → 只把这一个敌人的瞄准点微调到胸口；
+        /// 2. 准星指向天空 → 按档位半径吸附附近敌人（远距甩枪辅助）；
+        /// 3. 准星落在墙体 / 地面 → 绝不吸附，玩家瞄环境就必须打在环境上。
+        /// 旧实现会在 0.5~1.2m 半径内把射线拽到准星旁边的敌人身上，
+        /// 表现为「静止瞄墙也打偏」，因此收紧为「准星已经压住才微调」。
+        /// 仅对触屏与手柄生效，鼠标永远不做自动锁定。
+        /// </summary>
+        private CombatantHealth TryApplyAimAssist(
+            Vector3 origin,
+            Vector3 forward,
+            ref Vector3 hitPoint,
+            CombatantHealth rayTarget,
+            bool rayHitWorld)
         {
             if (!IsTouchDriven() && !_lastLookWasGamepad)
-                return;
+                return null;
 
             int aimAssistLevel = GameSettingsService.AimAssistLevel;
             if (aimAssistLevel <= GameSettingsMath.MinAimAssistLevel)
-                return;
+                return null;
+
+            // 射线已经落在墙体 / 地面：任何吸附都会让弹道偏离准星。
+            if (rayHitWorld)
+                return null;
 
             float aimAssistRadius = GameSettingsMath.GetAimAssistRadius(aimAssistLevel);
 
             var all = CombatantHealthRegistry.All;
             if (all == null)
-                return;
+                return null;
 
             float maxRange = _weapon != null && _weapon.Config != null ? _weapon.Config.maxRange : 12f;
             maxRange = Mathf.Max(2f, maxRange);
 
             float bestScore = float.PositiveInfinity;
             Vector3 bestPoint = Vector3.zero;
-            bool found = false;
+            CombatantHealth bestTarget = null;
 
             for (int i = 0; i < all.Count; i++)
             {
@@ -507,8 +585,11 @@ namespace P1.Player
                 if (target.Team == _health.Team)
                     continue;
 
-                InkCharacterMotor targetMotor = target.Motor;
-                if (targetMotor != null && targetMotor.IsStealthed)
+                // 准星已经压在某个敌人身上时，只允许微调这个敌人，不能拐到旁边的另一个目标。
+                if (rayTarget != null && target != rayTarget)
+                    continue;
+
+                if (IsStealthed(target))
                     continue;
 
                 Vector3 center = target.transform.position + Vector3.up * 0.95f;
@@ -530,12 +611,14 @@ namespace P1.Player
                 {
                     bestScore = score;
                     bestPoint = center;
-                    found = true;
+                    bestTarget = target;
                 }
             }
 
-            if (found)
+            if (bestTarget != null)
                 hitPoint = bestPoint;
+
+            return bestTarget;
         }
 
         private static bool HasClearShot(Vector3 origin, Vector3 target, CombatantHealth targetHealth)
@@ -687,11 +770,7 @@ namespace P1.Player
 
         private bool ReadBombPressed()
         {
-            if (TouchBombTriggered)
-            {
-                TouchBombTriggered = false;
-                return true;
-            }
+            // 仅桌面端按下沿；触屏「松手投掷」由 TouchBombTriggered 承载，在副武器仲裁处单独消费
             if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame) return true;
             if (Mouse.current != null && Mouse.current.middleButton.wasPressedThisFrame) return true;
             if (Gamepad.current != null && Gamepad.current.rightShoulder.wasPressedThisFrame) return true;

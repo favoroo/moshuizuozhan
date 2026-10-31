@@ -37,6 +37,40 @@ namespace P1.UI
     }
 
     /// <summary>
+    /// 本地玩家击杀连杀状态（P6-B，纯静态、零 GC）：
+    /// CombatantHealth.Die 在击杀瞬间登记，击杀琶音音量与 KillFlashView 边缘闪光
+    /// 按窗口内的连杀数逐层加码（对齐 Inkwave「连击加温」的节奏语义）。
+    /// </summary>
+    public static class KillFeedbackState
+    {
+        private static float _lastLocalKillUnscaledTime = -999f;
+        private static int _streak;
+
+        /// <summary>当前连杀数（连杀窗口内；窗口外重新从 1 计）。</summary>
+        public static int CurrentStreak => _streak;
+
+        /// <summary>连杀判定窗口（秒），由 PlayerConfigSO.killStreakWindowSeconds 在每次击杀时写入。</summary>
+        public static float StreakWindowSeconds { get; set; } = 4f;
+
+        /// <summary>本地玩家击杀时调用：返回本次击杀的连杀数（1 = 首杀）。</summary>
+        public static int RegisterLocalKill()
+        {
+            _streak = Time.unscaledTime - _lastLocalKillUnscaledTime <= Mathf.Max(0.1f, StreakWindowSeconds)
+                ? _streak + 1
+                : 1;
+            _lastLocalKillUnscaledTime = Time.unscaledTime;
+            return _streak;
+        }
+
+        /// <summary>跨局清零（KillFlashView 在 Ready/Finished 阶段调用）。</summary>
+        public static void Reset()
+        {
+            _streak = 0;
+            _lastLocalKillUnscaledTime = -999f;
+        }
+    }
+
+    /// <summary>
     /// 全局击杀事件中枢：解耦战斗逻辑与 UI 击杀播报。
     /// 无论来自 CombatantHealth.Die、武器爆炸还是测试调试命令，均在此统一分发。
     /// </summary>

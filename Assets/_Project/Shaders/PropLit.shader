@@ -10,6 +10,14 @@ Shader "P1/PropLit"
         _AmbientBoost ("Ambient Boost", Range(0.0, 2.0)) = 1.0
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull Mode", Float) = 2
 
+        [Header(Surface PBR P18)]
+        _SurfaceN ("Surface Normal (tileable)", 2D) = "bump" {}
+        _SurfaceRMO ("Surface RMO (R=metal G=AO B=detail A=smooth)", 2D) = "black" {}
+        _SurfaceTexelScale ("Surface Texel Scale (periods/m)", Range(0.05, 8)) = 0.5
+        _SurfaceNormalStrength ("Surface Normal Strength", Range(0, 1.5)) = 0.6
+        _SurfaceAOStrength ("Surface AO Strength", Range(0, 1.5)) = 0.7
+        _SurfaceSmoothnessScale ("Surface Smoothness Scale", Range(0, 2)) = 1.0
+
         [Header(Toon Shading)]
         _ShadeThreshold ("Shade Threshold", Range(0.2, 0.8)) = 0.5
         _ShadeSoftness ("Shade Softness", Range(0.005, 0.2)) = 0.03
@@ -48,6 +56,7 @@ Shader "P1/PropLit"
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
             #pragma target 4.5
             #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma multi_compile _ P1_INK_HIGH
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
@@ -57,6 +66,12 @@ Shader "P1/PropLit"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "ToonLighting.hlsl"
             #include "InkSurfaceOverlay.hlsl"
+            #include "InkWetShading.hlsl"
+
+            TEXTURE2D(_SurfaceN);
+            SAMPLER(sampler_SurfaceN);
+            TEXTURE2D(_SurfaceRMO);
+            SAMPLER(sampler_SurfaceRMO);
 
             struct Attributes
             {
@@ -94,6 +109,10 @@ Shader "P1/PropLit"
                 float _SpecStrength;
                 float _SpecThreshold;
                 float _SpecSoftness;
+                float _SurfaceTexelScale;
+                float _SurfaceNormalStrength;
+                float _SurfaceAOStrength;
+                float _SurfaceSmoothnessScale;
             CBUFFER_END
 
             Varyings vert(Attributes input)
@@ -116,8 +135,49 @@ Shader "P1/PropLit"
                 // 顶点色与基础色混合
                 half4 albedo = _BaseColor * input.color;
 
-                float3 normalWS = normalize(input.normalWS);
+                float3 geomN = normalize(input.normalWS);
                 float3 viewDirWS = normalize(GetCameraPositionWS() - input.positionWS);
+
+                #if defined(P1_INK_HIGH)
+                    float2 surfUV;
+                    float3 surfT, surfB;
+                    if (abs(geomN.y) > 0.5)
+                    {
+                        surfUV = input.positionWS.xz * _SurfaceTexelScale;
+                        surfT = float3(1.0, 0.0, 0.0);
+                        surfB = float3(0.0, 0.0, 1.0);
+                    }
+                    else
+                    {
+                        if (abs(geomN.x) > abs(geomN.z))
+                        {
+                            surfUV = input.positionWS.zy * _SurfaceTexelScale;
+                            surfT = float3(0.0, 0.0, 1.0);
+                            surfB = float3(0.0, 1.0, 0.0);
+                        }
+                        else
+                        {
+                            surfUV = input.positionWS.xy * _SurfaceTexelScale;
+                            surfT = float3(1.0, 0.0, 0.0);
+                            surfB = float3(0.0, 1.0, 0.0);
+                        }
+                    }
+
+                    half4 nSample = SAMPLE_TEXTURE2D(_SurfaceN, sampler_SurfaceN, surfUV);
+                    half3 tsN = UnpackNormalScale(nSample, _SurfaceNormalStrength);
+                    float3 worldN = normalize(geomN + (surfT * tsN.x + surfB * tsN.y));
+
+                    half4 rmo = SAMPLE_TEXTURE2D(_SurfaceRMO, sampler_SurfaceRMO, surfUV);
+                    half ao = clamp(lerp(1.0, rmo.g, _SurfaceAOStrength), 0.35, 1.0);
+                    float metallic = saturate(max(_Metallic, rmo.r));
+                    float smoothness = saturate(lerp(_Smoothness, rmo.a * _SurfaceSmoothnessScale, 0.85));
+                    albedo.rgb *= (0.88 + 0.24 * rmo.b);
+                #else
+                    float3 worldN = geomN;
+                    half ao = 1.0;
+                    float metallic = _Metallic;
+                    float smoothness = _Smoothness;
+                #endif
 
                 // 主光采样与阴影衰减
                 float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
@@ -127,17 +187,29 @@ Shader "P1/PropLit"
                 float3 L = normalize(mainLight.direction);
                 float3 H = normalize(L + viewDirWS);
 
-                float NdotH = saturate(dot(normalWS, H));
+                float NdotH = saturate(dot(worldN, H));
 
-                half3 ambient = P1ToonAmbient(normalWS, _ShadowTint.rgb, _AmbientBoost, 0.06);
-                half3 diffuse = P1ToonDiffuse(albedo.rgb, mainLight.color, dot(normalWS, L), shadowAtten,
+                half3 ambient = P1ToonAmbient(worldN, _ShadowTint.rgb, _AmbientBoost, 0.06);
+                half3 diffuse = P1ToonDiffuse(albedo.rgb, mainLight.color, dot(worldN, L), shadowAtten,
                                               _ShadeThreshold, _ShadeSoftness, _ShadowFloor, _ShadowTint.rgb, ambient);
-                half spec = P1ToonSpec(NdotH, _SpecThreshold, _SpecSoftness, _SpecStrength * _Metallic, shadowAtten);
-                half rim = P1ToonRim(saturate(dot(normalWS, viewDirWS)), _RimPower, shadowAtten) * _RimStrength;
-                half3 emission = _EmissionColor.rgb * _EmissionStrength;
-                half3 finalRgb = diffuse + mainLight.color * spec + _RimColor.rgb * rim + emission;
+                diffuse *= ao;
 
-                ApplyTopInkOverlay(finalRgb, input.positionWS, normalWS, shadowAtten, L, viewDirWS);
+                half spec = P1ToonSpec(NdotH, _SpecThreshold, _SpecSoftness, _SpecStrength * (0.5 + metallic) * (0.3 + 1.4 * smoothness), shadowAtten);
+                half3 specColor = lerp(mainLight.color, mainLight.color * albedo.rgb, metallic);
+                half3 specular = specColor * spec;
+
+                half rim = P1ToonRim(saturate(dot(worldN, viewDirWS)), _RimPower, shadowAtten) * _RimStrength;
+                half3 emission = _EmissionColor.rgb * _EmissionStrength;
+
+                // 环境镜面（纯数学，不分支）
+                float3 R = reflect(-viewDirWS, worldN);
+                float rough = saturate(1.0 - smoothness);
+                half3 envSpec = P1InkEnvSpecular(R, rough, saturate(dot(worldN, viewDirWS)));
+                envSpec *= lerp(half3(1.0, 1.0, 1.0), albedo.rgb, metallic) * ao;
+
+                half3 finalRgb = diffuse + specular + _RimColor.rgb * rim + emission + envSpec;
+
+                ApplyTopInkOverlay(finalRgb, input.positionWS, geomN, shadowAtten, L, viewDirWS);
 
                 // 雾效
                 finalRgb = MixFog(finalRgb, input.fogFactor);
@@ -197,6 +269,10 @@ Shader "P1/PropLit"
                 float _SpecStrength;
                 float _SpecThreshold;
                 float _SpecSoftness;
+                float _SurfaceTexelScale;
+                float _SurfaceNormalStrength;
+                float _SurfaceAOStrength;
+                float _SurfaceSmoothnessScale;
             CBUFFER_END
 
             float3 _LightDirection;
@@ -281,6 +357,10 @@ Shader "P1/PropLit"
                 float _SpecStrength;
                 float _SpecThreshold;
                 float _SpecSoftness;
+                float _SurfaceTexelScale;
+                float _SurfaceNormalStrength;
+                float _SurfaceAOStrength;
+                float _SurfaceSmoothnessScale;
             CBUFFER_END
 
             DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)

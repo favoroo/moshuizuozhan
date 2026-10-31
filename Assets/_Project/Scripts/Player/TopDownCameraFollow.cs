@@ -71,6 +71,23 @@ namespace P1.Player
         /// <summary>水平右向：D 键方向。</summary>
         public Vector3 PlanarRight => Quaternion.Euler(0f, _yaw, 0f) * Vector3.right;
 
+        /// <summary>
+        /// 本帧瞄准射线应使用的相机位置：与 LateUpdate 的枢轴/吊臂/肩部/地面保护同一套几何，
+        /// 但不叠加震屏、开火后拉与绕视轴 Roll（这些只做视觉偏移，不改变屏幕中心射线）。
+        /// PlayerController.Update 早于相机 LateUpdate，直接用 transform.position 会拿到上一帧位置，
+        /// 快速甩枪时射线会与渲染画面的中心线错开。
+        /// </summary>
+        public Vector3 GetAimCameraPosition()
+        {
+            if (!_hasSnapped || target == null)
+                return transform.position;
+
+            Vector3 forward = LookForward;
+            Vector3 right = Quaternion.Euler(0f, _yaw, 0f) * Vector3.right;
+            Vector3 position = _pivot - forward * Mathf.Max(0.01f, _currentDistance) + right * _shoulder;
+            return ApplyGroundClearance(position);
+        }
+
         private void Awake()
         {
             Instance = this;
@@ -347,12 +364,20 @@ namespace P1.Player
             transform.position = position;
             transform.rotation = lookRotation * Quaternion.Euler(0f, 0f, _shakeRoll + _shotKickRoll);
 
-            // ---- FOV：蓄力狙变焦 + 手雷瞄准微收 + 开火冲击
+            // ---- FOV：蓄力狙变焦 + 手雷瞄准微收 + 开火冲击 + 速度感拉伸
             float targetFov = GetBaseFov() + _shotKickFov;
             if (charge01 > 0f)
                 targetFov -= charge01 * (gameConfig != null ? gameConfig.tpsChargerZoomFov : 14f);
             if (_isSubAimActive)
                 targetFov -= gameConfig != null ? gameConfig.tpsSubAimFovKick : 4f;
+            if (gameConfig != null && gameConfig.tpsSpeedFovKick > 0f && _motor != null)
+            {
+                // 速度感：以人形跑速为起点、潜墨全速为终点做 0~1 归一，保守拉伸 FOV（INKWAVE 无速度线，速度感靠本体+镜头）
+                float startSpeed = Mathf.Max(0.1f, gameConfig.tpsSpeedFovStartSpeed);
+                float fullSpeed = _motor.Config != null ? _motor.Config.swimMoveSpeed : 11.8f;
+                float speedK = Mathf.Clamp01((_motor.EffectiveMoveSpeed - startSpeed) / Mathf.Max(0.1f, fullSpeed - startSpeed));
+                targetFov += speedK * gameConfig.tpsSpeedFovKick;
+            }
             targetFov = Mathf.Clamp(targetFov, 25f, 90f);
 
             if (dt > 0.0001f)

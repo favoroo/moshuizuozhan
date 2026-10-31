@@ -312,6 +312,12 @@ namespace P1.Core
         {
             switch (phase)
             {
+                case MatchManager.Phase.Ready:
+                    // 从对局/结算返回主菜单：停掉战斗 BGM 与循环音，保持开局时的安静状态
+                    ResetMusicForNewMatch();
+                    StopAllLoops();
+                    break;
+
                 case MatchManager.Phase.Countdown:
                     ResetMusicForNewMatch();
                     StopAllLoops();
@@ -598,6 +604,42 @@ namespace P1.Core
             PlayRandom(hitEnemyClips, 0.65f, 0.95f, 1.05f);
         }
 
+        /// <summary>墨拍身体音的最大可听距离（米），与落墨音一致：远处 Bot 互殴不该和脚下一样响。</summary>
+        private const float InkHitBodyMaxDistance = 26f;
+
+        private float _lastBodyHitTime = -99f;
+
+        /// <summary>
+        /// 墨水拍打身体的音效（P6-B，对齐 Inkwave ink_hit_body）：按世界位置做距离衰减，
+        /// 重击（≥60 伤害）音高下沉到 0.8 读作「打得很实」，轻击 1.05。
+        /// UI 层的 hit_marker tick 由准星负责（PlayHitMarker），两层并行、各用各的 clip。
+        /// </summary>
+        public void PlayInkHitBody(Vector3 worldPos, float damage)
+        {
+            float attenuation = 1f;
+
+            P1.Player.PlayerController player = P1.Player.PlayerController.LocalPlayer;
+            if (player != null)
+            {
+                float distance = Vector3.Distance(worldPos, player.transform.position);
+                if (distance > InkHitBodyMaxDistance)
+                    return;
+
+                attenuation = 1f - distance / InkHitBodyMaxDistance;
+                attenuation *= attenuation;
+            }
+
+            if (Time.unscaledTime - _lastBodyHitTime < 0.03f)
+                return;
+
+            _lastBodyHitTime = Time.unscaledTime;
+
+            float heavy01 = Mathf.Clamp01((damage - 30f) / 60f);
+            float pitch = Mathf.Lerp(1.05f, 0.80f, heavy01);
+            float volume = 0.42f * (0.25f + 0.9f * attenuation);
+            PlayRandom(hitEnemyClips, volume, pitch * 0.99f, pitch * 1.01f);
+        }
+
         public void PlayInkEmpty()
         {
             if (Time.unscaledTime - _lastEmptyClickTime < 0.22f)
@@ -629,6 +671,21 @@ namespace P1.Core
 
         public void PlayKill() => PlayOne(killClip, 0.80f, 0.98f, 1.04f);
 
+        /// <summary>
+        /// 击杀确认音（P6-B，对齐 Inkwave splat_enemy 的 sparkle chime 语义）：
+        /// kill 主音之上叠一层 ui_confirm 双音琶音，连杀越高越亮（音量与音高逐层加码）。
+        /// <paramref name="streak"/> 为连杀数（1 = 首杀）。
+        /// </summary>
+        public void PlayKill(int streak)
+        {
+            PlayOne(killClip, 0.80f, 0.98f, 1.04f);
+
+            int bonus = Mathf.Clamp(Mathf.Max(0, streak) - 1, 0, 3);
+            float chimePitch = 1.02f + 0.05f * bonus;
+            AudioClip chime = uiConfirmClip != null ? uiConfirmClip : killClip;
+            PlayOne(chime, 0.24f + 0.05f * bonus, chimePitch, chimePitch * 1.01f);
+        }
+
         public void PlayDeath()
         {
             PlayOne(deathClip, 0.75f, 0.96f, 1.02f);
@@ -636,6 +693,15 @@ namespace P1.Core
             var player = P1.Player.PlayerController.LocalPlayer;
             if (player != null && player.Health != null && !player.Health.IsAlive)
                 Duck(Mix.deathDuckAmount, 0.9f);
+        }
+
+        /// <summary>
+        /// 队友阵亡提示（P6-B，对齐 Inkwave ally_splatted 的语义）：
+        /// 低音量 + 升调的死亡音，读作「远处队友倒下了」而不是自己阵亡。
+        /// </summary>
+        public void PlayAllyDeath()
+        {
+            PlayOne(deathClip, 0.28f, 1.12f, 1.16f);
         }
 
         public void PlayRespawn() => PlayOne(respawnClip, 0.60f, 0.98f, 1.04f);
@@ -780,6 +846,19 @@ namespace P1.Core
 
             _lastHitMarkerTime = Time.unscaledTime;
             PlayRandom(hitMarkerClips, 0.65f, 0.98f, 1.02f);
+        }
+
+        /// <summary>
+        /// 带音高/音量的 hit_marker UI tick（P6-B）：命中确认的「哒」声由准星在 UI 层播放，
+        /// 音高按连击半音曲线（HitFeedbackMath.ComboPitch）抬升；与 hitEnemyClips 的身体音分层。
+        /// </summary>
+        public void PlayHitMarker(float pitch, float volume)
+        {
+            if (Time.unscaledTime - _lastHitMarkerTime < Mix.hitMarkerThrottleSeconds)
+                return;
+
+            _lastHitMarkerTime = Time.unscaledTime;
+            PlayRandom(hitMarkerClips, Mathf.Clamp(volume, 0f, 1f), pitch * 0.99f, pitch * 1.01f);
         }
 
         public void PlayUISound(UiSoundKind kind)

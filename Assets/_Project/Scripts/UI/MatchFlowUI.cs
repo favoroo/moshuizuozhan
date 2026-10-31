@@ -245,10 +245,14 @@ namespace P1.UI
                 new Vector2(m.DecoCircle * 0.26f, 0f), new Vector2(m.DecoCircle, m.DecoCircle), ComicStyle.Red);
 
             // 3) 安全区内容容器（刘海屏左右不被切）
-            var safeGo = new GameObject("MenuSafeArea", typeof(RectTransform), typeof(SafeAreaFitter));
+            //    注意顺序：必须先 Stretch 再挂 SafeAreaFitter。组件在 AddComponent 时就会
+            //    OnEnable→Apply 写入 safeArea 的 anchor，若之后再 Stretch 会把 anchor 覆盖回
+            //    全屏，菜单内容就会贴在屏幕物理边缘（横屏刘海区里面），SafeArea 等于白做。
+            var safeGo = new GameObject("MenuSafeArea", typeof(RectTransform));
             safeGo.transform.SetParent(readyPanel.transform, false);
             var safeRect = (RectTransform)safeGo.transform;
             Stretch(safeRect);
+            safeGo.AddComponent<SafeAreaFitter>();
 
             ReparentInto(startButton != null ? startButton.transform : null, safeRect);
             ReparentInto(checkUpdateButton != null ? checkUpdateButton.transform : null, safeRect);
@@ -821,15 +825,16 @@ namespace P1.UI
             Stretch(rootRt);
             rootRt.SetAsFirstSibling();
 
-            // 四角几何纯色装饰
+            // 四角几何纯色装饰：全部 0° 轴对齐实心块（不做菱形/斜方块，避免尖角），
+            // 只保留「黑方块 / 红方块 / 队色圆 / 队色方块」四枚扁平色块。
             CreateGeometricSquare(rootRt, "ResultSquareTL", new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(mobile ? 50f : 40f, mobile ? -50f : -40f), new Vector2(70f, 70f), 45f, ComicStyle.Ink);
+                new Vector2(mobile ? 50f : 40f, mobile ? -50f : -40f), new Vector2(70f, 70f), 0f, ComicStyle.Ink);
             CreateGeometricSquare(rootRt, "ResultSquareTR", new Vector2(1f, 1f), new Vector2(1f, 1f),
-                new Vector2(mobile ? -60f : -50f, mobile ? -60f : -50f), new Vector2(80f, 80f), 15f, ComicStyle.Red);
+                new Vector2(mobile ? -60f : -50f, mobile ? -60f : -50f), new Vector2(80f, 80f), 0f, ComicStyle.Red);
             CreateGeometricCircle(rootRt, "ResultCircleBL", new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(mobile ? 60f : 50f, mobile ? 60f : 50f), new Vector2(90f, 90f), resolved.GetTeamColor(Team.TeamA));
             CreateGeometricSquare(rootRt, "ResultSquareBR", new Vector2(1f, 0f), new Vector2(1f, 0f),
-                new Vector2(mobile ? -70f : -60f, mobile ? 70f : 60f), new Vector2(75f, 75f), 30f, resolved.GetTeamColor(Team.TeamB));
+                new Vector2(mobile ? -70f : -60f, mobile ? 70f : 60f), new Vector2(75f, 75f), 0f, resolved.GetTeamColor(Team.TeamB));
 
             // 1. 顶部 Hero 级 VICTORY / DEFEAT 判定大牌
             if (victoryBadgeRoot == null)
@@ -1015,9 +1020,10 @@ namespace P1.UI
                 barRt.anchorMax = Vector2.one;
                 barRt.offsetMin = new Vector2(2f, 2f);
                 barRt.offsetMax = new Vector2(-2f, -2f);
-                resultBarA.type = Image.Type.Filled;
-                resultBarA.fillMethod = Image.FillMethod.Horizontal;
-                resultBarA.fillOrigin = (int)Image.OriginHorizontal.Left;
+                // 纯平直角填充：内置 UISprite 在 20~30px 高度会露出圆角端帽，
+                // 实机就是「两头尖尖 + 边缘发灰的渐变」；换 1×1 纯白精灵才是纯色直条。
+                UIFlatSprite.MakeFlat(resultBarA, filled: true);
+                resultBarA.raycastTarget = false;
                 resultBarA.color = resolved.GetTeamColor(Team.TeamA);
             }
 
@@ -1045,9 +1051,9 @@ namespace P1.UI
                 barRt.anchorMax = Vector2.one;
                 barRt.offsetMin = new Vector2(2f, 2f);
                 barRt.offsetMax = new Vector2(-2f, -2f);
-                resultBarB.type = Image.Type.Filled;
-                resultBarB.fillMethod = Image.FillMethod.Horizontal;
-                resultBarB.fillOrigin = (int)Image.OriginHorizontal.Left;
+                // 同上：直角纯色填充，禁止圆角端帽 / 渐变边缘。
+                UIFlatSprite.MakeFlat(resultBarB, filled: true);
+                resultBarB.raycastTarget = false;
                 resultBarB.color = resolved.GetTeamColor(Team.TeamB);
             }
 
@@ -1170,8 +1176,33 @@ namespace P1.UI
                 bJelly.Configure(resolved, bBtn, bShape);
             }
 
+            // 8. 结算页硬性扁平化：所有形状的斜切高光、内沿墨光、网点、阴影全部归零，
+            //    确保无论场景继承了什么旧参数，屏幕上只出现纯色实心块。
+            var resultShapes = resultPanel.GetComponentsInChildren<UIInkShapeGraphic>(true);
+            for (int i = 0; i < resultShapes.Length; i++)
+            {
+                FlattenShape(resultShapes[i]);
+            }
+
             // 隐藏旧场景多余标题
             if (resultTitleText != null) resultTitleText.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// 几何风扁平化兜底：清掉斜切高光、内沿墨光、网点与硬阴影。
+        /// 结算页只允许「纯色实心块 + 0 圆角 + 实线边框」。
+        /// </summary>
+        private static void FlattenShape(UIInkShapeGraphic shape)
+        {
+            if (shape == null) return;
+            shape.DrawGloss = false;
+            shape.GlossAlpha = 0f;
+            shape.InnerRimAlpha = 0f;
+            shape.Halftone = false;
+            shape.HalftoneAlpha = 0f;
+            shape.HardShadow = false;
+            shape.ShadowOffset = Vector2.zero;
+            shape.CornerRadius = ComicStyle.CornerSharp;
         }
 
         public void EnsureUpdateUI()
@@ -1346,7 +1377,12 @@ namespace P1.UI
         private void HandlePhaseChanged(MatchManager match)
         {
             var phase = match.CurrentPhase;
-            if (phase == MatchManager.Phase.Countdown)
+            if (phase == MatchManager.Phase.Ready)
+            {
+                // 从对局/倒计时中返回主菜单：撤掉可能还挂着的倒计时横幅
+                if (bannerView != null) bannerView.HideImmediate();
+            }
+            else if (phase == MatchManager.Phase.Countdown)
             {
                 _lastCountdownNumber = -1;
                 _oneMinuteTriggered = false;

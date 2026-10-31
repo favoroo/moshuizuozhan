@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  androidx.core.content.FileProvider 的路径白名单：声明哪些目录下的文件可以被共享成 content:// URI。
+
+  必需项是 external-files-path —— UpdateManager 把 APK 写到 Application.persistentDataPath，
+  在 Android 上它等于 getExternalFilesDir(null)（/storage/emulated/0/Android/data/<包名>/files）。
+  files-path / cache-path 一并放开，便于将来换落盘位置而不用改清单。
+
+  与主清单 Assets/Plugins/Android/AndroidManifest.xml 里的 provider meta-data 对应。
+  本文件必须留在 P1UpdateLib.androidlib 内：Unity 6 已移除 Assets/Plugins/Android/res。
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-files-path name="p1_update_external_files" path="." />
+    <files-path name="p1_update_internal_files" path="." />
+    <cache-path name="p1_update_cache" path="." />
+</paths>

@@ -193,7 +193,7 @@ namespace P1.Weapons
             float hitRadius = Config != null ? Config.projectileRadius : 0.18f;
 
             Vector3 muzzle = host.MuzzlePosition;
-            Vector3 solveTarget = aim.GetShotTarget(muzzle, maxRange) + Vector3.up * hitRadius;
+            Vector3 solveTarget = aim.GetRangeClampedTarget(muzzle, maxRange) + Vector3.up * hitRadius;
 
             Vector3 launchDir = InkBallistics.SolveLaunchDirection(muzzle, solveTarget, speed, gravity, maxRange);
             Vector3 shotDir = InkBallistics.ApplySpread(launchDir, SpreadDegrees);

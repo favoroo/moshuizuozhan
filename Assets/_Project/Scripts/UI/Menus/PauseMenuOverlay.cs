@@ -58,6 +58,7 @@ namespace P1.UI.Menus
         private GameObject _mainViewContainer;
         private GameObject _settingsViewContainer;
         private bool _isSettingsOpen;
+        private Button _returnMenuButton;
 
         // 设置项控件
         private Slider _volumeSlider;
@@ -256,7 +257,10 @@ namespace P1.UI.Menus
             BuildMobilePauseButton(_safeAreaRect);
 
             // 4. 模态暂停与设置全屏蒙层
-            BuildModalOverlay(_safeAreaRect);
+            //    蒙层必须挂在 Canvas 根（物理全屏）而不是 SafeArea：
+            //    SafeArea 在横屏刘海/挖孔设备上左（右）侧有内缩，蒙层跟着缩会在刘海区留下
+            //    一条没被压暗的亮竖条。面板本身仍是屏幕居中的 920x820，另有安全区比例缩放。
+            BuildModalOverlay(transform);
         }
 
         private void BuildMobilePauseButton(Transform parent)
@@ -444,26 +448,38 @@ namespace P1.UI.Menus
             // 1. 继续游戏（黄底黑字直角）
             var resumeBtn = CreateStyledButton("ResumeBtn", parent, "继续游戏", ComicStyle.Yellow, ComicStyle.Ink, new Vector2(460f, 84f), _theme, UITypography.FontSnapped(28f), ComicStyle.CornerSharp, 0f);
             var resumeRt = resumeBtn.GetComponent<RectTransform>();
-            resumeRt.anchoredPosition = new Vector2(0f, 60f);
+            resumeRt.anchoredPosition = new Vector2(0f, 90f);
             resumeBtn.onClick.AddListener(Resume);
 
             // 2. 设置（白底黑字直角）
             var settingsBtn = CreateStyledButton("SettingsBtn", parent, "系统设置", ComicStyle.Paper, ComicStyle.Ink, new Vector2(460f, 84f), _theme, UITypography.FontSnapped(28f), ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var setRt = settingsBtn.GetComponent<RectTransform>();
-            setRt.anchoredPosition = new Vector2(0f, -45f);
+            setRt.anchoredPosition = new Vector2(0f, -10f);
             settingsBtn.onClick.AddListener(OpenSettings);
 
             // 3. 重新开始比赛（红底白字直角）
             var restartBtn = CreateStyledButton("RestartBtn", parent, "重新开始比赛", ComicStyle.Red, ComicStyle.Paper, new Vector2(460f, 84f), _theme, UITypography.FontSnapped(28f), ComicStyle.CornerSharp, 0f);
             var restartRt = restartBtn.GetComponent<RectTransform>();
-            restartRt.anchoredPosition = new Vector2(0f, -150f);
+            restartRt.anchoredPosition = new Vector2(0f, -110f);
             restartBtn.onClick.AddListener(RestartMatch);
+
+            // 4. 返回主菜单（白底墨字 + 红边直角：离开本局回到赛前主菜单）
+            var returnMenuBtn = CreateStyledButton("ReturnMenuBtn", parent, "返回主菜单", ComicStyle.Paper, ComicStyle.Ink, new Vector2(460f, 84f), _theme, UITypography.FontSnapped(28f), ComicStyle.CornerSharp, ComicStyle.Border);
+            var returnMenuRt = returnMenuBtn.GetComponent<RectTransform>();
+            returnMenuRt.anchoredPosition = new Vector2(0f, -210f);
+            var returnMenuShape = returnMenuBtn.GetComponent<UIInkShapeGraphic>();
+            if (returnMenuShape != null)
+            {
+                returnMenuShape.BorderColor = ComicStyle.Red; // 红边标记"离开本局"
+            }
+            returnMenuBtn.onClick.AddListener(ReturnToMainMenu);
+            _returnMenuButton = returnMenuBtn;
 
             // 提示文案
             string hintLabel = Application.isMobilePlatform ? "点击上方按钮继续" : "按 [ESC] 键或点击按钮继续";
             var hint = CreateTextMesh("Hint", parent, hintLabel, UITypography.FontSnapped(18f), ComicStyle.WithAlpha(ComicStyle.Paper, 0.70f), null, TextAlignmentOptions.Center, isDisplay: false);
             var hintRt = hint.rectTransform;
-            hintRt.anchoredPosition = new Vector2(0f, -240f);
+            hintRt.anchoredPosition = new Vector2(0f, -295f);
             hintRt.sizeDelta = new Vector2(500f, 30f);
         }
 
@@ -1011,6 +1027,17 @@ namespace P1.UI.Menus
             }
         }
 
+        /// <summary>关闭弹窗并回到赛前主菜单（Ready 阶段）；找不到比赛或已在主菜单时只关闭弹窗。</summary>
+        public void ReturnToMainMenu()
+        {
+            Resume();
+            MatchManager match = _match != null ? _match : MatchManager.Instance;
+            if (match != null && match.CurrentPhase != MatchManager.Phase.Ready)
+            {
+                match.ReturnToMenu();
+            }
+        }
+
         public void OpenSettings()
         {
             _isSettingsOpen = true;
@@ -1034,6 +1061,7 @@ namespace P1.UI.Menus
             _isSettingsOpen = false;
             _settingsViewContainer.SetActive(false);
             _mainViewContainer.SetActive(true);
+            UpdateReturnMenuButtonVisibility();
 
             if (_panelMotion != null)
             {
@@ -1046,6 +1074,21 @@ namespace P1.UI.Menus
             _isSettingsOpen = false;
             _settingsViewContainer.SetActive(false);
             _mainViewContainer.SetActive(true);
+            UpdateReturnMenuButtonVisibility();
+        }
+
+        /// <summary>已经在赛前主菜单（Ready）时隐藏「返回主菜单」，避免同屏出现无意义入口。</summary>
+        private void UpdateReturnMenuButtonVisibility()
+        {
+            if (_returnMenuButton == null)
+                return;
+
+            MatchManager match = _match != null ? _match : MatchManager.Instance;
+            bool alreadyInMenu = match != null && match.CurrentPhase == MatchManager.Phase.Ready;
+            if (_returnMenuButton.gameObject.activeSelf == alreadyInMenu)
+            {
+                _returnMenuButton.gameObject.SetActive(!alreadyInMenu);
+            }
         }
 
         private void OnMatchPhaseChanged(MatchManager.Phase phase)

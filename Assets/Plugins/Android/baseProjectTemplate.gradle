@@ -1,0 +1,30 @@
+plugins {
+    // If you are changing the Android Gradle Plugin version, make sure it is compatible with the Gradle version preinstalled with Unity
+    // See which Gradle version is preinstalled with Unity here https://docs.unity3d.com/Manual/android-gradle-overview.html
+    // See official Gradle and Android Gradle Plugin compatibility table here https://developer.android.com/studio/releases/gradle-plugin#updating-gradle
+    // To specify a custom Gradle version in Unity, go do "Preferences > External Tools", uncheck "Gradle Installed with Unity (recommended)" and specify a path to a custom Gradle version
+    id 'com.android.application' version '9.1.1' apply false
+    id 'com.android.library' version '9.1.1' apply false
+    **BUILD_SCRIPT_DEPS**
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}
+
+// 对齐 kotlin-stdlib 家族到 1.8.22（Unity 默认模板原样保留，只追加本段）：
+// P1UpdateLib.androidlib 依赖 androidx.core:core:1.13.1 → kotlin-stdlib 1.8.22（1.8 起类已并入主库），
+// 而注入组件仍带旧分体 kotlin-stdlib-jdk7/jdk8:1.6.21，两套同名类并存会令
+// :launcher:checkReleaseDuplicateClasses 失败。1.8.22 的 jdk7/jdk8 分体是空壳，统一升级即消除重复。
+subprojects {
+    afterEvaluate { subproj ->
+        subproj.configurations.all {
+            resolutionStrategy.eachDependency { details ->
+                if (details.requested.group == 'org.jetbrains.kotlin'
+                        && details.requested.name in ['kotlin-stdlib', 'kotlin-stdlib-jdk7', 'kotlin-stdlib-jdk8']) {
+                    details.useVersion '1.8.22'
+                }
+            }
+        }
+    }
+}

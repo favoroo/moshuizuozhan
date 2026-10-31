@@ -39,13 +39,18 @@ namespace P1.Ink
         private readonly List<InkWallFace> _faces = new List<InkWallFace>(4);
         private readonly List<Mesh> _meshes = new List<Mesh>(4);
         private readonly List<Renderer> _faceRenderers = new List<Renderer>(4);
+        private readonly List<Material> _faceMaterials = new List<Material>(4);
         private MaterialPropertyBlock _propBlock;
+
+        private float[] _lastPaintTimes = new float[4];
+        private float[] _currentWetness = new float[4];
 
         private Bounds _worldBounds;
         private bool _initialized;
         private bool _isRegistered;
 
         private static readonly int InkTexProp = Shader.PropertyToID("_InkTex");
+        private static readonly int WallWetnessProp = Shader.PropertyToID("_WallWetness");
 
         public Bounds WorldBounds => _worldBounds;
 
@@ -95,6 +100,16 @@ namespace P1.Ink
                 }
             }
             _meshes.Clear();
+
+            for (int i = 0; i < _faceMaterials.Count; i++)
+            {
+                if (_faceMaterials[i] != null)
+                {
+                    if (Application.isPlaying) Destroy(_faceMaterials[i]);
+                    else DestroyImmediate(_faceMaterials[i]);
+                }
+            }
+            _faceMaterials.Clear();
 
             for (int i = 0; i < _faces.Count; i++)
             {
@@ -264,6 +279,17 @@ namespace P1.Ink
                 AddFace("Z-", new Vector3(max.x, min.y, min.z), Vector3.left, Vector3.up, size.x, size.y, cellSize, neutral, teamA, teamB);
             }
 
+            if (_lastPaintTimes == null || _lastPaintTimes.Length < _faces.Count)
+            {
+                _lastPaintTimes = new float[_faces.Count];
+                _currentWetness = new float[_faces.Count];
+            }
+            for (int i = 0; i < _lastPaintTimes.Length; i++)
+            {
+                _lastPaintTimes[i] = -1000f;
+                _currentWetness[i] = 0f;
+            }
+
             _initialized = true;
 
             if (!_isRegistered)
@@ -389,6 +415,9 @@ namespace P1.Ink
                 new Vector2(1f, 1f),
                 new Vector2(0f, 1f)
             });
+            // UV1 = (面宽, 面高) 米：InkWall shader 用它在涂墨立面四周画掩体边界线（P17-A）
+            var faceSize = new Vector2(face.WorldWidth, face.WorldHeight);
+            mesh.SetUVs(1, new List<Vector2> { faceSize, faceSize, faceSize, faceSize });
             mesh.SetNormals(new List<Vector3> { localNormal, localNormal, localNormal, localNormal });
             // Unity 正面绕序：三角形叉乘方向与法线一致（内置 Quad 的 0,3,1 即为此规则），
             // 因此按 U×V = 朝外法线 的顺序取 0-1-2 / 0-2-3
@@ -399,7 +428,22 @@ namespace P1.Ink
             mf.sharedMesh = mesh;
 
             var mr = go.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = overlayMaterial;
+            // 为每张立面实例化独立的 Material，防 OcclusionFader.SetPropertyBlock(null) 冲刷，
+            // 且允许各面拥有独立的 _WallWetness 与 _InkTex
+            Material faceMat = overlayMaterial != null
+                ? new Material(overlayMaterial) { name = $"InkWallMat_{face.Name}" }
+                : null;
+            if (faceMat != null)
+            {
+                if (face.Texture != null)
+                {
+                    faceMat.SetTexture(InkTexProp, face.Texture);
+                }
+                faceMat.SetFloat(WallWetnessProp, 0f);
+            }
+            mr.sharedMaterial = faceMat;
+            _faceMaterials.Add(faceMat);
+
             mr.shadowCastingMode = ShadowCastingMode.Off;
             mr.receiveShadows = false;
             // 未落墨前保持禁用，0 DrawCall 开销；首次涂上墨斑后再激活
@@ -435,9 +479,16 @@ namespace P1.Ink
             if (changed > 0)
             {
                 int idx = _faces.IndexOf(face);
-                if (idx >= 0 && idx < _faceRenderers.Count && _faceRenderers[idx] != null)
+                if (idx >= 0)
                 {
-                    _faceRenderers[idx].enabled = true;
+                    if (idx < _lastPaintTimes.Length)
+                    {
+                        _lastPaintTimes[idx] = Time.time;
+                    }
+                    if (idx < _faceRenderers.Count && _faceRenderers[idx] != null)
+                    {
+                        _faceRenderers[idx].enabled = true;
+                    }
                 }
             }
             return changed;
@@ -476,6 +527,10 @@ namespace P1.Ink
                 int painted = face.PaintCircle(face.WorldToFace(projected), onFaceRadius, team);
                 if (painted > 0)
                 {
+                    if (i < _lastPaintTimes.Length)
+                    {
+                        _lastPaintTimes[i] = Time.time;
+                    }
                     if (i < _faceRenderers.Count && _faceRenderers[i] != null)
                     {
                         _faceRenderers[i].enabled = true;
@@ -492,6 +547,15 @@ namespace P1.Ink
             for (int i = 0; i < _faces.Count; i++)
             {
                 _faces[i].ResetPaint();
+                if (i < _lastPaintTimes.Length)
+                {
+                    _lastPaintTimes[i] = -1000f;
+                    _currentWetness[i] = 0f;
+                }
+                if (i < _faceMaterials.Count && _faceMaterials[i] != null)
+                {
+                    _faceMaterials[i].SetFloat(WallWetnessProp, 0f);
+                }
                 if (i < _faceRenderers.Count && _faceRenderers[i] != null)
                 {
                     _faceRenderers[i].enabled = false;
@@ -525,12 +589,82 @@ namespace P1.Ink
             if (target == null || face == null || face.Texture == null)
                 return;
 
+            // 材质实例直接持有墨迹贴图，即使 MPB 被 SetPropertyBlock(null) 也不会丢失
+            if (index < _faceMaterials.Count && _faceMaterials[index] != null)
+            {
+                _faceMaterials[index].SetTexture(InkTexProp, face.Texture);
+            }
+
             if (_propBlock == null)
                 _propBlock = new MaterialPropertyBlock();
 
             target.GetPropertyBlock(_propBlock);
             _propBlock.SetTexture(InkTexProp, face.Texture);
             target.SetPropertyBlock(_propBlock);
+        }
+
+        private void LateUpdate()
+        {
+            if (!_initialized || _faces.Count == 0)
+                return;
+
+            float sheenSeconds = config != null ? config.inkSheenSeconds : 22f;
+            float now = Time.time;
+
+            for (int i = 0; i < _faces.Count; i++)
+            {
+                InkWallFace face = _faces[i];
+                Material mat = i < _faceMaterials.Count ? _faceMaterials[i] : null;
+                if (mat == null)
+                    continue;
+
+                // 无墨面直接置 0 且跳过
+                if (!face.HasInk)
+                {
+                    if (_currentWetness[i] > 0f)
+                    {
+                        _currentWetness[i] = 0f;
+                        mat.SetFloat(WallWetnessProp, 0f);
+                    }
+                    continue;
+                }
+
+                float elapsed = now - _lastPaintTimes[i];
+                float wet = ComputeWallWetness(elapsed, sheenSeconds);
+
+                // 只有有效变化才 SetFloat，严格零 GC
+                if (Mathf.Abs(_currentWetness[i] - wet) > 0.005f || (wet == 0f && _currentWetness[i] != 0f))
+                {
+                    _currentWetness[i] = wet;
+                    mat.SetFloat(WallWetnessProp, wet);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 纯数学解算墙面湿润度：saturate(1 - elapsed / max(1, sheenSeconds))。
+        /// 供 LateUpdate 驱动材质，以及 EditMode 单测验证单调性与边界保护。
+        /// </summary>
+        public static float ComputeWallWetness(float elapsedSincePaint, float sheenSeconds)
+        {
+            if (elapsedSincePaint < 0f)
+                return 1f;
+
+            float denom = Mathf.Max(1f, sheenSeconds);
+            float wet = 1f - (elapsedSincePaint / denom);
+            return Mathf.Clamp01(wet);
+        }
+
+        /// <summary>获取指定立面当前的湿润度数值（供单测与诊断）。</summary>
+        public float GetFaceWetness(int index)
+        {
+            return (index >= 0 && index < _currentWetness.Length) ? _currentWetness[index] : 0f;
+        }
+
+        /// <summary>获取指定立面最近一次被涂时间（供单测与诊断）。</summary>
+        public float GetFaceLastPaintTime(int index)
+        {
+            return (index >= 0 && index < _lastPaintTimes.Length) ? _lastPaintTimes[index] : -1000f;
         }
 
         private InkWallFace FindFace(Vector3 worldNormal)

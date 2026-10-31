@@ -52,7 +52,7 @@ Material:
     - _XRMotionVectorsPass: 1
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.07323897, g: 0.08898155, b: 0.11928018, a: 1}
+    - _BaseColor: {r: 1, g: 0.19599415, b: 0.0071944073, a: 1}
     - _ChevronColor: {r: 0.71056664, g: 0.42003334, b: 0.033104762, a: 1}
     - _Color: {r: 0.07323897, g: 0.08898155, b: 0.11928018, a: 1}
     - _PlatformColor: {r: 0.3672465, g: 0.34239164, b: 0.2846467, a: 1}

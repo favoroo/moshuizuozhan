@@ -81,6 +81,31 @@ namespace P1.Tests
             Assert.AreEqual(0.5f, reticleRect.anchorMax.y, 1e-4f);
             Assert.AreEqual(0f, reticleRect.anchoredPosition.x, 1e-3f);
             Assert.AreEqual(0f, reticleRect.anchoredPosition.y, 1e-3f);
+
+            // SafeArea 容器在刘海/挖孔屏上会内缩：准星必须直接挂画布根，否则静止瞄准也会偏。
+            Canvas hudCanvas = reticle.GetComponentInParent<Canvas>();
+            Assert.IsNotNull(hudCanvas, "准星应位于 HUD 画布内");
+            Assert.AreEqual(hudCanvas.transform, reticle.transform.parent,
+                "准星必须直接挂在 Canvas 根，不能留在 HudSafeArea 里");
+
+            Vector3 reticleScreen = RectTransformUtility.WorldToScreenPoint(null, reticleRect.position);
+            Assert.AreEqual(Screen.width * 0.5f, reticleScreen.x, 1f,
+                "准星屏幕 X 必须等于屏幕正中心");
+            Assert.AreEqual(Screen.height * 0.5f, reticleScreen.y, 1f,
+                "准星屏幕 Y 必须等于屏幕正中心");
+
+            // 甩枪 20°：本帧瞄准点必须仍落在渲染画面的屏幕中心射线上。
+            // 旧实现用上一帧相机位置 + 本帧新朝向，20° 甩枪会偏出约 1m。
+            follow.AddLookInput(20f, 0f);
+            yield return null;
+
+            Ray centerRay = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+            Vector3 aimPoint = player.AimPoint;
+            Vector3 closestOnRay = centerRay.GetPoint(
+                Vector3.Dot(aimPoint - centerRay.origin, centerRay.direction));
+            float missDistance = Vector3.Distance(aimPoint, closestOnRay);
+            Assert.Less(missDistance, 0.15f,
+                $"甩枪后瞄准点必须贴合屏幕中心射线，实际偏差 {missDistance:0.000}m");
         }
     }
 }

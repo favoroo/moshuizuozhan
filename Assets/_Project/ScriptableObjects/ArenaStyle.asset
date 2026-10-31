@@ -14,20 +14,20 @@ MonoBehaviour:
   m_EditorClassIdentifier: P1.Game::P1.Environment.ArenaStyleSO
   groundBase: {r: 0.76, g: 0.74, b: 0.68, a: 1}
   groundSeam: {r: 0.52, g: 0.5, b: 0.45, a: 1}
-  groundMarking: {r: 0.88, g: 0.86, b: 0.78, a: 1}
-  groundMarkingAccent: {r: 0.82, g: 0.65, b: 0.26, a: 1}
+  groundMarking: {r: 0.3, g: 0.285, b: 0.345, a: 1}
+  groundMarkingAccent: {r: 0.62, g: 0.47, b: 0.16, a: 1}
   groundCliff: {r: 0.34, g: 0.33, b: 0.31, a: 1}
-  hazardYellow: {r: 0.86, g: 0.68, b: 0.2, a: 1}
-  hazardDark: {r: 0.16, g: 0.16, b: 0.16, a: 1}
+  hazardYellow: {r: 0.75, g: 0.58, b: 0.14, a: 1}
+  hazardDark: {r: 0.09, g: 0.085, b: 0.12, a: 1}
   concreteLight: {r: 0.8, g: 0.78, b: 0.72, a: 1}
   concreteMid: {r: 0.64, g: 0.62, b: 0.57, a: 1}
   concreteDark: {r: 0.42, g: 0.41, b: 0.38, a: 1}
   steel: {r: 0.42, g: 0.47, b: 0.56, a: 1}
   steelDark: {r: 0.24, g: 0.27, b: 0.32, a: 1}
-  wood: {r: 0.72, g: 0.58, b: 0.42, a: 1}
-  woodDark: {r: 0.48, g: 0.36, b: 0.24, a: 1}
-  foliage: {r: 0.24, g: 0.45, b: 0.28, a: 1}
-  lampGlass: {r: 1, g: 0.85, b: 0.6, a: 1}
+  wood: {r: 0.235, g: 0.175, b: 0.115, a: 1}
+  woodDark: {r: 0.145, g: 0.105, b: 0.07, a: 1}
+  foliage: {r: 0.075, g: 0.16, b: 0.095, a: 1}
+  lampGlass: {r: 1, g: 0.82, b: 0.52, a: 1}
   containerTeal: {r: 0.22, g: 0.56, b: 0.54, a: 1}
   containerRust: {r: 0.68, g: 0.32, b: 0.22, a: 1}
   containerSlate: {r: 0.36, g: 0.47, b: 0.62, a: 1}
@@ -56,8 +56,8 @@ MonoBehaviour:
   specThreshold: 0.95
   specSoftness: 0.02
   inkShadeThreshold: 0.48
-  inkShadeSoftness: 0.08
-  inkShadowFloor: 0.72
+  inkShadeSoftness: 0.1
+  inkShadowFloor: 0.62
   characterShadowFloor: 0.55
   fogEnabled: 1
   fogColor: {r: 0.62, g: 0.74, b: 0.86, a: 1}
@@ -66,8 +66,8 @@ MonoBehaviour:
   skyTop: {r: 0.16, g: 0.46, b: 0.86, a: 1}
   skyHorizon: {r: 0.8, g: 0.89, b: 0.97, a: 1}
   skyGround: {r: 0.52, g: 0.6, b: 0.66, a: 1}
-  sunDisc: {r: 1, g: 0.95, b: 0.82, a: 1}
-  cloudColor: {r: 1, g: 1, b: 1, a: 1}
+  sunDisc: {r: 1, g: 0.85, b: 0.6, a: 1}
+  cloudColor: {r: 0.55, g: 0.52, b: 0.62, a: 1}
   cloudStrength: 0.28
   waterShallow: {r: 0.2, g: 0.55, b: 0.62, a: 1}
   waterDeep: {r: 0.05, g: 0.24, b: 0.36, a: 1}
@@ -87,5 +87,22 @@ MonoBehaviour:
   outlineNormalThreshold: 0.35
   outlineFadeStart: 25
   outlineFadeEnd: 65
+  coverEdgeLineColor: {r: 0.09, g: 0.1, b: 0.13, a: 1}
+  coverEdgeLineWidth: 0.05
+  coverEdgeLineStrength: 0.85
+  coverTopLift: 0.06
+  envSpecStrength: 1
+  envSunDiscPower: 900
+  inkGrainScale: 1.6
+  inkGrainStrength: 0.35
+  inkRoughVarStrength: 0.5
+  coffeeRingStrength: 0.4
+  surfaceNormalStrength: 0.55
+  surfaceAOStrength: 0.45
+  surfaceSmoothnessScale: 1
+  useInkwaveGround: 0
+  splitShadowColor: {r: 0.3, g: 0.28, b: 0.44, a: 1}
+  splitHighlightColor: {r: 1.05, g: 0.98, b: 0.9, a: 1}
+  splitToningStrength: 0.15
   decorationDensity: 1
   buildBackdrop: 1

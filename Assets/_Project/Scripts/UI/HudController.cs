@@ -63,6 +63,38 @@ namespace P1.UI
         public TopRosterBarView TopRosterBar => topRosterBar;
         public CenterTimerView CenterTimer => centerTimer;
 
+        [Header("踩敌墨全屏边缘墨迹提示（P18-A）")]
+        [SerializeField] private InkEdgeWarningView inkEdgeWarning;
+
+        [Tooltip("场景里没有该视图时，Awake 自动程序化生成（挂在画布根、HUD 内容之下）")]
+        [SerializeField] private bool autoBuildInkEdgeWarning = true;
+
+        public InkEdgeWarningView InkEdgeWarning => inkEdgeWarning;
+
+        [Header("击杀确认屏幕边缘闪光（P6-B）")]
+        [SerializeField] private KillFlashView killFlash;
+
+        [Tooltip("场景里没有该视图时，Awake 自动程序化生成（挂在画布根、HUD 内容之下）")]
+        [SerializeField] private bool autoBuildKillFlash = true;
+
+        public KillFlashView KillFlash => killFlash;
+
+        [Header("镜头墨滴与水珠特效")]
+        [SerializeField] private LensInkView lensInk;
+
+        [Tooltip("场景里没有该视图时，Awake 自动程序化生成（挂在画布根、HUD 内容之下）")]
+        [SerializeField] private bool autoBuildLensInk = true;
+
+        public LensInkView LensInk => lensInk;
+
+        [Header("屏幕墨水漫灌与复活转场")]
+        [SerializeField] private ScreenInkTransitionView screenInkTransition;
+
+        [Tooltip("场景里没有该视图时，Awake 自动程序化生成（挂在画布根、压在 HUD 之上）")]
+        [SerializeField] private bool autoBuildScreenInkTransition = true;
+
+        public ScreenInkTransitionView ScreenInkTransition => screenInkTransition;
+
 #if UNITY_EDITOR
         private const string EditorThemePath = "Assets/_Project/ScriptableObjects/UITheme.asset";
         private const string EditorGaugeStylePath = "Assets/_Project/ScriptableObjects/HudGaugeStyle.asset";
@@ -95,6 +127,13 @@ namespace P1.UI
             EnsureSpecialGauges();
             EnsureTopRosterAndTimer();
             EnsureMinimapAndKillFeed();
+            // ScreenInkTransition 置于顶层（压在 HUD 之上，转场完成后关闭 Graphic）
+            // KillFlash、LensInk 先建，InkEdgeWarning 最后建并独占 sibling 0
+            //（保证 InkEdgeWarningPlayTests 断言其位于一切 HUD 内容之前）。
+            EnsureScreenInkTransition();
+            EnsureKillFlash();
+            EnsureLensInk();
+            EnsureInkEdgeWarning();
         }
 
         /// <summary>运行时 HUD 内容根：SafeArea 容器，桌面/编辑器下等价于全屏。</summary>
@@ -632,11 +671,147 @@ namespace P1.UI
                 weaponReticle = GetComponentInChildren<WeaponReticleUI>();
                 if (weaponReticle == null)
                 {
-                    var reticleGo = new GameObject("WeaponReticleUI", typeof(RectTransform), typeof(WeaponReticleUI));
-                    reticleGo.transform.SetParent(ContentRoot, false);
-                    weaponReticle = reticleGo.GetComponent<WeaponReticleUI>();
+                    // 屏幕中心准星挂在 Canvas 根，而不是 HudSafeArea：
+                    // 刘海/挖孔屏横屏时 SafeArea 会内缩，准星会偏离相机中心射线。
+                    Canvas rootCanvas = _hudCanvas != null ? _hudCanvas : GetComponent<Canvas>();
+                    Transform parent = rootCanvas != null ? rootCanvas.transform : ContentRoot;
+                    var reticleGo = new GameObject("WeaponReticleUI", typeof(RectTransform));
+                    reticleGo.transform.SetParent(parent, false);
+                    weaponReticle = reticleGo.AddComponent<WeaponReticleUI>();
                 }
             }
+        }
+
+        /// <summary>
+        /// P18-A：确保踩敌墨全屏边缘墨迹视图存在。
+        /// 直接挂在画布根（不进 SafeArea），并置于 sibling 0 ——
+        /// 盖住 3D 场景，但在所有 HUD 文字 / 准星 / 触控按钮之下。
+        /// </summary>
+        private void EnsureInkEdgeWarning()
+        {
+            if (inkEdgeWarning == null)
+            {
+                inkEdgeWarning = GetComponentInChildren<InkEdgeWarningView>(true);
+            }
+
+            if (inkEdgeWarning == null)
+            {
+                if (!autoBuildInkEdgeWarning) return;
+
+                var edgeGo = new GameObject("InkEdgeWarning",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                edgeGo.transform.SetParent(transform, false);
+                edgeGo.transform.SetAsFirstSibling();
+                inkEdgeWarning = edgeGo.AddComponent<InkEdgeWarningView>();
+            }
+
+            if (inkEdgeWarning != null)
+            {
+                inkEdgeWarning.EnsureBuilt();
+            }
+        }
+
+        /// <summary>
+        /// P6-B：确保击杀确认屏幕边缘闪光视图存在。
+        /// 与 InkEdgeWarning 同款层级约定——直接挂在画布根（不进 SafeArea）并置于 sibling 0，
+        /// 盖住 3D 场景，但在所有 HUD 文字 / 准星 / 触控按钮之下；由 KillFlashView 自行订阅击杀事件。
+        /// </summary>
+        private void EnsureKillFlash()
+        {
+            if (killFlash == null)
+            {
+                killFlash = GetComponentInChildren<KillFlashView>(true);
+            }
+
+            if (killFlash == null)
+            {
+                if (!autoBuildKillFlash) return;
+
+                var flashGo = new GameObject("KillFlash",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                flashGo.transform.SetParent(transform, false);
+                flashGo.transform.SetAsFirstSibling();
+                killFlash = flashGo.AddComponent<KillFlashView>();
+            }
+
+            if (killFlash != null)
+            {
+                killFlash.EnsureBuilt();
+            }
+        }
+
+        /// <summary>P6-B 显式绑定入口（编辑器装配 / 测试用）。</summary>
+        public void BindKillFlash(KillFlashView view)
+        {
+            killFlash = view;
+            if (killFlash != null) killFlash.EnsureBuilt();
+        }
+
+        /// <summary>P18-A 显式绑定入口（编辑器装配 / 测试用）。</summary>
+        public void BindInkEdgeWarning(InkEdgeWarningView view)
+        {
+            inkEdgeWarning = view;
+            if (inkEdgeWarning != null) inkEdgeWarning.EnsureBuilt();
+        }
+
+        private void EnsureLensInk()
+        {
+            if (lensInk == null)
+            {
+                lensInk = GetComponentInChildren<LensInkView>(true);
+            }
+
+            if (lensInk == null)
+            {
+                if (!autoBuildLensInk) return;
+
+                var lensGo = new GameObject("LensInk",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                lensGo.transform.SetParent(transform, false);
+                lensGo.transform.SetAsFirstSibling();
+                lensInk = lensGo.AddComponent<LensInkView>();
+            }
+
+            if (lensInk != null)
+            {
+                lensInk.EnsureBuilt();
+            }
+        }
+
+        private void EnsureScreenInkTransition()
+        {
+            if (screenInkTransition == null)
+            {
+                screenInkTransition = GetComponentInChildren<ScreenInkTransitionView>(true);
+            }
+
+            if (screenInkTransition == null)
+            {
+                if (!autoBuildScreenInkTransition) return;
+
+                var transGo = new GameObject("ScreenInkTransition",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                transGo.transform.SetParent(transform, false);
+                transGo.transform.SetAsLastSibling();
+                screenInkTransition = transGo.AddComponent<ScreenInkTransitionView>();
+            }
+
+            if (screenInkTransition != null)
+            {
+                screenInkTransition.EnsureBuilt();
+            }
+        }
+
+        public void BindLensInk(LensInkView view)
+        {
+            lensInk = view;
+            if (lensInk != null) lensInk.EnsureBuilt();
+        }
+
+        public void BindScreenInkTransition(ScreenInkTransitionView view)
+        {
+            screenInkTransition = view;
+            if (screenInkTransition != null) screenInkTransition.EnsureBuilt();
         }
 
         public void BindReferences(

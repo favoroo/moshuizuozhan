@@ -15,8 +15,8 @@ namespace P1.Weapons
         [Header("主武器：标准连发喷射枪")]
         public float fireInterval = 0.1f;
         public float damage = 36f;
-        public float projectileSpeed = 21f;
-        public float maxRange = 7.2f;
+        public float projectileSpeed = 34f;
+        public float maxRange = 12f;
 
         [Tooltip("持续开火发散到最大时的散布半角（度）")]
         public float spreadDegrees = 5.5f;
@@ -239,13 +239,34 @@ namespace P1.Weapons
         [Tooltip("扫射时移动速度（米/秒）")]
         public float splatlingMoveSpeedFiring = 3.4f;
 
-        [Header("副武器：抛物线延时墨水手雷 (Splat Bomb)")]
+        [Header("副武器：弹道手雷 (Splat Bomb，对齐 inkwave)")]
         [Tooltip("投掷一次消耗的墨水量：70% 墨水罐（满罐 100）")]
         public float bombInkCost = 70f;
         public float bombCooldown = 0.6f;
-        public float bombMaxThrowDistance = 7.5f;
+        [Tooltip("出手初速（米/秒）：inkwave SUB.bomb.throwSpeed = 13.5。远近由相机俯仰决定：平抛约 8m、抬头最远约 10.5m、低头贴脚丢")]
+        public float bombThrowSpeed = 13.5f;
+        [Tooltip("手雷飞行重力（米/秒²）：inkwave 炸弹积分器 = 24（角色重力 25）")]
+        public float bombThrowGravity = 24f;
+        [Tooltip("出手固定向上加成（米/秒）：inkwave throwVelocity 的 +1.5，保证平抛也有柔和上抛弧")]
+        public float bombThrowUpBoost = 1.5f;
+        [Tooltip("俯仰偏移（度）：实际出手俯仰 = 相机俯仰 + 该值（inkwave +0.28rad ≈ 16°），低头时也能温柔地抛出去")]
+        public float bombThrowPitchOffsetDegrees = 16f;
+        [Tooltip("出手俯仰下限（度）：inkwave clamp 下限 -0.3rad ≈ -17.2°，再低头也不会垂直砸脚")]
+        public float bombThrowPitchMinDegrees = -17.2f;
+        [Tooltip("出手俯仰上限（度）：inkwave clamp 上限 1.1rad ≈ 63°，即最远投掷的仰角")]
+        public float bombThrowPitchMaxDegrees = 63f;
+        [Tooltip("（旧字段，弹道模型已废弃）落点钳制距离：现行模型远近由俯仰物理决定，无钳制，保留供旧调用兼容")]
+        public float bombMaxThrowDistance = 12f;
+        [Tooltip("（旧字段）固定弧高，已由 bombArcHeightNear/Far 按落点距离动态计算取代，保留供旧调用兼容")]
         public float bombArcHeight = 2.6f;
+        [Tooltip("（旧字段）固定飞行时长，已由 bombFlightSpeed 按距离换算取代，保留供旧调用兼容")]
         public float bombFlightDuration = 0.38f;
+        [Tooltip("（旧字段）近距离弧高（米）：弹道模型已改为真实物理抛掷，保留供旧调用兼容")]
+        public float bombArcHeightNear = 1.6f;
+        [Tooltip("（旧字段）远距离弧高（米）：弹道模型已改为真实物理抛掷，保留供旧调用兼容")]
+        public float bombArcHeightFar = 3.8f;
+        [Tooltip("（旧字段）手雷飞行速度（米/秒）：弹道模型已改为 bombThrowSpeed 真实初速，保留供旧调用兼容")]
+        public float bombFlightSpeed = 15f;
         [Tooltip("落地后的警报引信时间（秒）：0.95s")]
         public float bombFuseDelay = 0.95f;
         [Tooltip("爆炸涂地半径（米）：2.7m")]
@@ -642,14 +663,23 @@ namespace P1.Weapons
             Debug.Log($"[WeaponConfigSO] P3-B 大招/副武器配置已同步到 {applied} 份武器资产");
         }
 
-        /// <summary>副武器 Splat Bomb 规范：耗墨 70、落地 0.95s 引信、核心 180 秒杀、涂地 2.7m。</summary>
+        /// <summary>副武器 Splat Bomb 规范：耗墨 70、最远投掷 12m、落地 0.95s 引信、核心 180 秒杀、涂地 2.7m。</summary>
         public static void ApplyBombSpec(WeaponConfigSO config)
         {
             config.bombInkCost = 70f;
             config.bombCooldown = 0.6f;
-            config.bombMaxThrowDistance = 7.5f;
+            config.bombThrowSpeed = 13.5f;
+            config.bombThrowGravity = 24f;
+            config.bombThrowUpBoost = 1.5f;
+            config.bombThrowPitchOffsetDegrees = 16f;
+            config.bombThrowPitchMinDegrees = -17.2f;
+            config.bombThrowPitchMaxDegrees = 63f;
+            config.bombMaxThrowDistance = 12f;
             config.bombArcHeight = 2.6f;
             config.bombFlightDuration = 0.38f;
+            config.bombArcHeightNear = 1.6f;
+            config.bombArcHeightFar = 3.8f;
+            config.bombFlightSpeed = 15f;
             config.bombFuseDelay = 0.95f;
             config.bombSplatRadius = 2.7f;
             config.bombDamageRadius = 3.1f;
@@ -700,6 +730,9 @@ namespace P1.Weapons
             config.displayName = "Spritzer";
             config.fireInterval = 0.1f;
             config.damage = 36f;
+            // 对齐 GamePlan / INKWAVE 的小枪射程与弹速：12m / 34m/s（弹道更平，准星=落点）。
+            config.maxRange = 12f;
+            config.projectileSpeed = 34f;
             config.inkCostPerShot = 0.95f;
             config.spreadMinDegrees = 1.2f;
             config.spreadDegrees = 5.5f;

@@ -47,7 +47,7 @@ namespace P1.Weapons
             {
                 Origin = origin,
                 Direction = direction,
-                Speed = config != null ? config.projectileSpeed : 25f,
+                Speed = config != null ? config.projectileSpeed : 34f,
                 Gravity = config != null ? config.projectileGravity : 28f,
                 MaxRange = config != null ? config.maxRange : 12f,
                 Damage = config != null ? config.damage : 34f,

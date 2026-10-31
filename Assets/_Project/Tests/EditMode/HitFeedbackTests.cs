@@ -129,10 +129,11 @@ namespace P1.Tests
         [Test]
         public void ComboPitch_RisesWithComboAndKill()
         {
+            // P6-B 对齐 Inkwave hit_marker：每级升 1.5 半音（×2^(1.5/12)），上限 8 级（一个八度内）
             Assert.AreEqual(1f, HitFeedbackMath.ComboPitch(0, false), 0.0001f);
-            Assert.AreEqual(1.3f, HitFeedbackMath.ComboPitch(6, false), 0.0001f);
-            Assert.AreEqual(1.3f, HitFeedbackMath.ComboPitch(12, false), 0.0001f, "连击音高上限 6 级");
-            Assert.AreEqual(1.36f, HitFeedbackMath.ComboPitch(6, true), 0.0001f, "击杀音再高 6%");
+            Assert.AreEqual(Mathf.Pow(2f, 9f / 12f), HitFeedbackMath.ComboPitch(6, false), 0.0001f, "6 连击 = 9 半音");
+            Assert.AreEqual(2f, HitFeedbackMath.ComboPitch(12, false), 0.0001f, "8 级封顶 = 刚好一个八度");
+            Assert.AreEqual(Mathf.Pow(2f, 9f / 12f) + 0.06f, HitFeedbackMath.ComboPitch(6, true), 0.0001f, "击杀音再高 6%");
         }
     }
 }

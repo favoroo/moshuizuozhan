@@ -81,6 +81,7 @@ namespace P1.Tests
             WeaponConfigSO config = CreateConfig();
 
             Assert.AreEqual(70f, config.bombInkCost, 0.0001f, "手雷耗墨 70%");
+            Assert.AreEqual(12f, config.bombMaxThrowDistance, 0.0001f, "设计稿最远投掷 12m");
             Assert.AreEqual(0.95f, config.bombFuseDelay, 0.0001f, "落地 0.95s 引信");
             Assert.AreEqual(2.7f, config.bombSplatRadius, 0.0001f, "涂地半径 2.7m");
             Assert.AreEqual(3.1f, config.bombDamageRadius, 0.0001f, "伤害判定半径 3.1m");

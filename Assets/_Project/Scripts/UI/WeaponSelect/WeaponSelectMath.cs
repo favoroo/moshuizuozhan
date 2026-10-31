@@ -197,14 +197,14 @@ namespace P1.UI.WeaponSelect
             {
                 switch (kind)
                 {
-                    case WeaponKind.Shooter: return "7.2m";
+                    case WeaponKind.Shooter: return "12.0m";
                     case WeaponKind.Roller: return "8.5m";
                     case WeaponKind.Charger: return "27.0m";
                     case WeaponKind.Dualies: return "11.0m";
                     case WeaponKind.Slosher: return "9.5m";
                     case WeaponKind.Blaster: return "10.5m";
                     case WeaponKind.Splatling: return "15.0m";
-                    default: return "7.2m";
+                    default: return "12.0m";
                 }
             }
 

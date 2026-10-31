@@ -7,11 +7,12 @@ using UnityEngine;
 namespace P1.Player
 {
     /// <summary>
-    /// Q 版无腿蛋形角色（Squidkid Egg Rig）与 7 类主武器装配工厂。
+    /// Q 版蛋仔风角色（圆头蛋形躯干 + 短粗腿，Squidkid Egg Rig）与 7 类主武器装配工厂。
     /// 遵循《P1 项目约定》与 CharacterMetrics 唯一尺寸真源：
-    /// 1. 人形态采用低重心、无腿蛋形圆润躯干，由 EggGaitSolver 驱动接触挤压与左右摇晃；
+    /// 1. 人形态 = 圆钝顶蛋形躯干（0.90m）+ 短粗双腿双脚（0.22m），总高与旧版一致（1.12m）；
+    ///    由 EggGaitSolver 驱动接触挤压、左右摇晃与 FK 摆腿（参考 INKWAVE 相位步态机制）；
     /// 2. 贴地枢轴（ChestPivotY = 0.05m）让倾斜与弹跳表现为整蛋摇摆而非上半身折叠；
-    /// 3. 蛋体网格采用解析法线分段光滑旋转体，原点置于脚底，保证着色连续与无接缝；
+    /// 3. 蛋体网格采用解析法线分段光滑旋转体，顶部以椭圆圆穹收口（顶端曲率半径与体宽同级，消除"洋葱尖"）；
     /// 4. 材质全面切换为 P1/CharacterToon 卡通着色器（蛋体唯一启用外描边），玻璃保持 URP Lit 透明；
     /// 5. 7 套武器模型按 CharacterMetrics 缩放换算挂载并绑定动态构件与枪口；
     /// 6. 武器静态构件在装配时按材质合并为少量 MergedStatic_* 网格压缩 DrawCall：
@@ -23,8 +24,6 @@ namespace P1.Player
         private static Mesh _eggMesh;
         private static Mesh _eggShortsShellMesh;
         private static Mesh _eggWaistbandShellMesh;
-        private static Mesh _sideTentacleMesh;
-        private static Mesh _centerTentacleMesh;
         private static Mesh _squidMesh;
 
         #region Public Assembly Entry
@@ -52,10 +51,12 @@ namespace P1.Player
 
             Transform hips, chest, head, leftHair, rightHair, leftArm, rightArm, tankFill;
             Transform bodySquash, leftEye, rightEye;
+            Transform leftLegRoot, rightLegRoot, leftKnee, rightKnee, leftAnkle, rightAnkle;
             BuildKidHierarchy(kidGo.transform, palette,
                 out hips, out chest, out head,
                 out leftHair, out rightHair, out leftArm, out rightArm, out tankFill,
-                out bodySquash, out leftEye, out rightEye);
+                out bodySquash, out leftEye, out rightEye,
+                out leftLegRoot, out rightLegRoot, out leftKnee, out rightKnee, out leftAnkle, out rightAnkle);
 
             // 4. 构建乌贼形态 (Squid Root)
             var squidGo = new GameObject("SquidRoot");
@@ -63,7 +64,8 @@ namespace P1.Player
             squidGo.SetActive(false);
 
             Transform squidBody, squidTentacles;
-            BuildSquidHierarchy(squidGo.transform, palette, out squidBody, out squidTentacles);
+            Transform[] tentacleArray;
+            BuildSquidHierarchy(squidGo.transform, palette, out squidBody, out squidTentacles, out tentacleArray);
 
             // 5. 构建武器挂载根节点 (WeaponVisual)
             var weaponGo = new GameObject("WeaponVisual");
@@ -114,6 +116,12 @@ namespace P1.Player
 
             // 6.1 注入蛋形角色步态与面部动效骨架绑定
             controller.BindEggRig(bodySquash, head, leftEye, rightEye);
+
+            // 6.1.1 绑定双腿 FK 链（步态摆腿 / 滞空收腿 / 落地屈膝吸收）
+            controller.BindLegRig(hips, leftLegRoot, rightLegRoot, leftKnee, rightKnee, leftAnkle, rightAnkle);
+
+            // 6.2 绑定 4 根拖尾触须（逐根行波驱动；数组为空时控制器回退根节点整体摆动）
+            controller.BindSquidTentacles(tentacleArray);
 
             WeaponKind startKind = initialWeaponConfig != null ? initialWeaponConfig.weaponKind : WeaponKind.Shooter;
             controller.EquipWeaponKind(startKind);
@@ -387,15 +395,6 @@ namespace P1.Player
         private static GameObject CreateCapsule(Transform parent, string name, Vector3 pos, Vector3 scale, Material mat)
             => CreatePart(parent, name, PrimitiveType.Capsule, pos, scale, Quaternion.identity, mat);
 
-        private static GameObject CreateMeshPart(Transform parent, string name, Mesh mesh, Material mat)
-        {
-            var go = new GameObject(name);
-            go.transform.SetParent(parent, false);
-            go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
-            return go;
-        }
-
         /// <summary>
         /// 优化角色的阴影投射：裁剪微小部件（面部贴片、墨渍小滴、袖口/小臂/手、旋钮与武器细碎零件）
         /// 的阴影以压缩阴影 Pass DrawCall，保留蛋体主躯干、发束与武器主体件的投影。
@@ -470,26 +469,51 @@ namespace P1.Player
 
         #region Egg Body Procedural Mesh
 
-        // 解析蛋形轮廓：max(半径) 出现高度约 36%，下段饱满、上段收窄。
-        // 旧版用 10 个控制点 + SmoothStep 分段插值，每个控制点都会把曲率压平，
-        // 在蛋体表面形成一圈圈"微鼓包"；这里改为单一解析函数，半径与切向连续可导。
-        private const float EggProfileAlpha = 0.68f;
-        private const float EggProfileBeta = 0.50f;
+        // 解析蛋形轮廓（P22-A 圆钝头顶版）：下段饱满蛋形 + 顶部椭圆圆穹，软最大值混合。
+        // 旧版（alpha=0.68）上段 64% 持续收窄、顶端有效曲率半径仅 ≈0.18m（远小于体宽 0.43m），
+        // 正/侧视都读成"洋葱尖"；新版顶端曲率半径 ≈0.37m 与体宽同级，呈蛋仔式圆穹。
+        // 保持单一解析函数：半径与切向连续可导，数值法线不会产生一圈圈"微鼓包"。
+        private const float EggProfileAlpha = 0.72f;   // 下段最大半径位置：t = 0.5^(1/α) ≈ 0.38
+        private const float EggProfileBeta = 0.60f;    // 下段饱满度
+        private const float EggDomeStart = 0.45f;      // 顶部圆穹起点（归一化躯干高度）
+        private const float EggDomePeak = 0.96f;       // 圆穹峰值略窄于最大体宽：上段单调收窄，读作“蛋”而非“球”
+        private const float EggBlendHalf = 0.035f;     // 小混合半宽：交界隆起压到 ~4mm，避免 toon 着色显出亮脊线
 
         /// <summary>
-        /// 采样蛋体归一化轮廓半径比例（0~1）。解析函数在两端自然收敛到 0，
-        /// 底部圆润触地、顶部收成圆顶，不再需要分段焊接。
+        /// 采样躯干归一化轮廓半径比例（0~1，躯干局部空间：0=躯干底、1=躯干顶）。
+        /// 底部圆润（由下段蛋形曲线自然收口），顶部以椭圆圆穹收口：
+        /// 圆穹顶端有效曲率半径 ρ ≈ a²/b（a=BodyMaxRadius·EggDomePeak, b=(1-EggDomeStart)·TorsoHeight）。
         /// </summary>
         private static float SampleEggRadius01(float t)
         {
             t = Mathf.Clamp01(t);
+            // 下段饱满蛋形
             float s = Mathf.Sin(Mathf.PI * Mathf.Pow(t, EggProfileAlpha));
-            return Mathf.Pow(Mathf.Max(0f, s), EggProfileBeta);
+            float body = Mathf.Pow(Mathf.Max(0f, s), EggProfileBeta);
+            // 顶部椭圆圆穹（四分之一椭圆弧，t < EggDomeStart 时不参与）
+            float dome = 0f;
+            float dt0 = (t - EggDomeStart) / Mathf.Max(0.0001f, 1f - EggDomeStart);
+            if (dt0 > 0f)
+            {
+                dome = EggDomePeak * Mathf.Sqrt(Mathf.Max(0f, 1f - dt0 * dt0));
+            }
+            // 软最大值：交界处 C1 圆滑过渡，避免 max 的硬折痕在描边/着色上显形
+            return SmoothMax(body, dome, EggBlendHalf);
         }
 
-        /// <summary>蛋体在指定高度处的实际半径（米）。</summary>
+        /// <summary>多项式 soft-min（Inigo Quilez）：h 越小越接近 min，交界处圆滑无折痕。</summary>
+        private static float SmoothMin(float a, float b, float h)
+        {
+            float t = Mathf.Clamp01(0.5f + 0.5f * (b - a) / Mathf.Max(0.0001f, h));
+            // 注意 lerp 参数序是 (b, a, t)：a 远小于 b 时 t=1 → 返回 a（真正的 min）
+            return Mathf.Lerp(b, a, t) - h * t * (1f - t);
+        }
+
+        private static float SmoothMax(float a, float b, float h) => -SmoothMin(-a, -b, h);
+
+        /// <summary>躯干在指定（躯干局部）高度处的实际半径（米）。</summary>
         private static float EggRadiusAt(float y)
-            => SampleEggRadius01(y / CharacterMetrics.BodyHeight) * CharacterMetrics.BodyMaxRadius;
+            => SampleEggRadius01(y / CharacterMetrics.TorsoHeight) * CharacterMetrics.BodyMaxRadius;
 
         /// <summary>
         /// 求蛋体前半球表面（面向 +Z）上的一点，并沿表面法线向外推出 outOffset。
@@ -514,9 +538,9 @@ namespace P1.Player
         }
 
         /// <summary>
-        /// 创建并静态缓存 Q 版无腿蛋形角色网格。
-        /// 40 环 × 40 径向段解析旋转体，原点位于脚底（y=0）；上下极点各用一个中心点封口。
-        /// 整颗蛋体使用单一描边材质；短裤与腰带是另外的贴面薄壳（见 CreateEggShellMesh）。
+        /// 创建并静态缓存 Q 版蛋形躯干网格（圆钝顶）。
+        /// 40 环 × 40 径向段解析旋转体，原点位于躯干底面（躯干局部 y=0，挂在 Torso 节点下）；
+        /// 上下极点各用一个中心点封口。整颗躯干使用单一描边材质；短裤与腰带是另外的贴面薄壳（见 BuildEggShellMesh）。
         /// 法线全部由解析轮廓切线推导，避免四边形拼接处的硬边与明暗断裂。
         /// </summary>
         public static Mesh CreateEggBodyMesh()
@@ -533,7 +557,7 @@ namespace P1.Player
             List<Vector2> uvs = new List<Vector2>();
             List<int> tris = new List<int>();
 
-            // 1. 底部极点（y=0，贴地）
+            // 1. 底部极点（躯干局部 y=0）
             int bottomCenterIdx = 0;
             verts.Add(Vector3.zero);
             normals.Add(Vector3.down);
@@ -543,7 +567,7 @@ namespace P1.Player
             for (int r = 1; r < ringCount; r++)
             {
                 float t = (float)r / ringCount;
-                float y = t * CharacterMetrics.BodyHeight;
+                float y = t * CharacterMetrics.TorsoHeight;
                 float radius = SampleEggRadius01(t) * CharacterMetrics.BodyMaxRadius;
 
                 // 差分计算轮廓沿高度切线斜率 dr/dy
@@ -552,7 +576,7 @@ namespace P1.Player
                 float tNext = Mathf.Min(1f, t + dt);
                 float rPrev = SampleEggRadius01(tPrev) * CharacterMetrics.BodyMaxRadius;
                 float rNext = SampleEggRadius01(tNext) * CharacterMetrics.BodyMaxRadius;
-                float dr_dy = (rNext - rPrev) / Mathf.Max(0.00001f, (tNext - tPrev) * CharacterMetrics.BodyHeight);
+                float dr_dy = (rNext - rPrev) / Mathf.Max(0.00001f, (tNext - tPrev) * CharacterMetrics.TorsoHeight);
 
                 for (int s = 0; s <= radialSegs; s++)
                 {
@@ -612,7 +636,7 @@ namespace P1.Player
 
             // 5. 顶部极点封顶
             int topCenterIdx = verts.Count;
-            verts.Add(new Vector3(0f, CharacterMetrics.BodyHeight, 0f));
+            verts.Add(new Vector3(0f, CharacterMetrics.TorsoHeight, 0f));
             normals.Add(Vector3.up);
             uvs.Add(new Vector2(0.5f, 1f));
 
@@ -682,7 +706,7 @@ namespace P1.Player
             for (int r = 0; r <= ringCount; r++)
             {
                 float t = Mathf.Lerp(tStart, tEnd, (float)r / ringCount);
-                float y = t * CharacterMetrics.BodyHeight;
+                float y = t * CharacterMetrics.TorsoHeight;
                 float radius = SampleEggRadius01(t) * CharacterMetrics.BodyMaxRadius + offset;
 
                 const float dt = 0.0005f;
@@ -690,7 +714,7 @@ namespace P1.Player
                 float tNext = Mathf.Min(1f, t + dt);
                 float rPrev = SampleEggRadius01(tPrev) * CharacterMetrics.BodyMaxRadius;
                 float rNext = SampleEggRadius01(tNext) * CharacterMetrics.BodyMaxRadius;
-                float dr_dy = (rNext - rPrev) / Mathf.Max(0.00001f, (tNext - tPrev) * CharacterMetrics.BodyHeight);
+                float dr_dy = (rNext - rPrev) / Mathf.Max(0.00001f, (tNext - tPrev) * CharacterMetrics.TorsoHeight);
 
                 for (int s = 0; s <= radialSegs; s++)
                 {
@@ -771,7 +795,7 @@ namespace P1.Player
             int radialSegs,
             bool facingUp)
         {
-            float y = t * CharacterMetrics.BodyHeight;
+            float y = t * CharacterMetrics.TorsoHeight;
             float bodyRadius = SampleEggRadius01(t) * CharacterMetrics.BodyMaxRadius;
             int innerRowBase = verts.Count;
 
@@ -835,17 +859,27 @@ namespace P1.Player
             out Transform tankFill,
             out Transform bodySquash,
             out Transform leftEye,
-            out Transform rightEye)
+            out Transform rightEye,
+            out Transform leftLegRoot,
+            out Transform rightLegRoot,
+            out Transform leftKnee,
+            out Transform rightKnee,
+            out Transform leftAnkle,
+            out Transform rightAnkle)
         {
-            // 蛋形角色取消腿部骨骼结构，hips 传 null 以保持旧接口兼容
-            hips = null;
-
             // 1. 躯干枢轴 (Chest)：位于贴地低位 (y = ChestPivotY = 0.05m)。
             // 使得奔跑前倾与左右摇摆像"蛋在地面晃荡"，而非传统人形的上半身在腰部折断
             var chestGo = new GameObject("Chest");
             chestGo.transform.SetParent(kidRoot, false);
             chestGo.transform.localPosition = new Vector3(0f, CharacterMetrics.ChestPivotY, 0f);
             chest = chestGo.transform;
+
+            // 1.5 髋部枢轴 (Hips)：挂在 Chest 下（世界 y = HipPivotY = 0.27m，藏在躯干下段内），
+            //    双腿挂在这里而不是 BodySquash：触地挤压只压躯干，脚掌不会被压进地面
+            var hipsGo = new GameObject("Hips");
+            hipsGo.transform.SetParent(chest, false);
+            hipsGo.transform.localPosition = new Vector3(0f, CharacterMetrics.HipPivotY - CharacterMetrics.ChestPivotY, 0f);
+            hips = hipsGo.transform;
 
             // 2. 弹性形变容器 (BodySquash)：挂在 Chest 下，抵消枢轴高度置于世界 y=0。
             // 步态弹跳（BobY）与触地挤压拉伸（SquashY / SquashXZ）全部作用在它身上
@@ -854,11 +888,18 @@ namespace P1.Player
             squashGo.transform.localPosition = new Vector3(0f, -CharacterMetrics.ChestPivotY, 0f);
             bodySquash = squashGo.transform;
 
-            // 2.1 蛋形主躯干：整颗蛋体只用一件带描边的奶油白材质。
-            // 短裤与腰带是另外两层贴面薄壳（沿表面法线外扩 5mm / 9mm），像真实衣物一样叠在蛋体上；
+            // 2.0 躯干抬升节点 (Torso)：蛋体从世界 y = TorsoBaseY = 0.22m 起，下方让位给短粗腿。
+            // 挤压缩放仍作用在 BodySquash（围绕地面原点），躯干会向下压进弯曲的膝盖里 —— 正是落地缓冲想要的观感
+            var torsoGo = new GameObject("Torso");
+            torsoGo.transform.SetParent(bodySquash, false);
+            torsoGo.transform.localPosition = new Vector3(0f, CharacterMetrics.TorsoBaseY, 0f);
+            Transform torso = torsoGo.transform;
+
+            // 2.1 蛋形主躯干：整颗躯干只用一件带描边的奶油白材质。
+            // 短裤与腰带是另外两层贴面薄壳（沿表面法线外扩 5mm / 9mm），像真实衣物一样叠在躯干上；
             // 这样外轮廓只有一条完整黑边，不会出现 submesh 各画一次描边造成的接缝黑线。
             var eggGo = new GameObject("EggBody");
-            eggGo.transform.SetParent(bodySquash, false);
+            eggGo.transform.SetParent(torso, false);
             eggGo.transform.localPosition = Vector3.zero;
             var mf = eggGo.AddComponent<MeshFilter>();
             var mr = eggGo.AddComponent<MeshRenderer>();
@@ -866,32 +907,33 @@ namespace P1.Player
             mr.sharedMaterial = p.Shirt;
 
             var shortsGo = new GameObject("EggShorts");
-            shortsGo.transform.SetParent(bodySquash, false);
+            shortsGo.transform.SetParent(torso, false);
             shortsGo.transform.localPosition = Vector3.zero;
             shortsGo.AddComponent<MeshFilter>().sharedMesh = GetEggShortsShellMesh();
             shortsGo.AddComponent<MeshRenderer>().sharedMaterial = p.Shorts;
 
             var bandGo = new GameObject("EggWaistband");
-            bandGo.transform.SetParent(bodySquash, false);
+            bandGo.transform.SetParent(torso, false);
             bandGo.transform.localPosition = Vector3.zero;
             bandGo.AddComponent<MeshFilter>().sharedMesh = GetEggWaistbandShellMesh();
             bandGo.AddComponent<MeshRenderer>().sharedMaterial = p.Waistband;
 
             // 2.2 面部分区靠大眼、连体面罩与胸前墨点承担，蛋体本身保持一整块干净曲面。
 
-            // 2.3 面部容器 (Face)：容器本身放在原点，所有部件直接用「蛋体身体空间」坐标贴面
+            // 2.3 面部容器 (Face)：容器本身放在躯干局部原点，所有部件直接用「躯干曲面空间」坐标贴面
+            // （五官 y 已按 TorsoHeight/BodyHeight 比例从旧蛋体坐标重映射，保持原有构图比例）
             var faceGo = new GameObject("Face");
-            faceGo.transform.SetParent(bodySquash, false);
+            faceGo.transform.SetParent(torso, false);
             faceGo.transform.localPosition = Vector3.zero;
             var face = faceGo.transform;
 
             // 2.3.1 连体深色眼罩：两片眼窝 + 中间鼻梁桥，读起来像 inkling 的面罩，而不是两个孤立的黑斑。
-            const float eyeY = 0.72f;
+            const float eyeY = 0.58f;
             var maskBridge = CreateSphere(face, "EyeMask_Bridge",
                 EggFrontPoint(0f, eyeY, 0.002f), new Vector3(0.20f, 0.15f, 0.028f), p.Dark);
             maskBridge.transform.localRotation = Quaternion.identity;
 
-            // 大眼：眼睛贴在上半前脸（y≈0.72），由曲面采样保证既不陷入也不悬浮。
+            // 大眼：眼睛贴在上半前脸（y≈0.58），由曲面采样保证既不陷入也不悬浮。
             leftEye = null;
             rightEye = null;
             for (int s = -1; s <= 1; s += 2)
@@ -919,22 +961,22 @@ namespace P1.Player
 
                 // 腮红贴在眼睛外下方
                 float blushX = s * 0.255f;
-                var blush = CreateSphere(face, "Blush_" + side, EggFrontPoint(blushX, 0.585f, 0.004f), new Vector3(0.095f, 0.05f, 0.022f), p.Blush);
-                blush.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(blushX, 0.585f), 0f);
+                var blush = CreateSphere(face, "Blush_" + side, EggFrontPoint(blushX, 0.47f, 0.004f), new Vector3(0.095f, 0.05f, 0.022f), p.Blush);
+                blush.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(blushX, 0.47f), 0f);
             }
 
             // 小 ω 嘴：极扁的深色椭圆，贴在两眼下方的中线上
-            var mouth = CreateSphere(face, "Mouth", EggFrontPoint(0f, 0.60f, 0.004f), new Vector3(0.085f, 0.028f, 0.020f), p.Dark);
+            var mouth = CreateSphere(face, "Mouth", EggFrontPoint(0f, 0.48f, 0.004f), new Vector3(0.085f, 0.028f, 0.020f), p.Dark);
             mouth.transform.localRotation = Quaternion.identity;
 
             // 2.3.2 胸前队伍色墨点：把"全身刷队伍色"改成小面积墨渍点缀，既保留队伍识别，
-            // 又不会让角色和地面/墨迹糊成一片。位置全部由蛋体曲面采样，不会浮空。
+            // 又不会让角色和地面/墨迹糊成一片。位置全部由躯干曲面采样，不会浮空。
             Vector3[] chestInkPos = new Vector3[]
             {
-                new Vector3(0.12f, 0.500f, 0f),
-                new Vector3(0.19f, 0.455f, 0f),
-                new Vector3(0.045f, 0.545f, 0f),
-                new Vector3(0.155f, 0.415f, 0f)
+                new Vector3(0.12f, 0.400f, 0f),
+                new Vector3(0.19f, 0.365f, 0f),
+                new Vector3(0.045f, 0.437f, 0f),
+                new Vector3(0.155f, 0.333f, 0f)
             };
             float[] chestInkSize = new float[] { 0.085f, 0.050f, 0.042f, 0.034f };
             for (int i = 0; i < chestInkPos.Length; i++)
@@ -945,40 +987,19 @@ namespace P1.Player
                     new Vector3(size, size * 0.85f, size * 0.14f), p.InkDecal);
                 spot.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(cp.x, cp.y), 0f);
             }
-            var drip = CreateSphere(face, "ChestInk_Drip", EggFrontPoint(0.105f, 0.430f, 0.003f),
+            var drip = CreateSphere(face, "ChestInk_Drip", EggFrontPoint(0.105f, 0.345f, 0.003f),
                 new Vector3(0.022f, 0.050f, 0.012f), p.InkDecal);
-            drip.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(0.105f, 0.430f), 0f);
+            drip.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(0.105f, 0.345f), 0f);
 
-            // 2.4 头顶墨焰触须束 (InkCrest)：三束墨焰从圆顶后方起笔、向后下方扫出弧线，
-            // 像真正垂在脑后的触须头发，而不是竖在头顶的两根天线。
-            var crestGo = new GameObject("InkCrest");
-            crestGo.transform.SetParent(bodySquash, false);
-            crestGo.transform.localPosition = new Vector3(0f, 0.99f, 0f);
+            // 2.4 头顶墨焰触须束已按 P22-A 需求移除（"头尖"观感来源之一）；
+            // 队伍色识别改由腰带/虹膜/袖口/胸渍/墨罐液面承担。leftHair/rightHair 传 null 保持旧接口兼容。
+            leftHair = null;
+            rightHair = null;
 
-            var lHairGo = new GameObject("LeftHairPivot");
-            lHairGo.transform.SetParent(crestGo.transform, false);
-            lHairGo.transform.localPosition = new Vector3(-0.09f, 0f, 0f);
-            lHairGo.transform.localRotation = Quaternion.Euler(0f, 0f, 8f);   // 向左外扩，形成扇形墨发
-            leftHair = lHairGo.transform;
-            CreateMeshPart(leftHair, "LeftTentacle", GetSideTentacleMesh(), p.TeamHair);
-
-            var rHairGo = new GameObject("RightHairPivot");
-            rHairGo.transform.SetParent(crestGo.transform, false);
-            rHairGo.transform.localPosition = new Vector3(0.09f, 0f, 0f);
-            rHairGo.transform.localRotation = Quaternion.Euler(0f, 0f, -8f);  // 向右外扩
-            rightHair = rHairGo.transform;
-            CreateMeshPart(rightHair, "RightTentacle", GetSideTentacleMesh(), p.TeamHair);
-
-            // 中央发束：比两侧短一截，填满头冠又不遮挡脸
-            var centerHairGo = new GameObject("CenterHairPivot");
-            centerHairGo.transform.SetParent(crestGo.transform, false);
-            centerHairGo.transform.localPosition = new Vector3(0f, 0.012f, -0.020f);
-            CreateMeshPart(centerHairGo.transform, "CenterTentacle", GetCenterTentacleMesh(), p.TeamHair);
-
-            // 2.5 后背紧凑型墨罐背包 (InkTankBackpack)：外推到 z=-0.40，让壳体真正凸出蛋体背面成为可见背包
+            // 2.5 后背紧凑型墨罐背包 (InkTankBackpack)：外推到 z=-0.43，让壳体真正凸出躯干背面成为可见背包
             var backpackGo = new GameObject("InkTankBackpack");
-            backpackGo.transform.SetParent(bodySquash, false);
-            backpackGo.transform.localPosition = new Vector3(0f, 0.50f, -0.43f);
+            backpackGo.transform.SetParent(torso, false);
+            backpackGo.transform.localPosition = new Vector3(0f, 0.40f, -0.43f);
 
             CreateBox(backpackGo.transform, "MountPlate", new Vector3(0f, 0f, 0.04f), new Vector3(0.16f, 0.26f, 0.035f), p.Dark);
             CreateCylinder(backpackGo.transform, "GlassChamber", Vector3.zero, new Vector3(0.26f, 0.15f, 0.26f), p.Glass);
@@ -992,8 +1013,8 @@ namespace P1.Player
 
             // 2.6 头顶空锚点 (Head)：供待机微表现进行微妙呼吸浮动
             var headGo = new GameObject("Head");
-            headGo.transform.SetParent(bodySquash, false);
-            headGo.transform.localPosition = new Vector3(0f, 0.74f, 0f);
+            headGo.transform.SetParent(torso, false);
+            headGo.transform.localPosition = new Vector3(0f, 0.595f, 0f);
             head = headGo.transform;
 
             // 3. 左右手臂 (LeftArm / RightArm)：必须是 Chest 的直接子节点
@@ -1010,6 +1031,61 @@ namespace P1.Player
             rArmGo.transform.localPosition = new Vector3(0.34f, 0.41f, 0.04f);
             rightArm = rArmGo.transform;
             BuildMittenArm(rightArm, p, -1);
+
+            // 4. 短粗双腿双脚 (P22-A)：挂在 Hips 下，FK 三段（LegRoot/Knee/Ankle）
+            //    由 CharacterVisualController 按 EggGaitSolver 步态与滞空/落地姿态写回
+            BuildLeg(hips, p, -1, out leftLegRoot, out leftKnee, out leftAnkle);
+            BuildLeg(hips, p, 1, out rightLegRoot, out rightKnee, out rightAnkle);
+        }
+
+        /// <summary>
+        /// 短粗蛋仔腿：短裤蓝大腿 → 膝 → 肤色小腿 → 踝 → 深色圆头短靴，脚底正好落在世界 y=0。
+        /// 复用现有调色盘材质（短裤/皮肤/深色塑料），不新增材质；大腿上端埋进躯干下段的短裤薄壳里，
+        /// 站立时接缝不可见。渲染器全部保留投影（腿是实体大件，遮挡与影子都需要）。
+        /// </summary>
+        private static void BuildLeg(
+            Transform hips,
+            Palette p,
+            int side,
+            out Transform legRoot,
+            out Transform kneePivot,
+            out Transform anklePivot)
+        {
+            var legGo = new GameObject(side < 0 ? "LeftLeg" : "RightLeg");
+            legGo.transform.SetParent(hips, false);
+            legGo.transform.localPosition = new Vector3(side * CharacterMetrics.HipOffsetX, 0f, 0f);
+            legRoot = legGo.transform;
+
+            float thighLen = CharacterMetrics.ThighLength;
+            float calfLen = CharacterMetrics.CalfLength;
+
+            // 大腿（短裤蓝）：胶囊从髋枢轴垂到膝（半径 0.085 —— 蛋仔比例的墩实短腿）
+            CreateCapsule(legRoot, "Thigh",
+                new Vector3(0f, -thighLen * 0.5f, 0f),
+                new Vector3(0.17f, thighLen * 0.5f + 0.03f, 0.17f), p.Shorts);
+
+            // 膝关节枢轴
+            var kneeGo = new GameObject("Knee");
+            kneeGo.transform.SetParent(legRoot, false);
+            kneeGo.transform.localPosition = new Vector3(0f, -thighLen, 0f);
+            kneePivot = kneeGo.transform;
+
+            // 小腿（肤色）
+            CreateCapsule(kneePivot, "Calf",
+                new Vector3(0f, -calfLen * 0.5f, 0f),
+                new Vector3(0.135f, calfLen * 0.5f + 0.02f, 0.135f), p.Skin);
+
+            // 踝关节枢轴
+            var ankleGo = new GameObject("Ankle");
+            ankleGo.transform.SetParent(kneePivot, false);
+            ankleGo.transform.localPosition = new Vector3(0f, -calfLen, 0f);
+            anklePivot = ankleGo.transform;
+
+            // 圆头短靴（深色）：压扁球前伸成鞋头，鞋底落在世界 y=0
+            //（踝世界高度 = HipPivotY - ThighLength - CalfLength = 0.05m，球心再降 0.01m、半径 0.045m → 底面 -0.005m ≈ 贴地）
+            CreateSphere(anklePivot, "Foot",
+                new Vector3(0f, -0.01f, 0.03f),
+                new Vector3(0.15f, 0.09f, 0.20f), p.Dark);
         }
 
         /// <summary>
@@ -1046,136 +1122,6 @@ namespace P1.Player
             CreateSphere(root, "Hand", toHand, new Vector3(0.105f, 0.105f, 0.105f), p.Skin);
         }
 
-        private static Mesh GetSideTentacleMesh()
-        {
-            if (_sideTentacleMesh == null)
-            {
-                _sideTentacleMesh = CreateTentacleMesh(
-                    0.070f, 0.012f,
-                    new Vector3(0f, -0.020f, 0.020f),
-                    new Vector3(0f, 0.140f, 0.040f),
-                    new Vector3(0f, 0.180f, -0.180f),
-                    new Vector3(0f, 0.080f, -0.380f),
-                    "SideTentacleMesh");
-            }
-            return _sideTentacleMesh;
-        }
-
-        private static Mesh GetCenterTentacleMesh()
-        {
-            if (_centerTentacleMesh == null)
-            {
-                _centerTentacleMesh = CreateTentacleMesh(
-                    0.065f, 0.011f,
-                    new Vector3(0f, -0.020f, 0.020f),
-                    new Vector3(0f, 0.130f, 0.030f),
-                    new Vector3(0f, 0.160f, -0.150f),
-                    new Vector3(0f, 0.050f, -0.290f),
-                    "CenterTentacleMesh");
-            }
-            return _centerTentacleMesh;
-        }
-
-        /// <summary>
-        /// 单条触须：三次贝塞尔中心线 + 变半径圆截面管状网格，两端自然收细。
-        /// 用一整条光滑曲面替代"4 段胶囊叠起来"的做法，背面不会再出现一串肉瘤状凸起。
-        /// </summary>
-        private static Mesh CreateTentacleMesh(
-            float baseRadius,
-            float tipRadius,
-            Vector3 p0,
-            Vector3 p1,
-            Vector3 p2,
-            Vector3 p3,
-            string name)
-        {
-            const int ringCount = 20;
-            const int radialSegs = 14;
-
-            var mesh = new Mesh { name = name };
-            List<Vector3> verts = new List<Vector3>();
-            List<Vector2> uvs = new List<Vector2>();
-            List<int> tris = new List<int>();
-
-            Vector3 lastCenter = p3;
-            Vector3 lastTangent = (p3 - p2).normalized;
-
-            for (int r = 0; r <= ringCount; r++)
-            {
-                float u = (float)r / ringCount;
-                Vector3 center = Bezier(p0, p1, p2, p3, u);
-                Vector3 tangent = (Bezier(p0, p1, p2, p3, Mathf.Min(1f, u + 0.002f))
-                                   - Bezier(p0, p1, p2, p3, Mathf.Max(0f, u - 0.002f))).normalized;
-                if (tangent.sqrMagnitude < 0.0001f) tangent = lastTangent;
-
-                // 根部粗、梢部细，中段略鼓；曲线在 YZ 平面内，right 始终与切线垂直
-                float taper = Mathf.Lerp(baseRadius, tipRadius, Mathf.Pow(u, 0.9f));
-                float radius = taper * (1f + 0.08f * Mathf.Sin(u * Mathf.PI));
-
-                Vector3 side = Vector3.right;
-                Vector3 up = Vector3.Cross(tangent, side).normalized;
-
-                for (int s = 0; s < radialSegs; s++)
-                {
-                    float theta = (float)s / radialSegs * Mathf.PI * 2f;
-                    Vector3 dir = side * Mathf.Cos(theta) + up * Mathf.Sin(theta);
-                    verts.Add(center + dir * radius);
-                    uvs.Add(new Vector2((float)s / radialSegs, u));
-                }
-
-                lastCenter = center;
-                lastTangent = tangent;
-            }
-
-            for (int r = 0; r < ringCount; r++)
-            {
-                int row0 = r * radialSegs;
-                int row1 = (r + 1) * radialSegs;
-                for (int s = 0; s < radialSegs; s++)
-                {
-                    int next = (s + 1) % radialSegs;
-                    int i0 = row0 + s;
-                    int i0n = row0 + next;
-                    int i1 = row1 + s;
-                    int i1n = row1 + next;
-
-                    tris.Add(i0);
-                    tris.Add(i0n);
-                    tris.Add(i1);
-
-                    tris.Add(i0n);
-                    tris.Add(i1n);
-                    tris.Add(i1);
-                }
-            }
-
-            // 圆润尖端封口
-            int tipIndex = verts.Count;
-            verts.Add(lastCenter + lastTangent * tipRadius * 0.8f);
-            uvs.Add(new Vector2(0.5f, 1f));
-            int lastRow = ringCount * radialSegs;
-            for (int s = 0; s < radialSegs; s++)
-            {
-                int next = (s + 1) % radialSegs;
-                tris.Add(lastRow + s);
-                tris.Add(lastRow + next);
-                tris.Add(tipIndex);
-            }
-
-            mesh.SetVertices(verts);
-            mesh.SetUVs(0, uvs);
-            mesh.SetTriangles(tris, 0);
-            mesh.RecalculateNormals();
-            mesh.RecalculateBounds();
-            return mesh;
-        }
-
-        private static Vector3 Bezier(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float u)
-        {
-            float v = 1f - u;
-            return a * (v * v * v) + b * (3f * v * v * u) + c * (3f * v * u * u) + d * (u * u * u);
-        }
-
         #endregion
 
         #region Squid Form Assembly
@@ -1184,7 +1130,8 @@ namespace P1.Player
             Transform squidRoot,
             Palette p,
             out Transform squidBody,
-            out Transform squidTentacles)
+            out Transform squidTentacles,
+            out Transform[] tentacleArray)
         {
             var bodyGo = new GameObject("SquidBody");
             bodyGo.transform.SetParent(squidRoot, false);
@@ -1218,10 +1165,15 @@ namespace P1.Player
             tentRootGo.transform.localPosition = new Vector3(0f, 0f, -0.22f);
             squidTentacles = tentRootGo.transform;
 
-            CreateCapsule(squidTentacles, "Tentacle_OutL", new Vector3(-0.14f, 0.01f, -0.16f), new Vector3(0.06f, 0.18f, 0.06f), p.SquidBody).transform.localRotation = Quaternion.Euler(85f, 0f, 0f);
-            CreateCapsule(squidTentacles, "Tentacle_MidL", new Vector3(-0.05f, 0.01f, -0.20f), new Vector3(0.055f, 0.22f, 0.055f), p.SquidBody).transform.localRotation = Quaternion.Euler(88f, 0f, 0f);
-            CreateCapsule(squidTentacles, "Tentacle_MidR", new Vector3(0.05f, 0.01f, -0.20f), new Vector3(0.055f, 0.22f, 0.055f), p.SquidBody).transform.localRotation = Quaternion.Euler(88f, 0f, 0f);
-            CreateCapsule(squidTentacles, "Tentacle_OutR", new Vector3(0.14f, 0.01f, -0.16f), new Vector3(0.06f, 0.18f, 0.06f), p.SquidBody).transform.localRotation = Quaternion.Euler(85f, 0f, 0f);
+            tentacleArray = new Transform[4];
+            tentacleArray[0] = CreateCapsule(squidTentacles, "Tentacle_OutL", new Vector3(-0.14f, 0.01f, -0.16f), new Vector3(0.06f, 0.18f, 0.06f), p.SquidBody).transform;
+            tentacleArray[0].localRotation = Quaternion.Euler(85f, 0f, 0f);
+            tentacleArray[1] = CreateCapsule(squidTentacles, "Tentacle_MidL", new Vector3(-0.05f, 0.01f, -0.20f), new Vector3(0.055f, 0.22f, 0.055f), p.SquidBody).transform;
+            tentacleArray[1].localRotation = Quaternion.Euler(88f, 0f, 0f);
+            tentacleArray[2] = CreateCapsule(squidTentacles, "Tentacle_MidR", new Vector3(0.05f, 0.01f, -0.20f), new Vector3(0.055f, 0.22f, 0.055f), p.SquidBody).transform;
+            tentacleArray[2].localRotation = Quaternion.Euler(88f, 0f, 0f);
+            tentacleArray[3] = CreateCapsule(squidTentacles, "Tentacle_OutR", new Vector3(0.14f, 0.01f, -0.16f), new Vector3(0.06f, 0.18f, 0.06f), p.SquidBody).transform;
+            tentacleArray[3].localRotation = Quaternion.Euler(85f, 0f, 0f);
         }
 
         /// <summary>

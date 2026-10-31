@@ -179,6 +179,89 @@ namespace P1.Core
         }
 
         /// <summary>
+        /// 命中身体的定向墨花（P6-B，对齐 Inkwave hitSplash）：一小片墨幕从受击者胸口沿弹道方向撕开，
+        /// 约 2/3 液滴顺着弹道贯穿方向飞出、1/3 逆着弹道回溅向射击者，再叠一枚短促高光让远处也读得出命中。
+        /// damage01 = 伤害 / 基准（Inkwave 为 amount/60，夹在 0.3~1.5）；击杀走 <see cref="SpawnKillBurst"/>，不经此入口。
+        /// </summary>
+        public void SpawnHitSplash(Vector3 worldPos, Vector3 shotDirection, Color color, float damage01)
+        {
+            float k = Mathf.Clamp(damage01, 0.3f, 1.5f);
+            Vector3 dir = shotDirection;
+            dir.y *= 0.5f;
+            dir = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.forward;
+
+            float radius = Mathf.Lerp(0.55f, 1.05f, Mathf.Clamp01(k / 1.5f));
+
+            // 顺着弹道贯穿飞出的主喷
+            int through = Mathf.Max(4, Mathf.RoundToInt(6f + 8f * k));
+            SpawnInkSplatAligned(worldPos, dir, color, radius, through);
+
+            // 逆着弹道回溅向射击者的碎墨（Inkwave：每 3 滴有 1 滴回溅）
+            int back = Mathf.Max(2, through / 3);
+            SpawnInkSplatAligned(worldPos, -dir, color, radius * 0.7f, back);
+
+            // 绕弹道轴的甩出墨珠 + 短促高光（0.08s，命中在远处也能一眼读出）
+            SpawnSatelliteDroplets(worldPos, dir, color, radius, Mathf.RoundToInt(2f + 2f * k), dir);
+            SpawnImpactFlash(worldPos, dir, color, radius * 1.1f);
+        }
+
+        /// <summary>
+        /// 击杀爆散（P6-B，对齐 Inkwave killed 版 hitSplash + ghost）：
+        /// 在 Die 已有的全方位爆墨与首层冲击环之上，补方向性贯穿爆散、延迟第二层冲击环，
+        /// 以及缓缓升起消散的「墨魂」墨珠。
+        /// </summary>
+        public void SpawnKillBurst(Vector3 worldPos, Vector3 shotDirection, Color color, float splatRadius)
+        {
+            Vector3 dir = shotDirection;
+            dir.y = 0f;
+            dir = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.forward;
+            float radius = Mathf.Max(0.8f, splatRadius);
+
+            Vector3 burstCenter = worldPos + Vector3.up * 0.5f;
+            SpawnInkSplatAligned(burstCenter, dir, color, radius, 16);
+            SpawnInkSplatAligned(burstCenter, -dir, color, radius * 0.7f, 6);
+            SpawnSatelliteDroplets(worldPos + Vector3.up * 0.9f, dir, color, radius, 6, dir);
+
+            // 第二层冲击波延迟追上主波，制造「余波」层次
+            SpawnDelayedShockwaveRing(0.10f, worldPos, color, 0.4f, radius * 1.45f, 0.32f);
+
+            SpawnGhostWisps(worldPos, color, 5);
+        }
+
+        /// <summary>
+        /// 墨魂（对齐 Inkwave ghost）：几颗较大较慢的浅色墨珠从爆点缓缓升起并消散，
+        /// 读作「乌贼的灵魂从墨斑里飘出来」。重力取小值让珠子减速上飘而不是抛物线坠落。
+        /// </summary>
+        private void SpawnGhostWisps(Vector3 worldPos, Color color, int count)
+        {
+            Color ghostColor = Color.Lerp(color, Color.white, 0.3f);
+
+            for (int i = 0; i < count && _dropletPool.Count > 0; i++)
+            {
+                SatelliteDroplet droplet = _dropletPool.Dequeue();
+                droplet.Transform.gameObject.SetActive(true);
+                float jitterX = Random.Range(-0.25f, 0.25f);
+                float jitterZ = Random.Range(-0.25f, 0.25f);
+                droplet.Transform.position = worldPos
+                    + new Vector3(jitterX, Random.Range(0.5f, 1.2f), jitterZ);
+                droplet.Velocity = new Vector3(jitterX * 0.4f, Random.Range(1.4f, 2.4f), jitterZ * 0.4f);
+                droplet.Gravity = Random.Range(0.8f, 1.6f);
+                droplet.Elapsed = 0f;
+                droplet.Lifetime = Random.Range(0.8f, 1.15f);
+                droplet.BaseScale = Random.Range(0.06f, 0.10f);
+                droplet.StretchY = 1.15f;
+                droplet.Transform.rotation = Quaternion.LookRotation(droplet.Velocity);
+                droplet.Transform.localScale = Vector3.one * droplet.BaseScale;
+
+                droplet.PropBlock.SetColor(BaseColorProp, ghostColor);
+                droplet.PropBlock.SetColor(ColorProp, ghostColor);
+                droplet.Renderer.SetPropertyBlock(droplet.PropBlock);
+
+                _activeDroplets.Add(droplet);
+            }
+        }
+
+        /// <summary>
         /// 弹丸撞击的综合反馈入口：主溅射粒子 + 沿撞击法线甩出的延迟落地卫星墨珠。
         /// 卫星墨珠只做视觉表现（不参与涂地判定），因此不会给 Ink 系统带来额外耦合。
         /// </summary>

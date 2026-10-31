@@ -32,6 +32,14 @@ namespace P1.Player
         private string _lastWeaponCause;
         private InkCharacterMotor _motorCache;
         private bool _motorQueried;
+        private float _lastHitSplashTime = -999f;
+
+        // P6-B 命中墨花门控：同一单位 50ms 内多次命中只炸一片（霰弹/连发聚合），
+        // 距相机 40m 外的战斗不炸（Inkwave _near(victim.pos, 40) 的同款取舍）
+        private const float HitSplashMinInterval = 0.05f;
+        private const float HitSplashMaxDistanceSqr = 1600f;
+        private const float HitSplashChestHeight = 0.9f;
+        private const float HitSplashDamageRefFallback = 60f;
 
         private static readonly int BaseColorProp = Shader.PropertyToID("_BaseColor");
 
@@ -228,8 +236,20 @@ namespace P1.Player
             if (!string.IsNullOrEmpty(weaponCause)) _lastWeaponCause = weaponCause;
 
             _currentHealth = Mathf.Max(0f, _currentHealth - damage);
-            _hitFlashTimer = 0.09f;
+            _hitFlashTimer = config != null && config.hitFlashSeconds > 0.01f ? config.hitFlashSeconds : 0.09f;
             ApplyHitFlash(true);
+
+            // P6-B 命中反馈统一入口：受击点方向性墨花 + 墨拍身体音。
+            // 所有武器（弹丸/光束/滚筒/爆破/手雷/大招/风暴）都经 TakeDamage，因此一处接入全体生效。
+            if (_currentHealth > 0f)
+            {
+                SpawnHitSplashFeedback(damage, attackerTeam, attacker, hitPoint);
+
+                if (AudioManager.Instance != null)
+                {
+                    AudioManager.Instance.PlayInkHitBody(transform.position, damage);
+                }
+            }
 
             bool killed = _currentHealth <= 0f;
             if (killed)
@@ -275,10 +295,60 @@ namespace P1.Player
             if (!killed || attacker == null || !IsLocalPlayer(attacker))
                 return;
 
+            // P6-B 击杀确认镜头冲击：trauma 震屏（受无障碍滑杆门控）+ FOV 微踢，与 Hitstop 定格叠加成「入肉感」
+            if (TopDownCameraFollow.Instance != null)
+            {
+                float killTrauma = feel != null ? feel.killTrauma : 0.35f;
+                float killFovPunch = feel != null ? feel.killFovPunchDegrees : 2.2f;
+                TopDownCameraFollow.Instance.AddTrauma(killTrauma);
+                if (killFovPunch > 0.01f)
+                {
+                    TopDownCameraFollow.Instance.AddShotPunch(0f, 0f, killFovPunch, 0.18f);
+                }
+            }
+
             HitstopService.Pulse(
                 feel != null ? feel.hitstopHoldSeconds : HitstopService.DefaultHoldSeconds,
                 feel != null ? feel.hitstopTimeScale : HitstopService.DefaultTimeScale,
                 feel != null ? feel.hitstopRecoverSeconds : HitstopService.DefaultRecoverSeconds);
+        }
+
+        /// <summary>
+        /// P6-B 命中墨花（对齐 Inkwave hitSplash）：从受击者胸口沿弹道方向炸开一小片墨水，
+        /// 强度随伤害缩放；0.05s 节流 + 40m 距离门控，避免 8 人混战刷爆粒子池。
+        /// hitPoint 被丢弃的旧问题顺带修正：无 attacker 时用「受击点 → 身体中心」的反向近似弹道。
+        /// </summary>
+        private void SpawnHitSplashFeedback(float damage, Team attackerTeam, CombatantHealth attacker, Vector3 hitPoint)
+        {
+            if (VfxPool.Instance == null)
+                return;
+
+            float now = Time.time;
+            if (now - _lastHitSplashTime < HitSplashMinInterval)
+                return;
+            _lastHitSplashTime = now;
+
+            Vector3 origin = transform.position + Vector3.up * HitSplashChestHeight;
+            if (TopDownCameraFollow.Instance != null &&
+                (origin - TopDownCameraFollow.Instance.transform.position).sqrMagnitude > HitSplashMaxDistanceSqr)
+            {
+                return;
+            }
+
+            Vector3 shotDir = attacker != null
+                ? transform.position - attacker.transform.position
+                : transform.position - hitPoint;
+            shotDir.y = 0f;
+            shotDir = shotDir.sqrMagnitude > 0.0001f ? shotDir.normalized : Vector3.forward;
+
+            Color color = InkSurfaceController.Instance != null
+                ? InkSurfaceController.Instance.GetTeamColor(attackerTeam)
+                : Color.white;
+
+            float damageRef = config != null && config.hitSplashDamageRef > 1f
+                ? config.hitSplashDamageRef
+                : HitSplashDamageRefFallback;
+            VfxPool.Instance.SpawnHitSplash(origin, shotDir, color, damage / damageRef);
         }
 
         private void Die(Team killerTeam)
@@ -300,13 +370,41 @@ namespace P1.Player
                 {
                     VfxPool.Instance.SpawnInkSplat(transform.position, c, deathSplatRadius, 22);
                     VfxPool.Instance.SpawnShockwaveRing(transform.position, c, 0.3f, deathSplatRadius, 0.26f);
+
+                    // P6-B 击杀爆散加强：方向性贯穿爆散 + 延迟第二层冲击环 + 墨魂上升
+                    Vector3 killDir = _lastAttacker != null
+                        ? transform.position - _lastAttacker.transform.position
+                        : Vector3.forward;
+                    killDir.y = 0f;
+                    killDir = killDir.sqrMagnitude > 0.0001f ? killDir.normalized : Vector3.forward;
+                    VfxPool.Instance.SpawnKillBurst(transform.position, killDir, c, deathSplatRadius);
                 }
             }
 
+            // P6-B 击杀音路由修正：按「谁杀的/谁死了」而不是队伍编号——
+            // 只有本地玩家击杀才给确认音（旧逻辑队友 Bot 击杀也会响，稀释了奖励感）；
+            // 本地玩家阵亡播死亡音（内部含 BGM duck），队友阵亡给低音量提示，远处混战静默。
             if (AudioManager.Instance != null)
             {
-                if (killerTeam == Team.TeamA) AudioManager.Instance.PlayKill();
-                else AudioManager.Instance.PlayDeath();
+                if (_lastAttacker != null && IsLocalPlayer(_lastAttacker))
+                {
+                    KillFeedbackState.StreakWindowSeconds = config != null
+                        ? config.killStreakWindowSeconds
+                        : 4f;
+                    AudioManager.Instance.PlayKill(KillFeedbackState.RegisterLocalKill());
+                }
+                else if (IsLocalPlayer(this))
+                {
+                    AudioManager.Instance.PlayDeath();
+                }
+                else
+                {
+                    PlayerController localPlayer = PlayerController.LocalPlayer;
+                    if (localPlayer != null && localPlayer.Health != null && team == localPlayer.Health.Team)
+                    {
+                        AudioManager.Instance.PlayAllyDeath();
+                    }
+                }
             }
 
             ClearHitFlash();

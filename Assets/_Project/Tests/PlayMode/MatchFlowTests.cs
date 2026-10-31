@@ -104,5 +104,27 @@ namespace P1.Tests
             Assert.AreEqual(120f, match.RemainingSeconds, 1f, "重开应重置计时");
             Assert.AreEqual(0f, InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA), 0.01f, "重开应清空墨水");
         }
+
+        [UnityTest]
+        public IEnumerator Match_ReturnToMenu_BackToReadyAndClearsWorld()
+        {
+            yield return LoadScene();
+
+            var match = MatchManager.Instance;
+            match.StartMatch();
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Playing, 6f);
+
+            InkSurfaceController.Instance.PaintCircle(new Vector3(0f, 0f, 4f), 5f, Team.TeamA);
+            yield return null;
+            Assert.Greater(InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA), 0f);
+
+            match.ReturnToMenu();
+            yield return null;
+
+            Assert.AreEqual(MatchManager.Phase.Ready, match.CurrentPhase, "返回主菜单应回到 Ready 阶段");
+            Assert.IsFalse(MatchManager.CombatAllowed, "Ready 阶段不应允许战斗");
+            Assert.AreEqual(120f, match.RemainingSeconds, 1f, "返回主菜单应重置计时");
+            Assert.AreEqual(0f, InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA), 0.01f, "返回主菜单应清空墨水");
+        }
     }
 }

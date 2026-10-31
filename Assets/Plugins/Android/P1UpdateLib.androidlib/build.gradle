@@ -1,0 +1,33 @@
+// P1 应用内更新专用的 Android 库（纯资源库）：
+//   1. 携带 FileProvider 路径表 res/xml/p1_update_paths.xml
+//      （Unity 6 起 Assets/Plugins/Android/res 已被移除，资源必须放进 .androidlib）；
+//   2. 声明 androidx.core:core —— 主清单里 androidx.core.content.FileProvider 的实现类。
+//      不引入的话 APK 里没有这个类，应用启动实例化 provider 时直接崩溃。
+// 写法对齐官方样例 PlaybackEngines/AndroidPlayer/Source/UnityFoldingFeature.androidlib：
+// 自带 build.gradle（namespace 写死），清单不再带 package 属性（AGP8 已不支持）。
+apply plugin: 'com.android.library'
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation 'androidx.core:core:1.13.1'
+}
+
+android {
+    namespace "com.p1.updatelib"
+    compileSdk getProperty("unity.compileSdkVersion") as int
+    buildToolsVersion getProperty("unity.buildToolsVersion")
+
+    compileOptions {
+        sourceCompatibility JavaVersion.valueOf(getProperty("unity.javaCompatibilityVersion"))
+        targetCompatibility JavaVersion.valueOf(getProperty("unity.javaCompatibilityVersion"))
+    }
+
+    defaultConfig {
+        minSdk getProperty("unity.minSdkVersion") as int
+        targetSdk getProperty("unity.targetSdkVersion") as int
+    }
+
+    lint {
+        abortOnError false
+    }
+}

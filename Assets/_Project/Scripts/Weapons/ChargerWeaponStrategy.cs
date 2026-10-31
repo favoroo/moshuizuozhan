@@ -120,16 +120,20 @@ namespace P1.Weapons
                 : Mathf.Lerp(damageMin, damageMax * 0.62f, charge);
 
             Vector3 muzzle = host.MuzzlePosition;
+            Vector3 chest = host.Position + Vector3.up * 0.95f;
+            // 长枪管近距离贴墙/打脚下时，准星点可能已在枪口后方：改用胸口起点，
+            // 否则从枪口沿相机方向发射会与屏幕中心射线平行错开一个横向偏移。
+            Vector3 origin = aim.GetShotOrigin(muzzle, chest);
 
-            // 沿「枪口 → 准星命中点」发射：抬头就是一条朝天的光束，对墙就在墙面截断并铺墨线。
-            Vector3 direction = aim.GetShotDirection(muzzle);
+            // 沿「起点 → 准星命中点」发射：抬头就是一条朝天的光束，对墙就在墙面截断并铺墨线。
+            Vector3 direction = aim.GetShotDirection(origin, 0.2f);
 
             float lineRadius = Config != null ? Mathf.Max(0.05f, Config.chargeLineRadius) : 0.55f;
             float impactRadius = Config != null ? Mathf.Max(0.05f, Config.chargeImpactRadius) : 1.2f;
 
             host.FireBeam(new WeaponBeam
             {
-                Origin = muzzle,
+                Origin = origin,
                 Direction = direction,
                 Range = range,
                 Damage = damage,

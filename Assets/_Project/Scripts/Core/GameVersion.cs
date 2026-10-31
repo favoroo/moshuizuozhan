@@ -10,7 +10,7 @@ namespace P1.Core
     {
         public const string APP_NAME = "墨水大作战";
         public const string APP_NAME_EN = "InkTurf";
-        public const string APP_VERSION = "0.1.6";
+        public const string APP_VERSION = "0.1.7";
         public const string APP_VERSION_NAME = "v" + APP_VERSION;
 
         public const string GITHUB_OWNER = "favoroo";

@@ -22,7 +22,15 @@ Material:
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
-    m_TexEnvs: []
+    m_TexEnvs:
+    - _SurfaceN:
+        m_Texture: {fileID: 2800000, guid: 25d1f5f81d82f4b4fb1e782e93d2c6e0, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SurfaceRMO:
+        m_Texture: {fileID: 2800000, guid: 205b0e33f22bf43fca00d7d2102bf648, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
     - _AmbientBoost: 1
@@ -38,6 +46,10 @@ Material:
     - _SpecSoftness: 0.02
     - _SpecStrength: 0.5
     - _SpecThreshold: 0.95
+    - _SurfaceAOStrength: 0.45
+    - _SurfaceNormalStrength: 0.55
+    - _SurfaceSmoothnessScale: 0.7
+    - _SurfaceTexelScale: 0.7
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}

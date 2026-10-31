@@ -59,6 +59,10 @@ namespace P1.Core
         public float tpsSubAimFovKick = 4f;
         [Tooltip("手雷瞄准时吊臂拉远量（米），便于看清远端落点")]
         public float tpsSubAimDistanceKick = 0.35f;
+        [Tooltip("FOV 随速度拉伸上限（度）：达到潜墨全速时叠加，增强速度感；0 = 关闭（保守小幅度）")]
+        public float tpsSpeedFovKick = 3.5f;
+        [Tooltip("FOV 速度拉伸起始速度 (m/s)：低于该速度不叠加")]
+        public float tpsSpeedFovStartSpeed = 6f;
 
         [Header("俯视倾斜相机参数（旧版，保留序列化兼容，P9 起不再使用）")]
         [Tooltip("旧版俯视参数：是否启用透视模式")]

@@ -22,7 +22,15 @@ Material:
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
-    m_TexEnvs: []
+    m_TexEnvs:
+    - _SurfaceN:
+        m_Texture: {fileID: 2800000, guid: 25d1f5f81d82f4b4fb1e782e93d2c6e0, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SurfaceRMO:
+        m_Texture: {fileID: 2800000, guid: 205b0e33f22bf43fca00d7d2102bf648, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
     - _CorrugationDepth: 0.28
@@ -30,6 +38,8 @@ Material:
     - _DetailNoiseStrength: 0.04
     - _DitherAlpha: 1
     - _EdgeHighlight: 0.25
+    - _EdgeLineStrength: 0.85
+    - _EdgeLineWidth: 0.05
     - _EnableCorrugation: 0
     - _FocusMinAlpha: 0.25
     - _FocusRadius: 2.2
@@ -45,8 +55,14 @@ Material:
     - _SpecSoftness: 0.02
     - _SpecStrength: 0.5
     - _SpecThreshold: 0.95
+    - _SurfaceAOStrength: 0.45
+    - _SurfaceNormalStrength: 0.55
+    - _SurfaceSmoothnessScale: 0.7
+    - _SurfaceTexelScale: 0.7
+    - _TopLift: 0.06
     m_Colors:
     - _BaseColor: {r: 0.6038274, g: 0.5704816, b: 0.47699985, a: 1}
+    - _EdgeLineColor: {r: 0.008540383, g: 0.010022826, b: 0.015325204, a: 1}
     - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
     - _RimColor: {r: 0.5225216, g: 0.71056664, b: 1, a: 1}
     - _ShadowTint: {r: 0.13286833, g: 0.17064494, b: 0.34239164, a: 1}

@@ -8,15 +8,19 @@ namespace P1.Player
 {
     /// <summary>
     /// 精致多部件程序化角色（Squidkid）与武器模型运行时控制器。
-    /// 现已升级适配「Q 版无腿蛋形」形态：
-    /// 1. 贴地步态（EggGaitSolver）：左右摇摆 + 极轻微起伏表现无腿走路，不再上下弹跳；
-    /// 2. 果冻弹簧（Jelly Spring）：起跳向上拉伸、落地按速度阻尼压扁缓冲、滞空仰俯；
-    /// 3. 前倾与侧倾（Lean Springs）：适配贴地枢轴（y=0.05m），抑制过大倾角放大；
-    /// 4. 独立挤压节点（BodySquash）：挤压与呼吸形变完全隔离于武器挂点（Chest）之外，杜绝武器被连带压扁；
-    /// 5. 待机自然微呼吸与实例非同步眨眼（站立时不位移，避免原地一蹦一蹦）；
-    /// 6. 踩敌方墨水抖动与墨墙攀爬小幅蠕动；
-    /// 7. 人形态 ⇄ 乌贼潜行弹性形变过渡；
-    /// 8. 7 类主武器换装、双枪/单持姿态适配与专属机构动画（滚筒、加特林、蓄力线圈等）。
+    /// 现已升级适配「Q 版圆头蛋形 + 短粗腿」形态：
+    /// 1. 贴地步态（EggGaitSolver）：左右摇摆 + 极轻微起伏 + FK 摆腿（异侧交叉协同），
+    ///    腿部三段（LegRoot/Knee/Ankle）由同一相位源驱动，与触地挤压天然协调；
+    /// 2. 果冻弹簧（Jelly Spring）：起跳向上拉伸、落地按速度阻尼压扁缓冲并屈膝吸收、滞空仰俯；
+    /// 3. 滞空收腿与攀墙收腿（参考 Inkwave _poseAir 团身）：离地淡入屈膝前抬，落地随弹簧回弹伸直；
+    /// 4. 前倾与侧倾（Lean Springs）：适配贴地枢轴（y=0.05m），抑制过大倾角放大；
+    /// 5. 独立挤压节点（BodySquash）：挤压与呼吸形变完全隔离于武器挂点（Chest）与双腿（Hips）之外；
+    /// 6. 待机自然微呼吸与实例非同步眨眼（站立时不位移，避免原地一蹦一蹦）；
+    /// 7. 踩敌方墨水抖动与墨墙攀爬小幅蠕动；
+    /// 8. 人形态 ⇄ 乌贼潜行弹性手势（AnimSpring1D 弹簧 + SO 曲线，0.42s 过冲回稳，数值对齐 Inkwave）；
+    /// 9. 7 类主武器换装、双枪/单持姿态适配与专属机构动画（滚筒、加特林、蓄力线圈等）；
+    /// 10. 乌贼游动姿态（SwimPoseSolver）：身体起伏波 + 转向侧倾 banking + 保体积速度拉伸 + 头部点摆；
+    /// 11. 4 根拖尾触须逐根行波（相邻相位差近似根→尖传播）与形态切换表演点缀（甩臂/果冻冲量）。
     /// </summary>
     [DisallowMultipleComponent]
     public class CharacterVisualController : MonoBehaviour
@@ -35,6 +39,14 @@ namespace P1.Player
         [SerializeField] private Transform leftArmTransform;
         [SerializeField] private Transform rightArmTransform;
         [SerializeField] private Transform tankLiquidFill;
+
+        [Header("人形态双腿 FK 链 (P22-A)")]
+        [SerializeField] private Transform leftLegRoot;
+        [SerializeField] private Transform rightLegRoot;
+        [SerializeField] private Transform leftKneePivot;
+        [SerializeField] private Transform rightKneePivot;
+        [SerializeField] private Transform leftAnklePivot;
+        [SerializeField] private Transform rightAnklePivot;
 
         [Header("乌贼形态节点")]
         [SerializeField] private Transform squidBodyTransform;
@@ -93,6 +105,14 @@ namespace P1.Player
         private Quaternion _leftArmWeaponPoseRot = Quaternion.identity;
         private Quaternion _defaultRightArmRot = Quaternion.identity;
 
+        // 双腿 FK 基准姿态（装配期为 identity，缓存防写回累乘）
+        private Quaternion _defaultLeftLegRot = Quaternion.identity;
+        private Quaternion _defaultRightLegRot = Quaternion.identity;
+        private Quaternion _defaultLeftKneeRot = Quaternion.identity;
+        private Quaternion _defaultRightKneeRot = Quaternion.identity;
+        private Quaternion _defaultLeftAnkleRot = Quaternion.identity;
+        private Quaternion _defaultRightAnkleRot = Quaternion.identity;
+
         private Transform _lastCachedLeftEye;
         private Transform _lastCachedRightEye;
         private Vector3 _defaultLeftEyeScale = Vector3.one;
@@ -110,6 +130,7 @@ namespace P1.Player
         private float _verticalVel;
         private bool _wasGrounded = true;
         private float _lastAirVelY;
+        private float _airTime;
 
         // 蛋形步态相位与果冻弹簧状态
         private float _gaitPhase;
@@ -143,14 +164,46 @@ namespace P1.Player
         private float _nextBlinkTime = 2.0f;
         private float _blinkStartTime = -1f;
 
-        // 乌贼潜行形态平滑过渡 (0 = Kid, 1 = Squid)
-        private float _swimTransition01;
+        // 乌贼潜行形态手势：弹簧驱动的形态标量 f (0 = Kid, 1 = Squid，过冲区 [-0.35, 1.35])。
+        // 快速翻转目标时弹簧状态天然连续，杜绝跳变（INKWAVE 用双向关键帧时间轴 + 按当前缩放反查时间防 pop，
+        // 弹簧模型一次配置双向复用，过冲区即表演区：f<0 浮出拉伸、f>1 潜入回稳摆动）。
+        // 注意：不能标记 readonly —— 对 readonly struct 字段调用 Step() 会作用在防御性副本上，状态永远不推进
+        private AnimSpring1D _formSpring = new AnimSpring1D(0f);
+        private float _formAmount;
         private bool _isCurrentlySwimming;
+        private bool _weaponVisuallyHidden;
 
-        // 潜行贴地下沉量（米）：乌贼展开时按 pop 比例沉入墨面，腹部埋进地面、只露背脊与眼睛，
-        // 消除"整只乌贼浮在墨面上"的悬浮感（Splatoon 式半潜观感）
-        private const float SquidSubmergeDepth = 0.10f;
+        // 逐根拖尾触须（装配期绑定；必须序列化，否则进 Play 场景克隆后引用丢失、逐根行波失效）
+        [SerializeField] private Transform[] _squidTentacles;
+        [SerializeField] private Quaternion[] _squidTentacleBaseRots;
+        private Quaternion _squidTentaclesRootBaseRot = Quaternion.identity;
+
+        // 形态切换表演点缀（甩臂 / 果冻冲量 / 墨焰甩动，线性衰减，零 GC）：
+        // 潜入 = 自由臂高举如跳水 + 轻微下蹲压扁；浮出 = 双臂弹开亮相 + 起跳式拉伸
+        private float _flingArmDeg;
+        private float _flingArmRate;
+        private float _flingHairPitchDeg;
+        private float _flingHairRollDeg;
+        private float _flingHairRate;
+
+        // 游动侧倾平滑（与 Lean 同款 SmoothDamp 语义，防角速度尖峰直接上身）
+        private float _swimBankCurrent;
+        private float _swimBankVelocity;
+
+        // 全形态共享的运动采样（SampleMotion 每帧计算，潜行期同样可用）
+        private Vector3 _localVel;
+        private float _yawRate;
+        private bool _groundedNow = true;
+        private bool _teleportedThisFrame;
+
+        [SerializeField] private CharacterAnimConfigSO _animConfig;
+        private static CharacterAnimConfigSO _defaultAnimConfig;
+
         private Vector3 _squidBodyDefaultPos = Vector3.zero;
+        private Vector3 _defaultSquidBodyScale = Vector3.one;
+        private Quaternion _defaultSquidBodyRot = Quaternion.identity;
+        private Vector3 _defaultKidRootScale = Vector3.one;
+        private Vector3 _defaultSquidRootScale = Vector3.one;
 
         // 武器缓存表
         private readonly Dictionary<WeaponKind, GameObject> _weaponMap = new Dictionary<WeaponKind, GameObject>();
@@ -254,6 +307,69 @@ namespace P1.Player
             CacheDefaultTransforms();
         }
 
+        /// <summary>
+        /// 由 CharacterVisualAssembler 绑定双腿 FK 链（P22-A）。
+        /// 参数允许为 null（旧场景 / 无腿兜底），写回处逐节点判空。
+        /// </summary>
+        public void BindLegRig(
+            Transform hips,
+            Transform leftLeg,
+            Transform rightLeg,
+            Transform leftKnee,
+            Transform rightKnee,
+            Transform leftAnkle,
+            Transform rightAnkle)
+        {
+            hipsTransform = hips;
+            leftLegRoot = leftLeg;
+            rightLegRoot = rightLeg;
+            leftKneePivot = leftKnee;
+            rightKneePivot = rightKnee;
+            leftAnklePivot = leftAnkle;
+            rightAnklePivot = rightAnkle;
+
+            CacheDefaultTransforms();
+        }
+
+        /// <summary>注入动画调参配置（可为 null，运行时回退到 INKWAVE 数值的共享默认实例）。</summary>
+        public void BindAnimationConfig(CharacterAnimConfigSO config)
+        {
+            _animConfig = config;
+        }
+
+        /// <summary>实际生效的动画配置：绑定资产优先，兜底共享默认实例（无资产也能跑，测试/独立包安全）。</summary>
+        public CharacterAnimConfigSO AnimConfig
+        {
+            get
+            {
+                if (_animConfig != null) return _animConfig;
+                if (_defaultAnimConfig == null)
+                {
+                    _defaultAnimConfig = ScriptableObject.CreateInstance<CharacterAnimConfigSO>();
+                }
+                return _defaultAnimConfig;
+            }
+        }
+
+        /// <summary>由 CharacterVisualAssembler 绑定 4 根拖尾触须，驱动逐根行波（无蒙皮骨骼的相位差近似）。</summary>
+        public void BindSquidTentacles(Transform[] tentacles)
+        {
+            _squidTentacles = tentacles;
+            if (tentacles == null)
+            {
+                _squidTentacleBaseRots = null;
+                return;
+            }
+            if (_squidTentacleBaseRots == null || _squidTentacleBaseRots.Length != tentacles.Length)
+            {
+                _squidTentacleBaseRots = new Quaternion[tentacles.Length];
+            }
+            for (int i = 0; i < tentacles.Length; i++)
+            {
+                _squidTentacleBaseRots[i] = tentacles[i] != null ? tentacles[i].localRotation : Quaternion.identity;
+            }
+        }
+
         private void Awake()
         {
             _nextBlinkTime = Time.time + UnityEngine.Random.Range(1.5f, 4.0f);
@@ -261,6 +377,13 @@ namespace P1.Player
 
             CacheDefaultTransforms();
             BuildWeaponMaps();
+
+            // 触须基准姿态重捕获：Awake 早于任何动画写入，此时场景里保存的就是 authored 姿态；
+            // 序列化的绑定引用在 Play 克隆后保留，这里重建基准旋转，避免用残留动画姿态当基准。
+            if (_squidTentacles != null && _squidTentacles.Length > 0)
+            {
+                BindSquidTentacles(_squidTentacles);
+            }
 
             if (_motor == null) _motor = GetComponentInParent<InkCharacterMotor>();
             if (_weaponController == null) _weaponController = GetComponentInParent<WeaponController>();
@@ -342,6 +465,20 @@ namespace P1.Player
             if (squidBodyTransform != null)
             {
                 _squidBodyDefaultPos = squidBodyTransform.localPosition;
+                _defaultSquidBodyScale = squidBodyTransform.localScale;
+                _defaultSquidBodyRot = squidBodyTransform.localRotation;
+            }
+            if (kidRoot != null)
+            {
+                _defaultKidRootScale = kidRoot.transform.localScale;
+            }
+            if (squidRoot != null)
+            {
+                _defaultSquidRootScale = squidRoot.transform.localScale;
+            }
+            if (squidTentaclesRoot != null)
+            {
+                _squidTentaclesRootBaseRot = squidTentaclesRoot.localRotation;
             }
 
             // 缓存装配器赋予的初始手臂位姿：仅在首次绑定或挂载目标变更时缓存，避免后续 EquipWeaponKind 相对位移污染基准
@@ -356,6 +493,14 @@ namespace P1.Player
             {
                 _defaultRightArmRot = rightArmTransform.localRotation;
             }
+
+            // 双腿 FK 链基准姿态
+            if (leftLegRoot != null) _defaultLeftLegRot = leftLegRoot.localRotation;
+            if (rightLegRoot != null) _defaultRightLegRot = rightLegRoot.localRotation;
+            if (leftKneePivot != null) _defaultLeftKneeRot = leftKneePivot.localRotation;
+            if (rightKneePivot != null) _defaultRightKneeRot = rightKneePivot.localRotation;
+            if (leftAnklePivot != null) _defaultLeftAnkleRot = leftAnklePivot.localRotation;
+            if (rightAnklePivot != null) _defaultRightAnkleRot = rightAnklePivot.localRotation;
 
             // 缓存眼睛默认尺寸，防止眨眼循环缩放累乘漂移
             if (leftEyeTransform != null && leftEyeTransform != _lastCachedLeftEye)
@@ -503,10 +648,12 @@ namespace P1.Player
             float dt = Time.deltaTime;
             if (dt <= 0f) return;
 
+            SampleMotion(dt);
             UpdateFormMorph(dt);
             UpdateAimPose(dt);
+            UpdateFlourish(dt);
 
-            if (_swimTransition01 < 0.99f)
+            if (_formAmount < 0.99f)
             {
                 UpdateBodyPose(dt);
                 UpdateHairSway(dt);
@@ -515,75 +662,219 @@ namespace P1.Player
             }
             else
             {
-                // 潜行期间保持采样锚点同步，避免浮出墨面第一帧由于大位移产生误触发瞬移或着地震荡
-                _prevWorldPos = transform.position;
-                _planarSpeed = 0f;
-                _prevYaw = transform.eulerAngles.y;
-                _wasGrounded = _motor == null || _motor.IsGrounded;
+                // 乌贼潜行姿态：身体起伏 + 转向侧倾 + 保体积拉伸 + 逐根触须行波
+                UpdateSwimPosture(dt);
             }
 
             UpdateWeaponMechanics(dt);
         }
 
         /// <summary>
-        /// 人形态 ⇄ 乌贼形态弹性形变（Squash & Stretch）过渡
+        /// 全形态共享的运动采样（每帧一次）：真实位移速度 / 局部速度 / 偏航角速度 / 着地 / 传送跳变。
+        /// 潜行期同样计算——游动姿态的起伏频率、触须摆幅、转向侧倾都依赖真实速度与 yawRate；
+        /// 关键：速度必须用真实位移而不是 motor.CurrentMoveSpeed（那是形态速度上限，站立时也为 6）。
+        /// </summary>
+        private void SampleMotion(float dt)
+        {
+            Vector3 curPos = transform.position;
+            Vector3 worldVel = (curPos - _prevWorldPos) / Mathf.Max(0.0001f, dt);
+
+            // 传送/复活导致的速度尖峰（> 50 m/s）：直接复位，避免误判为超高速起跳/落地
+            _teleportedThisFrame = worldVel.sqrMagnitude > 2500f;
+            if (_teleportedThisFrame)
+            {
+                worldVel = Vector3.zero;
+                _verticalVel = 0f;
+                _lastAirVelY = 0f;
+            }
+            else
+            {
+                _verticalVel = worldVel.y;
+            }
+
+            _prevWorldPos = curPos;
+            _planarSpeed = new Vector2(worldVel.x, worldVel.z).magnitude;
+            _localVel = transform.InverseTransformDirection(worldVel);
+
+            float curYaw = transform.eulerAngles.y;
+            _yawRate = Mathf.DeltaAngle(_prevYaw, curYaw) / Mathf.Max(0.0001f, dt);
+            _prevYaw = curYaw;
+
+            _groundedNow = _motor == null || _motor.IsGrounded;
+        }
+
+        /// <summary>
+        /// 人形态 ⇄ 乌贼形态弹性手势（Squash & Stretch）：
+        /// AnimSpring1D 驱动形态标量 f，kid/squid 的缩放从 SO 四条 AnimationCurve 求值
+        /// （曲线过冲区编码表演：f&lt;0 浮出拉伸、f&gt;1 潜入回稳摆动），缩放严格基于默认值乘算，绝不每帧累乘。
+        /// 数值来自 INKWAVE character.js L383-386/1342-1358：双向约 0.42s、潜入压扁 Y→0.16、
+        /// 浮出拉伸 Y≈1.36、乌贼钻出过冲 1.28 后回稳。
         /// </summary>
         private void UpdateFormMorph(float dt)
         {
+            CharacterAnimConfigSO cfg = AnimConfig;
             bool wantsSwim = _motor != null && _motor.IsSwimming;
-            _isCurrentlySwimming = wantsSwim;
 
-            float target = wantsSwim ? 1f : 0f;
-            _swimTransition01 = Mathf.MoveTowards(_swimTransition01, target, dt * 10f);
+            // 形态翻转边沿：触发表演性点缀（跳水甩臂 / 亮相甩臂），让切换有生命力而不是淡入淡出
+            if (wantsSwim != _isCurrentlySwimming)
+            {
+                _isCurrentlySwimming = wantsSwim;
+                TriggerFormFlourish(wantsSwim);
+            }
+
+            _formSpring.Step(wantsSwim ? 1f : 0f, cfg.formSpringOmega, cfg.formSpringZeta, dt);
+            float f = Mathf.Clamp(_formSpring.Value, cfg.formAmountMin, cfg.formAmountMax);
+            _formAmount = f;
 
             if (kidRoot != null)
             {
-                kidRoot.SetActive(_swimTransition01 < 0.98f);
-                if (_swimTransition01 < 0.98f)
+                bool kidVisible = f < cfg.kidHideFormAmount;
+                kidRoot.SetActive(kidVisible);
+                if (kidVisible)
                 {
-                    // 下潜时蓄力压扁，浮出时冲顶弹性拉伸
-                    float t = _swimTransition01;
-                    float sy = Mathf.Lerp(1f, 0.15f, t);
-                    float sxz = Mathf.Lerp(1f, 1.25f, t);
-                    kidRoot.transform.localScale = new Vector3(sxz, sy, sxz);
+                    float ft = Mathf.Clamp01(f);
+                    float sy = EvalCurve(cfg.kidScaleY, f, Mathf.Lerp(1f, 0.15f, ft));
+                    float sxz = EvalCurve(cfg.kidScaleXZ, f, Mathf.Lerp(1f, 1.25f, ft));
+                    kidRoot.transform.localScale = Vector3.Scale(_defaultKidRootScale, new Vector3(sxz, sy, sxz));
                 }
             }
 
             if (squidRoot != null)
             {
-                squidRoot.SetActive(_swimTransition01 > 0.02f);
-                if (_swimTransition01 > 0.02f)
+                bool squidVisible = f > cfg.squidShowFormAmount;
+                squidRoot.SetActive(squidVisible);
+                if (squidVisible)
                 {
-                    float t = _swimTransition01;
-                    float pop = Mathf.SmoothStep(0.2f, 1.0f, t);
-                    squidRoot.transform.localScale = new Vector3(pop, pop, pop);
-
-                    // 潜行贴地：身体随展开比例沉入墨面（SquidRoot 被缩放 pop，故世界下沉量随 pop 平滑加速），
-                    // 展开过程呈现"从墨里钻出来再沉回去"，而不是凭空放大悬浮
-                    if (squidBodyTransform != null)
-                    {
-                        squidBodyTransform.localPosition = _squidBodyDefaultPos
-                            + Vector3.down * (SquidSubmergeDepth * pop);
-                    }
-
-                    // 乌贼贴水波浪游动
-                    if (squidTentaclesRoot != null && _motor != null)
-                    {
-                        float spd01 = Mathf.Clamp01(_motor.CurrentMoveSpeed / 12f);
-                        float wave = Mathf.Sin(Time.time * 16f) * 12f * spd01;
-                        squidTentaclesRoot.localRotation = Quaternion.Euler(0f, wave, 0f);
-                    }
+                    float fallbackPop = Mathf.SmoothStep(0.2f, 1f, Mathf.Clamp01(f));
+                    float sy = EvalCurve(cfg.squidScaleY, f, fallbackPop);
+                    float sxz = EvalCurve(cfg.squidScaleXZ, f, fallbackPop);
+                    squidRoot.transform.localScale = Vector3.Scale(_defaultSquidRootScale, new Vector3(sxz, sy, sxz));
                 }
-                else if (squidBodyTransform != null)
+            }
+
+            if (squidBodyTransform != null)
+            {
+                if (f > cfg.squidShowFormAmount)
                 {
-                    // 人形态期间恢复默认高度，保证下一次潜入从同一基准展开
+                    // 潜行贴地：随形态进度沉入墨面（半潜观感，只露背脊与眼睛）；
+                    // 姿态（起伏/侧倾/拉伸）由 UpdateSwimPosture 写入
+                    squidBodyTransform.localPosition = _squidBodyDefaultPos
+                        + Vector3.down * (cfg.squidSubmergeDepth * Mathf.Clamp01(f));
+                }
+                else
+                {
+                    // 人形态期间恢复默认位姿，保证下一次潜入从同一基准展开
                     squidBodyTransform.localPosition = _squidBodyDefaultPos;
+                    squidBodyTransform.localRotation = _defaultSquidBodyRot;
+                    squidBodyTransform.localScale = _defaultSquidBodyScale;
                 }
             }
 
             if (weaponRoot != null)
             {
-                weaponRoot.SetActive(_swimTransition01 < 0.5f);
+                // 迟滞：潜入时 f 一到高位立即藏枪，浮出时 f 回落到低位才亮枪，
+                // 防止弹簧过冲在阈值边界反复闪烁
+                if (_isCurrentlySwimming && f >= cfg.weaponHideFormAmount) _weaponVisuallyHidden = true;
+                else if (!_isCurrentlySwimming && f <= cfg.weaponShowFormAmount) _weaponVisuallyHidden = false;
+                weaponRoot.SetActive(!_weaponVisuallyHidden);
+            }
+        }
+
+        /// <summary>曲线求值兜底：设计器误清空曲线时退回旧版线性语义，保证动画不崩。</summary>
+        private static float EvalCurve(AnimationCurve curve, float t, float fallback)
+        {
+            return curve != null && curve.length >= 2 ? curve.Evaluate(t) : fallback;
+        }
+
+        /// <summary>形态翻转瞬间的表演性点缀：甩臂 + 果冻弹簧冲量 + 墨焰惯性甩动。</summary>
+        private void TriggerFormFlourish(bool toSquid)
+        {
+            CharacterAnimConfigSO cfg = AnimConfig;
+            float duration;
+            if (toSquid)
+            {
+                _flingArmDeg = cfg.diveArmFlingDeg;
+                duration = cfg.diveArmFlingDuration;
+                _jellyVel += cfg.diveJellyKick;
+            }
+            else
+            {
+                _flingArmDeg = cfg.emergeArmFlingDeg;
+                duration = cfg.emergeArmFlingDuration;
+                _jellyVel += cfg.emergeJellyKick;
+            }
+            _flingArmRate = _flingArmDeg / Mathf.Max(0.05f, duration);
+            _flingHairPitchDeg = cfg.formHairKickDeg;
+            _flingHairRollDeg = cfg.formHairKickDeg * 0.6f;
+            _flingHairRate = cfg.formHairKickDeg / 0.30f;
+        }
+
+        /// <summary>表演点缀通道的线性衰减（MoveTowards 到 0，时长确定、可单测）。</summary>
+        private void UpdateFlourish(float dt)
+        {
+            if (_flingArmDeg > 0f)
+            {
+                _flingArmDeg = Mathf.MoveTowards(_flingArmDeg, 0f, _flingArmRate * dt);
+            }
+            if (_flingHairPitchDeg > 0f)
+            {
+                _flingHairPitchDeg = Mathf.MoveTowards(_flingHairPitchDeg, 0f, _flingHairRate * dt);
+                _flingHairRollDeg = Mathf.MoveTowards(_flingHairRollDeg, 0f, _flingHairRate * 0.6f * dt);
+            }
+        }
+
+        /// <summary>
+        /// 乌贼游动姿态（潜行期替代人形态管线，数值对齐 INKWAVE character.js L3550-3611）：
+        /// 身体起伏波（频率 5→14 rad/s 随速度）+ 转向侧倾 banking + 保体积速度拉伸（Z 1+0.2·sv，XZ 1/√）
+        /// + 头部点摆 + 逐根触须行波。
+        /// </summary>
+        private void UpdateSwimPosture(float dt)
+        {
+            CharacterAnimConfigSO cfg = AnimConfig;
+            float sv = SwimPoseSolver.Speed01(
+                _planarSpeed,
+                cfg.ResolveSwimRefSpeed(_motor != null ? _motor.Config : null));
+
+            SwimPoseSolver.SwimPose pose = SwimPoseSolver.Sample(sv, Time.time, _yawRate, cfg);
+
+            // 侧倾走平滑，防角速度尖峰直接上身
+            _swimBankCurrent = Mathf.SmoothDamp(_swimBankCurrent, pose.RollDeg, ref _swimBankVelocity, 0.08f, 120f, dt);
+
+            if (squidBodyTransform != null)
+            {
+                squidBodyTransform.localRotation = _defaultSquidBodyRot
+                    * Quaternion.Euler(pose.PitchDeg, pose.SwayDeg, _swimBankCurrent);
+                // 保体积拉伸：沿游进方向拉长、横向收缩（INKWAVE sy=1+0.2sv, sxz=1/√sy）
+                squidBodyTransform.localScale = Vector3.Scale(
+                    _defaultSquidBodyScale,
+                    new Vector3(pose.StretchXZ, pose.StretchXZ, pose.StretchZ));
+            }
+
+            UpdateSwimTentacles(sv);
+
+            if (squidTentaclesRoot != null && (_squidTentacles == null || _squidTentacles.Length == 0))
+            {
+                // 未绑定逐根触须时的兜底：根节点整体 Y 轴摆动（旧行为）
+                float wave = Mathf.Sin(Time.time * 16f) * 12f * sv;
+                squidTentaclesRoot.localRotation = _squidTentaclesRootBaseRot * Quaternion.Euler(0f, wave, 0f);
+            }
+
+            _wasGrounded = _groundedNow;
+        }
+
+        /// <summary>4 根拖尾触须逐根驱动：相邻相位差近似根→尖行波（INKWAVE 顶点着色器行波的无蒙皮近似）。</summary>
+        private void UpdateSwimTentacles(float sv)
+        {
+            if (_squidTentacles == null || _squidTentacles.Length == 0) return;
+
+            CharacterAnimConfigSO cfg = AnimConfig;
+            float t = Time.time;
+            for (int i = 0; i < _squidTentacles.Length; i++)
+            {
+                Transform tentacle = _squidTentacles[i];
+                if (tentacle == null) continue;
+                SwimPoseSolver.TentacleFlap(sv, t, i, cfg, out float flapDeg, out float sideDeg);
+                tentacle.localRotation = _squidTentacleBaseRots[i] * Quaternion.Euler(flapDeg, 0f, sideDeg);
             }
         }
 
@@ -600,38 +891,19 @@ namespace P1.Player
         /// </summary>
         private void UpdateBodyPose(float dt)
         {
-            // --- 1. 速度与着地采样（每帧只算一次） ---
-            Vector3 curPos = transform.position;
-            Vector3 worldVel = (curPos - _prevWorldPos) / Mathf.Max(0.0001f, dt);
-
-            // 传送/复活导致的速度尖峰（> 50 m/s）：直接复位，避免误判为超高速起跳/落地
-            bool teleported = worldVel.sqrMagnitude > 2500f;
-            bool grounded = _motor == null || _motor.IsGrounded;
-
-            if (teleported)
+            // --- 1. 速度与着地采样（SampleMotion 每帧已算好；传送跳变在此复位果冻弹簧） ---
+            bool grounded = _groundedNow;
+            if (_teleportedThisFrame)
             {
-                _prevWorldPos = curPos;
-                worldVel = Vector3.zero;
-                _verticalVel = 0f;
-                _wasGrounded = grounded;
                 _jelly = 0f;
                 _jellyVel = 0f;
                 _lastAirVelY = 0f;
-                _planarSpeed = 0f;
             }
-            _prevWorldPos = curPos;
-            _verticalVel = worldVel.y;
             // 关键：步态必须用真实位移速度，而不是 motor.CurrentMoveSpeed（那是当前形态的速度上限，站立时也为 6）。
             // 旧写法导致角色一落地就永远在走弹跳步态，原地站着也一蹦一蹦。
-            _planarSpeed = new Vector2(worldVel.x, worldVel.z).magnitude;
-
-            Vector3 localVel = transform.InverseTransformDirection(worldVel);
-            float curYaw = transform.eulerAngles.y;
-            float yawRate = Mathf.DeltaAngle(_prevYaw, curYaw) / Mathf.Max(0.0001f, dt);
-            _prevYaw = curYaw;
-
-            // --- 2. 贴地步态计算 ---
             float speed = _planarSpeed;
+            Vector3 localVel = _localVel;
+            float yawRate = _yawRate;
             float speed01 = EggGaitSolver.Speed01(speed);
             // 步态权重：仅在地面且高于静止阈值时生效；用 SmoothStep 让起步/停步过渡柔和，
             // 站立（含 Bot 交火时的小幅走位）不会触发持续的"原地弹跳"。
@@ -648,7 +920,19 @@ namespace P1.Player
             float squashY = Mathf.Lerp(1f, gait.SquashY, gaitWeight);
             float squashXZ = Mathf.Lerp(1f, gait.SquashXZ, gaitWeight);
             float rock = gait.RockDeg * gaitWeight;
-            float armSwing = gait.ArmSwingDeg * gaitWeight;
+            // 步态摆臂 + 形态切换表演甩臂（潜入高举 / 浮出弹开，线性衰减）
+            float armSwing = gait.ArmSwingDeg * gaitWeight + _flingArmDeg;
+
+            // --- 2.5 双腿 FK 步态（P22-A）：与躯干同一相位源，天然协调 ---
+            // 带符号摆幅（正 = 左腿向后）；控制器对左右腿取反相，与同侧手臂交叉协同
+            float legSwing = gait.LegSwingDeg * gaitWeight;
+            float kneeBend = gait.KneeBendDeg * gaitWeight;
+            float footPitch = gait.FootPitchDeg * gaitWeight;
+            // 滞空收腿（参考 INKWAVE _poseAir 团身）：离地 ~0.12s 内淡入，短促台阶抖动不会触发
+            float airTuck = grounded ? 0f : Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(_airTime / 0.12f));
+            float tuckThigh = -EggGaitSolver.AirTuckThighDeg * airTuck;
+            float tuckKnee = EggGaitSolver.AirTuckKneeDeg * airTuck;
+            float tuckFoot = EggGaitSolver.AirTuckFootDeg * airTuck;
 
             // --- 3. 起跳 / 滞空 / 落地（果冻弹簧与滞空仰俯） ---
             if (_wasGrounded && !grounded)
@@ -667,6 +951,9 @@ namespace P1.Player
                 }
             }
             _wasGrounded = grounded;
+            // 滞空计时（供收腿淡入）：着地立即清零
+            if (grounded) _airTime = 0f;
+            else _airTime += dt;
 
             float airPitch = 0f;
             if (!grounded)
@@ -720,6 +1007,14 @@ namespace P1.Player
                 armSwing = 0f;
                 squashY = 1f + Mathf.Sin(Time.time * 22f) * 0.02f;
                 squashXZ = 1f;
+                // 双腿收拢悬挂，不再摆动
+                legSwing = 0f;
+                kneeBend = 0f;
+                footPitch = 0f;
+                airTuck = 0f;
+                tuckThigh = -10f;
+                tuckKnee = EggGaitSolver.WallClimbTuckKneeDeg;
+                tuckFoot = 8f;
             }
 
             // --- 8. 写回骨骼与挤压节点 ---
@@ -754,6 +1049,37 @@ namespace P1.Player
             if (rightArmTransform != null)
             {
                 rightArmTransform.localRotation = _defaultRightArmRot * Quaternion.Euler(-armSwing, 0f, 0f);
+            }
+
+            // --- 9. 双腿 FK 写回（P22-A）：左右腿与同侧手臂反相（交叉协同） ---
+            // 旋转符号约定（腿指向 -Y、角色面向 +Z）：X 正旋转 = 腿向后摆 / 屈膝（脚跟后抬）/ 脚尖下垂
+            float landingAbsorb = Mathf.Max(0f, -_jelly) * 110f;   // 果冻压扁（_jelly<0）瞬间屈膝缓冲，随弹簧回弹伸直
+            if (leftLegRoot != null || rightLegRoot != null)
+            {
+                if (leftLegRoot != null)
+                {
+                    leftLegRoot.localRotation = _defaultLeftLegRot * Quaternion.Euler(-legSwing + tuckThigh, 0f, 0f);
+                }
+                if (rightLegRoot != null)
+                {
+                    rightLegRoot.localRotation = _defaultRightLegRot * Quaternion.Euler(legSwing + tuckThigh, 0f, 0f);
+                }
+                if (leftKneePivot != null)
+                {
+                    leftKneePivot.localRotation = _defaultLeftKneeRot * Quaternion.Euler(kneeBend + tuckKnee + landingAbsorb, 0f, 0f);
+                }
+                if (rightKneePivot != null)
+                {
+                    rightKneePivot.localRotation = _defaultRightKneeRot * Quaternion.Euler(kneeBend + tuckKnee + landingAbsorb, 0f, 0f);
+                }
+                if (leftAnklePivot != null)
+                {
+                    leftAnklePivot.localRotation = _defaultLeftAnkleRot * Quaternion.Euler(footPitch + tuckFoot, 0f, 0f);
+                }
+                if (rightAnklePivot != null)
+                {
+                    rightAnklePivot.localRotation = _defaultRightAnkleRot * Quaternion.Euler(footPitch + tuckFoot, 0f, 0f);
+                }
             }
         }
 
@@ -812,7 +1138,9 @@ namespace P1.Player
             _currentHairPitch = Mathf.SmoothDamp(_currentHairPitch, targetHairPitch, ref _hairPitchVel, 0.12f, 120f, dt);
             _currentHairRoll = Mathf.SmoothDamp(_currentHairRoll, targetHairRoll, ref _hairRollVel, 0.12f, 120f, dt);
 
-            Quaternion swayRot = Quaternion.Euler(_currentHairPitch, 0f, _currentHairRoll);
+            Quaternion swayRot = Quaternion.Euler(
+                _currentHairPitch + _flingHairPitchDeg, 0f,
+                _currentHairRoll + _flingHairRollDeg);
             if (leftHairPivot != null) leftHairPivot.localRotation = _defaultLeftHairRot * swayRot;
             if (rightHairPivot != null) rightHairPivot.localRotation = _defaultRightHairRot * swayRot;
         }

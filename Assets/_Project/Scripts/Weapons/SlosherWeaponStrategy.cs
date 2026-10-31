@@ -93,7 +93,7 @@ namespace P1.Weapons
             float tailDamage = Config != null ? Config.slosherTailDamage : 34f;
 
             Vector3 muzzle = host.MuzzlePosition;
-            Vector3 target = aim.GetShotTarget(muzzle, maxRange);
+            Vector3 target = aim.GetRangeClampedTarget(muzzle, maxRange);
             Vector3 toTarget = target - muzzle;
             float horizontal = new Vector2(toTarget.x, toTarget.z).magnitude;
             float baseYaw = horizontal > 0.3f

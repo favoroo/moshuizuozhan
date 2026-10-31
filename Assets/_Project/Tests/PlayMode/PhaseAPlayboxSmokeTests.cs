@@ -3,6 +3,7 @@ using NUnit.Framework;
 using P1.Core;
 using P1.Ink;
 using P1.Player;
+using P1.Weapons;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
@@ -206,6 +207,82 @@ namespace P1.Tests
             Assert.AreEqual(inkBefore - 70f, motor.CurrentInk, 0.5f, "P3-B：手雷应消耗 70 点墨水（70%）");
 
             yield return new WaitForSeconds(0.4f);
+        }
+
+        [UnityTest]
+        public IEnumerator Player_TouchBombHoldRelease_ThrowsViaArbiter()
+        {
+            yield return LoadPlaybox();
+
+            // 本用例驱动 PlayerController.Update 内的仲裁链路，必须处于 Playing 相位
+            // （Ready 下 InputAllowed=false，Update 整帧早退，仲裁不会 tick）
+            var match = MatchManager.Instance;
+            PlayModeTestKit.ShortenMatchTimers();
+            match.StartMatch();
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Playing, 6f);
+
+            // 编辑器里触屏 UI 可能被序列化显示：它会每帧覆写 TouchBombHeld，先关掉
+            var touchUi = Object.FindFirstObjectByType<P1.UI.MobileTouchUI>();
+            if (touchUi != null) touchUi.enabled = false;
+
+            var player = PlayerController.LocalPlayer;
+            player.Health.IsInvulnerable = true; // 避免测试期间被 Bot 击杀打断
+            var motor = player.Motor;
+            motor.RefillInkFull();
+            float inkBefore = motor.CurrentInk;
+
+            // 1. 长按（TouchBombHeld）→ 进入瞄准态，期间不得扣墨投掷（旧「按下即投」bug 回归）
+            player.TouchBombHeld = true;
+            yield return null;
+            yield return null;
+            Assert.IsTrue(player.IsAimingBomb, "长按副武器键应进入瞄准态");
+            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.01f, "按住瞄准期间不得扣墨投掷");
+
+            // 2. 触屏松手注入（TouchBombTriggered，pointer-up 语义）→ 投掷一次并扣 70 墨
+            player.TouchBombTriggered = true;
+            yield return null;
+            Assert.IsFalse(player.IsAimingBomb, "松手后应退出瞄准态");
+            Assert.AreEqual(inkBefore - 70f, motor.CurrentInk, 0.5f, "松手投掷应恰好消耗 70 点墨水（只投一颗）");
+
+            player.TouchBombHeld = false;
+        }
+
+        [UnityTest]
+        public IEnumerator Player_BombBallisticThrow_ArmsFuseAndPaintsOnDetonation()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            player.enabled = false; // 关闭输入驱动，避免真实输入干扰
+            yield return null;
+
+            var motor = player.Motor;
+            motor.RefillInkFull();
+            float inkBefore = motor.CurrentInk;
+            float coverageBefore = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
+
+            // inkwave 弹道模型：平抛初速（相机俯仰 0°）从出手点真实抛出，远近由俯仰物理决定
+            var cfg = player.Weapon.Config;
+            Vector3 muzzle = player.Weapon.GetSubBombMuzzlePosition();
+            Vector3 velocity = InkBombTrajectoryUtility.ComputeThrowVelocity(
+                player.transform.forward, 0f, Vector3.zero, cfg);
+
+            // 预览仿真与实飞同参数：应能在窗口内落到前方地面
+            var preview = new Vector3[InkBombTrajectoryUtility.TrajectoryPointCount];
+            bool landed = InkBombTrajectoryUtility.SimulateThrow(
+                muzzle, velocity, cfg, player.transform, preview, out Vector3 hitPoint);
+            Assert.IsTrue(landed, "平抛初速应能在预览窗口内落到地面");
+            Assert.Less(hitPoint.y, 1.5f, "预测落点应接近地面");
+            Assert.Greater(hitPoint.z, muzzle.z + 3f, "平抛落点应在出手点前方数米，而不是贴脚");
+
+            bool thrown = player.Weapon.TryThrowSubBombBallistic(velocity);
+            Assert.IsTrue(thrown, "墨水充足时应能弹道投掷");
+            Assert.AreEqual(inkBefore - 70f, motor.CurrentInk, 0.5f, "弹道投掷应恰好消耗 70 点墨水");
+
+            // 飞行（约 0.6s）+ 引信 0.95s + 余量 → 爆炸涂地
+            yield return new WaitForSeconds(2.6f);
+            Assert.Greater(InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA), coverageBefore,
+                "手雷弹道飞行落地引信后应爆炸涂出墨水");
         }
 
         [UnityTest]

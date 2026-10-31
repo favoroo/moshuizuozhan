@@ -44,6 +44,8 @@ namespace P1.UI
         private Image _chargerCenterDot;
         private Image _chargerTrackRing;
         private Image _chargerFillRing;
+        private Image _chargerLineLeftImage;
+        private Image _chargerLineRightImage;
         private RectTransform _chargerLineLeft;
         private RectTransform _chargerLineRight;
 
@@ -56,6 +58,7 @@ namespace P1.UI
         // 程序化生成的 UI 贴图与 Sprite
         private Sprite _dotSprite;
         private Sprite _ringSprite;
+        private Sprite _ringDashedSprite;
         private Sprite _boxSprite;
         private Sprite _pillSprite;
         private Sprite _arcSprite;
@@ -76,6 +79,16 @@ namespace P1.UI
         private float _lastHitTime = -99f;
         private float _lastHitSoundTime = -99f;
         private Color _hitMarkerColor = Color.white;
+
+        // 击杀确认（P6-B，对齐 Inkwave is-killflash / .iw-kill__splat）：
+        // 准星本体 scale 1.28→1.0 ease-out，准星上方弹一枚队伍色墨滴徽标（弹出过冲→回稳→上飘淡出）
+        private RectTransform _splatBadgeRect;
+        private CanvasGroup _splatBadgeGroup;
+        private UIInkShapeGraphic _splatBadgeGraphic;
+        private float _splatBadgeTimer;
+        private float _killPopTimer;
+        private const float KillPopDuration = 0.45f;
+        private const float SplatBadgeDuration = 0.8f;
 
         // 定向受击指示弧（Damage Direction Arcs, P6-A）
         private RectTransform _damageArcLayer;
@@ -117,7 +130,7 @@ namespace P1.UI
             public float Age;
         }
 
-        /// <summary>当前连击数（0~6），调试/自动化测试可读。</summary>
+        /// <summary>当前连击数（0~8），调试/自动化测试可读。</summary>
         public int HitCombo => _hitCombo;
 
         /// <summary>准星打击标记是否正在播放。</summary>
@@ -126,6 +139,12 @@ namespace P1.UI
         /// <summary>屏幕上当前存活的定向受击弧数量。</summary>
         public int ActiveDamageArcCount => _damageArcs.Count;
 
+        /// <summary>准星当前是否处于超距状态（变暗 + 虚线）。</summary>
+        public bool IsOutOfRange => _farWeight > 0.5f;
+
+        /// <summary>准星当前是否锁定敌人（染红 + 放大）。</summary>
+        public bool IsOnTarget => _targetWeight > 0.5f;
+
         private WeaponKind _lastKind = WeaponKind.Shooter;
         private int _lastShotsFired = -1;
         private float _shotPunch;
@@ -133,6 +152,8 @@ namespace P1.UI
         private float _rollerWeight = 0f;
         private float _chargerWeight = 0f;
         private float _subAimWeight = 0f;
+        private float _farWeight;
+        private float _targetWeight;
 
         private void Awake()
         {
@@ -141,8 +162,19 @@ namespace P1.UI
 
         public void EnsureInitialized()
         {
+            if (_rectTransform == null) _rectTransform = GetComponent<RectTransform>();
+
+            // 屏幕中心准星必须直接挂在画布根：HudSafeArea 在刘海/挖孔屏横屏时会整体内缩，
+            // 挂在 SafeArea 里会让准星中心偏离相机中心射线（Android 上表现为「静止瞄准也偏」）。
+            // 运行时创建顺序可能是「先 AddComponent（此时还没挂到 Canvas 下）→ 再 SetParent」，
+            // 因此这里每次初始化都校正一次父级，且放在早退之前。
+            Canvas rootCanvas = GetComponentInParent<Canvas>();
+            if (rootCanvas != null && _rectTransform.parent != rootCanvas.transform)
+            {
+                _rectTransform.SetParent(rootCanvas.transform, false);
+            }
+
             if (_shooterContainer != null) return;
-            _rectTransform = GetComponent<RectTransform>();
 
             // P9：准星固定屏幕中心。显式锁定中心锚点，避免运行时被父级布局拉伸。
             _rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
@@ -196,6 +228,7 @@ namespace P1.UI
         {
             DestroySpriteAndTexture(ref _dotSprite);
             DestroySpriteAndTexture(ref _ringSprite);
+            DestroySpriteAndTexture(ref _ringDashedSprite);
             DestroySpriteAndTexture(ref _boxSprite);
             DestroySpriteAndTexture(ref _pillSprite);
             DestroySpriteAndTexture(ref _arcSprite);
@@ -269,6 +302,7 @@ namespace P1.UI
             ringTex.SetPixels(ringCols);
             ringTex.Apply();
             _ringSprite = Sprite.Create(ringTex, new Rect(0, 0, 128, 128), new Vector2(0.5f, 0.5f));
+            _ringDashedSprite = GenerateDashedRingSprite();
 
             // 3. 刻度矩形贴图 (32x32)：墨黑实心 + 白色硬描边
             Texture2D boxTex = new Texture2D(32, 32, TextureFormat.RGBA32, false) { name = "ReticleBoxTex" };
@@ -315,6 +349,55 @@ namespace P1.UI
 
             // 5. 受击方向弧贴图 (256x256)：纯色几何硬边扇面
             _arcSprite = GenerateArcSprite();
+        }
+
+        /// <summary>
+        /// 超距状态用的虚线圆环：与实心环同半径/同描边，按 18 段 55% 实、45% 空切开。
+        /// 几何风硬边、无柔光；Image.color 仍可正常染色。
+        /// </summary>
+        private static Sprite GenerateDashedRingSprite()
+        {
+            const int size = 128;
+            const int segments = 18;
+            const float solidFraction = 0.55f;
+
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                name = "ReticleDashedRingTex"
+            };
+            Color[] pixels = new Color[size * size];
+            Vector2 center = new Vector2(63.5f, 63.5f);
+            float segmentDegrees = 360f / segments;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = x - center.x;
+                    float dy = y - center.y;
+                    float dist = Mathf.Sqrt(dx * dx + dy * dy);
+                    float ringDiff = Mathf.Abs(dist - 56f);
+                    if (ringDiff > 5.2f)
+                    {
+                        pixels[y * size + x] = Color.clear;
+                        continue;
+                    }
+
+                    float angle = Mathf.Atan2(dy, dx) * Mathf.Rad2Deg + 180f;
+                    float phase = Mathf.Repeat(angle / segmentDegrees, 1f);
+                    if (phase > solidFraction)
+                    {
+                        pixels[y * size + x] = Color.clear;
+                        continue;
+                    }
+
+                    pixels[y * size + x] = ringDiff <= 2.8f ? ComicStyle.Ink : Color.white;
+                }
+            }
+
+            tex.SetPixels(pixels);
+            tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
         }
 
         private Sprite GenerateArcSprite()
@@ -447,6 +530,7 @@ namespace P1.UI
             leftGo.transform.SetParent(_chargerContainer, false);
             var leftImg = leftGo.GetComponent<Image>();
             leftImg.sprite = _boxSprite;
+            _chargerLineLeftImage = leftImg;
             _chargerLineLeft = leftGo.GetComponent<RectTransform>();
             _chargerLineLeft.sizeDelta = new Vector2(16f, 2.5f);
             _chargerLineLeft.anchoredPosition = new Vector2(-46f, 0f);
@@ -455,6 +539,7 @@ namespace P1.UI
             rightGo.transform.SetParent(_chargerContainer, false);
             var rightImg = rightGo.GetComponent<Image>();
             rightImg.sprite = _boxSprite;
+            _chargerLineRightImage = rightImg;
             _chargerLineRight = rightGo.GetComponent<RectTransform>();
             _chargerLineRight.sizeDelta = new Vector2(16f, 2.5f);
             _chargerLineRight.anchoredPosition = new Vector2(46f, 0f);
@@ -571,6 +656,37 @@ namespace P1.UI
             _hitRingRect.pivot = new Vector2(0.5f, 0.5f);
             _hitRingRect.sizeDelta = new Vector2(30f, 30f);
             _hitRingRect.anchoredPosition = Vector2.zero;
+
+            // P6-B 击杀墨滴徽标：Blob 形队伍色墨滴，平时 alpha=0 完全隐藏（几何风：不用图片资源，纯程序化形状）。
+            // 挂准星根而不是 _hitMarkerRoot：HitMarker 的 CanvasGroup 在 0.55s 后淡出至 alpha=0，
+            // 嵌套 CanvasGroup 会把徽标最后 0.25s 的上飘淡出连带截断（Inkwave 里 killEl 与 hitEl 也是兄弟节点）。
+            var splatGo = new GameObject("KillSplatBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            splatGo.transform.SetParent(transform, false);
+            splatGo.transform.SetAsLastSibling();
+            _splatBadgeGraphic = splatGo.GetComponent<UIInkShapeGraphic>();
+            _splatBadgeGraphic.Shape = UIInkShape.Blob;
+            _splatBadgeGraphic.SpeechTail = false;
+            _splatBadgeGraphic.BorderWidth = 0f;
+            _splatBadgeGraphic.HardShadow = false;
+            _splatBadgeGraphic.ShadowOffset = Vector2.zero;
+            _splatBadgeGraphic.Halftone = false;
+            _splatBadgeGraphic.GlossAlpha = 0f;
+            _splatBadgeGraphic.DrawGloss = false;
+            _splatBadgeGraphic.InnerRimAlpha = 0f;
+            _splatBadgeGraphic.color = Color.white;
+            _splatBadgeGraphic.raycastTarget = false;
+
+            _splatBadgeRect = splatGo.GetComponent<RectTransform>();
+            _splatBadgeRect.anchorMin = new Vector2(0.5f, 0.5f);
+            _splatBadgeRect.anchorMax = new Vector2(0.5f, 0.5f);
+            _splatBadgeRect.pivot = new Vector2(0.5f, 0.5f);
+            _splatBadgeRect.sizeDelta = new Vector2(44f, 44f);
+            _splatBadgeRect.anchoredPosition = new Vector2(0f, 66f);
+
+            _splatBadgeGroup = splatGo.AddComponent<CanvasGroup>();
+            _splatBadgeGroup.alpha = 0f;
+            _splatBadgeGroup.blocksRaycasts = false;
+            _splatBadgeGroup.interactable = false;
         }
 
         private void TriggerHitMarker(float damage, bool killed, int combo, Color teamColor)
@@ -603,7 +719,74 @@ namespace P1.UI
             if (_hitRing != null)
                 _hitRing.color = new Color(_hitMarkerColor.r, _hitMarkerColor.g, _hitMarkerColor.b, 0f);
 
+            // P6-B 击杀确认：准星本体 killflash + 墨滴徽标（Inkwave kill tier：ret 与 killEl 同帧重启）
+            if (killed)
+            {
+                _killPopTimer = KillPopDuration;
+                _splatBadgeTimer = SplatBadgeDuration;
+                if (_splatBadgeGraphic != null)
+                {
+                    Color splat = Color.Lerp(teamColor, Color.white, 0.15f);
+                    splat.a = 1f;
+                    _splatBadgeGraphic.color = splat;
+                }
+            }
+
             _hitMarkerGroup.alpha = 1f;
+        }
+
+        /// <summary>
+        /// 击杀反馈动画（P6-B）：真实时间推进，Hitstop 冻结期间照常播放。
+        /// 准星本体 scale 1.28→1.0 ease-out（不做旋转：蓄力狙横线保持正交）；
+        /// 墨滴徽标 20% 内弹出到 1.25 过冲、35% 回稳归正、75% 后上飘淡出（对齐 Inkwave iw-kill-splat 曲线）。
+        /// </summary>
+        private void UpdateKillFeedback(float unscaledDt)
+        {
+            if (_killPopTimer > 0f)
+            {
+                _killPopTimer = Mathf.Max(0f, _killPopTimer - unscaledDt);
+                float popT = 1f - _killPopTimer / KillPopDuration;
+                float s = Mathf.LerpUnclamped(1.28f, 1f, EaseOutCubic(popT));
+                _rectTransform.localScale = new Vector3(s, s, 1f);
+                if (_killPopTimer <= 0f)
+                    _rectTransform.localScale = Vector3.one;
+            }
+
+            if (_splatBadgeGroup == null || _splatBadgeRect == null)
+                return;
+
+            if (_splatBadgeTimer <= 0f)
+            {
+                if (_splatBadgeGroup.alpha > 0f)
+                {
+                    _splatBadgeGroup.alpha = 0f;
+                    _splatBadgeRect.localScale = Vector3.one;
+                    _splatBadgeRect.localRotation = Quaternion.identity;
+                    _splatBadgeRect.anchoredPosition = new Vector2(0f, 66f);
+                }
+                return;
+            }
+
+            _splatBadgeTimer = Mathf.Max(0f, _splatBadgeTimer - unscaledDt);
+            float p = 1f - _splatBadgeTimer / SplatBadgeDuration;
+
+            float scale = p < 0.20f
+                ? Mathf.Lerp(0.2f, 1.25f, EaseOutCubic(p / 0.20f))
+                : p < 0.35f ? Mathf.Lerp(1.25f, 1f, (p - 0.20f) / 0.15f)
+                : 1f;
+            _splatBadgeRect.localScale = new Vector3(scale, scale, 1f);
+
+            float rot = p < 0.35f ? Mathf.Lerp(-40f, 0f, EaseOutCubic(p / 0.35f)) : 0f;
+            _splatBadgeRect.localRotation = Quaternion.Euler(0f, 0f, rot);
+
+            float alpha = p < 0.20f
+                ? EaseOutCubic(p / 0.20f)
+                : p < 0.75f ? 1f
+                : 1f - (p - 0.75f) / 0.25f;
+            _splatBadgeGroup.alpha = Mathf.Clamp01(alpha);
+
+            float rise = p < 0.75f ? 0f : Mathf.Lerp(0f, 10f, (p - 0.75f) / 0.25f);
+            _splatBadgeRect.anchoredPosition = new Vector2(0f, 66f + rise);
         }
 
         /// <summary>
@@ -734,7 +917,7 @@ namespace P1.UI
                     : hitComboWindowFallback;
 
                 _hitCombo = now - _lastHitTime <= comboWindow
-                    ? Mathf.Min(_hitCombo + 1, 6)
+                    ? Mathf.Min(_hitCombo + 1, 8)
                     : 0;
                 _lastHitTime = now;
 
@@ -766,13 +949,10 @@ namespace P1.UI
                 return;
             _lastHitSoundTime = now;
 
-            AudioClip[] clips = audio.hitEnemyClips;
-            if (clips == null || clips.Length == 0)
-                return;
-
+            // P6-B 对齐 Inkwave 的双层命中音：UI tick 换用 hit_marker（连击每级升 1.5 半音），
+            // hit_enemy 系列降级为受击点 3D「墨拍身体」音（AudioManager.PlayInkHitBody，CombatantHealth 统一触发）
             float pitch = HitFeedbackMath.ComboPitch(combo, killed);
-            audio.PlayOne(clips[Random.Range(0, clips.Length)], hitMarkerSoundVolume,
-                pitch * 0.99f, pitch * 1.01f);
+            audio.PlayHitMarker(pitch, hitMarkerSoundVolume);
         }
 
         private void SpawnDamageArc(CombatantHealth attacker)
@@ -931,6 +1111,7 @@ namespace P1.UI
             if (_hitMarkerRoot == null) BuildHitMarker();
             EnsureDamageArcLayer();
             UpdateHitMarker(unscaledDt);
+            UpdateKillFeedback(unscaledDt);
             UpdateDamageArcs(unscaledDt);
 
             var player = PlayerController.LocalPlayer;
@@ -952,6 +1133,18 @@ namespace P1.UI
             var weapon = player.Weapon;
             if (weapon == null) return;
 
+            // 3.1 准星状态：超距 → 变暗 + 虚线；锁定敌人 → 染红 + 放大（INKWAVE 的 is-far / is-target）。
+            // 用真实时间过渡，Hitstop 期间状态也能读完；100ms linear 符合几何大胆风。
+            WeaponKind kind = weapon.CurrentWeaponKind;
+            _lastKind = kind;
+            ReticleStateMath.State reticleState = ReticleStateMath.Compute(
+                player.AimFlatDistance,
+                weapon.EffectiveRange,
+                player.AimTarget != null,
+                kind);
+            _farWeight = Mathf.MoveTowards(_farWeight, reticleState.OutOfRange ? 1f : 0f, unscaledDt * 10f);
+            _targetWeight = Mathf.MoveTowards(_targetWeight, reticleState.OnTarget ? 1f : 0f, unscaledDt * 10f);
+
             // 开火弹跳（P16）：每打出一发，准星刻度短促外扩再回弹。
             // 用 ShotsFired 增量检测，不新增事件订阅；滚筒推地每帧都在结算，排除掉避免持续抖动。
             int shotsFired = weapon.ShotsFired;
@@ -960,8 +1153,6 @@ namespace P1.UI
             _lastShotsFired = shotsFired;
             _shotPunch = Mathf.MoveTowards(_shotPunch, 0f, unscaledDt * 7f);
 
-            WeaponKind kind = weapon.CurrentWeaponKind;
-            _lastKind = kind;
             float dt = Time.deltaTime;
 
             float targetShooter = kind == WeaponKind.Shooter ? 1f : 0f;
@@ -995,7 +1186,10 @@ namespace P1.UI
             if (_shooterWeight > 0.01f)
             {
                 if (!_shooterContainer.gameObject.activeSelf) _shooterContainer.gameObject.SetActive(true);
-                _shooterContainer.localScale = Vector3.one * _shooterWeight;
+
+                float alpha = _shooterWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
+                float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
+                _shooterContainer.localScale = Vector3.one * (_shooterWeight * lockScale);
 
                 // 散布 Bloom: 1.2° ~ 5.5° 映射到 24px ~ 42px 刻度距离；开火再叠一层短促外扩
                 float spreadDeg = weapon.CurrentSpreadDegrees;
@@ -1011,10 +1205,14 @@ namespace P1.UI
                 float ringScale = 1.0f + (spreadDeg - 1.2f) * 0.06f;
                 _shooterRing.rectTransform.localScale = Vector3.one * ringScale;
 
-                Color tint = new Color(1f, 1f, 1f, _shooterWeight);
+                Color tint = Color.Lerp(Color.white, ComicStyle.Red, _targetWeight);
+                tint.a = alpha;
                 _shooterCenterDot.color = tint;
-                _shooterCenterDot.rectTransform.localScale = Vector3.one * (1f + _shotPunch * 0.35f);
+                _shooterCenterDot.rectTransform.localScale = Vector3.one *
+                    (1f + _shotPunch * 0.35f) * (1f - 0.45f * _farWeight);
                 _shooterRing.color = tint;
+                Sprite ringSprite = _farWeight > 0.5f ? _ringDashedSprite : _ringSprite;
+                if (_shooterRing.sprite != ringSprite) _shooterRing.sprite = ringSprite;
                 for (int i = 0; i < 4; i++) _shooterTickImages[i].color = tint;
             }
             else if (_shooterContainer.gameObject.activeSelf)
@@ -1028,9 +1226,13 @@ namespace P1.UI
             if (_rollerWeight > 0.01f)
             {
                 if (!_rollerContainer.gameObject.activeSelf) _rollerContainer.gameObject.SetActive(true);
-                _rollerContainer.localScale = Vector3.one * _rollerWeight;
 
-                Color tint = new Color(1f, 1f, 1f, _rollerWeight);
+                float alpha = _rollerWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
+                float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
+                _rollerContainer.localScale = Vector3.one * (_rollerWeight * lockScale);
+
+                Color tint = Color.Lerp(Color.white, ComicStyle.Red, _targetWeight);
+                tint.a = alpha;
                 _rollerBarImage.color = tint;
             }
             else if (_rollerContainer.gameObject.activeSelf)
@@ -1044,10 +1246,27 @@ namespace P1.UI
             if (_chargerWeight > 0.01f)
             {
                 if (!_chargerContainer.gameObject.activeSelf) _chargerContainer.gameObject.SetActive(true);
-                _chargerContainer.localScale = Vector3.one * _chargerWeight;
+
+                float alpha = _chargerWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
+                float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
+                _chargerContainer.localScale = Vector3.one * (_chargerWeight * lockScale);
 
                 float ch01 = weapon.Charge01;
                 _chargerFillRing.fillAmount = ch01;
+
+                // 超距时导轨环切虚线，整环与两条收束线同步变暗；锁定敌人时统一染红。
+                Sprite trackSprite = _farWeight > 0.5f ? _ringDashedSprite : _ringSprite;
+                if (_chargerTrackRing.sprite != trackSprite) _chargerTrackRing.sprite = trackSprite;
+
+                Color tint = Color.Lerp(Color.white, ComicStyle.Red, _targetWeight);
+                Color trackColor = tint;
+                trackColor.a = 0.3f * alpha;
+                _chargerTrackRing.color = trackColor;
+
+                Color lineColor = tint;
+                lineColor.a = alpha;
+                if (_chargerLineLeftImage != null) _chargerLineLeftImage.color = lineColor;
+                if (_chargerLineRightImage != null) _chargerLineRightImage.color = lineColor;
 
                 // 左右两条收紧线：从 ±46px 靠拢到 ±26px (对应 Inkwave var(--ch, 0))
                 float lineOffset = Mathf.Lerp(46f, 26f, ch01);
@@ -1059,16 +1278,19 @@ namespace P1.UI
                 {
                     float flashPulse = 1f + Mathf.PingPong(Time.time * 6f, 0.20f);
                     _chargerFillRing.rectTransform.localScale = Vector3.one * flashPulse;
-                    _chargerFillRing.color = Color.white;
-                    _chargerCenterDot.color = Color.white;
+                    Color fullColor = Color.white;
+                    fullColor.a = alpha;
+                    _chargerFillRing.color = fullColor;
+                    _chargerCenterDot.color = fullColor;
                 }
                 else
                 {
                     _chargerFillRing.rectTransform.localScale = Vector3.one;
                     Color fillColor = Color.Lerp(teamColor, Color.white, ch01 * 0.7f);
-                    fillColor.a = _chargerWeight;
+                    fillColor = Color.Lerp(fillColor, ComicStyle.Red, _targetWeight);
+                    fillColor.a = alpha;
                     _chargerFillRing.color = fillColor;
-                    _chargerCenterDot.color = new Color(1f, 1f, 1f, _chargerWeight);
+                    _chargerCenterDot.color = lineColor;
                 }
             }
             else if (_chargerContainer.gameObject.activeSelf)

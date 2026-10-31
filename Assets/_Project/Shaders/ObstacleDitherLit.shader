@@ -18,6 +18,22 @@ Shader "P1/ObstacleDitherLit"
         _PanelLineStrength ("Panel Line Strength", Range(0.0, 1.0)) = 0.35
         _DetailNoiseStrength ("Detail Noise Strength", Range(0.0, 1.0)) = 0.04
 
+        [Header(Surface PBR P18)]
+        _SurfaceN ("Surface Normal (tileable)", 2D) = "bump" {}
+        _SurfaceRMO ("Surface RMO (R=metal G=AO B=detail A=smooth)", 2D) = "black" {}
+        _SurfaceTexelScale ("Surface Texel Scale (periods/m)", Range(0.05, 8)) = 0.5
+        _SurfaceNormalStrength ("Surface Normal Strength", Range(0, 1.5)) = 0.6
+        _SurfaceAOStrength ("Surface AO Strength", Range(0, 1.5)) = 0.7
+        _SurfaceSmoothnessScale ("Surface Smoothness Scale", Range(0, 2)) = 1.0
+
+        [Header(Cover Edge Line)]
+        // P17-A：掩体每个面四周一圈深色硬边线（世界米宽），压在墨水叠加之后，
+        // 涂满墨后掩体轮廓依然可辨（否则墨色统一后掩体与地面不可区分）。
+        _EdgeLineColor ("Edge Line Color", Color) = (0.09, 0.10, 0.13, 1.0)
+        _EdgeLineWidth ("Edge Line Width (m)", Float) = 0.05
+        _EdgeLineStrength ("Edge Line Strength", Range(0.0, 1.0)) = 0.85
+        _TopLift ("Top Face Brightness Lift", Range(0.0, 0.5)) = 0.06
+
         [Header(Toon Shading)]
         _ShadeThreshold ("Shade Threshold", Range(0.2, 0.8)) = 0.5
         _ShadeSoftness ("Shade Softness", Range(0.005, 0.2)) = 0.03
@@ -64,6 +80,7 @@ Shader "P1/ObstacleDitherLit"
             // 注：带 MPB（OcclusionFader 淡化中）的 renderer 会被 GRD 排除并自动回退普通路径，仍正确
             #pragma target 4.5
             #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma multi_compile _ P1_INK_HIGH
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
@@ -73,6 +90,12 @@ Shader "P1/ObstacleDitherLit"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "ToonLighting.hlsl"
             #include "InkSurfaceOverlay.hlsl"
+            #include "InkWetShading.hlsl"
+
+            TEXTURE2D(_SurfaceN);
+            SAMPLER(sampler_SurfaceN);
+            TEXTURE2D(_SurfaceRMO);
+            SAMPLER(sampler_SurfaceRMO);
 
             struct Attributes
             {
@@ -88,6 +111,7 @@ Shader "P1/ObstacleDitherLit"
                 float3 normalWS   : TEXCOORD1;
                 float2 uv         : TEXCOORD2;
                 half   fogFactor  : TEXCOORD3;
+                float3 edgeDist3  : TEXCOORD4; // 到三条棱边组的距离（米，见 vert）
             };
 
             CBUFFER_START(UnityPerMaterial)
@@ -101,6 +125,10 @@ Shader "P1/ObstacleDitherLit"
                 float _EdgeHighlight;
                 float _PanelLineStrength;
                 float _DetailNoiseStrength;
+                half4 _EdgeLineColor;
+                float _EdgeLineWidth;
+                float _EdgeLineStrength;
+                float _TopLift;
                 float _ShadeThreshold;
                 float _ShadeSoftness;
                 half4 _ShadowTint;
@@ -116,6 +144,10 @@ Shader "P1/ObstacleDitherLit"
                 float _FocusRadius;
                 float _FocusMinAlpha;
                 float _FocusWeight;
+                float _SurfaceTexelScale;
+                float _SurfaceNormalStrength;
+                float _SurfaceAOStrength;
+                float _SurfaceSmoothnessScale;
             CBUFFER_END
 
             static const float4x4 _BayerMatrix4x4 = float4x4(
@@ -131,10 +163,20 @@ Shader "P1/ObstacleDitherLit"
                 VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
+                // 掩体均为轴对齐盒（object space 半径恒 0.5）：每轴乘世界尺度，
+                // 得到"到该轴两侧棱边的米距离"，fragment 里取 min 即到最近棱边的距离。
+                // 用 UNITY_MATRIX_M 而非 unity_ObjectToWorld，兼容 GPU Resident Drawer 实例化矩阵。
+                float3 objScale = float3(
+                    length(UNITY_MATRIX_M._11_21_31),
+                    length(UNITY_MATRIX_M._12_22_32),
+                    length(UNITY_MATRIX_M._13_23_33));
+                float3 edgeDist3 = (0.5 - abs(input.positionOS.xyz)) * objScale;
+
                 output.positionCS = posInputs.positionCS;
                 output.positionWS = posInputs.positionWS;
                 output.normalWS = normInputs.normalWS;
                 output.uv = input.uv;
+                output.edgeDist3 = edgeDist3;
                 output.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
                 return output;
             }
@@ -208,6 +250,52 @@ Shader "P1/ObstacleDitherLit"
                     }
                 }
 
+                // 2.2 顶面未涂墨区轻微提亮（P17-A）：第三人称视角下把"可站立的掩体顶"
+                // 从同色地面里分出来；放在墨水叠加之前，墨覆盖后仍是统一墨色。
+                surfaceColor *= 1.0 + _TopLift * saturate(geomN.y * 2.0 - 1.0);
+
+                // 2.3 表面 PBR 贴图采样（世界空间双轴投影，P1_INK_HIGH 桌面开启/移动端跳过）
+                #if defined(P1_INK_HIGH)
+                    float2 surfUV;
+                    float3 surfT, surfB;
+                    if (abs(geomN.y) > 0.5)
+                    {
+                        surfUV = input.positionWS.xz * _SurfaceTexelScale;
+                        surfT = float3(1.0, 0.0, 0.0);
+                        surfB = float3(0.0, 0.0, 1.0);
+                    }
+                    else
+                    {
+                        if (abs(geomN.x) > abs(geomN.z))
+                        {
+                            surfUV = input.positionWS.zy * _SurfaceTexelScale;
+                            surfT = float3(0.0, 0.0, 1.0);
+                            surfB = float3(0.0, 1.0, 0.0);
+                        }
+                        else
+                        {
+                            surfUV = input.positionWS.xy * _SurfaceTexelScale;
+                            surfT = float3(1.0, 0.0, 0.0);
+                            surfB = float3(0.0, 1.0, 0.0);
+                        }
+                    }
+
+                    half4 nSample = SAMPLE_TEXTURE2D(_SurfaceN, sampler_SurfaceN, surfUV);
+                    half3 tsN = UnpackNormalScale(nSample, _SurfaceNormalStrength);
+                    float3 worldN = normalize(geomN + (surfT * tsN.x + surfB * tsN.y));
+
+                    half4 rmo = SAMPLE_TEXTURE2D(_SurfaceRMO, sampler_SurfaceRMO, surfUV);
+                    half ao = clamp(lerp(1.0, rmo.g, _SurfaceAOStrength), 0.35, 1.0);
+                    float metallic = saturate(max(_Metallic, rmo.r));
+                    float smoothness = saturate(lerp(_Smoothness, rmo.a * _SurfaceSmoothnessScale, 0.85));
+                    surfaceColor *= (0.88 + 0.24 * rmo.b);
+                #else
+                    float3 worldN = geomN;
+                    half ao = 1.0;
+                    float metallic = _Metallic;
+                    float smoothness = _Smoothness;
+                #endif
+
                 // 3. 基础光照与高光（含主光阴影与三渲二光照）
                 float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
                 Light mainLight = GetMainLight(shadowCoord);
@@ -216,20 +304,35 @@ Shader "P1/ObstacleDitherLit"
                 float3 V = normalize(GetCameraPositionWS() - input.positionWS);
                 float3 H = normalize(L + V);
 
-                float NdotH = saturate(dot(geomN, H));
+                float NdotH = saturate(dot(worldN, H));
 
-                half3 ambient = P1ToonAmbient(geomN, _ShadowTint.rgb, 0.55, 0.10);
-                half3 diffuse = P1ToonDiffuse(surfaceColor, mainLight.color, dot(geomN, L), shadowAtten,
+                half3 ambient = P1ToonAmbient(worldN, _ShadowTint.rgb, 0.55, 0.10);
+                half3 diffuse = P1ToonDiffuse(surfaceColor, mainLight.color, dot(worldN, L), shadowAtten,
                                               _ShadeThreshold, _ShadeSoftness, _ShadowFloor, _ShadowTint.rgb, ambient);
+                diffuse *= ao;
 
-                half spec = P1ToonSpec(NdotH, _SpecThreshold, _SpecSoftness, _SpecStrength * (0.5 + _Metallic), shadowAtten);
-                half3 specular = mainLight.color * spec;
+                half spec = P1ToonSpec(NdotH, _SpecThreshold, _SpecSoftness, _SpecStrength * (0.5 + metallic) * (0.3 + 1.4 * smoothness), shadowAtten);
+                half3 specColor = lerp(mainLight.color, mainLight.color * surfaceColor, metallic);
+                half3 specular = specColor * spec;
 
-                half rim = P1ToonRim(saturate(dot(geomN, V)), _RimPower, shadowAtten) * _RimStrength;
+                half rim = P1ToonRim(saturate(dot(worldN, V)), _RimPower, shadowAtten) * _RimStrength;
                 half3 rimLight = _RimColor.rgb * rim;
 
-                half3 shaded = diffuse + specular + rimLight;
+                // 环境镜面反射（纯数学不分支，使用解析天空盒与太阳盘，暗部受 AO 遮挡）
+                float3 R = reflect(-V, worldN);
+                float rough = saturate(1.0 - smoothness);
+                half3 envSpec = P1InkEnvSpecular(R, rough, saturate(dot(worldN, V)));
+                envSpec *= lerp(half3(1.0, 1.0, 1.0), surfaceColor, metallic) * ao;
+
+                half3 shaded = diffuse + specular + rimLight + envSpec;
                 ApplyTopInkOverlay(shaded, input.positionWS, geomN, shadowAtten, L, V);
+
+                // 4. 掩体边界线（P17-A）：到最近棱边的世界米距离 → 四周一圈深色硬边。
+                // 必须压在墨水叠加之后：顶面/立面涂满墨后轮廓仍然可辨，掩体不会"消失"在同色地面里。
+                float edgeDist = min(min(input.edgeDist3.x, input.edgeDist3.y), input.edgeDist3.z);
+                float edgeFw = max(fwidth(edgeDist), 0.005);
+                float edgeLine = 1.0 - smoothstep(_EdgeLineWidth, _EdgeLineWidth + edgeFw, edgeDist);
+                shaded = lerp(shaded, _EdgeLineColor.rgb, edgeLine * _EdgeLineStrength);
 
                 half3 finalColor = MixFog(shaded, input.fogFactor);
                 return half4(finalColor, 1.0);
@@ -281,6 +384,10 @@ Shader "P1/ObstacleDitherLit"
                 float _EdgeHighlight;
                 float _PanelLineStrength;
                 float _DetailNoiseStrength;
+                half4 _EdgeLineColor;
+                float _EdgeLineWidth;
+                float _EdgeLineStrength;
+                float _TopLift;
                 float _ShadeThreshold;
                 float _ShadeSoftness;
                 half4 _ShadowTint;
@@ -296,6 +403,10 @@ Shader "P1/ObstacleDitherLit"
                 float _FocusRadius;
                 float _FocusMinAlpha;
                 float _FocusWeight;
+                float _SurfaceTexelScale;
+                float _SurfaceNormalStrength;
+                float _SurfaceAOStrength;
+                float _SurfaceSmoothnessScale;
             CBUFFER_END
 
             static const float4x4 _BayerMatrix4x4 = float4x4(
@@ -380,6 +491,10 @@ Shader "P1/ObstacleDitherLit"
                 float _EdgeHighlight;
                 float _PanelLineStrength;
                 float _DetailNoiseStrength;
+                half4 _EdgeLineColor;
+                float _EdgeLineWidth;
+                float _EdgeLineStrength;
+                float _TopLift;
                 float _ShadeThreshold;
                 float _ShadeSoftness;
                 half4 _ShadowTint;
@@ -395,6 +510,10 @@ Shader "P1/ObstacleDitherLit"
                 float _FocusRadius;
                 float _FocusMinAlpha;
                 float _FocusWeight;
+                float _SurfaceTexelScale;
+                float _SurfaceNormalStrength;
+                float _SurfaceAOStrength;
+                float _SurfaceSmoothnessScale;
             CBUFFER_END
 
             static const float4x4 _BayerMatrix4x4 = float4x4(

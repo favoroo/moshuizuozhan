@@ -120,7 +120,7 @@ namespace P1.Weapons
             Vector3 muzzle = baseMuzzle + right * (_hand == 0 ? offset : -offset);
             _hand ^= 1;
 
-            Vector3 solveTarget = aim.GetShotTarget(muzzle, maxRange) + Vector3.up * hitRadius;
+            Vector3 solveTarget = aim.GetRangeClampedTarget(muzzle, maxRange) + Vector3.up * hitRadius;
 
             Vector3 launchDir = InkBallistics.SolveLaunchDirection(muzzle, solveTarget, speed, gravity, maxRange);
             Vector3 shotDir = InkBallistics.ApplySpread(launchDir, SpreadDegrees);

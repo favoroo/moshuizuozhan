@@ -95,6 +95,7 @@ namespace P1.UI
             DontDestroyOnLoad(gameObject);
             EnsureUI();
 
+            UpdateManager.Instance.OnUpdateInfoRefined += HandleUpdateInfoRefined;
             UpdateManager.Instance.OnDownloadProgress += HandleDownloadProgress;
             UpdateManager.Instance.OnDownloadCompleted += HandleDownloadCompleted;
             UpdateManager.Instance.OnDownloadFailed += HandleDownloadFailed;
@@ -104,10 +105,28 @@ namespace P1.UI
         {
             if (UpdateManager.Instance != null)
             {
+                UpdateManager.Instance.OnUpdateInfoRefined -= HandleUpdateInfoRefined;
                 UpdateManager.Instance.OnDownloadProgress -= HandleDownloadProgress;
                 UpdateManager.Instance.OnDownloadCompleted -= HandleDownloadCompleted;
                 UpdateManager.Instance.OnDownloadFailed -= HandleDownloadFailed;
             }
+        }
+
+        /// <summary>
+        /// 体积等元信息是延迟补齐的：Gitee 的 Release API 不给 asset size，
+        /// UpdateManager 会另发一次 HEAD 探测，拿到后回来刷这行「大小」。
+        /// </summary>
+        private void HandleUpdateInfoRefined(UpdateInfo info)
+        {
+            if (info == null || !ReferenceEquals(info, _currentInfo)) return;
+            RefreshSizeText(info);
+        }
+
+        private void RefreshSizeText(UpdateInfo info)
+        {
+            if (_sizeText == null) return;
+            string text = info != null ? info.fileSizeText : "";
+            _sizeText.text = $"大小: {(string.IsNullOrEmpty(text) ? "未知" : text)}";
         }
 
         public void PopupUpdate(UpdateInfo info)
@@ -119,14 +138,32 @@ namespace P1.UI
             EnsureUI();
             ApplyResponsivePanelScale();
             if (_verText != null) _verText.text = $"新版本: {info.tagName}";
-            if (_sizeText != null) _sizeText.text = $"大小: {(string.IsNullOrEmpty(info.fileSizeText) ? "未知" : info.fileSizeText)}";
+            RefreshSizeText(info);
             if (_notesText != null) _notesText.text = string.IsNullOrEmpty(info.releaseNotes) ? "暂无更新说明" : info.releaseNotes;
 
             if (_scrollRect != null) _scrollRect.verticalNormalizedPosition = 1f;
 
-            if (_progressBox != null) _progressBox.SetActive(false);
-            if (_actionBtnText != null) _actionBtnText.text = "立 即 更 新";
-            if (_actionBtn != null) _actionBtn.interactable = true;
+            // 没有 APK 附件时应用内下载无从谈起，只剩「浏览器下载」这条逃生通道
+            bool canInstallInApp = info.hasApk;
+            if (_actionBtn != null) _actionBtn.interactable = canInstallInApp;
+            if (_actionBtnText != null) _actionBtnText.text = canInstallInApp ? "立 即 更 新" : "无内置安装包";
+
+            // 上一次已经下好、且文件仍是完整 APK：直接给安装入口，不必重下几十 MB
+            if (canInstallInApp && UpdateManager.Instance.HasReadyApk())
+            {
+                _isCompleted = true;
+                _completedApkPath = UpdateManager.Instance.GetApkSavePath();
+
+                if (_progressBox != null) _progressBox.SetActive(true);
+                if (_progressBarFill != null) _progressBarFill.fillAmount = 1f;
+                if (_progressPercentText != null) _progressPercentText.text = "安装包已就绪";
+                if (_progressSpeedText != null) _progressSpeedText.text = "点「立即安装」开始安装";
+                if (_actionBtnText != null) _actionBtnText.text = "立 即 安 装";
+            }
+            else
+            {
+                if (_progressBox != null) _progressBox.SetActive(false);
+            }
 
             _dialogRoot.SetActive(true);
         }
@@ -164,11 +201,19 @@ namespace P1.UI
         {
             if (_isCompleted && !string.IsNullOrEmpty(_completedApkPath))
             {
-                UpdateManager.Instance.InstallApk(_completedApkPath);
+                TryInstall(_completedApkPath);
                 return;
             }
 
             if (_currentInfo == null) return;
+
+            if (!_currentInfo.hasApk)
+            {
+                if (_progressBox != null) _progressBox.SetActive(true);
+                if (_progressPercentText != null) _progressPercentText.text = "该版本未附带安装包";
+                if (_progressSpeedText != null) _progressSpeedText.text = "请点「浏览器下载」";
+                return;
+            }
 
             if (_progressBox != null) _progressBox.SetActive(true);
             if (_progressBarFill != null) _progressBarFill.fillAmount = 0f;
@@ -178,6 +223,21 @@ namespace P1.UI
             if (_actionBtnText != null) _actionBtnText.text = "下 载 中...";
 
             UpdateManager.Instance.StartDownload(_currentInfo);
+        }
+
+        /// <summary>
+        /// 调起安装并把失败原因如实显示出来（失败时旧实现是一声不响，玩家只看到"点了没反应"）。
+        /// </summary>
+        private void TryInstall(string filePath)
+        {
+            if (UpdateManager.Instance.InstallApk(filePath, out string reason))
+            {
+                if (_progressSpeedText != null) _progressSpeedText.text = "已调起系统安装器";
+                return;
+            }
+
+            if (_progressSpeedText != null) _progressSpeedText.text = reason;
+            UpdateManager.Instance.ShowToast($"安装未完成：{reason}", new Color(1f, 0.35f, 0.35f));
         }
 
         private void HandleBrowserClick()
@@ -193,9 +253,17 @@ namespace P1.UI
             if (_progressBox == null || !_progressBox.activeSelf) return;
 
             if (_progressBarFill != null) _progressBarFill.fillAmount = percent / 100f;
+
             string loadedStr = GameVersion.FormatBytes(loaded);
             string totalStr = GameVersion.FormatBytes(total);
-            if (_progressPercentText != null) _progressPercentText.text = $"{percent:F0}% ({loadedStr} / {totalStr})";
+
+            if (_progressPercentText != null)
+            {
+                _progressPercentText.text = total > 0
+                    ? $"{percent:F0}% ({loadedStr} / {totalStr})"
+                    // 服务端没给 Content-Length 时如实报"已下载多少"，绝不编一个百分比
+                    : $"连接中… 已下载 {loadedStr}";
+            }
 
             if (speed > 0f)
             {
@@ -214,31 +282,24 @@ namespace P1.UI
             _isCompleted = true;
             _completedApkPath = filePath;
 
-            if (_progressBox != null)
-            {
-                if (_progressBarFill != null) _progressBarFill.fillAmount = 1f;
-                if (_progressPercentText != null) _progressPercentText.text = "100% (下载完成)";
-                if (_progressSpeedText != null) _progressSpeedText.text = "准备安装";
-            }
+            if (_progressBox != null) _progressBox.SetActive(true);
+            if (_progressBarFill != null) _progressBarFill.fillAmount = 1f;
+            if (_progressPercentText != null) _progressPercentText.text = "100% (下载完成)";
+            if (_progressSpeedText != null) _progressSpeedText.text = "准备安装";
 
-            if (_actionBtn != null)
-            {
-                _actionBtn.interactable = true;
-            }
-            if (_actionBtnText != null)
-            {
-                _actionBtnText.text = "立 即 安 装";
-            }
+            if (_actionBtn != null) _actionBtn.interactable = true;
+            if (_actionBtnText != null) _actionBtnText.text = "立 即 安 装";
 
-            UpdateManager.Instance.InstallApk(filePath);
+            TryInstall(filePath);
         }
 
         private void HandleDownloadFailed(string error)
         {
             if (_progressBox != null)
             {
+                _progressBox.SetActive(true);
                 if (_progressPercentText != null) _progressPercentText.text = "下载中断";
-                if (_progressSpeedText != null) _progressSpeedText.text = error;
+                if (_progressSpeedText != null) _progressSpeedText.text = $"{error} · 可尝试「浏览器下载」";
             }
 
             if (_actionBtn != null)
@@ -277,7 +338,9 @@ namespace P1.UI
             rootRt.anchorMax = Vector2.one;
             rootRt.offsetMin = Vector2.zero;
             rootRt.offsetMax = Vector2.zero;
-            _dialogRoot.AddComponent<SafeAreaFitter>();
+            // 不挂 SafeAreaFitter：根节点必须保持物理全屏，压暗蒙层才能盖住刘海/挖孔区；
+            // 挂上后蒙层会跟着安全区收缩，刘海区会留一条没被压暗的亮竖条。
+            // 弹窗面板本身是屏幕居中的 840×640，尺寸远小于安全区，不必再单独收缩。
 
             // 1. 全屏黑色暗底半透明遮罩 (墨色 70%，无网点)
             var overlayGo = new GameObject("DimOverlay", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));

@@ -66,6 +66,48 @@ namespace P1.Tests
         }
 
         [Test]
+        public void ComputeArcParams_ArcHeightGrowsWithDistance_AndClampsToFar()
+        {
+            var cfg = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            cfg.bombMaxThrowDistance = 12f;
+            cfg.bombArcHeightNear = 1.6f;
+            cfg.bombArcHeightFar = 3.8f;
+            cfg.bombFlightSpeed = 15f;
+
+            Vector3 start = Vector3.zero;
+            var near = InkBombTrajectoryUtility.ComputeArcParams(start, start, cfg);
+            var mid = InkBombTrajectoryUtility.ComputeArcParams(start, new Vector3(6f, 0f, 0f), cfg);
+            var far = InkBombTrajectoryUtility.ComputeArcParams(start, new Vector3(12f, 0f, 0f), cfg);
+
+            Assert.AreEqual(1.6f, near.ArcHeight, 0.05f, "零距离落点应取近距弧高锚点");
+            Assert.AreEqual(3.8f, far.ArcHeight, 0.05f, "满射程落点应取远距弧高");
+            Assert.Greater(mid.ArcHeight, near.ArcHeight, "弧高应随落点距离单调增加");
+            Assert.Less(mid.ArcHeight, far.ArcHeight);
+            Assert.AreEqual(3.8f, InkBombTrajectoryUtility.ComputeArcParams(start, new Vector3(30f, 0f, 0f), cfg).ArcHeight,
+                0.05f, "超远目标弧高按满射程档钳制");
+
+            Object.DestroyImmediate(cfg);
+        }
+
+        [Test]
+        public void ComputeArcParams_FlightDurationFollowsSpeed_WithNearFloor()
+        {
+            var cfg = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            cfg.bombFlightSpeed = 15f;
+
+            var near = InkBombTrajectoryUtility.ComputeArcParams(Vector3.zero, new Vector3(1f, 0f, 0f), cfg);
+            var far = InkBombTrajectoryUtility.ComputeArcParams(Vector3.zero, new Vector3(12f, 0f, 0f), cfg);
+
+            Assert.AreEqual(0.28f, near.FlightDuration, 0.001f, "贴脚投掷按下限 0.28s 钳制，防瞬移手感");
+            Assert.AreEqual(0.8f, far.FlightDuration, 0.001f, "12m / 15m/s = 0.8s，远投应有明显滞空力度感");
+
+            var fallback = InkBombTrajectoryUtility.ComputeArcParams(Vector3.zero, new Vector3(15f, 0f, 0f), null);
+            Assert.AreEqual(1f, fallback.FlightDuration, 0.001f, "无配置时按默认速度 15m/s 兜底");
+
+            Object.DestroyImmediate(cfg);
+        }
+
+        [Test]
         public void SubWeaponThrowTrajectory_Component_GeneratesMatchingPoints()
         {
             var go = new GameObject("TestTrajectoryHost");

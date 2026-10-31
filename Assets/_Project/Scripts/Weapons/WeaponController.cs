@@ -99,6 +99,11 @@ namespace P1.Weapons
         /// <summary>蓄力狙蓄力进度 0~1；其他武器恒为 0。</summary>
         public float Charge01 => _strategy != null ? _strategy.Charge01 : 0f;
 
+        /// <summary>当前武器有效射程（米）：HUD 准星据此显示超距状态。</summary>
+        public float EffectiveRange => _strategy != null
+            ? _strategy.EffectiveRange
+            : (config != null ? Mathf.Max(0.1f, config.maxRange) : 0f);
+
         public bool IsCharging => _strategy != null && _strategy.IsCharging;
         public bool IsRolling => _strategy != null && _strategy.IsRolling;
 
@@ -147,6 +152,9 @@ namespace P1.Weapons
 
         /// <summary>主武器累计出手次数（弹丸波次与光束各计 1 次），调试/测试可观测。</summary>
         public int ShotsFired { get; private set; }
+
+        /// <summary>最近一次蓄力狙光束的结算结果（起点 / 终点 / 命中法线），调试与自动化测试可读。</summary>
+        public BeamResult LastBeamResult { get; private set; }
 
         private void Awake()
         {
@@ -367,7 +375,7 @@ namespace P1.Weapons
                     return playerAim;
             }
 
-            float maxRange = config != null ? config.maxRange : 7.2f;
+            float maxRange = config != null ? config.maxRange : 12f;
             Vector3 point = transform.position + flatAim * maxRange;
             if (Physics.Raycast(point + Vector3.up * 5f, Vector3.down, out RaycastHit hit, 12f, ~0, QueryTriggerInteraction.Ignore))
             {
@@ -376,7 +384,19 @@ namespace P1.Weapons
             return point;
         }
 
-        public bool TryThrowSubBomb(Vector3 targetGroundPos)
+        /// <summary>副武器手雷出手点：弹道预览与实际投掷统一取自这里，保证落点完全重合。</summary>
+        public Vector3 GetSubBombMuzzlePosition()
+        {
+            return muzzleTransform != null
+                ? muzzleTransform.position
+                : transform.position + Vector3.up * 0.8f;
+        }
+
+        /// <summary>
+        /// 副武器手雷投掷（inkwave 弹道模型）：以指定初速从出手点真实抛出，
+        /// 远近与反弹全部由物理决定。玩家链路（相机俯仰 → 初速）由此进入。
+        /// </summary>
+        public bool TryThrowSubBombBallistic(Vector3 throwVelocity)
         {
             if (!_health.IsAlive || IsPerformingSpecial || _bombCooldown > 0f)
                 return false;
@@ -393,15 +413,13 @@ namespace P1.Weapons
 
             _bombCooldown = config != null ? config.bombCooldown : 0.6f;
 
-            Vector3 startPos = muzzleTransform != null
-                ? muzzleTransform.position
-                : transform.position + Vector3.up * 0.8f;
+            Vector3 startPos = GetSubBombMuzzlePosition();
 
             if (InkBombPool.Instance != null)
             {
                 InkBombPool.Instance.ThrowBomb(
                     startPos,
-                    targetGroundPos,
+                    throwVelocity,
                     _health.Team,
                     config,
                     AddSpecialPoints,
@@ -414,6 +432,18 @@ namespace P1.Weapons
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 旧落点制签名（Bot 与既有测试在用，保持向后兼容）：
+        /// 按固定初速做弹道学反解，炸弹仍落在 targetGroundPos（指哪落哪），
+        /// 飞行/反弹/引信走与玩家完全相同的弹道管线。
+        /// </summary>
+        public bool TryThrowSubBomb(Vector3 targetGroundPos)
+        {
+            Vector3 startPos = GetSubBombMuzzlePosition();
+            Vector3 velocity = InkBombTrajectoryUtility.ComputeThrowVelocityToLandAt(startPos, targetGroundPos, config);
+            return TryThrowSubBombBallistic(velocity);
         }
 
         public bool TryActivateSpecial()
@@ -551,6 +581,19 @@ namespace P1.Weapons
         private void LateUpdate()
         {
             float dt = Time.deltaTime;
+
+            // 本地玩家的准星每帧都在变，不能只在「按住扳机」的帧更新 _lastAim：
+            // 蓄力狙真正发射发生在松手帧，而松手帧 PlayerController 不会再调用 TryFireMainWeapon，
+            // 旧实现会让光束永远慢一帧（甩枪/跟踪时 27m 外可差米级）。这里用本帧准星补齐。
+            if (_playerController != null &&
+                _playerController.isActiveAndEnabled &&
+                _playerController.Health != null &&
+                _playerController.Health.IsAlive)
+            {
+                _lastAim = WeaponAim.FromDirection(
+                    _playerController.AimDirection, _playerController.AimPoint);
+                _hasAim = true;
+            }
 
             if (_strategy != null)
             {
@@ -761,12 +804,16 @@ namespace P1.Weapons
             {
                 EnsureLaserSight();
 
-                Vector3 origin = ResolveMuzzlePosition();
+                Vector3 muzzle = ResolveMuzzlePosition();
+                Vector3 chest = transform.position + Vector3.up * 0.95f;
+                // 长枪管贴墙/打脚下时，从枪口指向准星会出现「瞄准点已在枪口后方」，
+                // 此时改用胸口起点，激光与光束才会真正收敛到准星点。
+                Vector3 origin = _lastAim.GetShotOrigin(muzzle, chest);
                 float rangeMax = config != null ? Mathf.Max(1f, config.chargeRangeMax) : 27f;
                 float rangeMin = config != null ? Mathf.Max(0.5f, config.chargeRangeMin) : 11f;
                 // 指示线长度跟随蓄力：低蓄力时如实显示这一枪能打多远，也顺带给蓄力一个视觉反馈。
                 float range = Mathf.Lerp(rangeMin, rangeMax, Mathf.Clamp01(charger.Charge01));
-                Vector3 direction = _lastAim.GetShotDirection(origin);
+                Vector3 direction = _lastAim.GetShotDirection(origin, 0.2f);
                 Vector3 target = origin + direction * range;
 
                 if (WeaponBeamSystem.TryFindWorldHit(origin, direction, range, gameObject, out RaycastHit wallHit))
@@ -954,8 +1001,10 @@ namespace P1.Weapons
         {
             ShotsFired++;
             BeamResult result = WeaponBeamSystem.Fire(beam, TeamId, gameObject, AddSpecialPoints);
+            LastBeamResult = result;
             PlayBeamVisual(result, beam.Intensity01);
-            EmitShotFeedback(beam.Origin, beam.Direction, 1.2f);
+            // 枪口闪光跟实际枪口走；光束在近距可能改从胸口起点结算。
+            EmitShotFeedback(ResolveMuzzlePosition(), beam.Direction, 1.2f);
             OnFired?.Invoke();
         }
 

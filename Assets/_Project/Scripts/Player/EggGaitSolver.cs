@@ -15,8 +15,14 @@ namespace P1.Player
         public float SquashY;
         /// <summary>横向缩放系数（触地时膨胀 &gt; 1）。</summary>
         public float SquashXZ;
-        /// <summary>双臂反相摆动幅度（度）。</summary>
+        /// <summary>双臂反相摆动幅度（度，带符号：正 = 左臂向后）。</summary>
         public float ArmSwingDeg;
+        /// <summary>大腿摆动幅度（度，带符号：正 = 左腿向后）；控制器对左右腿取反相。</summary>
+        public float LegSwingDeg;
+        /// <summary>摆动相膝弯角度（度，正 = 屈膝）；双腿同步，峰值在双腿从躯干下方穿过的相位。</summary>
+        public float KneeBendDeg;
+        /// <summary>脚掌俯仰（度，正 = 脚尖下垂）；随膝弯同步，触地相归零。</summary>
+        public float FootPitchDeg;
 
         public static readonly EggGaitPose Neutral = new EggGaitPose
         {
@@ -24,14 +30,19 @@ namespace P1.Player
             RockDeg = 0f,
             SquashY = 1f,
             SquashXZ = 1f,
-            ArmSwingDeg = 0f
+            ArmSwingDeg = 0f,
+            LegSwingDeg = 0f,
+            KneeBendDeg = 0f,
+            FootPitchDeg = 0f
         };
     }
 
     /// <summary>
-    /// 无腿蛋形角色的贴地步态求解（左右摇摆，不做上下弹跳）。
+    /// 蛋仔风角色贴地步态求解（左右摇摆 + FK 摆腿，不做上下弹跳）。
     /// 旧版用 |sin| 驱动垂直弹跳与 12% 触地挤压，蛋仔走起来像在连续蹦；
-    /// 现在只保留很小的起伏（≤ 8 mm）与摇摆，让脚底始终贴地，站立时完全静止。
+    /// 现在只保留很小的起伏（≤ 8 mm）与摇摆，站立时完全静止。
+    /// 腿部为纯 FK 相位步态（P22-A）：幅度/膝弯随速度插值（参考 INKWAVE 相位步态的
+    /// duty/lift 插值机制），不做世界锁定落脚 IK——俯视角下脚部滑步可被摇摆掩盖。
     /// 纯函数、无状态、零分配，可在 EditMode 直接单测；实际位移仍由物理移动组件负责。
     /// </summary>
     public static class EggGaitSolver
@@ -53,6 +64,22 @@ namespace P1.Player
         public const float ArmSwingSlow = 6f;
         public const float ArmSwingFast = 14f;
 
+        // ---- 双腿 FK 步态（P22-A）：慢走收着走、快跑迈开腿，幅度随速度插值 ----
+        /// <summary>大腿摆幅（度）：慢走 / 快跑。摆动方向与同侧手臂反相（交叉协同）。</summary>
+        public const float LegSwingSlow = 8f;
+        public const float LegSwingFast = 26f;
+        /// <summary>摆动相膝弯峰值（度）：双腿穿过躯干下方时屈膝抬脚，慢走 3mm、快跑 ~3cm 离地。</summary>
+        public const float KneeBendSlow = 15f;
+        public const float KneeBendFast = 45f;
+        /// <summary>屈膝时脚尖随动下垂上限（度，极简版 toe-roll）。</summary>
+        public const float FootPitchMax = 10f;
+
+        // ---- 滞空 / 攀墙收腿（供控制器驱动，参考 INKWAVE _poseAir 的团身收腿）----
+        public const float AirTuckThighDeg = 22f;
+        public const float AirTuckKneeDeg = 48f;
+        public const float AirTuckFootDeg = 14f;
+        public const float WallClimbTuckKneeDeg = 26f;
+
         /// <summary>把实际移速归一化（11.8 m/s 为潜墨全速，也是本项目的最高移速）。</summary>
         public static float Speed01(float moveSpeed)
             => Mathf.Clamp01(moveSpeed / 11.8f);
@@ -63,6 +90,8 @@ namespace P1.Player
         /// <summary>
         /// 采样步态。phaseRadians 由调用方按 <c>Mathf.PI * CadenceHz * dt</c> 累积
         /// （因为 |sin| 的周期是 π，这样 CadenceHz 就是每秒触地次数）。
+        /// 腿部时序与躯干步态天然协调：双腿摆到最大分开（|sin|=1）时身体抬升舒展；
+        /// 双腿穿过躯干下方（|sin|=0，cos 峰值）时屈膝抬脚 + 触地挤压 —— 收步与压扁同一瞬间。
         /// </summary>
         public static EggGaitPose Sample(float speed01, float phaseRadians)
         {
@@ -71,6 +100,7 @@ namespace P1.Player
             float sway = Mathf.Sin(phaseRadians);
             float lift = Mathf.Abs(sway);
             float contact = 1f - lift;
+            float kneePhase = Mathf.Max(0f, Mathf.Cos(phaseRadians));
             // 慢速时保留一半形变量，避免小碎步看起来僵硬
             float effort = 0.5f + 0.5f * speed01;
 
@@ -80,6 +110,9 @@ namespace P1.Player
             pose.SquashY = 1f - SquashDepth * contact * effort;
             pose.SquashXZ = 1f + SquashBulge * contact * effort;
             pose.ArmSwingDeg = sway * Mathf.Lerp(ArmSwingSlow, ArmSwingFast, speed01);
+            pose.LegSwingDeg = sway * Mathf.Lerp(LegSwingSlow, LegSwingFast, speed01);
+            pose.KneeBendDeg = kneePhase * Mathf.Lerp(KneeBendSlow, KneeBendFast, speed01) * effort;
+            pose.FootPitchDeg = kneePhase * FootPitchMax * effort;
             return pose;
         }
     }

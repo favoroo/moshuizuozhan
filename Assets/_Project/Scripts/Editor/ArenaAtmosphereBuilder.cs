@@ -138,6 +138,31 @@ namespace P1.Editor
                 c.color.Override(new Color(0.05f, 0.06f, 0.09f, 1f));
             });
 
+            // P18 INKWAVE grade：阴影染冷紫、高光染暖（白 = 不染色，按强度插值），
+            // 高饱和队色主要落在中亮部，受阴影染色影响小，纯度得以保留（对齐竞品 split-tone）。
+            GetOrAddComponent<SplitToning>(profile, c =>
+            {
+                float strength = Mathf.Clamp01(style.splitToningStrength);
+                c.shadows.Override(Color.Lerp(Color.white, Linear(style.splitShadowColor), strength));
+                c.highlights.Override(Color.Lerp(Color.white, Linear(style.splitHighlightColor), strength));
+                c.balance.Override(0f);
+            });
+
+            // P18：胶片曲线——压 toe（暗部收进深炭紫）+ 压 shoulder（高光不过曝发白），
+            // 中灰 0.5 处保持线性，避免整体对比拉爆后队色偏色。
+            GetOrAddComponent<ColorCurves>(profile, c =>
+            {
+                var master = new AnimationCurve(
+                    new Keyframe(0f, 0f, 0f, 0.55f),
+                    new Keyframe(0.25f, 0.20f, 0.9f, 1.05f),
+                    new Keyframe(0.5f, 0.5f, 1f, 1f),
+                    new Keyframe(0.75f, 0.80f, 1.05f, 0.9f),
+                    new Keyframe(1f, 1f, 0.55f, 0f));
+                master.preWrapMode = WrapMode.Clamp;
+                master.postWrapMode = WrapMode.Clamp;
+                c.master.Override(new TextureCurve(master, 0f, false, new Vector2(0f, 1f)));
+            });
+
             EditorUtility.SetDirty(profile);
             AssetDatabase.SaveAssets();
 

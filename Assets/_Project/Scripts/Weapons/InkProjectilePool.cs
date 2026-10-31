@@ -94,8 +94,13 @@ namespace P1.Weapons
             Instance = this;
             _propBlock = new MaterialPropertyBlock();
 
-            Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
-            if (sh == null) sh = Shader.Find("Sprites/Default");
+            Shader sh = Shader.Find("P1/InkBody");
+            if (sh == null)
+            {
+                Debug.LogWarning("[InkProjectilePool] 未找到 Shader 'P1/InkBody'，回退到 Unlit 材质。");
+                sh = Shader.Find("Universal Render Pipeline/Unlit");
+                if (sh == null) sh = Shader.Find("Sprites/Default");
+            }
             _sharedMat = new Material(sh) { name = "InkProjectileMat" };
             _cometMesh = BuildCometMesh(16);
 
@@ -159,8 +164,8 @@ namespace P1.Weapons
             node.position = shot.Origin;
 
             Color teamColor = InkSurfaceController.Instance != null
-                ? InkSurfaceController.Instance.GetTeamColor(team)
-                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f) : new Color(0.15f, 0.42f, 1f));
+                ? InkSurfaceController.Instance.GetTeamColorLinear(team)
+                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f).linear : new Color(0.15f, 0.42f, 1f).linear);
 
             var mr = node.GetComponent<MeshRenderer>();
             _propBlock.SetColor(BaseColorProp, teamColor);

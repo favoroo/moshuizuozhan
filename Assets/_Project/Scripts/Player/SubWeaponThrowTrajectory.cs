@@ -6,9 +6,9 @@ using UnityEngine;
 namespace P1.Player
 {
     /// <summary>
-    /// 副武器「抛物线手雷」弹道预测线与地面爆炸预警圈：
-    /// 实时渲染 64 点平滑抛物线虚线与末端 2.7m 爆炸范围预警红圈。
-    /// 算法严格与 <see cref="InkBombTrajectoryUtility"/> 保持一致，保证预测落点与实际爆炸 100% 重合。
+    /// 副武器手雷弹道预测线与预测落点爆炸预警圈：
+    /// 主路径 <see cref="UpdateTrajectorySim"/> 用与实飞完全相同的常数仿真 64 点虚线（inkwave 做法），
+    /// 预测落点环即真实弹道首个接触面；旧插值抛物线接口 <see cref="UpdateTrajectory"/> 保留兼容。
     /// </summary>
     public class SubWeaponThrowTrajectory : MonoBehaviour
     {
@@ -161,9 +161,9 @@ namespace P1.Player
                 _landingRingRoot.gameObject.SetActive(true);
             }
 
-            // 1. 严格解析实际落点
+            // 1. 严格解析实际落点，并按落点距离动态解算弧高（与 InkBombPool 实飞共用同一公式）
             _currentLandingPos = InkBombTrajectoryUtility.ResolveLandingPosition(startPos, targetGroundPos, config);
-            float arcHeight = config != null ? config.bombArcHeight : 2.6f;
+            float arcHeight = InkBombTrajectoryUtility.ComputeArcParams(startPos, _currentLandingPos, config).ArcHeight;
             float splatRadius = config != null ? config.bombSplatRadius : DefaultExplosionRadius;
 
             // 2. 采样 64 个点平滑曲线
@@ -220,6 +220,95 @@ namespace P1.Player
             _ringBlock.SetColor(BaseColorProp, ringInnerColor);
             _ringBlock.SetColor(ColorProp, ringInnerColor);
             _innerFillRenderer.SetPropertyBlock(_ringBlock);
+        }
+
+        /// <summary>
+        /// inkwave 弹道预览：以与 InkBombPool 实飞完全相同的初速/重力/反弹做 64 点仿真积分，
+        /// 虚线 = 预测飞行轨迹，落点环 = 预测首个接触面（仅在预览窗口内落地时显示）。
+        /// 远近由相机俯仰决定，所见即所得；缺墨时虚线与环变灰闪烁。
+        /// </summary>
+        public void UpdateTrajectorySim(
+            Vector3 startPos,
+            Vector3 throwVelocity,
+            WeaponConfigSO config,
+            bool hasEnoughInk,
+            Team team)
+        {
+            EnsureInitialized();
+
+            if (!_isShowing)
+            {
+                _isShowing = true;
+                _lineRenderer.gameObject.SetActive(true);
+                _landingRingRoot.gameObject.SetActive(true);
+                // 上一次缺墨预览可能关闭了环体渲染，先恢复
+                _outerRingRenderer.enabled = true;
+                _innerFillRenderer.enabled = true;
+            }
+
+            // 1. 仿真弹道（与实飞同常数）：未落地时虚线悬空截断，环隐藏
+            bool landed = InkBombTrajectoryUtility.SimulateThrow(
+                startPos, throwVelocity, config, transform.root, _trajectoryBuffer, out Vector3 hitPoint);
+            _currentLandingPos = landed ? hitPoint : _trajectoryBuffer[_trajectoryBuffer.Length - 1];
+            _lineRenderer.SetPositions(_trajectoryBuffer);
+
+            // 虚线沿弹道流动微动效果（长度按出手→末点近似）
+            float flowOffset = -Time.time * 2.8f;
+            float totalApproxLength = Vector3.Distance(startPos, _currentLandingPos) + 2f;
+            _lineMaterial.mainTextureScale = new Vector2(totalApproxLength * 3.2f, 1f);
+            _lineMaterial.mainTextureOffset = new Vector2(flowOffset, 0f);
+
+            // 2. 颜色与充足墨水反馈（缺墨：暗灰红闪烁；inkwave 用灰色虚线，这里沿用 P1 既有红警圈语言）
+            Color teamColor = InkSurfaceController.Instance != null
+                ? InkSurfaceController.Instance.GetTeamColor(team)
+                : Color.white;
+
+            Color lineColor;
+            Color ringOuterColor;
+            Color ringInnerColor;
+
+            if (hasEnoughInk)
+            {
+                lineColor = Color.Lerp(teamColor, Color.white, 0.45f);
+                lineColor.a = 0.92f;
+
+                // 2.7m 爆炸预警红圈：鲜明警示红橙色
+                ringOuterColor = new Color(1.0f, 0.22f, 0.24f, 0.95f);
+                ringInnerColor = new Color(1.0f, 0.18f, 0.20f, 0.16f);
+            }
+            else
+            {
+                // 缺墨：暗灰红闪烁
+                float blink = Mathf.PingPong(Time.time * 6f, 1f);
+                lineColor = Color.Lerp(new Color(0.7f, 0.2f, 0.2f, 0.45f), new Color(0.4f, 0.4f, 0.4f, 0.35f), blink);
+                ringOuterColor = new Color(0.85f, 0.2f, 0.2f, 0.5f);
+                ringInnerColor = new Color(0.85f, 0.1f, 0.1f, 0.08f);
+            }
+
+            _lineRenderer.startColor = lineColor;
+            _lineRenderer.endColor = lineColor;
+
+            // 3. 预测落点环：贴地呼吸动效；未落到表面时隐藏（虚线悬空即「投不到」的诚实反馈）
+            _outerRingRenderer.enabled = landed;
+            _innerFillRenderer.enabled = landed;
+
+            if (landed)
+            {
+                float splatRadius = config != null ? config.bombSplatRadius : DefaultExplosionRadius;
+                float pulse = 1.0f + Mathf.Sin(Time.time * 8f) * 0.035f;
+                float dynamicRadius = splatRadius * pulse;
+
+                _landingRingRoot.position = new Vector3(_currentLandingPos.x, _currentLandingPos.y + 0.038f, _currentLandingPos.z);
+                _landingRingRoot.localScale = new Vector3(dynamicRadius, 1f, dynamicRadius);
+
+                _ringBlock.SetColor(BaseColorProp, ringOuterColor);
+                _ringBlock.SetColor(ColorProp, ringOuterColor);
+                _outerRingRenderer.SetPropertyBlock(_ringBlock);
+
+                _ringBlock.SetColor(BaseColorProp, ringInnerColor);
+                _ringBlock.SetColor(ColorProp, ringInnerColor);
+                _innerFillRenderer.SetPropertyBlock(_ringBlock);
+            }
         }
 
         public void Hide()

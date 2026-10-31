@@ -50,12 +50,12 @@ namespace P1.Weapons
             _cooldown = FireInterval;
 
             float hitRadius = Config != null ? Config.projectileRadius : 0.18f;
-            float speed = Config != null ? Config.projectileSpeed : 21f;
+            float speed = Config != null ? Config.projectileSpeed : 34f;
             float gravity = Config != null ? Config.projectileGravity : 28f;
-            float maxRange = Config != null ? Config.maxRange : 7.2f;
+            float maxRange = Config != null ? Config.maxRange : 12f;
 
             Vector3 muzzle = host.MuzzlePosition;
-            Vector3 solveTarget = aim.GetShotTarget(muzzle, maxRange) + Vector3.up * hitRadius;
+            Vector3 solveTarget = aim.GetRangeClampedTarget(muzzle, maxRange) + Vector3.up * hitRadius;
 
             // 先反解仰角（射程内落点与准星重合），再做绕弹道轴的锥形散布：
             // 抬头朝天时弹丸会真的向上飞，而不是被压平水平射出。

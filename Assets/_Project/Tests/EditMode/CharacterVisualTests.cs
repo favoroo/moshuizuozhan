@@ -118,7 +118,7 @@ namespace P1.Tests
             Assert.IsNotNull(chargerMuzzle, "狙击枪 Muzzle 必须存在");
         }
 
-        // ==================== P8-D 蛋形角色（无腿） ====================
+        // ==================== P22-A 圆头蛋形躯干 + 短粗腿 ====================
 
         [Test]
         public void EggBodyMesh_HasEggSilhouetteAndPlantedBase()
@@ -129,15 +129,25 @@ namespace P1.Tests
             Assert.Greater(mesh.triangles.Length, 0, "蛋体网格面数必须大于 0");
 
             Bounds bounds = mesh.bounds;
-            Assert.AreEqual(0f, bounds.min.y, 0.002f, "蛋体底面必须贴地 y=0（挤压枢轴在此）");
-            Assert.AreEqual(CharacterMetrics.BodyHeight, bounds.max.y, 0.005f, "蛋体高度必须等于 CharacterMetrics.BodyHeight");
+            float torsoH = CharacterMetrics.TorsoHeight;
+            Assert.AreEqual(0f, bounds.min.y, 0.002f, "躯干底面必须在躯干局部 y=0（Torso 节点在此）");
+            Assert.AreEqual(torsoH, bounds.max.y, 0.005f, "躯干高度必须等于 CharacterMetrics.TorsoHeight");
             Assert.AreEqual(CharacterMetrics.BodyMaxRadius * 2f, bounds.size.x, 0.02f, "横向直径必须等于最大半径的两倍");
             Assert.AreEqual(CharacterMetrics.BodyMaxRadius * 2f, bounds.size.z, 0.02f, "前后厚度必须等于最大半径的两倍");
 
-            // 蛋形特征：下半身（y≈35%）应当比上半身（y≈88%）明显更宽
-            Assert.Greater(RingRadius(mesh, CharacterMetrics.BodyHeight * 0.35f),
-                           RingRadius(mesh, CharacterMetrics.BodyHeight * 0.88f) * 1.2f,
-                           "蛋形轮廓必须下半身饱满、上半身收窄");
+            // 下段饱满：下半身（y≈35%）应当比上段（y≈88%）明显更宽
+            Assert.Greater(RingRadius(mesh, torsoH * 0.35f),
+                           RingRadius(mesh, torsoH * 0.88f) * 1.2f,
+                           "蛋形轮廓必须下半身饱满、上段收窄");
+
+            // P22-A 圆钝头顶：顶端有效曲率半径须与体宽同级（旧版 ~0.18m 读成"洋葱尖"）。
+            // 圆穹版在 95% / 97.5% 高度仍保有 0.40x / 0.28x 最大半径的宽度。
+            float maxRing = RingRadius(mesh, torsoH * 0.38f);
+            Assert.Greater(maxRing, CharacterMetrics.BodyMaxRadius * 0.97f, "最大体宽应出现在下段 ~38% 高度");
+            Assert.Greater(RingRadius(mesh, torsoH * 0.95f), CharacterMetrics.BodyMaxRadius * 0.38f,
+                           "顶部 95% 高度必须保持圆穹宽度（不得收成尖顶）");
+            Assert.Greater(RingRadius(mesh, torsoH * 0.975f), CharacterMetrics.BodyMaxRadius * 0.27f,
+                           "顶部 97.5% 高度必须保持圆穹宽度（顶端曲率半径 ≈ 体宽量级）");
 
             // 法线必须朝外且为单位向量，否则角色会整片变黑
             Vector3[] normals = mesh.normals;
@@ -170,23 +180,47 @@ namespace P1.Tests
         }
 
         [Test]
-        public void KidHierarchy_IsLeglessEgg_AndKeepsControllerPaths()
+        public void KidHierarchy_HasStubbyLegs_AndKeepsControllerPaths()
         {
             Transform kid = _controller.KidRoot.transform;
 
-            Assert.IsNull(kid.Find("Hips"), "蛋形角色不应再有 Hips 节点");
-            Assert.IsNull(kid.Find("Chest/LeftLeg"), "蛋形角色不应再有左腿");
-            Assert.IsNull(kid.Find("Chest/RightLeg"), "蛋形角色不应再有右腿");
+            // 双腿双脚：Hips → LeftLeg/RightLeg → Knee → Ankle → Foot（FK 三段链，P22-A）
+            Transform hips = kid.Find("Chest/Hips");
+            Assert.IsNotNull(hips, "蛋仔风角色必须有 Hips 髋部节点");
+            Assert.AreEqual(CharacterMetrics.HipPivotY - CharacterMetrics.ChestPivotY, hips.localPosition.y, 0.001f,
+                "髋枢轴必须按 CharacterMetrics 藏在躯干下段内");
+            Transform leftLeg = kid.Find("Chest/Hips/LeftLeg");
+            Transform rightLeg = kid.Find("Chest/Hips/RightLeg");
+            Assert.IsNotNull(leftLeg, "左腿必须存在");
+            Assert.IsNotNull(rightLeg, "右腿必须存在");
+            Assert.IsNotNull(leftLeg.Find("Knee"), "左膝枢轴必须存在");
+            Assert.IsNotNull(leftLeg.Find("Knee/Ankle"), "左踝枢轴必须存在");
+            Assert.IsNotNull(leftLeg.Find("Knee/Ankle/Foot"), "左脚圆头靴必须存在");
+            Assert.IsNotNull(rightLeg.Find("Knee/Ankle/Foot"), "右脚圆头靴必须存在");
 
-            // 控制器与测试依赖的路径必须保留
+            // 腿挂在 Hips（Chest 子树）而不是 BodySquash：触地挤压不得连带腿部变形、把脚压进地里
+            Assert.IsNull(kid.Find("Chest/BodySquash/LeftLeg"), "腿不允许挂在 BodySquash 下");
+            Assert.IsNull(kid.Find("Chest/BodySquash/RightLeg"), "腿不允许挂在 BodySquash 下");
+
+            // 鞋底贴地：踝世界高度 = HipPivotY - Thigh - Calf = 0.05，靴底（球心 - 半径）应落在 y≈0
+            Transform foot = leftLeg.Find("Knee/Ankle/Foot");
+            float footBottom = foot.position.y - foot.lossyScale.y * 0.5f;
+            Assert.Less(footBottom, 0.03f, "鞋底必须接近地面 y=0");
+            Assert.Greater(footBottom, -0.06f, "鞋底不能明显插入地面");
+
+            // 控制器与测试依赖的路径必须保留（躯干件现挂在新 Torso 抬升节点下）
             Assert.IsNotNull(kid.Find("Chest"), "Chest 必须是 KidRoot 的直接子节点");
+            Assert.IsNotNull(kid.Find("Chest/BodySquash"), "BodySquash 必须是 Chest 的直接子节点");
+            Assert.IsNotNull(kid.Find("Chest/BodySquash/Torso"), "躯干抬升节点 Torso 必须存在");
+            Assert.AreEqual(CharacterMetrics.TorsoBaseY, kid.Find("Chest/BodySquash/Torso").localPosition.y, 0.001f,
+                "躯干底面必须按 CharacterMetrics.TorsoBaseY 抬升");
             Assert.IsNotNull(kid.Find("Chest/LeftArm"), "Chest/LeftArm 路径必须保留（双枪姿态测试依赖）");
             Assert.IsNotNull(kid.Find("Chest/RightArm"), "Chest/RightArm 必须保留");
-            Assert.IsNotNull(kid.Find("Chest/BodySquash"), "BodySquash 必须是 Chest 的直接子节点");
-            Assert.IsNotNull(kid.Find("Chest/BodySquash/EggBody"), "蛋体网格节点必须存在");
-            Assert.IsNotNull(kid.Find("Chest/BodySquash/Face/Eye_L"), "左眼必须存在");
-            Assert.IsNotNull(kid.Find("Chest/BodySquash/Face/Eye_R"), "右眼必须存在");
-            Assert.IsNotNull(kid.Find("Chest/BodySquash/InkTankBackpack/LiquidFill"), "墨罐液面必须存在（墨量联动）");
+            Assert.IsNotNull(kid.Find("Chest/BodySquash/Torso/EggBody"), "蛋体网格节点必须存在");
+            Assert.IsNotNull(kid.Find("Chest/BodySquash/Torso/Face/Eye_L"), "左眼必须存在");
+            Assert.IsNotNull(kid.Find("Chest/BodySquash/Torso/Face/Eye_R"), "右眼必须存在");
+            Assert.IsNotNull(kid.Find("Chest/BodySquash/Torso/InkTankBackpack/LiquidFill"), "墨罐液面必须存在（墨量联动）");
+            Assert.IsNull(kid.Find("Chest/BodySquash/Torso/InkCrest"), "P22-A 已移除头顶墨焰触须（'头尖'观感来源）");
             Assert.IsNotNull(_controller.BodySquashTransform, "控制器必须绑定 BodySquash 挤压节点");
         }
 
@@ -196,9 +230,9 @@ namespace P1.Tests
             Transform squash = _controller.KidRoot.transform.Find("Chest/BodySquash");
             Assert.IsNotNull(squash, "BodySquash 节点必须存在");
 
-            var egg = squash.Find("EggBody").GetComponent<Renderer>();
-            var shorts = squash.Find("EggShorts").GetComponent<Renderer>();
-            var band = squash.Find("EggWaistband").GetComponent<Renderer>();
+            var egg = squash.Find("Torso/EggBody").GetComponent<Renderer>();
+            var shorts = squash.Find("Torso/EggShorts").GetComponent<Renderer>();
+            var band = squash.Find("Torso/EggWaistband").GetComponent<Renderer>();
 
             Assert.IsNotNull(egg, "EggBody 渲染器必须存在");
             Assert.IsNotNull(shorts, "EggShorts 渲染器必须存在");
@@ -238,6 +272,45 @@ namespace P1.Tests
             EggGaitPose fast = EggGaitSolver.Sample(1f, 0f);
             Assert.Less(fast.SquashY, slow.SquashY, "速度越快触地压扁越深");
             Assert.Greater(fast.SquashXZ, slow.SquashXZ, "速度越快触地膨胀越大");
+        }
+
+        [Test]
+        public void GaitSolver_LegsCoordinateWithBody_PhaseLocked()
+        {
+            // 触地相位（φ=0）：双腿竖直穿过躯干下方 → 屈膝抬脚 + 脚尖随动下垂，与躯干触地挤压同帧
+            EggGaitPose contact = EggGaitSolver.Sample(1f, 0f);
+            Assert.AreEqual(0f, contact.LegSwingDeg, 0.001f, "收步相位双腿应竖直穿过躯干下方");
+            Assert.Greater(contact.KneeBendDeg, 30f, "收步相位必须明显屈膝（快跑 ≥ 30°）");
+            Assert.Greater(contact.FootPitchDeg, 0f, "屈膝时脚尖随动下垂（极简 toe-roll）");
+
+            // 分开相位（φ=π/2）：双腿前后张开踩地 → 伸直、脚掌回正，身体抬升舒展
+            EggGaitPose apex = EggGaitSolver.Sample(1f, Mathf.PI * 0.5f);
+            Assert.Greater(Mathf.Abs(apex.LegSwingDeg), 0f, "分开相位双腿应前后张开");
+            Assert.AreEqual(0f, apex.KneeBendDeg, 0.001f, "分开相位双腿伸直");
+            Assert.AreEqual(0f, apex.FootPitchDeg, 0.001f, "分开相位脚掌回正");
+
+            // 站立（speed01=0）保留一半形变量但腿幅照常存在——慢走收着走
+            EggGaitPose idle = EggGaitSolver.Sample(0f, 0f);
+            Assert.Greater(idle.KneeBendDeg, 0f, "慢速触地仍需保留一半膝弯，避免小碎步僵硬");
+        }
+
+        [Test]
+        public void GaitSolver_LegAmplitudeScalesWithSpeed()
+        {
+            EggGaitPose slow = EggGaitSolver.Sample(0.2f, Mathf.PI * 0.5f);
+            EggGaitPose fast = EggGaitSolver.Sample(1f, Mathf.PI * 0.5f);
+            Assert.Less(Mathf.Abs(slow.LegSwingDeg), Mathf.Abs(fast.LegSwingDeg), "速度越快大腿摆幅越大");
+
+            EggGaitPose slowContact = EggGaitSolver.Sample(0.2f, 0f);
+            EggGaitPose fastContact = EggGaitSolver.Sample(1f, 0f);
+            Assert.Less(slowContact.KneeBendDeg, fastContact.KneeBendDeg, "速度越快膝弯越深");
+
+            // 符号约定：φ=π/2 时摆幅为正（左腿向后基准），控制器对左右腿取反相实现交叉协同
+            Assert.Greater(fast.LegSwingDeg, 0f, "摆幅符号约定：正 = 左腿向后");
+
+            // 收腿常量供控制器滞空/攀墙使用，必须为正（屈膝方向）
+            Assert.Greater(EggGaitSolver.AirTuckKneeDeg, 0f);
+            Assert.Greater(EggGaitSolver.WallClimbTuckKneeDeg, 0f);
         }
     }
 }

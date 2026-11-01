@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using P1.Ink;
+using P1.Player;
 using P1.Weapons;
 using UnityEngine;
 
@@ -58,6 +59,8 @@ namespace P1.Tests
             _config.weaponKind = WeaponKind.Dualies;
             _config.recoilPitchDegrees = 9f;
             _config.cameraKickMeters = 0f; // 未填写 → 回落预设
+            _config.feelSpringOmega = 7.5f;
+            _config.cameraKickDecayRate = 12f;
 
             WeaponFeelParams feel = WeaponFeelProfile.Resolve(_config);
             WeaponFeelParams preset = WeaponFeelProfile.ForKind(WeaponKind.Dualies);
@@ -65,6 +68,8 @@ namespace P1.Tests
             Assert.AreEqual(9f, feel.RecoilPitchDegrees, 0.0001f, "配置里 > 0 的字段必须覆盖类别预设");
             Assert.AreEqual(preset.CameraKickMeters, feel.CameraKickMeters, 0.0001f,
                 "配置里为 0 的字段必须回落到类别预设（旧资产不用迁移）");
+            Assert.AreEqual(7.5f, feel.SpringOmega, 0.0001f, "弹簧角频率也必须支持配置覆盖");
+            Assert.AreEqual(12f, feel.CameraKickDecayRate, 0.0001f, "镜头热积累衰减率也必须支持配置覆盖");
         }
 
         [Test]
@@ -136,6 +141,58 @@ namespace P1.Tests
                 "距离过远的落墨不应合并");
             Assert.IsFalse(InkSurfaceController.ShouldMergeRipple(new Vector4(0f, 0f, 0f, -999f), Vector3.zero, 10f),
                 "未使用的槽位（birth = -999）永远不参与合并");
+        }
+
+        [Test]
+        public void FeelProfile_SpringPresets_ArePositive_AndRapidFireIsStiffer()
+        {
+            WeaponFeelParams splatling = WeaponFeelProfile.ForKind(WeaponKind.Splatling);
+            WeaponFeelParams dualies = WeaponFeelProfile.ForKind(WeaponKind.Dualies);
+            WeaponFeelParams shooter = WeaponFeelProfile.ForKind(WeaponKind.Shooter);
+            WeaponFeelParams charger = WeaponFeelProfile.ForKind(WeaponKind.Charger);
+            WeaponFeelParams blaster = WeaponFeelProfile.ForKind(WeaponKind.Blaster);
+
+            Assert.Greater(splatling.SpringOmega, charger.SpringOmega,
+                "15 发/秒的加特林弹簧必须比单发蓄力狙更硬，才能读作连发震颤");
+            Assert.Greater(dualies.SpringOmega, shooter.SpringOmega,
+                "12 发/秒的双枪弹簧应比小枪更快，逐发回稳不糊底");
+            Assert.Greater(blaster.SpringOmega, 0f);
+            Assert.Greater(splatling.CameraKickDecayRate, charger.CameraKickDecayRate,
+                "连发武器的镜头热积累应衰减更慢，形成持续后拉");
+            Assert.Greater(charger.CameraKickDecayRate, 0f);
+        }
+
+        [Test]
+        public void SpringImpulse_PeakMatchesRequestedOffset_AndSettles()
+        {
+            const float omega = 30f;
+            const float peak = 0.045f;
+            var spring = new AnimSpring1D(0f);
+
+            spring.Kick(AnimSpring1D.ImpulseForPeak(peak, omega, WeaponFeelMath.RecoilDampingRatio));
+
+            float maxValue = 0f;
+            for (int i = 0; i < 180; i++)
+            {
+                spring.Step(0f, omega, WeaponFeelMath.RecoilDampingRatio, 1f / 120f);
+                maxValue = Mathf.Max(maxValue, Mathf.Abs(spring.Value));
+            }
+
+            Assert.AreEqual(peak, maxValue, peak * 0.12f,
+                "冲量峰值应接近目标后坐距离，不能过冲成 2 倍也不能小到无感");
+            Assert.Less(Mathf.Abs(spring.Value), 0.001f, "1.5s 内必须回稳到 0");
+        }
+
+        [Test]
+        public void ShotStrengthScale_MapsChargeToFeedback()
+        {
+            Assert.AreEqual(0.35f, WeaponFeelMath.ShotStrengthScale(0f), 0.0001f,
+                "点按蓄力也要保留最低反馈，不能完全无手感");
+            Assert.AreEqual(1f, WeaponFeelMath.ShotStrengthScale(1f), 0.0001f);
+            Assert.AreEqual(0.35f + 0.65f * 0.12f, WeaponFeelMath.ShotStrengthScale(0.12f), 0.0001f,
+                "蓄力狙最低 12% 蓄力约 0.428 倍");
+            Assert.AreEqual(1f, WeaponFeelMath.ShotStrengthScale(5f), 0.0001f,
+                "超出 0~1 的强度必须钳制");
         }
     }
 }

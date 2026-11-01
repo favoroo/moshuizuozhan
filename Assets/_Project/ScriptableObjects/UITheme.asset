@@ -55,8 +55,10 @@ MonoBehaviour:
   entranceFadeDuration: 0.12
   chunkyOutlineWidth: 0.04
   chunkyInnerOutlineWidth: 0
-  chunkyShadowOffsetY: 0
-  chunkyShadowOffsetX: 0
+  chunkyShadowOffsetY: 0.04
+  chunkyShadowOffsetX: -0.04
+  chunkyShadowInPixels: 1
+  chunkyShadowOffsetPixels: {x: 4, y: -4}
   inkColor: {r: 0.078431375, g: 0.078431375, b: 0.078431375, a: 1}
   paperColor: {r: 1, g: 1, b: 1, a: 1}
   paperAltColor: {r: 0.9411765, g: 0.9411765, b: 0.9411765, a: 1}
@@ -66,7 +68,7 @@ MonoBehaviour:
   accentGreen: {r: 0.12156863, g: 0.7882353, b: 0.30980393, a: 1}
   inkBorderWidth: 4
   inkBorderHeavyWidth: 6
-  hardShadowOffset: {x: 0, y: -0}
+  hardShadowOffset: {x: 4, y: -5}
   halftoneOnMobile: 0
   halftoneSpacing: 8
   halftoneDotRadius: 1.3
@@ -74,10 +76,28 @@ MonoBehaviour:
   halftoneHoverAlpha: 0
   pressDuration: 0.05
   hoverDuration: 0.1
-  entranceDuration: 0.12
+  entranceDuration: 0.22
   hoverScale: 1.05
   hoverTiltDegrees: 0
-  pressScale: 0.95
+  pressScale: 0.97
+  hardShadowColor: {r: 0.078431375, g: 0.078431375, b: 0.078431375, a: 1}
+  shadowOffsetTag: {x: 2, y: -3}
+  shadowOffsetButton: {x: 3, y: -4}
+  shadowOffsetButtonHover: {x: 5, y: -6}
+  shadowOffsetButtonPressed: {x: 0, y: 0}
+  shadowOffsetPanel: {x: 4, y: -5}
+  shadowOffsetHero: {x: 6, y: -7}
+  shadowOffsetDialog: {x: 8, y: -9}
+  pressContentShift: 1
+  pressInstant: 1
+  pressReboundDuration: 0.1
+  pressReboundEasing:
+    x1: 0.22
+    y1: 1
+    x2: 0.36
+    y2: 1
+  entranceBackOut: 1
+  entranceStagger: 0.05
   displayCjkFont: {fileID: 11400000, guid: fc229e5d33bba4abf91eaab774ce81ac, type: 2}
   bodyCjkFont: {fileID: 11400000, guid: 098f07be3104240bd8fff34b66914b93, type: 2}
   teamCard:

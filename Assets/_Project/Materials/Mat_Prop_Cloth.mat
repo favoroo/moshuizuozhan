@@ -23,12 +23,16 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: 590f5f12480344f6a8e46fdfd3b71611, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _SurfaceN:
-        m_Texture: {fileID: 0}
+        m_Texture: {fileID: 2800000, guid: d96062771320f490c8cd44281945df27, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _SurfaceRMO:
-        m_Texture: {fileID: 0}
+        m_Texture: {fileID: 2800000, guid: ab7725956959f4239878d1e090b39b16, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
@@ -39,21 +43,21 @@ Material:
     - _Metallic: 0
     - _RimPower: 3
     - _RimStrength: 0.14400001
-    - _ShadeSoftness: 0.03
+    - _ShadeSoftness: 0.1
     - _ShadeThreshold: 0.5
-    - _ShadowFloor: 0.42
+    - _ShadowFloor: 0.5
     - _Smoothness: 0.1
-    - _SpecSoftness: 0.02
+    - _SpecSoftness: 0.04
     - _SpecStrength: 0.5
     - _SpecThreshold: 0.95
-    - _SurfaceAOStrength: 0.7
-    - _SurfaceNormalStrength: 0.6
-    - _SurfaceSmoothnessScale: 1
-    - _SurfaceTexelScale: 0.5
+    - _SurfaceAOStrength: 0.45
+    - _SurfaceNormalStrength: 0.44000003
+    - _SurfaceSmoothnessScale: 0.55
+    - _SurfaceTexelScale: 1.1
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _RimColor: {r: 0.5225216, g: 0.71056664, b: 1, a: 1}
-    - _ShadowTint: {r: 0.13286833, g: 0.17064494, b: 0.34239164, a: 1}
+    - _ShadowTint: {r: 0.19599415, g: 0.21404114, b: 0.3672465, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

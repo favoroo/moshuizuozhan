@@ -15,8 +15,11 @@ namespace P1.Player
     {
         private InkCharacterMotor _motor;
         private CombatantHealth _health;
+        private CharacterVisualController _visual;
+        private bool _footstepSubscribed;
 
         private bool _wasSwimming;
+        private bool _wasInSquidForm;
         private bool _wasClimbing;
         private bool _wasInEnemyInk;
         private bool _wasGrounded = true;
@@ -40,12 +43,44 @@ namespace P1.Player
 
         private void OnDisable()
         {
+            UnsubscribeFootsteps();
             StopMovementLoops();
         }
 
         private void OnDestroy()
         {
+            UnsubscribeFootsteps();
             StopMovementLoops();
+        }
+
+        /// <summary>
+        /// P29 脚步锁相：优先订阅视觉控制器的步态触地事件（脚步与腿部落地同帧），
+        /// 取不到视觉控制器时退回旧的距离累积触发（Bot/无控制器场景兜底）。
+        /// </summary>
+        private void EnsureFootstepSubscription()
+        {
+            if (_footstepSubscribed) return;
+            _visual = _motor != null ? _motor.VisualController : null;
+            if (_visual == null) return;
+            _visual.FootstepLanded += HandleFootstepLanded;
+            _footstepSubscribed = true;
+        }
+
+        private void UnsubscribeFootsteps()
+        {
+            if (_footstepSubscribed && _visual != null)
+            {
+                _visual.FootstepLanded -= HandleFootstepLanded;
+            }
+            _footstepSubscribed = false;
+            _visual = null;
+        }
+
+        private void HandleFootstepLanded(bool leftFoot)
+        {
+            if (AudioManager.Instance == null || _motor == null || _health == null) return;
+            if (!_health.IsAlive || _motor.IsSwimming || _motor.IsWallClimbing) return;
+            AudioManager.Instance.PlayFootstep(_motor.IsInOwnInk, _motor.IsInEnemyInk);
         }
 
         private void Update()
@@ -57,11 +92,15 @@ namespace P1.Player
             if (!isLocal)
                 return;
 
+            // 脚步锁相订阅（视觉控制器可能在 Configure 后才挂上，惰性重试）
+            EnsureFootstepSubscription();
+
             bool isAlive = _health.IsAlive;
             if (!isAlive)
             {
                 StopMovementLoops();
                 _wasSwimming = false;
+                _wasInSquidForm = false;
                 _wasClimbing = false;
                 _wasInEnemyInk = false;
                 _wasGrounded = true;
@@ -70,18 +109,31 @@ namespace P1.Player
                 return;
             }
 
-            // 1. 潜水进出与游泳循环音
+            // 1. 乌贼形态进出音（对齐 Inkwave：每次 kid⇄squid 切换都播，干地乌贼同样有入水/出水反馈）
+            bool inSquidForm = _motor.IsInSquidForm;
+            if (inSquidForm != _wasInSquidForm)
+            {
+                if (inSquidForm)
+                {
+                    AudioManager.Instance.PlaySquidIn();
+                }
+                else
+                {
+                    AudioManager.Instance.PlaySquidOut();
+                }
+                _wasInSquidForm = inSquidForm;
+            }
+
+            // 1.1 潜墨循环音：只在己方墨水中循环（干地乌贼没有水面，不进游泳循环）
             bool isSwimming = _motor.IsSwimming;
             if (isSwimming != _wasSwimming)
             {
                 if (isSwimming)
                 {
-                    AudioManager.Instance.PlaySquidIn();
                     AudioManager.Instance.PlayLoop(LoopSfxKind.Swim);
                 }
                 else
                 {
-                    AudioManager.Instance.PlaySquidOut();
                     AudioManager.Instance.StopLoop(LoopSfxKind.Swim);
                 }
                 _wasSwimming = isSwimming;
@@ -148,9 +200,9 @@ namespace P1.Player
                     }
                 }
             }
-            else if (isGrounded)
+            else if (isGrounded && _visual == null)
             {
-                // 陆地跑步声（敌墨黏滞步幅短 0.9m，正常 1.35m）
+                // 兜底：无视觉控制器时按距离累积触发脚步（敌墨黏滞步幅短 0.9m，正常 1.35m）
                 float stride = _motor.IsInEnemyInk ? 0.9f : 1.35f;
                 if (_stepDistance >= stride)
                 {

@@ -159,6 +159,118 @@ namespace P1.Ink
         }
 
         /// <summary>
+        /// 窄缝自动剔除（移植 slotSides 思路）：
+        /// 遍历所有非 blocked 格，若其在 X 方向左右两侧的相对障碍物缝宽 ≤ maxGapMeters
+        /// （或在 Z 方向前后两侧的相对障碍物缝宽 ≤ maxGapMeters），判定为角色无法通过且难以涂抹的死缝，
+        /// 将该格标记为 blocked 并同步扣减 _paintableCount。
+        /// 单侧贴墙格与宽度 > maxGapMeters 的走廊不会被封闭。
+        /// </summary>
+        public int SealNarrowSlits(float maxGapMeters = 0.9f)
+        {
+            if (maxGapMeters <= 0f)
+                return 0;
+
+            int maxCellsX = Mathf.CeilToInt(maxGapMeters / CellWidth) + 1;
+            int maxCellsY = Mathf.CeilToInt(maxGapMeters / CellHeight) + 1;
+
+            var toSeal = new System.Collections.Generic.List<int>();
+
+            for (int y = 0; y < Height; y++)
+            {
+                int rowOffset = y * Width;
+                for (int x = 0; x < Width; x++)
+                {
+                    int idx = rowOffset + x;
+                    if (_blocked[idx])
+                        continue;
+
+                    // 1. 检查 X 方向左右两侧障碍物缝宽
+                    int leftBlockedX = -1;
+                    int minLeft = Math.Max(0, x - maxCellsX);
+                    for (int lx = x - 1; lx >= minLeft; lx--)
+                    {
+                        if (_blocked[rowOffset + lx])
+                        {
+                            leftBlockedX = lx;
+                            break;
+                        }
+                    }
+
+                    bool sealedInX = false;
+                    if (leftBlockedX >= 0)
+                    {
+                        int rightBlockedX = -1;
+                        int maxRight = Math.Min(Width - 1, x + maxCellsX);
+                        for (int rx = x + 1; rx <= maxRight; rx++)
+                        {
+                            if (_blocked[rowOffset + rx])
+                            {
+                                rightBlockedX = rx;
+                                break;
+                            }
+                        }
+
+                        if (rightBlockedX >= 0)
+                        {
+                            // 左右障碍物之间的净空宽度（开阔格数 × 单格米数）
+                            float gapX = (rightBlockedX - leftBlockedX - 1) * CellWidth;
+                            if (gapX <= maxGapMeters)
+                            {
+                                toSeal.Add(idx);
+                                sealedInX = true;
+                            }
+                        }
+                    }
+
+                    if (sealedInX)
+                        continue;
+
+                    // 2. 检查 Z (Y) 方向前后两侧障碍物缝宽
+                    int downBlockedY = -1;
+                    int minDown = Math.Max(0, y - maxCellsY);
+                    for (int dy = y - 1; dy >= minDown; dy--)
+                    {
+                        if (_blocked[dy * Width + x])
+                        {
+                            downBlockedY = dy;
+                            break;
+                        }
+                    }
+
+                    if (downBlockedY >= 0)
+                    {
+                        int upBlockedY = -1;
+                        int maxUp = Math.Min(Height - 1, y + maxCellsY);
+                        for (int uy = y + 1; uy <= maxUp; uy++)
+                        {
+                            if (_blocked[uy * Width + x])
+                            {
+                                upBlockedY = uy;
+                                break;
+                            }
+                        }
+
+                        if (upBlockedY >= 0)
+                        {
+                            float gapZ = (upBlockedY - downBlockedY - 1) * CellHeight;
+                            if (gapZ <= maxGapMeters)
+                            {
+                                toSeal.Add(idx);
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (int i = 0; i < toSeal.Count; i++)
+            {
+                SetCellBlocked(toSeal[i], true);
+            }
+
+            return toSeal.Count;
+        }
+
+        /// <summary>
         /// 在世界坐标 XZ 处涂一个半径为 radius 的圆斑。
         /// 返回本次新涂或改写归属的格子数量（可直接用于大招充能）。
         /// </summary>

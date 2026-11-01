@@ -23,6 +23,7 @@ namespace P1.Ink
 
         /// <summary>场景内全部可涂墙面（运行时注册，供手雷/大招/重开统一处理）。</summary>
         public static IReadOnlyList<InkWallSurface> All => Registered;
+        public static int ActiveCount => Registered.Count;
 
         [SerializeField] private BoxCollider wallCollider;
         [SerializeField] private Material overlayMaterial;

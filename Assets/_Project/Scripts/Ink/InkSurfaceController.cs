@@ -89,6 +89,12 @@ namespace P1.Ink
 
         public InkGrid Grid => _grid;
 
+        /// <summary>
+        /// 单个墨格的世界面积（m²）：大招充能按面积计价用，与网格分辨率无关（桌面 400 / 移动 200 格时分别 ≈0.014 / 0.056）。
+        /// 网格未初始化时回退到 40×56m 地图、桌面 400 分辨率的默认值。
+        /// </summary>
+        public float CellArea => _grid != null ? _grid.CellWidth * _grid.CellHeight : 0.014f;
+
         /// <summary>CPU 粗网格贴图：小地图与编辑器工具使用，保持原有类型与语义。</summary>
         public Texture2D InkTexture => _inkTexture;
 
@@ -98,11 +104,17 @@ namespace P1.Ink
         /// <summary>顶面受墨（XZ 投影图集）的渲染器列表，供覆盖率审计工具只读使用。</summary>
         public IReadOnlyList<Renderer> InkableSurfaceRenderers => inkableSurfaceRenderers;
 
+        /// <summary>不可涂掩体/道具碰撞体列表，供覆盖率审计与调试只读读取。</summary>
+        public IReadOnlyList<Collider> BlockedColliders => blockedColliders;
+
         public InkSplatAtlas SplatAtlas => _atlas;
 
         public InkGridConfigSO Config => config;
 
         public double LastAtlasCommandMs => _atlas != null ? _atlas.LastCommandMs : 0.0;
+
+        /// <summary>GPU 涂图集累计命令提交次数（性能探针判定本帧是否发生新提交，避免陈旧值重复计数）。</summary>
+        public int AtlasCommandExecuteCount => _atlas != null ? _atlas.CommandExecuteCount : 0;
 
         public float LastUploadDurationMs { get; private set; }
         public float PeakUploadDurationMs { get; private set; }
@@ -241,6 +253,21 @@ namespace P1.Ink
             if (_grid == null)
                 return;
 
+            // 统一计分口径兜底：若场景内已存在 Arena_Decor 实体道具碰撞代理，自动补入 blockedColliders
+            var decorRoot = GameObject.Find("Arena_Decor");
+            if (decorRoot != null)
+            {
+                var decorColliders = decorRoot.GetComponentsInChildren<BoxCollider>(false);
+                for (int d = 0; d < decorColliders.Length; d++)
+                {
+                    BoxCollider box = decorColliders[d];
+                    if (box != null && !blockedColliders.Contains(box))
+                    {
+                        blockedColliders.Add(box);
+                    }
+                }
+            }
+
             // 编辑模式下改完 Transform 后碰撞体 bounds 不会立即刷新，必须先同步，
             // 否则所有障碍都会被当成原点处 1x1 的方块，导致几乎不产生不可涂区。
             Physics.SyncTransforms();
@@ -258,6 +285,9 @@ namespace P1.Ink
                 Vector2 maxXZ = new Vector2(b.max.x, b.max.z);
                 _grid.SetBlockedWorldRect(minXZ, maxXZ, true);
             }
+
+            // P16-D 窄缝自动剔除：封闭两面受夹且净宽 ≤ 0.9m 的不可行/不可涂死缝
+            _grid.SealNarrowSlits(0.9f);
         }
 
         public void ResetSurface()
@@ -419,9 +449,10 @@ namespace P1.Ink
         }
 
         /// <summary>
-        /// 线性空间的队伍色：专供 MaterialPropertyBlock / 材质 SetColor 使用。
-        /// MPB 与材质颜色都不会像 Shader.SetGlobalColor 那样自动做 sRGB→Linear 转换，
-        /// 直接塞原始值会把鲜艳橙渲染成浅鲑鱼色（P18 修正飞行墨体/弹丸/特效同款色偏）。
+        /// 线性空间的队伍色：**只** 供 <see cref="Shader.SetGlobalColor"/> 这类不做色彩空间转换的
+        /// 全局属性使用（如 InkSurfaceController.BindSurfaceMaterials）。
+        /// 材质 Color 属性与 MaterialPropertyBlock.SetColor 会由 Unity 自动做 sRGB→Linear，
+        /// 传本方法的返回值会二次转换——橙色变深红（v0.1.7 弹丸/手雷色偏回归教训）。
         /// </summary>
         public Color GetTeamColorLinear(Team team)
         {

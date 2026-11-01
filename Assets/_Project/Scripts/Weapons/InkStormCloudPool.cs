@@ -190,9 +190,10 @@ namespace P1.Weapons
                 drift = Vector3.forward;
             }
 
+            // 队色传原始 sRGB：MaterialPropertyBlock 会自动转 Linear，手动 .linear 会二次转换发深红。
             Color teamColor = InkSurfaceController.Instance != null
-                ? InkSurfaceController.Instance.GetTeamColorLinear(team)
-                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f).linear : new Color(0.15f, 0.42f, 1f).linear);
+                ? InkSurfaceController.Instance.GetTeamColor(team)
+                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f) : new Color(0.15f, 0.42f, 1f));
 
             node.CloudSpawned = false;
             node.Team = team;
@@ -402,7 +403,11 @@ namespace P1.Weapons
                     float paintRadius = Random.Range(node.RainRadiusMin, node.RainRadiusMax);
                     // 风暴云涂地计入涂地覆盖率，但不返还大招能量：雨点数量太多，返还会造成「一云接一云」的自循环。
                     // 雨点只铺平滑主体：一秒十几滴雨，每滴都刷涟漪会把 8 槽缓冲彻底冲散。
-                    InkSurfaceController.Instance.PaintCircle(hit.point, paintRadius, node.Team, false, false);
+                    int changed = InkSurfaceController.Instance.PaintCircle(hit.point, paintRadius, node.Team, false, false);
+                    if (changed > 0 && node.Attacker != null)
+                    {
+                        MatchStatsService.RegisterTurf(node.Attacker, changed * InkSurfaceController.Instance.CellArea);
+                    }
                 }
             }
 

@@ -7,24 +7,44 @@ using UnityEngine;
 namespace P1.Player
 {
     /// <summary>
-    /// Q 版蛋仔风角色（圆头蛋形躯干 + 短粗腿，Squidkid Egg Rig）与 7 类主武器装配工厂。
+    /// INKWAVE 原版比例的 squidkid 角色（P33 骨骼重建）与 7 类主武器装配工厂。
     /// 遵循《P1 项目约定》与 CharacterMetrics 唯一尺寸真源：
-    /// 1. 人形态 = 圆钝顶蛋形躯干（0.90m）+ 短粗双腿双脚（0.22m），总高与旧版一致（1.12m）；
-    ///    由 EggGaitSolver 驱动接触挤压、左右摇晃与 FK 摆腿（参考 INKWAVE 相位步态机制）；
-    /// 2. 贴地枢轴（ChestPivotY = 0.05m）让倾斜与弹跳表现为整蛋摇摆而非上半身折叠；
-    /// 3. 蛋体网格采用解析法线分段光滑旋转体，顶部以椭圆圆穹收口（顶端曲率半径与体宽同级，消除"洋葱尖"）；
-    /// 4. 材质全面切换为 P1/CharacterToon 卡通着色器（蛋体唯一启用外描边），玻璃保持 URP Lit 透明；
-    /// 5. 7 套武器模型按 CharacterMetrics 缩放换算挂载并绑定动态构件与枪口；
+    /// 1. 人形态 = ~4 头身真骨骼：馒头头（mochi head）独立挂在 Neck→Head 骨上，
+    ///    躯干链 Hips→BodySquash→Spine→Chest（前倾按 25/45/30 分配）、两骨臂（肩→肘→腕）、
+    ///    两骨腿（髋→膝→踝），由 KidGaitSolver 驱动相位步态与骨盆贴地（参考 INKWAVE character-geo.js 骨位表）；
+    /// 2. 总视觉包络不变（脚底 0 → 头顶 1.12m）：碰撞体 / 相机 / 遮挡采样 / 武器标定零玩法改动；
+    /// 3. 服装按 INKWAVE 色彩规则：盒型 T 恤 + 灯笼短裤 + 中筒袜 + 厚底板鞋为中性色，
+    ///    队伍色集中在触须发（6 根 2 段弹簧链）、发帽、腰带、墨罐液面与鞋头小饰片；
+    /// 4. 蛋体时代的贴面薄壳（短裤/发带/耳机头带壳）全部废弃：真骨骼 + 真体积不再需要贴面工艺；
+    /// 5. 7 套武器模型的握把按右手手位锚定（P34 两骨 IK 反解持握姿态），并绑定动态构件与枪口；
     /// 6. 武器静态构件在装配时按材质合并为少量 MergedStatic_* 网格压缩 DrawCall：
     ///    源部件 GameObject / MeshFilter / 测试锚点层级全部保留、仅禁用渲染；
     ///    动态构件（滚筒滚轴、加特林枪管簇、蓄力线圈）与枪口锚点不参与合并。
     /// </summary>
     public static class CharacterVisualAssembler
     {
-        private static Mesh _eggMesh;
-        private static Mesh _eggShortsShellMesh;
-        private static Mesh _eggWaistbandShellMesh;
+        private static Mesh _mochiHeadMesh;
+        private static Mesh _scalpCapMesh;
+        private static Mesh _teeMesh;
+        private static Mesh _shortsMesh;
+        private static Mesh _waistbandMesh;
+        private static Mesh _hairSeg1Mesh;
+        private static Mesh _hairSeg2Mesh;
         private static Mesh _squidMesh;
+
+        /// <summary>清空静态缓存的程序化网格与材质，供编辑器刷新与参数重载。</summary>
+        public static void ClearCaches()
+        {
+            _mochiHeadMesh = null;
+            _scalpCapMesh = null;
+            _teeMesh = null;
+            _shortsMesh = null;
+            _waistbandMesh = null;
+            _hairSeg1Mesh = null;
+            _hairSeg2Mesh = null;
+            _squidMesh = null;
+            _mergedMeshCache.Clear();
+        }
 
         #region Public Assembly Entry
 
@@ -45,18 +65,23 @@ namespace P1.Player
             Color teamColor = ResolveTeamColor(team);
             var palette = BuildMaterialPalette(team, teamColor, teamBodyMat, darkVisorMat);
 
-            // 3. 构建人形态 (Kid Root)
+            // 3. 构建人形态 (Kid Root)：P33 真骨骼树（Hips→BodySquash→Spine→Chest→Neck→Head）
             var kidGo = new GameObject("KidRoot");
             kidGo.transform.SetParent(visualRoot, false);
 
             Transform hips, chest, head, leftHair, rightHair, leftArm, rightArm, tankFill;
-            Transform bodySquash, leftEye, rightEye;
+            Transform bodySquash, leftEye, rightEye, face;
             Transform leftLegRoot, rightLegRoot, leftKnee, rightKnee, leftAnkle, rightAnkle;
+            Transform leftElbow, rightElbow;
+            Transform spine, neck;
+            Transform[] hairRootPivots, hairMidPivots;
             BuildKidHierarchy(kidGo.transform, palette,
                 out hips, out chest, out head,
                 out leftHair, out rightHair, out leftArm, out rightArm, out tankFill,
-                out bodySquash, out leftEye, out rightEye,
-                out leftLegRoot, out rightLegRoot, out leftKnee, out rightKnee, out leftAnkle, out rightAnkle);
+                out bodySquash, out leftEye, out rightEye, out face,
+                out leftLegRoot, out rightLegRoot, out leftKnee, out rightKnee, out leftAnkle, out rightAnkle,
+                out leftElbow, out rightElbow,
+                out spine, out neck, out hairRootPivots, out hairMidPivots);
 
             // 4. 构建乌贼形态 (Squid Root)
             var squidGo = new GameObject("SquidRoot");
@@ -81,10 +106,23 @@ namespace P1.Player
                 out rollerDrum, out splatlingBarrels, out chargerCoils,
                 out mShooter, out mRoller, out mCharger, out mDualiesR, out mDualiesL, out mSlosher, out mBlaster, out mSplatling);
 
-            // 5.1 武器挂到胸部贴地枢轴下（世界位置保持不变）：
-            // 保留原有 -chest.localPosition 偏移写法，抵消 Chest 局部高度，使武器在视觉上相对于根空间绝对位置正确
+            // 5.1 武器挂到胸腔骨 (Chest) 下：抵消 Hips+BodySquash+Spine+Chest 的链上偏移，
+            //     使武器在 KidRoot 空间的绝对位置等于下方握把锚点（前倾时枪随上身自然走）。
+            //     挤压节点的缩放由控制器逐帧在武器根上反缩放抵消（枪不被 squash 压扁）。
             weaponGo.transform.SetParent(chest, false);
-            weaponGo.transform.localPosition = -chest.localPosition;
+            float chainY = CharacterMetrics.HipBoneY
+                + CharacterMetrics.SpineLocalY + CharacterMetrics.ChestLocalY;
+            weaponGo.transform.localPosition = new Vector3(0f, -chainY, 0f);
+
+            // 5.1.5 握把锚定 + 每把武器的手臂持握姿态（P34）：
+            //      旧版挂点按 1.6m 人形缩放后落在腰前 ~30cm，而手臂总长只有 0.325m，
+            //      枪其实漂在手的正前方 5~8cm 处，肩/肘角度再准也握不到。
+            //      现在先定义"右手手位"，再把每把武器的握把（Grip/Handle 部件）平移到该手位，
+            //      最后用两骨 IK 反解肩/肘 —— 手与握把在装配期就严格重合。
+            Dictionary<WeaponKind, ArmHoldPose> holdPoses = ResolveWeaponHoldPoses(
+                weaponGo.transform, leftArm, rightArm, leftElbow, rightElbow,
+                shooterGo, rollerGo, chargerGo, dualiesGo, slosherGo, blasterGo, splatlingGo,
+                chainY);
 
             // 5.2 武器静态构件网格合并（装配期一次性完成，战斗热路径零开销）：
             // 每把程序化武器由十几个独立 MeshRenderer 组成，按材质分组合并成少量 MergedStatic_* 网格压缩 DrawCall。
@@ -114,14 +152,25 @@ namespace P1.Player
                 rollerDrum, splatlingBarrels, chargerCoils,
                 mShooter, mRoller, mCharger, mDualiesR, mDualiesL, mSlosher, mBlaster, mSplatling);
 
-            // 6.1 注入蛋形角色步态与面部动效骨架绑定
-            controller.BindEggRig(bodySquash, head, leftEye, rightEye);
+            // 6.1 注入真骨骼步态与头部稳定绑定。P33：Face 容器直接由装配出参传入（旧版靠路径 Find
+            //     "Chest/BodySquash/Torso/Face"，骨骼树重建后该路径不再成立）。
+            controller.BindEggRig(bodySquash, face, leftEye, rightEye);
 
-            // 6.1.1 绑定双腿 FK 链（步态摆腿 / 滞空收腿 / 落地屈膝吸收）
+            // 6.1.1 绑定双腿两骨链（髋→膝→踝）：步态摆腿 / 滞空收腿 / 落地屈膝吸收
             controller.BindLegRig(hips, leftLegRoot, rightLegRoot, leftKnee, rightKnee, leftAnkle, rightAnkle);
+
+            // 6.1.2 绑定二段臂肘枢轴：步态屈肘 / 持枪基础弯 / 落地伸肘
+            controller.BindArmRig(leftElbow, rightElbow);
+
+            // 6.1.3 绑定脊柱链（Spine/Neck/Head）与 6 根触须发弹簧链（根段 + 中段枢轴）
+            controller.BindKidRig(spine, neck, head, face, hairRootPivots, hairMidPivots);
 
             // 6.2 绑定 4 根拖尾触须（逐根行波驱动；数组为空时控制器回退根节点整体摆动）
             controller.BindSquidTentacles(tentacleArray);
+
+            // 6.3 注入每把武器的持握姿态：切枪时左手托握/双持、右手握把与肘部角度整体切换，
+            //     保证"枪在哪只手就在哪"，而不是每把武器共用一套按旧挂点写的固定角度。
+            controller.BindArmHoldPoses(holdPoses);
 
             WeaponKind startKind = initialWeaponConfig != null ? initialWeaponConfig.weaponKind : WeaponKind.Shooter;
             controller.EquipWeaponKind(startKind);
@@ -157,6 +206,8 @@ namespace P1.Player
             public Material Dark;
             public Material White;
             public Material Metal;
+            /// <summary>墨罐罐盖专用哑光金属：不用枪械金属的紧凑高光，防止阳光角度对上时罐顶闪白。</summary>
+            public Material TankMetal;
             public Material Glass;
             public Material Blush;
         }
@@ -181,28 +232,34 @@ namespace P1.Player
             Color shortsColor = new Color(0.153f, 0.188f, 0.290f); // 对齐 INKWAVE 的深海军蓝短裤
             Color darkColor = new Color(0.10f, 0.115f, 0.155f);
 
-            // 整颗蛋体只用这一件奶油白描边材质；短裤与腰带是另外的贴面薄壳（GetEggShortsShellMesh / GetEggWaistbandShellMesh）。
-            p.Shirt = CreateCharacterMat("Mat_CharacterShirt", shirtColor, 0.62f, 0.35f, outlined: true, shadeSoftness: 0.10f);
-            p.Sleeve = CreateCharacterMat("Mat_CharacterSleeve", new Color(0.78f, 0.81f, 0.85f), 0.50f, 0.30f, shadeSoftness: 0.08f);
-            // 短裤与腰带是不带描边的贴面薄壳：整颗蛋体只保留一条连续外描边，避免多材质接缝处出现黑线
-            p.Shorts = CreateCharacterMat("Mat_CharacterShorts", shortsColor, 0.45f, 0.30f, shadeSoftness: 0.08f);
-            p.Waistband = CreateCharacterMat("Mat_CharacterWaistband", teamCol, 0.85f, 0.55f, shadeSoftness: 0.06f);
+            // T 恤主体为奶油白（唯一大面积衣物剪影）；腰带是队伍色窄环、短裤锚在骨盆（P33 真体积）。
+            // 停用反向外扩描边（outlined: false），全屏 ToonOutline 已提供清晰锐利轮廓，杜绝单面开放筒体反向外扩破面与 Z-fighting。
+            p.Shirt = CreateCharacterMat("Mat_CharacterShirt", shirtColor, 0.35f, 0.15f, outlined: false, shadeSoftness: 0.10f);
+            p.Sleeve = CreateCharacterMat("Mat_CharacterSleeve", shirtColor, 0.35f, 0.15f, shadeSoftness: 0.08f);
+            p.Shorts = CreateCharacterMat("Mat_CharacterShorts", shortsColor, 0.35f, 0.15f, shadeSoftness: 0.08f);
+            p.Waistband = CreateCharacterMat("Mat_CharacterWaistband", teamCol, 0.45f, 0.20f, shadeSoftness: 0.06f);
             p.TeamCloth = p.Shirt;
 
             // 队伍墨色部件：墨焰/瞳孔/腕带共用；胸章使用哑光 InkDecal，墨罐液面单独带一点自发光。
-            p.TeamHair = CreateCharacterMat("Mat_TeamHair", teamCol, 0.90f, 0.70f, shadeSoftness: 0.05f);
+            // 触须发采用柔和胶质卡通参数（smoothness 0.45、rim 0.22），杜绝极硬高光与强边缘光在曲面微晃时产生的闪烁。
+            p.TeamHair = CreateCharacterMat("Mat_TeamHair", teamCol, 0.45f, 0.22f, shadeSoftness: 0.06f);
             p.InkDecal = CreateCharacterMat("Mat_TeamInkDecal", teamCol, 0.18f, 0.12f, shadeSoftness: 0.06f);
-            p.TeamLiquid = CreateCharacterMat("Mat_TeamLiquid", teamCol, 0.95f, 0.60f, emission: teamCol * 0.35f);
-            p.SquidBody = CreateCharacterMat("Mat_SquidBody", teamCol, 0.90f, 0.70f);
+            p.TeamLiquid = CreateCharacterMat("Mat_TeamLiquid", teamCol, 0.50f, 0.35f, emission: teamCol * 0.20f);
+            p.SquidBody = CreateCharacterMat("Mat_SquidBody", teamCol, 0.65f, 0.35f);
 
-            p.Skin = CreateCharacterMat("Mat_KidSkin", new Color(0.96f, 0.73f, 0.61f), 0.38f, 0.18f);
+            p.Skin = CreateCharacterMat("Mat_KidSkin", new Color(0.96f, 0.73f, 0.61f), 0.25f, 0.12f);
             p.Dark = CreateCharacterMat("Mat_DarkPlastic", darkColor, 0.40f, 0.25f);
             p.White = CreateCharacterMat("Mat_AccentsWhite", new Color(0.95f, 0.96f, 0.98f), 0.40f, 0.30f);
             p.Metal = CreateCharacterMat("Mat_Gunmetal", new Color(0.55f, 0.58f, 0.65f), 0.65f, 0.40f);
+            p.TankMetal = CreateCharacterMat("Mat_TankMetal", new Color(0.55f, 0.58f, 0.65f), 0.22f, 0.25f);
             p.Blush = CreateCharacterMat("Mat_Blush", new Color(0.98f, 0.62f, 0.60f), 0.20f, 0.15f);
 
-            // 墨罐玻璃必须保留 URP Lit 透明表面材质：卡通 Shader 不支持透明通道，否则墨罐外壳会变为不透明阻挡内部液面
-            p.Glass = CreateLitMat("Mat_TankGlass", new Color(0.85f, 0.92f, 1.0f, 0.45f), 0.95f, 0.1f);
+            // 墨罐玻璃必须保留 URP Lit 透明表面材质：卡通 Shader 不支持透明通道，否则墨罐外壳会变为不透明阻挡内部液面。
+            // 但不能沿用 0.95 的镜面级光滑度：近白基色 + 紧凑 GGX 高光/天空反射在阳光下会被 Bloom 烧成一团白光，
+            // 角色转身时偶尔对上角度就闪一下（表现为"后背墨罐上闪白光"）。基色/alpha 保持原值以复用同名材质资产，
+            // 只把光滑度压哑并关掉镜面高光与环境反射。
+            p.Glass = CreateLitMat("Mat_TankGlass", new Color(0.85f, 0.92f, 1.0f, 0.45f), TankGlassSmoothness, 0f);
+            DisableTankGlassGlint(p.Glass);
 
             return p;
         }
@@ -351,6 +408,23 @@ namespace P1.Player
             }
         }
 
+        /// <summary>墨罐玻璃粗糙度：保留玻璃质感，但不产生会被 Bloom 放大的紧凑 HDR 高光。</summary>
+        private const float TankGlassSmoothness = 0.20f;
+
+        /// <summary>
+        /// 墨罐玻璃关掉镜面高光与环境反射（URP Lit 用局部关键词控制）。
+        /// 只调 smoothness 不够：阳光角度对上时 GGX 高光峰值仍会远超 Bloom 阈值，在角色后背烧出一团白光。
+        /// </summary>
+        private static void DisableTankGlassGlint(Material mat)
+        {
+            if (mat == null) return;
+
+            if (mat.HasProperty("_SpecularHighlights")) mat.SetFloat("_SpecularHighlights", 0f);
+            if (mat.HasProperty("_EnvironmentReflections")) mat.SetFloat("_EnvironmentReflections", 0f);
+            mat.EnableKeyword("_SPECULARHIGHLIGHTS_OFF");
+            mat.EnableKeyword("_ENVIRONMENTREFLECTIONS_OFF");
+        }
+
         #endregion
 
         #region Primitives Helper
@@ -417,7 +491,8 @@ namespace P1.Player
 
         private static bool ShouldCastShadow(string partName)
         {
-            // 关闭面部小件、墨渍小滴、背包外露附件、手部小件与武器零件阴影
+            // 关闭面部贴片、细饰边、背包外露附件、手部小件与武器零件阴影。
+            // P33 真骨骼：主体大件 = 头/发帽/触须/T恤/短裤/大腿/小腿/球鞋壳/墨罐罐体，全部保留投影。
             if (partName.StartsWith("EyeMask") ||
                 partName.StartsWith("Eye_") ||
                 partName == "Iris" ||
@@ -425,16 +500,27 @@ namespace P1.Player
                 partName.StartsWith("Glint") ||
                 partName.StartsWith("Blush") ||
                 partName == "Mouth" ||
+                partName == "Nose" ||
+                partName.StartsWith("Ear_") ||
+                partName.StartsWith("Brow_") ||
                 partName.StartsWith("ChestInk") ||
-                // 短裤/腰带是 5mm/9mm 贴面薄壳，蛋体本身已投出相同轮廓；
+                // 腰带是 ~8mm 饰带、袜口是贴腿小环：主体 T 恤 / 小腿已投出相同轮廓，
                 // 重复投影只增加阴影 draw，并在细级联下放大自阴影噪声。
-                partName == "EggShorts" ||
-                partName == "EggWaistband" ||
+                partName == "Waistband" ||
+                partName == "SockCuff_L" ||
+                partName == "SockCuff_R" ||
+                // 球鞋分层件（白中底/鞋头包边/后跟饰片）随 Foot 鞋壳轮廓投影即可
+                partName == "SoleMid" ||
+                partName == "ToeCap" ||
+                partName == "HeelTab_L" ||
+                partName == "HeelTab_R" ||
+                partName == "TankStrap_L" ||
+                partName == "TankStrap_R" ||
                 partName == "TopCap" ||
                 partName == "ValveKnob" ||
                 partName == "BottomCap" ||
+                partName == "MountPlate" ||
                 partName == "Cuff" ||
-                partName == "Forearm" ||
                 partName == "Hand" ||
                 partName.Contains("Grip") ||
                 partName == "InkSpine" ||
@@ -467,379 +553,501 @@ namespace P1.Player
 
         #endregion
 
-        #region Egg Body Procedural Mesh
+        #region Squidkid Procedural Meshes (P33)
 
-        // 解析蛋形轮廓（P22-A 圆钝头顶版）：下段饱满蛋形 + 顶部椭圆圆穹，软最大值混合。
-        // 旧版（alpha=0.68）上段 64% 持续收窄、顶端有效曲率半径仅 ≈0.18m（远小于体宽 0.43m），
-        // 正/侧视都读成"洋葱尖"；新版顶端曲率半径 ≈0.37m 与体宽同级，呈蛋仔式圆穹。
-        // 保持单一解析函数：半径与切向连续可导，数值法线不会产生一圈圈"微鼓包"。
-        private const float EggProfileAlpha = 0.72f;   // 下段最大半径位置：t = 0.5^(1/α) ≈ 0.38
-        private const float EggProfileBeta = 0.60f;    // 下段饱满度
-        private const float EggDomeStart = 0.45f;      // 顶部圆穹起点（归一化躯干高度）
-        private const float EggDomePeak = 0.96f;       // 圆穹峰值略窄于最大体宽：上段单调收窄，读作“蛋”而非“球”
-        private const float EggBlendHalf = 0.035f;     // 小混合半宽：交界隆起压到 ~4mm，避免 toon 着色显出亮脊线
-
-        /// <summary>
-        /// 采样躯干归一化轮廓半径比例（0~1，躯干局部空间：0=躯干底、1=躯干顶）。
-        /// 底部圆润（由下段蛋形曲线自然收口），顶部以椭圆圆穹收口：
-        /// 圆穹顶端有效曲率半径 ρ ≈ a²/b（a=BodyMaxRadius·EggDomePeak, b=(1-EggDomeStart)·TorsoHeight）。
-        /// </summary>
-        private static float SampleEggRadius01(float t)
-        {
-            t = Mathf.Clamp01(t);
-            // 下段饱满蛋形
-            float s = Mathf.Sin(Mathf.PI * Mathf.Pow(t, EggProfileAlpha));
-            float body = Mathf.Pow(Mathf.Max(0f, s), EggProfileBeta);
-            // 顶部椭圆圆穹（四分之一椭圆弧，t < EggDomeStart 时不参与）
-            float dome = 0f;
-            float dt0 = (t - EggDomeStart) / Mathf.Max(0.0001f, 1f - EggDomeStart);
-            if (dt0 > 0f)
-            {
-                dome = EggDomePeak * Mathf.Sqrt(Mathf.Max(0f, 1f - dt0 * dt0));
-            }
-            // 软最大值：交界处 C1 圆滑过渡，避免 max 的硬折痕在描边/着色上显形
-            return SmoothMax(body, dome, EggBlendHalf);
-        }
-
-        /// <summary>多项式 soft-min（Inigo Quilez）：h 越小越接近 min，交界处圆滑无折痕。</summary>
+        // 解析软最小/最大（Inigo Quilez 多项式版）：用于头部轮廓分段混合，交界 C1 圆滑无折痕。
         private static float SmoothMin(float a, float b, float h)
         {
             float t = Mathf.Clamp01(0.5f + 0.5f * (b - a) / Mathf.Max(0.0001f, h));
-            // 注意 lerp 参数序是 (b, a, t)：a 远小于 b 时 t=1 → 返回 a（真正的 min）
             return Mathf.Lerp(b, a, t) - h * t * (1f - t);
         }
 
         private static float SmoothMax(float a, float b, float h) => -SmoothMin(-a, -b, h);
 
-        /// <summary>躯干在指定（躯干局部）高度处的实际半径（米）。</summary>
-        private static float EggRadiusAt(float y)
-            => SampleEggRadius01(y / CharacterMetrics.TorsoHeight) * CharacterMetrics.BodyMaxRadius;
-
         /// <summary>
-        /// 求蛋体前半球表面（面向 +Z）上的一点，并沿表面法线向外推出 outOffset。
-        /// 贴面部件（眼睛/面具/腮红/嘴）必须用它定位：蛋体是曲面，直接写死 z 会让椭球要么埋进肚子要么浮在空中。
+        /// 馒头头（mochi head）解析面采样：椭球基面 (Rx,Ry,Rz) 上加 INKWAVE 三处雕塑特征——
+        /// 颊线最宽（眼下 ~0.02 高度鼓一点）、小下巴（前下方快速收窄收小）、额后倾（顶前缘 −Z 收）。
+        /// dir = 单位方向向量（+Z 为脸朝向）。返回该方向上的表面点（头心局部坐标）。
         /// </summary>
-        private static Vector3 EggFrontPoint(float x, float y, float outOffset)
+        internal static Vector3 SampleMochiHeadPoint(Vector3 dir, float outOffset)
         {
-            float r = EggRadiusAt(y);
-            float xx = Mathf.Clamp(x, -r * 0.92f, r * 0.92f);
-            float z = Mathf.Sqrt(Mathf.Max(0.0001f, r * r - xx * xx));
-            Vector3 normal = new Vector3(xx, 0f, z).normalized;
-            return new Vector3(xx, y, z) + normal * outOffset;
-        }
+            dir = dir.normalized;
+            float rx = CharacterMetrics.HeadHalfWidth;
+            float ry = CharacterMetrics.HeadHalfHeight;
+            float rz = CharacterMetrics.HeadHalfDepth;
 
-        /// <summary>贴面部件的朝向：让局部 +Z 对准该处的水平表面法线。</summary>
-        private static float EggFaceYaw(float x, float y)
-        {
-            float r = EggRadiusAt(y);
-            float xx = Mathf.Clamp(x, -r * 0.92f, r * 0.92f);
-            float z = Mathf.Sqrt(Mathf.Max(0.0001f, r * r - xx * xx));
-            return Mathf.Atan2(xx, z) * Mathf.Rad2Deg;
-        }
+            // 基础椭球表面点（非单位球：dir 投影）
+            Vector3 p = new Vector3(dir.x * rx, dir.y * ry, dir.z * rz);
+            float x = dir.x, y = dir.y, z = dir.z;
 
-        /// <summary>
-        /// 创建并静态缓存 Q 版蛋形躯干网格（圆钝顶）。
-        /// 40 环 × 40 径向段解析旋转体，原点位于躯干底面（躯干局部 y=0，挂在 Torso 节点下）；
-        /// 上下极点各用一个中心点封口。整颗躯干使用单一描边材质；短裤与腰带是另外的贴面薄壳（见 BuildEggShellMesh）。
-        /// 法线全部由解析轮廓切线推导，避免四边形拼接处的硬边与明暗断裂。
-        /// </summary>
-        public static Mesh CreateEggBodyMesh()
-        {
-            if (_eggMesh != null) return _eggMesh;
-
-            var mesh = new Mesh { name = "EggBodyMesh" };
-
-            const int ringCount = 40;
-            const int radialSegs = 40;
-
-            List<Vector3> verts = new List<Vector3>();
-            List<Vector3> normals = new List<Vector3>();
-            List<Vector2> uvs = new List<Vector2>();
-            List<int> tris = new List<int>();
-
-            // 1. 底部极点（躯干局部 y=0）
-            int bottomCenterIdx = 0;
-            verts.Add(Vector3.zero);
-            normals.Add(Vector3.down);
-            uvs.Add(new Vector2(0.5f, 0f));
-
-            // 2. 侧面圆环：跳过两端极点，避免退化三角形
-            for (int r = 1; r < ringCount; r++)
+            // 1. 小下巴：dir 处于前下象限时，横向 + 纵深快速收窄，收成小巧圆润的下颌
+            if (y < -0.12f && z > 0f)
             {
-                float t = (float)r / ringCount;
-                float y = t * CharacterMetrics.TorsoHeight;
-                float radius = SampleEggRadius01(t) * CharacterMetrics.BodyMaxRadius;
+                float chin01 = Mathf.InverseLerp(-0.12f, -0.95f, y);
+                float chin = chin01 * chin01 * Mathf.Clamp01(z * 1.6f);
+                p.x *= 1f - 0.42f * chin;
+                p.z *= 1f - 0.30f * chin;
+            }
 
-                // 差分计算轮廓沿高度切线斜率 dr/dy
-                const float dt = 0.0005f;
-                float tPrev = Mathf.Max(0f, t - dt);
-                float tNext = Mathf.Min(1f, t + dt);
-                float rPrev = SampleEggRadius01(tPrev) * CharacterMetrics.BodyMaxRadius;
-                float rNext = SampleEggRadius01(tNext) * CharacterMetrics.BodyMaxRadius;
-                float dr_dy = (rNext - rPrev) / Mathf.Max(0.00001f, (tNext - tPrev) * CharacterMetrics.TorsoHeight);
+            // 2. 颊线微鼓：眼下 ±0.03 高度带最宽（"mochi" 的压扁重心），宽度过渡平滑
+            float cheekBand = Mathf.Exp(-Mathf.Pow((y - 0.02f) / 0.30f, 2f)) * Mathf.Clamp01(z * 1.5f);
+            p.x *= 1f + 0.055f * cheekBand;
 
-                for (int s = 0; s <= radialSegs; s++)
+            // 3. 额后倾 + 脸平面略平：dir 上半前侧，把额头往 −Z 收、把鼻尖前的弧压平
+            if (y > 0.25f && z > 0f)
+            {
+                float fore = Mathf.InverseLerp(0.25f, 0.95f, y) * Mathf.Clamp01(z * 1.4f);
+                p.z -= 0.30f * rz * fore;
+            }
+            if (y > -0.35f && y < 0.35f && z > 0.45f)
+            {
+                // 正脸区（眼眶所在）略平：大眼贴片不骑在球面上
+                p.z *= 1f - 0.075f * Mathf.Clamp01((z - 0.45f) / 0.55f);
+            }
+
+            // 外偏：沿近似法线（椭球缩放梯度）外移，保证贴片不陷入曲面
+            Vector3 normal = new Vector3(p.x / (rx * rx), p.y / (ry * ry), p.z / (rz * rz));
+            if (normal.sqrMagnitude < 1e-9f) normal = Vector3.forward;
+            return p + normal.normalized * outOffset;
+        }
+
+        /// <summary>
+        /// 创建并静态缓存 P33 馒头头网格（48×32 环面，解析雕塑函数见 <see cref="SampleMochiHeadPoint"/>）。
+        /// 法线由网格重算（RecalculateNormals）：三处特征位移后解析法线不再成立，
+        /// 高环密度下重算法线足够光滑（描边轮廓由 CharacterToonOutlined 边缘检测负责）。
+        /// </summary>
+        public static Mesh CreateMochiHeadMesh()
+        {
+            if (_mochiHeadMesh != null) return _mochiHeadMesh;
+
+            const int latRings = 32;
+            const int lonSegs = 48;
+
+            var verts = new List<Vector3>();
+            var normals = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+
+            for (int r = 0; r <= latRings; r++)
+            {
+                float theta = Mathf.PI * (float)r / latRings; // 0 顶 → π 底
+                float y = Mathf.Cos(theta);
+                float ring = Mathf.Sin(theta);
+                for (int s = 0; s <= lonSegs; s++)
                 {
-                    float uCoord = (float)s / radialSegs;
-                    float theta = uCoord * Mathf.PI * 2f;
-                    float cos = Mathf.Cos(theta);
-                    float sin = Mathf.Sin(theta);
-
-                    verts.Add(new Vector3(cos * radius, y, sin * radius));
-
-                    // 解析法线：profileTangent × aroundTangent = (cos, -dr_dy, sin)，严格朝外
-                    Vector3 radialDir = new Vector3(cos, 0f, sin);
-                    Vector3 normal = new Vector3(cos, -dr_dy, sin);
-                    if (Vector3.Dot(normal, radialDir) < 0f)
-                    {
-                        normal = -normal;
-                    }
-                    normals.Add(normal.normalized);
-
-                    uvs.Add(new Vector2(uCoord, t));
+                    float phi = 2f * Mathf.PI * (float)s / lonSegs; // 0 = 前脸 +Z
+                    Vector3 dir = new Vector3(ring * Mathf.Sin(phi), y, ring * Mathf.Cos(phi));
+                    verts.Add(SampleMochiHeadPoint(dir, 0f));
+                    normals.Add(dir); // 近似：随后 RecalculateNormals 覆盖
+                    uvs.Add(new Vector2((float)s / lonSegs, (float)r / latRings));
                 }
             }
 
-            int lastRing = ringCount - 1;
-
-            // 3. 底部封口三角扇
-            int firstRingBase = 1;
-            for (int s = 0; s < radialSegs; s++)
+            int row = lonSegs + 1;
+            for (int r = 0; r < latRings; r++)
             {
-                tris.Add(bottomCenterIdx);
-                tris.Add(firstRingBase + s);
-                tris.Add(firstRingBase + s + 1);
-            }
-
-            // 4. 侧面四边形拆三角
-            for (int r = 1; r < ringCount - 1; r++)
-            {
-                int row0 = 1 + (r - 1) * (radialSegs + 1);
-                int row1 = 1 + r * (radialSegs + 1);
-
-                for (int s = 0; s < radialSegs; s++)
+                for (int s = 0; s < lonSegs; s++)
                 {
-                    int i0 = row0 + s;
-                    int i1 = row1 + s;
-                    int i0_next = row0 + s + 1;
-                    int i1_next = row1 + s + 1;
-
-                    tris.Add(i0);
-                    tris.Add(i1);
-                    tris.Add(i0_next);
-
-                    tris.Add(i0_next);
-                    tris.Add(i1);
-                    tris.Add(i1_next);
+                    int i0 = r * row + s;
+                    int i1 = (r + 1) * row + s;
+                    tris.Add(i0); tris.Add(i1); tris.Add(i0 + 1);
+                    tris.Add(i0 + 1); tris.Add(i1); tris.Add(i1 + 1);
                 }
             }
 
-            // 5. 顶部极点封顶
-            int topCenterIdx = verts.Count;
-            verts.Add(new Vector3(0f, CharacterMetrics.TorsoHeight, 0f));
-            normals.Add(Vector3.up);
-            uvs.Add(new Vector2(0.5f, 1f));
-
-            int lastRingBase = 1 + (lastRing - 1) * (radialSegs + 1);
-            for (int s = 0; s < radialSegs; s++)
-            {
-                tris.Add(topCenterIdx);
-                tris.Add(lastRingBase + s + 1);
-                tris.Add(lastRingBase + s);
-            }
-
+            var mesh = new Mesh { name = "MochiHeadMesh" };
             mesh.SetVertices(verts);
-            mesh.SetNormals(normals);
             mesh.SetUVs(0, uvs);
             mesh.SetTriangles(tris, 0);
+            mesh.RecalculateNormals();
+
+            // 极点处三角退化可能产生零模长法线，统一做保底归一化
+            Vector3[] computedNormals = mesh.normals;
+            for (int i = 0; i < computedNormals.Length; i++)
+            {
+                if (computedNormals[i].sqrMagnitude < 0.01f)
+                    computedNormals[i] = verts[i].normalized;
+                else
+                    computedNormals[i] = computedNormals[i].normalized;
+            }
+            mesh.SetNormals(computedNormals);
             mesh.RecalculateBounds();
-
-            _eggMesh = mesh;
-            return _eggMesh;
-        }
-
-        /// <summary>短裤薄壳（贴面、无描边）。</summary>
-        private static Mesh GetEggShortsShellMesh()
-        {
-            if (_eggShortsShellMesh == null)
-            {
-                _eggShortsShellMesh = BuildEggShellMesh(0.006f, 0.325f, 0.005f, "EggShortsShell");
-            }
-            return _eggShortsShellMesh;
-        }
-
-        /// <summary>队伍色腰带薄壳（贴面、无描边，略高于短裤上沿以盖住接缝）。</summary>
-        private static Mesh GetEggWaistbandShellMesh()
-        {
-            if (_eggWaistbandShellMesh == null)
-            {
-                _eggWaistbandShellMesh = BuildEggShellMesh(0.295f, 0.365f, 0.009f, "EggWaistbandShell", true, true, 0.005f, 0f);
-            }
-            return _eggWaistbandShellMesh;
+            _mochiHeadMesh = mesh;
+            return mesh;
         }
 
         /// <summary>
-        /// 生成沿蛋体表面偏移 offset 的开放薄壳（上下不封口，由内层蛋体兜底）。
-        /// 用薄壳替代同一网格的 submesh 分材质：整颗蛋体只保留一次描边，
-        /// 短裤/腰带交界处不会因为多份描边壳叠加而出现细黑线。
+        /// 头皮帽（ScalpCap）：沿头部雕塑面外扩 6mm 的壳体，后脑深（极距 ~128°）、
+        /// 前发际浅（~68°，露出额头与眉上皮肤），左右按方位角平滑过渡。
+        /// 触须发根全部种在帽面上，读作"从头发里长出来"而不是漂浮贴片。
         /// </summary>
-        private static Mesh BuildEggShellMesh(
-            float tStart,
-            float tEnd,
-            float offset,
-            string name,
-            bool capBottom = false,
-            bool capTop = false,
-            float innerOffsetBottom = 0f,
-            float innerOffsetTop = 0f)
+        public static Mesh CreateScalpCapMesh()
         {
-            var mesh = new Mesh { name = name };
+            if (_scalpCapMesh != null) return _scalpCapMesh;
 
-            const int ringCount = 12;
-            const int radialSegs = 40;
+            const int lonSegs = 48;
+            const int uRings = 32; // 对齐 MochiHead 的 32 环，杜绝多边形弦凹差造成的 Z-fighting 闪烁
 
-            List<Vector3> verts = new List<Vector3>();
-            List<Vector3> normals = new List<Vector3>();
-            List<Vector2> uvs = new List<Vector2>();
-            List<int> tris = new List<int>();
+            var verts = new List<Vector3>();
+            var tris = new List<int>();
 
-            for (int r = 0; r <= ringCount; r++)
+            for (int r = 0; r <= uRings; r++)
             {
-                float t = Mathf.Lerp(tStart, tEnd, (float)r / ringCount);
-                float y = t * CharacterMetrics.TorsoHeight;
-                float radius = SampleEggRadius01(t) * CharacterMetrics.BodyMaxRadius + offset;
-
-                const float dt = 0.0005f;
-                float tPrev = Mathf.Max(0f, t - dt);
-                float tNext = Mathf.Min(1f, t + dt);
-                float rPrev = SampleEggRadius01(tPrev) * CharacterMetrics.BodyMaxRadius;
-                float rNext = SampleEggRadius01(tNext) * CharacterMetrics.BodyMaxRadius;
-                float dr_dy = (rNext - rPrev) / Mathf.Max(0.00001f, (tNext - tPrev) * CharacterMetrics.TorsoHeight);
-
-                for (int s = 0; s <= radialSegs; s++)
+                float u = (float)r / uRings;
+                for (int s = 0; s <= lonSegs; s++)
                 {
-                    float uCoord = (float)s / radialSegs;
-                    float theta = uCoord * Mathf.PI * 2f;
-                    float cos = Mathf.Cos(theta);
-                    float sin = Mathf.Sin(theta);
-
-                    verts.Add(new Vector3(cos * radius, y, sin * radius));
-
-                    Vector3 radialDir = new Vector3(cos, 0f, sin);
-                    Vector3 normal = new Vector3(cos, -dr_dy, sin);
-                    if (Vector3.Dot(normal, radialDir) < 0f) normal = -normal;
-                    normals.Add(normal.normalized);
-
-                    uvs.Add(new Vector2(uCoord, t));
+                    float phi = 2f * Mathf.PI * (float)s / lonSegs;
+                    float frontness = Mathf.Cos(phi); // 1 = 正脸方向
+                    // 帽缘极角：前脸 68°（发际在额上）→ 后脑 126°（盖到枕部）
+                    float thetaMax = Mathf.Lerp(Mathf.PI * 0.38f, Mathf.PI * 0.70f,
+                        Mathf.SmoothStep(0f, 1f, (1f - frontness) * 0.5f));
+                    float theta = u * thetaMax;
+                    Vector3 dir = new Vector3(
+                        Mathf.Sin(theta) * Mathf.Sin(phi),
+                        Mathf.Cos(theta),
+                        Mathf.Sin(theta) * Mathf.Cos(phi));
+                    // 外扩 12mm 形成头发厚度与体量感，彻底避免待机 squash 呼吸缩放时与头骨互穿
+                    verts.Add(SampleMochiHeadPoint(dir, 0.012f));
                 }
             }
 
-            for (int r = 0; r < ringCount; r++)
+            int row = lonSegs + 1;
+            for (int r = 0; r < uRings; r++)
             {
-                int row0 = r * (radialSegs + 1);
-                int row1 = (r + 1) * (radialSegs + 1);
-                for (int s = 0; s < radialSegs; s++)
+                for (int s = 0; s < lonSegs; s++)
                 {
-                    int i0 = row0 + s;
-                    int i1 = row1 + s;
-                    int i0_next = row0 + s + 1;
-                    int i1_next = row1 + s + 1;
-
-                    tris.Add(i0);
-                    tris.Add(i1);
-                    tris.Add(i0_next);
-
-                    tris.Add(i0_next);
-                    tris.Add(i1);
-                    tris.Add(i1_next);
+                    int i0 = r * row + s;
+                    int i1 = (r + 1) * row + s;
+                    tris.Add(i0); tris.Add(i1); tris.Add(i0 + 1);
+                    tris.Add(i0 + 1); tris.Add(i1); tris.Add(i1 + 1);
                 }
             }
 
-            // 6. 腰带上下沿做一圈内收盖面，接到底下的短裤/蛋体表面：
-            // 薄壳的开放边缘会在接缝处投出一条黑线，加盖后变成干净的队伍色皮带边。
-            if (capBottom || capTop)
-            {
-                int outerBottomRow = 0;
-                int outerTopRow = ringCount * (radialSegs + 1);
-
-                if (capBottom)
-                {
-                    AddShellCap(verts, normals, uvs, tris,
-                        tStart, outerBottomRow, offset, innerOffsetBottom, radialSegs, facingUp: false);
-                }
-                if (capTop)
-                {
-                    AddShellCap(verts, normals, uvs, tris,
-                        tEnd, outerTopRow, offset, innerOffsetTop, radialSegs, facingUp: true);
-                }
-            }
-
+            var mesh = new Mesh { name = "ScalpCapMesh" };
             mesh.SetVertices(verts);
-            mesh.SetNormals(normals);
-            mesh.SetUVs(0, uvs);
             mesh.SetTriangles(tris, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            _scalpCapMesh = mesh;
+            return mesh;
+        }
+
+        /// <summary>
+        /// 盒型 T 恤（INKWAVE "boxy kid tee"）：超椭圆环堆叠（指数 2.3，方中带圆真实衣物布量感）。
+        /// 网格锚在 Spine 节点（世界 y = 0.605）：下摆 y -0.015（世界 0.590，紧扣腰带上沿）→
+        /// 腰腹 0.050 → 胸膛 0.105 → 落肩 0.145 → 肩线 0.170（世界 0.775，与肩关节 0.762m 协调）。
+        /// 顶端圆领向下挖弧 0.038m（前领窝世界 0.737m），开领口（openCaps: 3），露出一截清爽精神的肤色小脖子。
+        /// </summary>
+        public static Mesh CreateTeeMesh()
+        {
+            if (_teeMesh != null) return _teeMesh;
+
+            var profile = new SuperellipseProfile(
+                new float[] { -0.015f, 0.050f, 0.105f, 0.145f, 0.170f },
+                new float[] { 0.100f, 0.108f, 0.116f, 0.124f, 0.078f },
+                new float[] { 0.080f, 0.086f, 0.088f, 0.084f, 0.060f });
+            _teeMesh = BuildSuperellipseTube(profile, "TeeMesh", 0.0f, 3, 2.3f, frontCollarDip: 0.038f);
+            return _teeMesh;
+        }
+
+        /// <summary>
+        /// 灯笼短裤（半筒，膝上）：原点 = Hips 节点（世界 0.520）。
+        /// 上端埋进 T 恤下摆（交界处同超椭圆族不描边），中段胯部最宽，裤脚微收形成灯笼感。
+        /// </summary>
+        public static Mesh CreateShortsMesh()
+        {
+            if (_shortsMesh != null) return _shortsMesh;
+
+            var profile = new SuperellipseProfile(
+                new float[] { 0.125f, 0.080f, 0.000f, -0.060f, -0.105f, -0.120f },
+                new float[] { 0.102f, 0.107f, 0.110f, 0.104f, 0.082f, 0.078f },
+                new float[] { 0.084f, 0.090f, 0.093f, 0.088f, 0.070f, 0.066f });
+            _shortsMesh = BuildSuperellipseTube(profile, "ShortsMesh", 0.0f, 3, 2.2f);
+            return _shortsMesh;
+        }
+
+        /// <summary>队伍色腰带：T 恤下摆处外扩 7mm 的窄环（与 T 恤同超椭圆族，贴合不出缝）。</summary>
+        public static Mesh CreateWaistbandMesh()
+        {
+            if (_waistbandMesh != null) return _waistbandMesh;
+
+            var profile = new SuperellipseProfile(
+                new float[] { -0.020f, 0.012f },
+                new float[] { 0.105f, 0.105f },
+                new float[] { 0.085f, 0.085f });
+            // 外扩 13mm（高于 T 恤与短裤的基准面），形成立体的衣带层级台阶，彻底消除下摆交界处的共面 Z-fighting
+            _waistbandMesh = BuildSuperellipseTube(profile, "WaistbandMesh", 0.013f, 3, 2.3f);
+            return _waistbandMesh;
+        }
+
+        /// <summary>服装纵向截面轮廓：高度序列（必须单调）+ 半宽 + 半深。</summary>
+        private struct SuperellipseProfile
+        {
+            public readonly float[] Y;
+            public readonly float[] HalfWidth;
+            public readonly float[] HalfDepth;
+
+            public SuperellipseProfile(float[] y, float[] w, float[] d)
+            {
+                Y = y; HalfWidth = w; HalfDepth = d;
+            }
+
+            /// <summary>在归一化弧长 u∈[0,1] 处采样（按 Y 段距线性参数化）。</summary>
+            public Vector2 Sample(float u)
+            {
+                float total = Y[Y.Length - 1] - Y[0];
+                float targetY = Y[0] + u * total;
+                for (int i = 0; i < Y.Length - 1; i++)
+                {
+                    if (targetY <= Y[i + 1] || i == Y.Length - 2)
+                    {
+                        float t = Mathf.InverseLerp(Y[i], Y[i + 1], targetY);
+                        return new Vector2(Mathf.Lerp(HalfWidth[i], HalfWidth[i + 1], t),
+                                           Mathf.Lerp(HalfDepth[i], HalfDepth[i + 1], t));
+                    }
+                }
+                return new Vector2(HalfWidth[HalfWidth.Length - 1], HalfDepth[HalfDepth.Length - 1]);
+            }
+        }
+
+        /// <summary>
+        /// 通用超椭圆管体网格（T 恤 / 短裤 / 腰带共用）：沿 Y 采样 profile，
+        /// 每环用 |cos|^(2/n)、|sin|^(2/n) 生成方中带圆的截面；上下端盖面（openCaps:bit0=底 bit1=顶，1=开放）。
+        /// </summary>
+        private static Mesh BuildSuperellipseTube(
+            SuperellipseProfile profile, string name, float offset, int openCaps, float exponent, float frontCollarDip = 0f)
+        {
+            const int rings = 20;
+            const int segs = 32;
+
+            var verts = new List<Vector3>();
+            var tris = new List<int>();
+
+            for (int r = 0; r <= rings; r++)
+            {
+                float u = (float)r / rings;
+                Vector2 wd = profile.Sample(u);
+                float w = wd.x + offset;
+                float d = wd.y + offset;
+                for (int s = 0; s <= segs; s++)
+                {
+                    float theta = 2f * Mathf.PI * (float)s / segs;
+                    float c = Mathf.Cos(theta);
+                    float sn = Mathf.Sin(theta);
+                    float e = 2f / exponent;
+
+                    float y = u * (profile.Y[profile.Y.Length - 1] - profile.Y[0]) + profile.Y[0];
+                    if (frontCollarDip > 0.001f && u > 0.45f)
+                    {
+                        // 前胸圆领挖弧：sn = sin(theta) > 0（正脸 +Z 方向）平滑下沉，后背与双肩平缓过渡
+                        float forwardFactor = Mathf.Clamp01(sn);
+                        float dipProg = Mathf.SmoothStep(0f, 1f, (u - 0.45f) / 0.55f);
+                        y -= frontCollarDip * forwardFactor * dipProg;
+                    }
+
+                    verts.Add(new Vector3(
+                        Mathf.Sign(c) * Mathf.Pow(Mathf.Abs(c), e) * w,
+                        y,
+                        Mathf.Sign(sn) * Mathf.Pow(Mathf.Abs(sn), e) * d));
+                }
+            }
+
+            int row = segs + 1;
+            for (int r = 0; r < rings; r++)
+            {
+                for (int s = 0; s < segs; s++)
+                {
+                    int i0 = r * row + s;
+                    int i1 = (r + 1) * row + s;
+                    tris.Add(i0); tris.Add(i1); tris.Add(i0 + 1);
+                    tris.Add(i0 + 1); tris.Add(i1); tris.Add(i1 + 1);
+                }
+            }
+
+            // 端盖（默认封闭；短裤底开放让大腿穿出、T 恤领口由颈部遮断但仍封闭顶面）
+            if ((openCaps & 1) == 0)
+            {
+                AddFanCap(verts, tris, 0, segs, false);
+            }
+            if ((openCaps & 2) == 0)
+            {
+                AddFanCap(verts, tris, rings * row, segs, true);
+            }
+
+            var mesh = new Mesh { name = name };
+            mesh.SetVertices(verts);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
         }
 
-        /// <summary>给薄壳端面补一圈水平盖面（从外圈收到内圈），避免开放边缘露缝/露黑。</summary>
-        private static void AddShellCap(
-            List<Vector3> verts,
-            List<Vector3> normals,
-            List<Vector2> uvs,
-            List<int> tris,
-            float t,
-            int outerRowBase,
-            float outerOffset,
-            float innerOffset,
-            int radialSegs,
-            bool facingUp)
+        /// <summary>给管体端部补一个中心扇形盖面。</summary>
+        private static void AddFanCap(List<Vector3> verts, List<int> tris, int ringBase, int segs, bool facingUp)
         {
-            float y = t * CharacterMetrics.TorsoHeight;
-            float bodyRadius = SampleEggRadius01(t) * CharacterMetrics.BodyMaxRadius;
-            int innerRowBase = verts.Count;
-
-            for (int s = 0; s <= radialSegs; s++)
+            int center = verts.Count;
+            Vector3 avg = Vector3.zero;
+            for (int s = 0; s < segs; s++) avg += verts[ringBase + s];
+            avg /= segs;
+            verts.Add(avg);
+            for (int s = 0; s < segs; s++)
             {
-                float uCoord = (float)s / radialSegs;
-                float theta = uCoord * Mathf.PI * 2f;
-                float cos = Mathf.Cos(theta);
-                float sin = Mathf.Sin(theta);
-                float innerRadius = bodyRadius + innerOffset;
-
-                verts.Add(new Vector3(cos * innerRadius, y, sin * innerRadius));
-                normals.Add(facingUp ? Vector3.up : Vector3.down);
-                uvs.Add(new Vector2(uCoord, t));
+                int a = ringBase + s;
+                int b = ringBase + (s + 1) % segs;
+                if (facingUp) { tris.Add(center); tris.Add(a); tris.Add(b); }
+                else { tris.Add(center); tris.Add(b); tris.Add(a); }
             }
+        }
 
-            for (int s = 0; s < radialSegs; s++)
+        /// <summary>三次贝塞尔插值。</summary>
+        private static Vector3 EvalBezier(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float t)
+        {
+            float mt = 1f - t;
+            return mt * mt * mt * a + 3f * mt * mt * t * b + 3f * mt * t * t * c + t * t * t * d;
+        }
+
+        /// <summary>三次贝塞尔一阶导（切线方向）。</summary>
+        private static Vector3 EvalBezierTangent(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float t)
+        {
+            float mt = 1f - t;
+            return 3f * mt * mt * (b - a) + 6f * mt * t * (c - b) + 3f * t * t * (d - c);
+        }
+
+        /// <summary>
+        /// 触须发段网格（INKWAVE tentacle hair kernel）：沿两段三次贝塞尔脊线的扁锥形管
+        /// （Z 向厚度 = 宽度的 flatten 比例，发束前后扁、左右宽），根部扇形封口（埋进帽里不露洞），
+        /// 尖端由段 B 贝塞尔向脸侧 (+Z) 内卷。原点 = 发根枢轴，脊线沿 −Y 生长。
+        /// </summary>
+        private static Mesh BuildHairTubeMesh(
+            string name,
+            Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3,
+            Vector3 p4, Vector3 p5, Vector3 p6,
+            float baseRadius, float tipRadius, float flattenZ, float taperStart)
+        {
+            const int spineSegs = 16;
+            const int radialSegs = 10;
+
+            var verts = new List<Vector3>(spineSegs * radialSegs + 2);
+            var tris = new List<int>(spineSegs * radialSegs * 6);
+
+            for (int i = 0; i <= spineSegs; i++)
             {
-                int outerA = outerRowBase + s;
-                int outerB = outerRowBase + s + 1;
-                int innerA = innerRowBase + s;
-                int innerB = innerRowBase + s + 1;
-
-                if (facingUp)
+                float u = (float)i / spineSegs;
+                Vector3 center, tangent;
+                if (u <= 0.5f)
                 {
-                    tris.Add(outerA);
-                    tris.Add(innerA);
-                    tris.Add(outerB);
-
-                    tris.Add(outerB);
-                    tris.Add(innerA);
-                    tris.Add(innerB);
+                    float t = u / 0.5f;
+                    center = EvalBezier(p0, p1, p2, p3, t);
+                    tangent = EvalBezierTangent(p0, p1, p2, p3, t);
                 }
                 else
                 {
-                    tris.Add(outerA);
-                    tris.Add(outerB);
-                    tris.Add(innerA);
+                    float t = (u - 0.5f) / 0.5f;
+                    center = EvalBezier(p3, p4, p5, p6, t);
+                    tangent = EvalBezierTangent(p3, p4, p5, p6, t);
+                }
 
-                    tris.Add(outerB);
-                    tris.Add(innerB);
-                    tris.Add(innerA);
+                float taper = Mathf.SmoothStep(taperStart, 0.97f, u);
+                float radius = Mathf.Lerp(baseRadius, tipRadius, taper);
+
+                Vector3 tangentN = tangent.normalized;
+                Vector3 side = Vector3.Cross(new Vector3(0f, 0f, 1f), tangentN);
+                if (side.sqrMagnitude < 0.0001f) side = Vector3.right;
+                side.Normalize();
+                Vector3 up = Vector3.Cross(tangentN, side).normalized;
+
+                for (int s = 0; s < radialSegs; s++)
+                {
+                    float theta = (float)s / radialSegs * Mathf.PI * 2f;
+                    Vector3 radial = side * Mathf.Cos(theta) + up * Mathf.Sin(theta) * flattenZ;
+                    verts.Add(center + radial * radius);
                 }
             }
+
+            for (int i = 0; i < spineSegs; i++)
+            {
+                int row0 = i * radialSegs;
+                int row1 = (i + 1) * radialSegs;
+                for (int s = 0; s < radialSegs; s++)
+                {
+                    int sNext = (s + 1) % radialSegs;
+                    int i0 = row0 + s;
+                    int i1 = row1 + s;
+                    int i0n = row0 + sNext;
+                    int i1n = row1 + sNext;
+                    tris.Add(i0); tris.Add(i1); tris.Add(i0n);
+                    tris.Add(i0n); tris.Add(i1); tris.Add(i1n);
+                }
+            }
+
+            // 根部封口扇面（+Y 朝上，摆动时不露洞）
+            int capRootCenter = verts.Count;
+            verts.Add(p0 + Vector3.up * 0.004f);
+            for (int s = 0; s < radialSegs; s++)
+            {
+                tris.Add(capRootCenter);
+                tris.Add((s + 1) % radialSegs);
+                tris.Add(s);
+            }
+
+            // 末端封口扇面（封闭发管尖端，杜绝管内中空漏底与背面剔除穿透）
+            int tipBaseRow = spineSegs * radialSegs;
+            int capTipCenter = verts.Count;
+            Vector3 tipDir = (p6 - p5).sqrMagnitude > 1e-6f ? (p6 - p5).normalized : Vector3.down;
+            verts.Add(p6 + tipDir * 0.003f);
+            for (int s = 0; s < radialSegs; s++)
+            {
+                tris.Add(capTipCenter);
+                tris.Add(tipBaseRow + s);
+                tris.Add(tipBaseRow + (s + 1) % radialSegs);
+            }
+
+            var mesh = new Mesh { name = name };
+            mesh.SetVertices(verts);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        /// <summary>
+        /// 触须发段 A（根段，长 ~0.13m）：根粗 0.048 → 中段 0.030，微后收（−Z 0.012）。
+        /// 公开给 EditMode 测试做网格健全性检查。
+        /// </summary>
+        public static Mesh CreateHairSegment1Mesh()
+        {
+            if (_hairSeg1Mesh != null) return _hairSeg1Mesh;
+            _hairSeg1Mesh = BuildHairTubeMesh(
+                "HairSeg1",
+                Vector3.zero,
+                new Vector3(0f, -0.045f, -0.002f),
+                new Vector3(0f, -0.090f, -0.008f),
+                new Vector3(0f, -0.130f, -0.012f),
+                new Vector3(0f, -0.130f, -0.012f),
+                new Vector3(0f, -0.130f, -0.012f),
+                new Vector3(0f, -0.130f, -0.012f),
+                0.048f, 0.030f, 0.55f, 0.15f);
+            return _hairSeg1Mesh;
+        }
+
+        /// <summary>
+        /// 触须发段 B（梢段，长 ~0.12m，挂在 HairMid 枢轴下）：0.030 → 0.006，
+        /// 末端向脸侧（+Z）内卷 ~0.06（INKWAVE 标志性的 tentacle 卷尖）。
+        /// </summary>
+        public static Mesh CreateHairSegment2Mesh()
+        {
+            if (_hairSeg2Mesh != null) return _hairSeg2Mesh;
+            _hairSeg2Mesh = BuildHairTubeMesh(
+                "HairSeg2",
+                Vector3.zero,
+                new Vector3(0f, -0.040f, 0.004f),
+                new Vector3(0f, -0.085f, 0.028f),
+                new Vector3(0f, -0.118f, 0.062f),
+                new Vector3(0f, -0.118f, 0.062f),
+                new Vector3(0f, -0.118f, 0.062f),
+                new Vector3(0f, -0.118f, 0.062f),
+                0.033f, 0.008f, 0.55f, 0.20f);
+            return _hairSeg2Mesh;
         }
 
         #endregion
@@ -860,188 +1068,267 @@ namespace P1.Player
             out Transform bodySquash,
             out Transform leftEye,
             out Transform rightEye,
+            out Transform face,
             out Transform leftLegRoot,
             out Transform rightLegRoot,
             out Transform leftKnee,
             out Transform rightKnee,
             out Transform leftAnkle,
-            out Transform rightAnkle)
+            out Transform rightAnkle,
+            out Transform leftElbow,
+            out Transform rightElbow,
+            out Transform spine,
+            out Transform neck,
+            out Transform[] hairRootPivots,
+            out Transform[] hairMidPivots)
         {
-            // 1. 躯干枢轴 (Chest)：位于贴地低位 (y = ChestPivotY = 0.05m)。
-            // 使得奔跑前倾与左右摇摆像"蛋在地面晃荡"，而非传统人形的上半身在腰部折断
-            var chestGo = new GameObject("Chest");
-            chestGo.transform.SetParent(kidRoot, false);
-            chestGo.transform.localPosition = new Vector3(0f, CharacterMetrics.ChestPivotY, 0f);
-            chest = chestGo.transform;
-
-            // 1.5 髋部枢轴 (Hips)：挂在 Chest 下（世界 y = HipPivotY = 0.27m，藏在躯干下段内），
-            //    双腿挂在这里而不是 BodySquash：触地挤压只压躯干，脚掌不会被压进地面
+            // 1. 骨盆枢轴 (Hips)：P33 真骨骼树根（世界 y = HipBoneY = 0.520m）。
+            //    双腿直接挂 Hips（不受躯干挤压影响），上身链经 BodySquash → Spine → Chest 逐级折叠，
+            //    前倾按 KidGaitSolver 的 25/45/30 分配到髋/腰/胸（对齐 INKWAVE runPose 脊柱链）。
             var hipsGo = new GameObject("Hips");
-            hipsGo.transform.SetParent(chest, false);
-            hipsGo.transform.localPosition = new Vector3(0f, CharacterMetrics.HipPivotY - CharacterMetrics.ChestPivotY, 0f);
+            hipsGo.transform.SetParent(kidRoot, false);
+            hipsGo.transform.localPosition = new Vector3(0f, CharacterMetrics.HipBoneY, 0f);
             hips = hipsGo.transform;
 
-            // 2. 弹性形变容器 (BodySquash)：挂在 Chest 下，抵消枢轴高度置于世界 y=0。
-            // 步态弹跳（BobY）与触地挤压拉伸（SquashY / SquashXZ）全部作用在它身上
+            // 2. 上身挤压容器 (BodySquash)：触地压扁 / 起跳拉伸只作用在上身链（脚保持踩地）。
             var squashGo = new GameObject("BodySquash");
-            squashGo.transform.SetParent(chest, false);
-            squashGo.transform.localPosition = new Vector3(0f, -CharacterMetrics.ChestPivotY, 0f);
+            squashGo.transform.SetParent(hips, false);
+            squashGo.transform.localPosition = Vector3.zero;
             bodySquash = squashGo.transform;
 
-            // 2.0 躯干抬升节点 (Torso)：蛋体从世界 y = TorsoBaseY = 0.22m 起，下方让位给短粗腿。
-            // 挤压缩放仍作用在 BodySquash（围绕地面原点），躯干会向下压进弯曲的膝盖里 —— 正是落地缓冲想要的观感
-            var torsoGo = new GameObject("Torso");
-            torsoGo.transform.SetParent(bodySquash, false);
-            torsoGo.transform.localPosition = new Vector3(0f, CharacterMetrics.TorsoBaseY, 0f);
-            Transform torso = torsoGo.transform;
+            // 2.05 腰椎 (Spine) 与胸腔 (Chest)：两级脊柱节点，控制器分别写 45% / 30% 前倾；
+            //      头/臂/墨罐/武器都挂胸腔骨，前倾时枪随上身自然走（滚筒贴地由运行时闭环兜底）。
+            var spineGo = new GameObject("Spine");
+            spineGo.transform.SetParent(bodySquash, false);
+            spineGo.transform.localPosition = new Vector3(0f, CharacterMetrics.SpineLocalY, 0f);
+            spine = spineGo.transform;
 
-            // 2.1 蛋形主躯干：整颗躯干只用一件带描边的奶油白材质。
-            // 短裤与腰带是另外两层贴面薄壳（沿表面法线外扩 5mm / 9mm），像真实衣物一样叠在躯干上；
-            // 这样外轮廓只有一条完整黑边，不会出现 submesh 各画一次描边造成的接缝黑线。
-            var eggGo = new GameObject("EggBody");
-            eggGo.transform.SetParent(torso, false);
-            eggGo.transform.localPosition = Vector3.zero;
-            var mf = eggGo.AddComponent<MeshFilter>();
-            var mr = eggGo.AddComponent<MeshRenderer>();
-            mf.sharedMesh = CreateEggBodyMesh();
-            mr.sharedMaterial = p.Shirt;
+            var chestGo = new GameObject("Chest");
+            chestGo.transform.SetParent(spine, false);
+            chestGo.transform.localPosition = new Vector3(0f, CharacterMetrics.ChestLocalY, 0f);
+            chest = chestGo.transform;
 
-            var shortsGo = new GameObject("EggShorts");
-            shortsGo.transform.SetParent(torso, false);
+            // 2.1 服装真体积化（P33 废弃蛋面贴壳工艺）：盒型 T 恤随胸腔折叠、灯笼短裤锚骨盆、
+            //     队伍色腰带贴 T 恤下摆。外描边只给 T 恤与头（两条主剪影），交界处不出双描边黑线。
+            var teeGo = new GameObject("KidTee");
+            teeGo.transform.SetParent(spine, false);
+            teeGo.transform.localPosition = Vector3.zero;
+            teeGo.AddComponent<MeshFilter>().sharedMesh = CreateTeeMesh();
+            teeGo.AddComponent<MeshRenderer>().sharedMaterial = p.Shirt;
+
+            var shortsGo = new GameObject("KidShorts");
+            shortsGo.transform.SetParent(hips, false);
             shortsGo.transform.localPosition = Vector3.zero;
-            shortsGo.AddComponent<MeshFilter>().sharedMesh = GetEggShortsShellMesh();
+            shortsGo.AddComponent<MeshFilter>().sharedMesh = CreateShortsMesh();
             shortsGo.AddComponent<MeshRenderer>().sharedMaterial = p.Shorts;
 
-            var bandGo = new GameObject("EggWaistband");
-            bandGo.transform.SetParent(torso, false);
+            var bandGo = new GameObject("Waistband");
+            bandGo.transform.SetParent(spine, false);
             bandGo.transform.localPosition = Vector3.zero;
-            bandGo.AddComponent<MeshFilter>().sharedMesh = GetEggWaistbandShellMesh();
+            bandGo.AddComponent<MeshFilter>().sharedMesh = CreateWaistbandMesh();
             bandGo.AddComponent<MeshRenderer>().sharedMaterial = p.Waistband;
 
-            // 2.2 面部分区靠大眼、连体面罩与胸前墨点承担，蛋体本身保持一整块干净曲面。
+            // 2.4 颈与头 (Neck → Head)：头心世界 y ≈ 0.978、头顶 1.120（恰好贴包络，零玩法影响）。
+            var neckGo = new GameObject("Neck");
+            neckGo.transform.SetParent(chest, false);
+            neckGo.transform.localPosition = new Vector3(0f, CharacterMetrics.NeckLocalY, 0.006f);
+            neck = neckGo.transform;
 
-            // 2.3 面部容器 (Face)：容器本身放在躯干局部原点，所有部件直接用「躯干曲面空间」坐标贴面
-            // （五官 y 已按 TorsoHeight/BodyHeight 比例从旧蛋体坐标重映射，保持原有构图比例）
+            // 真实可见的少年肤色小脖子：从 T 恤领口（世界 0.73m）稳稳延伸到下巴（世界 0.88m），露出一截清爽精神的颈部
+            CreateCylinder(neck, "NeckSkin", new Vector3(0f, -0.055f, 0.002f), new Vector3(0.076f, 0.060f, 0.076f), p.Skin);
+            // T 恤圆领螺纹领圈（Crew Collar Ribbing）：勾勒出精致时尚的圆领轮廓
+            CreateCylinder(neck, "NeckCollarRib", new Vector3(0f, -0.095f, 0.002f), new Vector3(0.084f, 0.008f, 0.080f), p.Dark);
+
+            var headGo = new GameObject("Head");
+            headGo.transform.SetParent(neck, false);
+            headGo.transform.localPosition = new Vector3(0f, CharacterMetrics.HeadLocalY, 0.004f);
+            head = headGo.transform;
+
+            // 2.5 馒头头（mochi head）：唯一描边头部网格 + 队伍色头皮帽（盖枕部、露额与眉上）。
+            var headMeshGo = new GameObject("MochiHead");
+            headMeshGo.transform.SetParent(head, false);
+            headMeshGo.transform.localPosition = Vector3.zero;
+            headMeshGo.AddComponent<MeshFilter>().sharedMesh = CreateMochiHeadMesh();
+            headMeshGo.AddComponent<MeshRenderer>().sharedMaterial = p.Skin;
+
+            var scalpGo = new GameObject("ScalpCap");
+            scalpGo.transform.SetParent(head, false);
+            scalpGo.transform.localPosition = Vector3.zero;
+            scalpGo.AddComponent<MeshFilter>().sharedMesh = CreateScalpCapMesh();
+            scalpGo.AddComponent<MeshRenderer>().sharedMaterial = p.TeamHair;
+
+            // 2.6 面部容器 (Face)：五官按头部雕塑面采样贴面（SampleMochiHeadPoint），
+            //     既不会陷入曲面也不悬浮；大眼构图对齐 INKWAVE（单眼宽 ≈ 头宽 25%，颊线高度）。
             var faceGo = new GameObject("Face");
-            faceGo.transform.SetParent(torso, false);
+            faceGo.transform.SetParent(head, false);
             faceGo.transform.localPosition = Vector3.zero;
-            var face = faceGo.transform;
+            face = faceGo.transform;
 
-            // 2.3.1 连体深色眼罩：两片眼窝 + 中间鼻梁桥，读起来像 inkling 的面罩，而不是两个孤立的黑斑。
-            const float eyeY = 0.58f;
+            // 连体深色眼罩桥（鼻上一小横）+ 左右眼窝罩 + 大眼 + 队伍色虹膜 + 瞳孔 + 双高光
+            var bridgeDir = new Vector3(0f, 0.10f, 1f).normalized;
             var maskBridge = CreateSphere(face, "EyeMask_Bridge",
-                EggFrontPoint(0f, eyeY, 0.002f), new Vector3(0.20f, 0.15f, 0.028f), p.Dark);
+                SampleMochiHeadPoint(bridgeDir, 0.005f), new Vector3(0.052f, 0.040f, 0.016f), p.Dark);
             maskBridge.transform.localRotation = Quaternion.identity;
 
-            // 大眼：眼睛贴在上半前脸（y≈0.58），由曲面采样保证既不陷入也不悬浮。
             leftEye = null;
             rightEye = null;
             for (int s = -1; s <= 1; s += 2)
             {
-                float eyeX = s * 0.135f;
                 string side = s < 0 ? "L" : "R";
-                Quaternion faceRot = Quaternion.Euler(0f, EggFaceYaw(eyeX, eyeY), 0f);
 
-                // 面罩压扁成贴面片，减少"脸上贴了几个球"的凸起感
-                var mask = CreateSphere(face, "EyeMask_" + side, EggFrontPoint(eyeX, eyeY, 0.003f), new Vector3(0.24f, 0.25f, 0.030f), p.Dark);
-                mask.transform.localRotation = faceRot;
+                Vector3 eyeDir = new Vector3(s * 0.44f, 0.10f, 0.89f).normalized;
+                float yaw = Mathf.Atan2(eyeDir.x, eyeDir.z) * Mathf.Rad2Deg;
 
-                var eye = CreateSphere(face, "Eye_" + side, EggFrontPoint(eyeX, eyeY, 0.010f), new Vector3(0.175f, 0.195f, 0.062f), p.White);
-                eye.transform.localRotation = faceRot;
+                var mask = CreateSphere(face, "EyeMask_" + side,
+                    SampleMochiHeadPoint(eyeDir, 0.005f), new Vector3(0.094f, 0.108f, 0.018f), p.Dark);
+                mask.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
 
-                // 白眼球 + 队伍色虹膜 + 深色瞳孔 + 双高光：彩色只占眼球中央一小块，远看仍是大白眼。
-                // 眼球的局部空间半径是 0.5（Unity 球体直径为 1），贴片必须放在 z≈0.5 的极点附近才能露出表面。
-                CreateSphere(eye.transform, "Iris", new Vector3(0f, -0.005f, 0.50f), new Vector3(0.58f, 0.58f, 0.26f), p.TeamHair);
-                CreateSphere(eye.transform, "Pupil", new Vector3(0f, -0.005f, 0.62f), new Vector3(0.30f, 0.32f, 0.18f), p.Dark);
-                CreateSphere(eye.transform, "Glint", new Vector3(-0.15f, 0.17f, 0.70f), new Vector3(0.16f, 0.16f, 0.10f), p.White);
-                CreateSphere(eye.transform, "Glint2", new Vector3(0.12f, -0.12f, 0.68f), new Vector3(0.09f, 0.09f, 0.08f), p.White);
+                // 白眼球椭球（局部 +Z 朝脸外）：眨眼写 localScale.y，控制器缓存默认值
+                var eye = CreateSphere(face, "Eye_" + side,
+                    SampleMochiHeadPoint(eyeDir, 0.010f), new Vector3(0.070f, 0.082f, 0.036f), p.White);
+                eye.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+
+                CreateSphere(eye.transform, "Iris", new Vector3(0f, -0.004f, 0.47f), new Vector3(0.52f, 0.52f, 0.30f), p.TeamHair);
+                CreateSphere(eye.transform, "Pupil", new Vector3(0f, -0.004f, 0.58f), new Vector3(0.26f, 0.28f, 0.20f), p.Dark);
+                CreateSphere(eye.transform, "Glint", new Vector3(-0.14f, 0.16f, 0.66f), new Vector3(0.15f, 0.15f, 0.10f), p.White);
+                CreateSphere(eye.transform, "Glint2", new Vector3(0.11f, -0.11f, 0.64f), new Vector3(0.08f, 0.08f, 0.08f), p.White);
 
                 if (s < 0) leftEye = eye.transform;
                 else rightEye = eye.transform;
 
-                // 腮红贴在眼睛外下方
-                float blushX = s * 0.255f;
-                var blush = CreateSphere(face, "Blush_" + side, EggFrontPoint(blushX, 0.47f, 0.004f), new Vector3(0.095f, 0.05f, 0.022f), p.Blush);
-                blush.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(blushX, 0.47f), 0f);
+                // 眉毛：眼罩上方的小弧，外侧微挑（+roll 抬 +X 端）
+                Vector3 browDir = new Vector3(s * 0.50f, 0.44f, 0.86f).normalized;
+                float browYaw = Mathf.Atan2(browDir.x, browDir.z) * Mathf.Rad2Deg;
+                var brow = CreateSphere(face, "Brow_" + side,
+                    SampleMochiHeadPoint(browDir, 0.007f), new Vector3(0.056f, 0.012f, 0.012f), p.Dark);
+                brow.transform.localRotation = Quaternion.Euler(0f, browYaw, s * 6f);
+
+                // 腮红（保留一点 Q 版信号）：眼外下方
+                Vector3 blushDir = new Vector3(s * 0.68f, -0.16f, 0.72f).normalized;
+                float blushYaw = Mathf.Atan2(blushDir.x, blushDir.z) * Mathf.Rad2Deg;
+                var blush = CreateSphere(face, "Blush_" + side,
+                    SampleMochiHeadPoint(blushDir, 0.006f), new Vector3(0.050f, 0.026f, 0.012f), p.Blush);
+                blush.transform.localRotation = Quaternion.Euler(0f, blushYaw, 0f);
+
+                // 耳朵（挂头骨本体）：头侧小杯
+                Vector3 earDir = new Vector3(s * 0.97f, -0.05f, -0.06f).normalized;
+                var ear = CreateSphere(head, "Ear_" + side,
+                    SampleMochiHeadPoint(earDir, 0.004f), new Vector3(0.014f, 0.034f, 0.026f), p.Skin);
+                ear.transform.localRotation = Quaternion.Euler(0f, 0f, s * 10f);
             }
 
-            // 小 ω 嘴：极扁的深色椭圆，贴在两眼下方的中线上
-            var mouth = CreateSphere(face, "Mouth", EggFrontPoint(0f, 0.48f, 0.004f), new Vector3(0.085f, 0.028f, 0.020f), p.Dark);
+            // 小嘴：中线、颊线下方（chin 收坡上，不落在下巴尖）
+            var mouthDir = new Vector3(0f, -0.26f, 0.96f).normalized;
+            var mouth = CreateSphere(face, "Mouth",
+                SampleMochiHeadPoint(mouthDir, 0.006f), new Vector3(0.044f, 0.014f, 0.012f), p.Dark);
             mouth.transform.localRotation = Quaternion.identity;
 
-            // 2.3.2 胸前队伍色墨点：把"全身刷队伍色"改成小面积墨渍点缀，既保留队伍识别，
-            // 又不会让角色和地面/墨迹糊成一片。位置全部由躯干曲面采样，不会浮空。
-            Vector3[] chestInkPos = new Vector3[]
+            // 2.7 胸前队伍色墨点 ×2：T 恤前片（超椭圆脸近似平面）上的小贴点，保留队伍识别。
+            var ink0 = CreateSphere(spine, "ChestInk_0", new Vector3(0.045f, 0.085f, 0.096f),
+                new Vector3(0.045f, 0.038f, 0.010f), p.InkDecal);
+            ink0.transform.localRotation = Quaternion.Euler(0f, 0f, -8f);
+            var ink1 = CreateSphere(spine, "ChestInk_1", new Vector3(0.072f, 0.058f, 0.092f),
+                new Vector3(0.028f, 0.024f, 0.010f), p.InkDecal);
+            ink1.transform.localRotation = Quaternion.Euler(0f, 0f, 14f);
+
+            // 2.8 触须垂发（P33 主剪件，队伍色）：6 束（左右各 3），每束 根段→梢段 两节骨骼链。
+            // 发根种在头皮帽面上（曲面外扩 14mm），默认"外撇 + 下垂 + 微后收"；
+            // 根/梢两层 pivot 交给控制器弹簧链（BindKidRig → UpdateHairSway），
+            // 跑跳/急转/变形时整束甩动并在鞭梢滞后 —— INKWAVE 头发读法的灵魂。
+            // 节点命名避开测试断言不存在的 "InkCrest"。
+            var hairRootGo = new GameObject("TentacleHair");
+            hairRootGo.transform.SetParent(head, false);
+            Mesh seg1Mesh = CreateHairSegment1Mesh();
+            Mesh seg2Mesh = CreateHairSegment2Mesh();
+            hairRootPivots = new Transform[6];
+            hairMidPivots = new Transform[6];
+            Vector3[] strandDirs = new Vector3[]
             {
-                new Vector3(0.12f, 0.400f, 0f),
-                new Vector3(0.19f, 0.365f, 0f),
-                new Vector3(0.045f, 0.437f, 0f),
-                new Vector3(0.155f, 0.333f, 0f)
+                new Vector3(-0.88f, 0.30f, -0.10f),  // 0 左前（贴脸侧）
+                new Vector3( 0.88f, 0.30f, -0.10f),  // 1 右前
+                new Vector3(-0.62f, 0.42f, -0.56f),  // 2 左后侧
+                new Vector3( 0.62f, 0.42f, -0.56f),  // 3 右后侧
+                new Vector3(-0.28f, 0.52f, -0.80f),  // 4 左后
+                new Vector3( 0.28f, 0.52f, -0.80f)   // 5 右后
             };
-            float[] chestInkSize = new float[] { 0.085f, 0.050f, 0.042f, 0.034f };
-            for (int i = 0; i < chestInkPos.Length; i++)
+            for (int i = 0; i < strandDirs.Length; i++)
             {
-                Vector3 cp = chestInkPos[i];
-                float size = chestInkSize[i];
-                var spot = CreateSphere(face, "ChestInk_" + i, EggFrontPoint(cp.x, cp.y, 0.003f),
-                    new Vector3(size, size * 0.85f, size * 0.14f), p.InkDecal);
-                spot.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(cp.x, cp.y), 0f);
+                Vector3 dir = strandDirs[i].normalized;
+                Vector3 rootPos = SampleMochiHeadPoint(dir, 0.008f);
+                // 下垂方向 = 外法线 45% + 重力 95% + 微后收，用 FromToRotation 把骨骼 -Y 轴对准它
+                Vector3 drop = (dir * 0.5f + Vector3.down * 0.92f + Vector3.back * 0.12f).normalized;
+                Quaternion rootRot = Quaternion.FromToRotation(Vector3.down, drop);
+
+                var rootGo = new GameObject("HairPivot_" + i);
+                rootGo.transform.SetParent(hairRootGo.transform, false);
+                rootGo.transform.localPosition = rootPos;
+                rootGo.transform.localRotation = rootRot;
+                hairRootPivots[i] = rootGo.transform;
+
+                var seg1Go = new GameObject("Tentacle_Hair_" + i);
+                seg1Go.transform.SetParent(rootGo.transform, false);
+                seg1Go.AddComponent<MeshFilter>().sharedMesh = seg1Mesh;
+                seg1Go.AddComponent<MeshRenderer>().sharedMaterial = p.TeamHair;
+
+                // 梢段 pivot：接在根段末端（网格脊线 −0.13），默认续接方向 + 微内卷预弯
+                var midGo = new GameObject("HairSkirt_" + i);
+                midGo.transform.SetParent(rootGo.transform, false);
+                midGo.transform.localPosition = new Vector3(0f, -0.128f, -0.012f);
+                midGo.transform.localRotation = Quaternion.Euler(-6f, 0f, 0f);
+                hairMidPivots[i] = midGo.transform;
+
+                var seg2Go = new GameObject("Tentacle_Hair_Skirt" + i);
+                seg2Go.transform.SetParent(midGo.transform, false);
+                seg2Go.AddComponent<MeshFilter>().sharedMesh = seg2Mesh;
+                seg2Go.AddComponent<MeshRenderer>().sharedMaterial = p.TeamHair;
             }
-            var drip = CreateSphere(face, "ChestInk_Drip", EggFrontPoint(0.105f, 0.345f, 0.003f),
-                new Vector3(0.022f, 0.050f, 0.012f), p.InkDecal);
-            drip.transform.localRotation = Quaternion.Euler(0f, EggFaceYaw(0.105f, 0.345f), 0f);
+            leftHair = hairRootPivots[0];
+            rightHair = hairRootPivots[1];
 
-            // 2.4 头顶墨焰触须束已按 P22-A 需求移除（"头尖"观感来源之一）；
-            // 队伍色识别改由腰带/虹膜/袖口/胸渍/墨罐液面承担。leftHair/rightHair 传 null 保持旧接口兼容。
-            leftHair = null;
-            rightHair = null;
-
-            // 2.5 后背紧凑型墨罐背包 (InkTankBackpack)：外推到 z=-0.43，让壳体真正凸出躯干背面成为可见背包
+            // 2.9 背驮墨罐 (InkTankBackpack)：挂胸腔骨、罐顶微后倾（INKWAVE tank 骨 −0.1rad）；
+            //     上身前倾时墨罐自然跟着抬压，罐内液面由控制器按墨水余量收缩。
             var backpackGo = new GameObject("InkTankBackpack");
-            backpackGo.transform.SetParent(torso, false);
-            backpackGo.transform.localPosition = new Vector3(0f, 0.40f, -0.43f);
+            backpackGo.transform.SetParent(chest, false);
+            backpackGo.transform.localPosition = new Vector3(0f, -0.010f, -CharacterMetrics.TankBackZ);
+            backpackGo.transform.localRotation = Quaternion.Euler(-6f, 0f, 0f);
 
-            CreateBox(backpackGo.transform, "MountPlate", new Vector3(0f, 0f, 0.04f), new Vector3(0.16f, 0.26f, 0.035f), p.Dark);
-            CreateCylinder(backpackGo.transform, "GlassChamber", Vector3.zero, new Vector3(0.26f, 0.15f, 0.26f), p.Glass);
+            CreateBox(backpackGo.transform, "MountPlate", new Vector3(0f, 0f, 0.048f), new Vector3(0.10f, 0.20f, 0.014f), p.Dark);
+            CreateCylinder(backpackGo.transform, "GlassChamber", Vector3.zero, new Vector3(0.112f, 0.078f, 0.112f), p.Glass);
 
-            var fillGo = CreateCylinder(backpackGo.transform, "LiquidFill", Vector3.zero, new Vector3(0.22f, 0.135f, 0.22f), p.TeamLiquid);
+            var fillGo = CreateCylinder(backpackGo.transform, "LiquidFill", Vector3.zero, new Vector3(0.094f, 0.066f, 0.094f), p.TeamLiquid);
             tankFill = fillGo.transform;
 
-            CreateCylinder(backpackGo.transform, "TopCap", new Vector3(0f, 0.15f, 0f), new Vector3(0.28f, 0.02f, 0.28f), p.Metal);
-            CreateCylinder(backpackGo.transform, "ValveKnob", new Vector3(0f, 0.18f, 0f), new Vector3(0.06f, 0.025f, 0.06f), p.Dark);
-            CreateCylinder(backpackGo.transform, "BottomCap", new Vector3(0f, -0.15f, 0f), new Vector3(0.28f, 0.02f, 0.28f), p.Metal);
+            CreateCylinder(backpackGo.transform, "TopCap", new Vector3(0f, 0.080f, 0f), new Vector3(0.120f, 0.008f, 0.120f), p.TankMetal);
+            CreateCylinder(backpackGo.transform, "ValveKnob", new Vector3(0f, 0.093f, 0f), new Vector3(0.028f, 0.010f, 0.028f), p.Dark);
+            CreateCylinder(backpackGo.transform, "BottomCap", new Vector3(0f, -0.080f, 0f), new Vector3(0.120f, 0.008f, 0.120f), p.TankMetal);
 
-            // 2.6 头顶空锚点 (Head)：供待机微表现进行微妙呼吸浮动
-            var headGo = new GameObject("Head");
-            headGo.transform.SetParent(torso, false);
-            headGo.transform.localPosition = new Vector3(0f, 0.595f, 0f);
-            head = headGo.transform;
-
-            // 3. 左右手臂 (LeftArm / RightArm)：必须是 Chest 的直接子节点
-            //    （测试用例强依赖 KidRoot.transform.Find("Chest/LeftArm") 路径）。
-            //    蛋体很胖，枢轴只能埋进侧面、让前臂从体表前方伸出，圆手才落在武器握把附近。
+            // 3. 两骨手臂 (LeftArm / RightArm)：肩枢轴挂胸腔骨（测试路径 Chest/LeftArm 保持）。
+            //    这里的 authored 旋转只是"装配期占位"：真正的持握姿态在武器建好后由
+            //    ResolveWeaponHoldPoses 按每把武器的真实握把位置用两骨 IK 反解并整体套用
+            //    （见 CharacterVisualAssembler.ResolveWeaponHoldPoses）。
             var lArmGo = new GameObject("LeftArm");
             lArmGo.transform.SetParent(chest, false);
-            lArmGo.transform.localPosition = new Vector3(-0.34f, 0.41f, 0.04f);
+            lArmGo.transform.localPosition = new Vector3(-CharacterMetrics.ShoulderLocalX, CharacterMetrics.ShoulderLocalY, CharacterMetrics.ShoulderLocalZ);
+            lArmGo.transform.localRotation = Quaternion.Euler(-8f, 0f, -4f);
             leftArm = lArmGo.transform;
-            BuildMittenArm(leftArm, p, 1);
+            BuildKidArm(leftArm, p, -1, out leftElbow);
 
             var rArmGo = new GameObject("RightArm");
             rArmGo.transform.SetParent(chest, false);
-            rArmGo.transform.localPosition = new Vector3(0.34f, 0.41f, 0.04f);
+            rArmGo.transform.localPosition = new Vector3(CharacterMetrics.ShoulderLocalX, CharacterMetrics.ShoulderLocalY, CharacterMetrics.ShoulderLocalZ);
+            rArmGo.transform.localRotation = Quaternion.Euler(-20f, 0f, 5f);
             rightArm = rArmGo.transform;
-            BuildMittenArm(rightArm, p, -1);
+            BuildKidArm(rightArm, p, 1, out rightElbow);
 
-            // 4. 短粗双腿双脚 (P22-A)：挂在 Hips 下，FK 三段（LegRoot/Knee/Ankle）
-            //    由 CharacterVisualController 按 EggGaitSolver 步态与滞空/落地姿态写回
+            // 4. 两骨双腿：髋→膝→踝三段链挂 Hips，由控制器按 KidGaitSolver 步态与滞空/落地写回
             BuildLeg(hips, p, -1, out leftLegRoot, out leftKnee, out leftAnkle);
             BuildLeg(hips, p, 1, out rightLegRoot, out rightKnee, out rightAnkle);
         }
 
         /// <summary>
-        /// 短粗蛋仔腿：短裤蓝大腿 → 膝 → 肤色小腿 → 踝 → 深色圆头短靴，脚底正好落在世界 y=0。
-        /// 复用现有调色盘材质（短裤/皮肤/深色塑料），不新增材质；大腿上端埋进躯干下段的短裤薄壳里，
-        /// 站立时接缝不可见。渲染器全部保留投影（腿是实体大件，遮挡与影子都需要）。
+        /// 两骨腿（P33）：短裤蓝大腿 → 膝 → 肤色小腿（白袜口）→ 踝 → INKWAVE 厚底板鞋
+        /// （深色鞋壳 + 白中底 + 白鞋头包边 + 队伍色后跟片），鞋底严格落在世界 y=0
+        /// （踝世界高度 0.501 − 0.222 − 0.211 = 0.068，鞋壳底 = 0.068 − 0.037 − 0.032 = −0.001 贴地）。
         /// </summary>
         private static void BuildLeg(
             Transform hips,
@@ -1051,18 +1338,19 @@ namespace P1.Player
             out Transform kneePivot,
             out Transform anklePivot)
         {
+            string sideName = side < 0 ? "L" : "R";
             var legGo = new GameObject(side < 0 ? "LeftLeg" : "RightLeg");
             legGo.transform.SetParent(hips, false);
-            legGo.transform.localPosition = new Vector3(side * CharacterMetrics.HipOffsetX, 0f, 0f);
+            legGo.transform.localPosition = new Vector3(side * CharacterMetrics.HipHalfX, CharacterMetrics.LegHipLocalY, 0f);
             legRoot = legGo.transform;
 
             float thighLen = CharacterMetrics.ThighLength;
-            float calfLen = CharacterMetrics.CalfLength;
+            float shinLen = CharacterMetrics.ShinLength;
 
-            // 大腿（短裤蓝）：胶囊从髋枢轴垂到膝（半径 0.085 —— 蛋仔比例的墩实短腿）
+            // 大腿（短裤蓝）：从髋枢轴垂到膝
             CreateCapsule(legRoot, "Thigh",
                 new Vector3(0f, -thighLen * 0.5f, 0f),
-                new Vector3(0.17f, thighLen * 0.5f + 0.03f, 0.17f), p.Shorts);
+                new Vector3(0.096f, thighLen * 0.5f + 0.024f, 0.096f), p.Shorts);
 
             // 膝关节枢轴
             var kneeGo = new GameObject("Knee");
@@ -1070,56 +1358,210 @@ namespace P1.Player
             kneeGo.transform.localPosition = new Vector3(0f, -thighLen, 0f);
             kneePivot = kneeGo.transform;
 
-            // 小腿（肤色）
+            // 小腿（肤色）+ 白袜口（中筒袜上沿）
             CreateCapsule(kneePivot, "Calf",
-                new Vector3(0f, -calfLen * 0.5f, 0f),
-                new Vector3(0.135f, calfLen * 0.5f + 0.02f, 0.135f), p.Skin);
+                new Vector3(0f, -shinLen * 0.5f, 0f),
+                new Vector3(0.078f, shinLen * 0.5f + 0.016f, 0.078f), p.Skin);
+            CreateCylinder(kneePivot, "SockCuff_" + sideName,
+                new Vector3(0f, -0.052f, 0f), new Vector3(0.086f, 0.011f, 0.086f), p.White);
 
             // 踝关节枢轴
             var ankleGo = new GameObject("Ankle");
             ankleGo.transform.SetParent(kneePivot, false);
-            ankleGo.transform.localPosition = new Vector3(0f, -calfLen, 0f);
+            ankleGo.transform.localPosition = new Vector3(0f, -shinLen, 0f);
             anklePivot = ankleGo.transform;
 
-            // 圆头短靴（深色）：压扁球前伸成鞋头，鞋底落在世界 y=0
-            //（踝世界高度 = HipPivotY - ThighLength - CalfLength = 0.05m，球心再降 0.01m、半径 0.045m → 底面 -0.005m ≈ 贴地）
+            // 厚底板鞋：鞋壳压扁球前伸成鞋头；中底白条与鞋头包边底缘与鞋壳齐平（触地标定不变）
             CreateSphere(anklePivot, "Foot",
-                new Vector3(0f, -0.01f, 0.03f),
-                new Vector3(0.15f, 0.09f, 0.20f), p.Dark);
+                new Vector3(0f, -0.037f, 0.052f),
+                new Vector3(0.098f, 0.064f, CharacterMetrics.ShoeLength), p.Dark);
+            CreateSphere(anklePivot, "SoleMid",
+                new Vector3(0f, -0.056f, 0.048f),
+                new Vector3(0.104f, 0.024f, 0.208f), p.White);
+            CreateSphere(anklePivot, "ToeCap",
+                new Vector3(0f, -0.044f, 0.128f),
+                new Vector3(0.086f, 0.042f, 0.070f), p.White);
+            // 队伍色后跟片（INKWAVE heel window：远距认队色的锚点之一）
+            CreateBox(anklePivot, "HeelTab_" + sideName,
+                new Vector3(0f, -0.022f, -0.046f), new Vector3(0.042f, 0.034f, 0.014f), p.TeamHair);
         }
 
         /// <summary>
-        /// 短袖手臂：上臂（奶油白短袖）→ 队伍色袖口 → 肤色小臂 → 肤色圆手。
-        /// 旧版整条手臂都是奶油白袖子，叠在奶油白蛋体上远看只剩几个圆点；
-        /// 露出一段肤色小臂后，正面/侧面都能读出"手在握枪"。
+        /// 两骨手臂（P32 二段臂的完整骨骼版）：肩球（三角肌胶囊）+ 上臂（奶油白短袖身）→ 肘枢轴 →
+        /// 队伍色袖口 + 肤色前臂 + 圆手。肩球挂在肩枢轴上、随抬臂一起转，专门用来填平
+        /// "衣身肩线 → 手臂"之间的断缝；上臂短袖顶部压在枢轴之下，避免旧版袖头冒出肩膀的悬浮感。
+        /// 具体持握角度由 <see cref="ResolveWeaponHoldPoses"/> 按武器反解，这里只负责几何。
         /// </summary>
-        private static void BuildMittenArm(Transform root, Palette p, int inward)
+        private static void BuildKidArm(Transform shoulder, Palette p, int side, out Transform elbowPivot)
         {
-            Vector3 toHand = new Vector3(inward * 0.11f, 0.06f, 0.46f);
-            // 肘部放到 72% 处：刚好越过蛋体表面，短袖、袖口和小臂都能被看见；
-            // 旧版 52% 时整段上臂都埋在肚子里，正面只剩一颗肤色圆点。
-            Vector3 elbow = toHand * 0.72f;
-            Vector3 wrist = toHand * 0.93f;
+            float upperLen = CharacterMetrics.UpperArmLength;
+            float foreLen = CharacterMetrics.ForearmLength;
 
-            // 上臂短袖
-            Vector3 sleeveVec = elbow;
-            var sleeve = CreateCapsule(root, "Sleeve", sleeveVec * 0.5f,
-                new Vector3(0.095f, sleeveVec.magnitude * 0.5f, 0.095f), p.Sleeve);
-            sleeve.transform.localRotation = Quaternion.FromToRotation(Vector3.up, sleeveVec.normalized);
+            // 肩球：只保留埋进 T 恤里的一小段三角肌过渡，不外凸成"护肩球"。
+            // 肩枢轴已经落在衣身最宽处内侧，袖子上半段会被衣服自然盖住，形成肩线。
+            CreateSphere(shoulder, "ShoulderCap",
+                new Vector3(side * 0.004f, -0.006f, 0f),
+                new Vector3(0.082f, 0.070f, 0.082f), p.Sleeve);
 
-            // 队伍色袖口：盖住短袖与肤色小臂的接缝
-            var cuff = CreateCylinder(root, "Cuff", elbow,
-                new Vector3(0.105f, 0.018f, 0.105f), p.TeamHair);
-            cuff.transform.localRotation = Quaternion.FromToRotation(Vector3.up, sleeveVec.normalized);
+            // 短袖：覆盖上臂上段（drop-shoulder 短款，袖口在肘上方收边）
+            // 顶端落在肩枢轴高度（不再冒出肩线），内侧半段埋进衣身、外侧形成圆润肩头。
+            CreateCapsule(shoulder, "Sleeve",
+                new Vector3(0f, -0.068f, 0f),
+                new Vector3(0.090f, 0.066f, 0.090f), p.Sleeve);
 
-            // 肤色小臂
-            Vector3 forearmVec = wrist - elbow;
-            var forearm = CreateCapsule(root, "Forearm", (elbow + wrist) * 0.5f,
-                new Vector3(0.075f, forearmVec.magnitude * 0.5f + 0.01f, 0.075f), p.Skin);
-            forearm.transform.localRotation = Quaternion.FromToRotation(Vector3.up, forearmVec.normalized);
+            // 肘枢轴：authored 屈肘 35°（负 X = 小臂向前卷）
+            var elbowGo = new GameObject("Elbow");
+            elbowGo.transform.SetParent(shoulder, false);
+            elbowGo.transform.localPosition = new Vector3(0f, -upperLen, 0f);
+            elbowGo.transform.localRotation = Quaternion.Euler(-35f, 0f, 0f);
+            Transform elbowT = elbowGo.transform;
 
-            // 圆手
-            CreateSphere(root, "Hand", toHand, new Vector3(0.105f, 0.105f, 0.105f), p.Skin);
+            // 队伍色袖口：盖住短袖与前臂的接缝（绕肘枢轴旋转时遮住断缝）
+            CreateCylinder(elbowT, "Cuff", Vector3.zero, new Vector3(0.080f, 0.010f, 0.080f), p.TeamHair);
+
+            // 肤色前臂
+            CreateCapsule(elbowT, "Forearm",
+                new Vector3(0f, -foreLen * 0.5f, 0f),
+                new Vector3(0.064f, foreLen * 0.5f + 0.012f, 0.064f), p.Skin);
+
+            // 握拳（握把位）：沿骨轴略拉长，读起来是"拳"而不是一颗球
+            var hand = CreateSphere(elbowT, "Hand", new Vector3(0f, -foreLen, 0f),
+                new Vector3(0.078f, 0.090f, 0.078f), p.Skin);
+            // 拇指：贴握把内侧的小凸起（右手在 -X 侧、左手在 +X 侧）
+            CreateSphere(hand.transform, "Thumb",
+                new Vector3(-side * 0.026f, 0.006f, 0.030f),
+                new Vector3(0.036f, 0.040f, 0.036f), p.Skin);
+
+            elbowPivot = elbowT;
+        }
+
+        /// <summary>双枪左肩的额外外展位移（与右手对称持枪时给肘部留出空间）。</summary>
+        private static readonly Vector3 DualLeftShoulderOffset = new Vector3(-0.035f, 0f, 0.010f);
+
+        /// <summary>
+        /// 把每把武器的握把平移到右手手位，并反解出对应的手臂姿态。
+        /// 关键点：
+        /// 1) 手位表 <see cref="WeaponHoldTargets"/> 定义在 KidRoot 空间（脚底 y=0），
+        ///    换算到 Chest 空间只需减去脊柱链高度 chainY；
+        /// 2) 武器归位以"真实握把部件"为准（Grip / RearGrip / GripRubberRear / HandleRear），
+        ///    而不是模型原点 —— 枪身形状再变，手也永远落在扳机握把上；
+        /// 3) 双枪逐把平移左右手枪，让两只手各握一把；其余武器左手自然垂下。
+        /// </summary>
+        private static Dictionary<WeaponKind, ArmHoldPose> ResolveWeaponHoldPoses(
+            Transform weaponRoot,
+            Transform leftArm, Transform rightArm, Transform leftElbow, Transform rightElbow,
+            GameObject shooterGo, GameObject rollerGo, GameObject chargerGo, GameObject dualiesGo,
+            GameObject slosherGo, GameObject blasterGo, GameObject splatlingGo,
+            float chainY)
+        {
+            // ---- 1. 握把锚定（模型根无旋转，只有统一缩放，直接平移 localPosition 即可）----
+            AnchorWeaponGrip(weaponRoot, shooterGo, WeaponKind.Shooter, "Grip");
+            AnchorWeaponGrip(weaponRoot, rollerGo, WeaponKind.Roller, "GripRubberRear");
+            AnchorWeaponGrip(weaponRoot, chargerGo, WeaponKind.Charger, "Grip");
+            AnchorWeaponGrip(weaponRoot, blasterGo, WeaponKind.Blaster, "Grip");
+            AnchorWeaponGrip(weaponRoot, splatlingGo, WeaponKind.Splatling, "RearGrip");
+            AnchorWeaponGrip(weaponRoot, slosherGo, WeaponKind.Slosher, "HandleRear");
+
+            if (dualiesGo != null)
+            {
+                Transform rightPistol = dualiesGo.transform.Find("RightPistol");
+                Transform leftPistol = dualiesGo.transform.Find("LeftPistol");
+                AnchorGripToTarget(weaponRoot, rightPistol, "Grip", WeaponHoldTargets.RightHand(WeaponKind.Dualies));
+                AnchorGripToTarget(weaponRoot, leftPistol, "Grip", WeaponHoldTargets.LeftHand(WeaponKind.Dualies));
+            }
+
+            // ---- 2. 姿态反解 ----
+            Vector3 rightShoulderPos = rightArm != null ? rightArm.localPosition : Vector3.zero;
+            Vector3 leftShoulderPos = leftArm != null ? leftArm.localPosition : Vector3.zero;
+
+            // 非持枪的左手：自然垂在身侧，略微外展避免前臂埋进短裤/髋部
+            Quaternion relaxedLeftShoulder = Quaternion.Euler(-6f, 0f, -12f);
+            Quaternion relaxedLeftElbow = Quaternion.Euler(-14f, 0f, 0f);
+
+            var poses = new Dictionary<WeaponKind, ArmHoldPose>();
+            WeaponKind[] kinds =
+            {
+                WeaponKind.Shooter, WeaponKind.Roller, WeaponKind.Charger, WeaponKind.Dualies,
+                WeaponKind.Slosher, WeaponKind.Blaster, WeaponKind.Splatling
+            };
+
+            for (int i = 0; i < kinds.Length; i++)
+            {
+                WeaponKind kind = kinds[i];
+                Vector3 rightTarget = ToChestSpace(WeaponHoldTargets.RightHand(kind), chainY);
+
+                TwoBoneArmSolver.Solve(
+                    rightShoulderPos, rightTarget,
+                    CharacterMetrics.UpperArmLength, CharacterMetrics.ForearmLength,
+                    WeaponHoldTargets.RightPole,
+                    out Quaternion rightShoulder, out Quaternion rightElbowRot);
+
+                if (kind == WeaponKind.Dualies)
+                {
+                    Vector3 dualLeftShoulderPos = leftShoulderPos + DualLeftShoulderOffset;
+                    Vector3 leftTarget = ToChestSpace(WeaponHoldTargets.LeftHand(kind), chainY);
+                    TwoBoneArmSolver.Solve(
+                        dualLeftShoulderPos, leftTarget,
+                        CharacterMetrics.UpperArmLength, CharacterMetrics.ForearmLength,
+                        WeaponHoldTargets.LeftPole,
+                        out Quaternion leftShoulder, out Quaternion leftElbowRot);
+
+                    poses[kind] = new ArmHoldPose(
+                        rightShoulder, rightElbowRot, leftShoulder, leftElbowRot,
+                        rightShoulderPos, dualLeftShoulderPos);
+                }
+                else
+                {
+                    poses[kind] = new ArmHoldPose(
+                        rightShoulder, rightElbowRot, relaxedLeftShoulder, relaxedLeftElbow,
+                        rightShoulderPos, leftShoulderPos);
+                }
+            }
+
+            return poses;
+        }
+
+        private static Vector3 ToChestSpace(Vector3 kidSpacePoint, float chainY)
+            => new Vector3(kidSpacePoint.x, kidSpacePoint.y - chainY, kidSpacePoint.z);
+
+        /// <summary>把武器模型的握把部件平移到该武器的右手手位。</summary>
+        private static void AnchorWeaponGrip(Transform weaponRoot, GameObject model, WeaponKind kind, string gripName)
+        {
+            if (model == null) return;
+            AnchorGripToTarget(weaponRoot, model.transform, gripName, WeaponHoldTargets.RightHand(kind));
+        }
+
+        private static void AnchorGripToTarget(Transform weaponRoot, Transform modelRoot, string gripName, Vector3 target)
+        {
+            if (weaponRoot == null || modelRoot == null) return;
+
+            Transform grip = FindChildByName(modelRoot, gripName);
+            if (grip == null)
+            {
+                Debug.LogWarning($"[CharacterVisualAssembler] 武器 {modelRoot.name} 未找到握把部件 '{gripName}'，保持原挂点。");
+                return;
+            }
+
+            Vector3 gripInWeaponRoot = weaponRoot.InverseTransformPoint(grip.position);
+            Vector3 delta = target - gripInWeaponRoot;
+            // 目标点换算回的位移要从 weaponRoot 空间转到"模型父节点"空间：
+            // 双枪的手枪挂在 0.92 缩放的 Twinfin 下，直接加在 localPosition 上会被缩放吃掉 8%。
+            Vector3 parentDelta = modelRoot.parent != null
+                ? modelRoot.parent.InverseTransformVector(weaponRoot.TransformVector(delta))
+                : delta;
+            modelRoot.localPosition += parentDelta;
+        }
+
+        private static Transform FindChildByName(Transform root, string name)
+        {
+            if (root == null) return null;
+            if (root.name == name) return root;
+            for (int i = 0; i < root.childCount; i++)
+            {
+                Transform found = FindChildByName(root.GetChild(i), name);
+                if (found != null) return found;
+            }
+            return null;
         }
 
         #endregion
@@ -1387,8 +1829,10 @@ namespace P1.Player
         {
             root.localPosition = CharacterMetrics.WeaponMountOffset(0.24f, 0.80f, 0.30f);
 
-            CreateBox(root, "Stock", new Vector3(0f, 0.02f, -0.22f), new Vector3(0.06f, 0.10f, 0.22f), p.Dark);
-            CreateBox(root, "ButtPad", new Vector3(0f, 0.02f, -0.34f), new Vector3(0.07f, 0.14f, 0.03f), p.Dark);
+            // 枪托缩短并前移：握把锚进手位后（枪身整体后收 ~5cm），旧的长枪托会埋进 T 恤。
+            // 短托 + 前移让托底刚好停在胸前表面之外，视觉上仍是"抵肩长枪"的剪影。
+            CreateBox(root, "Stock", new Vector3(0f, 0.02f, -0.090f), new Vector3(0.06f, 0.10f, 0.16f), p.Dark);
+            CreateBox(root, "ButtPad", new Vector3(0f, 0.02f, -0.180f), new Vector3(0.07f, 0.14f, 0.03f), p.Dark);
 
             CreateBox(root, "Receiver", new Vector3(0f, 0.04f, 0.04f), new Vector3(0.075f, 0.10f, 0.32f), p.White);
             CreateBox(root, "Grip", new Vector3(0f, -0.06f, -0.04f), new Vector3(0.055f, 0.14f, 0.07f), p.Dark).transform.localRotation = Quaternion.Euler(15f, 0f, 0f);

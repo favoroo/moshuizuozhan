@@ -340,6 +340,14 @@ Shader "P1/InkGround"
                     }
                 }
 
+                // 梯度修正覆盖率（只在 P1_INK_HIGH）：复用 sampR/L/U/D 邻域采样结果做亚纹素平滑
+                #if defined(P1_INK_HIGH)
+                float2 atlasRes = _GlobalInkTexelSize.zw > 1.0 ? _GlobalInkTexelSize.zw : float2(4096.0, 4096.0);
+                float2 subPixelF = frac(inkUV * atlasRes);
+                float amtCorr = saturate(amt + 0.5 * ((sampR.a - sampL.a) * (subPixelF.x - 0.5) + (sampU.a - sampD.a) * (subPixelF.y - 0.5)));
+                amtEff = lerp(amtEff, amtCorr, saturate(_P1InkEdgeSmoothStrength));
+                #endif
+
                 // 覆盖率边缘：图集内已有约 3 texel 的柔和过渡，这里只补一层屏幕空间抗锯齿
                 float fw = fwidth(amtEff);
                 float edgeWidth = clamp(fw * _EdgeSoftness, 0.012, 0.35);
@@ -565,13 +573,21 @@ Shader "P1/InkGround"
                 float F = clearcoatF0 + (0.35 - clearcoatF0) * fresnel;
                 half3 directTerm = _MainLightColor.rgb * (half)(directSpec * F * NdotL);
 
-                // 解析天空环境镜面（含掠射角抑制）
+                // 双层清漆与薄缘高光（湿润果冻墨质感）
+                float edgeBand = P1InkWetRim(amtEff, wet, sheen);
+                half3 rimLight = _MainLightColor.rgb * (half)(edgeBand * (0.10 + 0.35 * F) * _P1InkEdgeRimStrength);
+                directTerm += _MainLightColor.rgb * P1InkCoatSpec(NdotH, NdotV, shadowAtten, wet, sheen) + rimLight;
+
+                // 环境镜面（桌面端 Cubemap + 解析太阳盘，含掠射角抑制）
                 float3 R = reflect(-V, finalNormalWS);
                 half glanceDamp = (half)(1.0 - 0.75 * pow(saturate(1.0 - NdotV), 2.0));
-                half3 envSpec = P1InkEnvSpecular(R, rough, NdotV) * glanceDamp;
+                half3 envSpec = P1InkEnvSpecularFull(R, rough, NdotV, teamCol) * glanceDamp;
+                // 湿墨额外增强环境反射：F0 只有 0.04，典型俯视角下反射很弱；
+                // 新墨前几秒把它拉起，读作"刚泼上去的液体"，干后自然回到克制值。
+                envSpec *= (half)(1.0 + 0.70 * wet + 0.25 * sheen);
 
                 // 漫反射光照（三渲二色阶，重定标下限 0.40）
-                half inkBand = P1ToonBand(NdotL, _InkShadeThreshold, _InkShadeSoftness);
+                half inkBand = P1ToonTriBand(NdotL, _InkShadeThreshold, _InkShadeSoftness);
                 half inkShadow = P1ToonShadowTerm(shadowAtten, _InkShadowFloor, _InkShadeSoftness);
                 float diffuseLight = lerp(0.40, 1.0, inkBand * inkShadow);
 
@@ -586,6 +602,9 @@ Shader "P1/InkGround"
 
                 // 新鲜湿润状态轻微提亮与增加通透度
                 inkColor *= 1.0 + 0.07 * wet * wet;
+
+                // 湿润边缘队色轻微强化（与薄缘高光呼应，保持数值克制不形成白边）
+                inkColor += teamCol * (half)(0.12 * edgeBand * saturate(wet + sheen * 0.4));
 
                 // 咖啡环积墨：在边缘带加深墨色并提升饱和度
                 #if defined(P1_INK_HIGH)
@@ -611,7 +630,7 @@ Shader "P1/InkGround"
                 litInkColor += inkColor * _InkGlow * (0.75 + 0.35 * hs) * (1.0 - NdotL * 0.5);
 
                 // 最终混合地面石板基底与果冻立体墨水
-                half groundBand = P1ToonBand(dot(groundNormalWS, L), _ShadeThreshold, _ShadeSoftness);
+                half groundBand = P1ToonTriBand(dot(groundNormalWS, L), _ShadeThreshold, _ShadeSoftness);
                 half groundShadow = P1ToonShadowTerm(shadowAtten, _ShadowFloor, _ShadeSoftness);
                 half3 groundAmbient = (SampleSH(groundNormalWS) * 0.35 + _ShadowTint.rgb * 0.18) * groundAO;
                 half3 baseDiffuse = groundAmbient + lerp(_ShadowTint.rgb, half3(1.0, 1.0, 1.0), groundBand) * groundShadow * 0.85;

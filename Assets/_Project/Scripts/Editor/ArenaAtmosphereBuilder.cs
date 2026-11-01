@@ -7,7 +7,7 @@ using UnityEngine.Rendering.Universal;
 namespace P1.Editor
 {
     /// <summary>
-    /// P7-B 场景氛围装配器：把 ArenaStyleSO 的日光、环境光、雾、程序化天空与后处理
+    /// P7-B / P30 场景氛围装配器：把 ArenaStyleSO 的日光、环境光、雾、程序化天空、水面、出生台与后处理
     /// 幂等地写进当前场景（不重建角色/HUD），供一键升级菜单与全量场景构建共用。
     /// </summary>
     public static class ArenaAtmosphereBuilder
@@ -19,9 +19,38 @@ namespace P1.Editor
         private static readonly int SkyHorizonId = Shader.PropertyToID("_HorizonColor");
         private static readonly int SkyGroundId = Shader.PropertyToID("_GroundColor");
         private static readonly int SkySunColorId = Shader.PropertyToID("_SunColor");
+        private static readonly int SkySunIntensityId = Shader.PropertyToID("_SunIntensity");
         private static readonly int SkySunDirectionId = Shader.PropertyToID("_SunDirection");
         private static readonly int SkyCloudColorId = Shader.PropertyToID("_CloudColor");
         private static readonly int SkyCloudStrengthId = Shader.PropertyToID("_CloudStrength");
+        private static readonly int SkyHorizonWarmthColorId = Shader.PropertyToID("_HorizonWarmthColor");
+        private static readonly int SkyHorizonWarmthId = Shader.PropertyToID("_HorizonWarmth");
+        private static readonly int SkyCloudLayer2StrengthId = Shader.PropertyToID("_CloudLayer2Strength");
+        private static readonly int SkyCloudEdgeCrispnessId = Shader.PropertyToID("_CloudEdgeCrispness");
+
+        private static readonly int WaterShallowColorId = Shader.PropertyToID("_ShallowColor");
+        private static readonly int WaterDeepColorId = Shader.PropertyToID("_DeepColor");
+        private static readonly int WaterHorizonColorId = Shader.PropertyToID("_HorizonColor");
+        private static readonly int WaterWaveScaleId = Shader.PropertyToID("_WaveScale");
+        private static readonly int WaterWaveSpeedId = Shader.PropertyToID("_WaveSpeed");
+        private static readonly int WaterWaveStrengthId = Shader.PropertyToID("_WaveStrength");
+        private static readonly int WaterWaveNormalStrengthId = Shader.PropertyToID("_WaveNormalStrength");
+        private static readonly int WaterGlitterStrengthId = Shader.PropertyToID("_GlitterStrength");
+        private static readonly int WaterGlitterThresholdId = Shader.PropertyToID("_GlitterThreshold");
+        private static readonly int WaterShoreDistanceId = Shader.PropertyToID("_ShoreDistance");
+        private static readonly int WaterFoamStrengthId = Shader.PropertyToID("_FoamStrength");
+
+        private static readonly int SpawnBaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int SpawnPlatformColorId = Shader.PropertyToID("_PlatformColor");
+        private static readonly int SpawnRingColorId = Shader.PropertyToID("_RingColor");
+        private static readonly int SpawnChevronColorId = Shader.PropertyToID("_ChevronColor");
+        private static readonly int SpawnTeamColorId = Shader.PropertyToID("_TeamColor");
+        private static readonly int SpawnGlowStrengthId = Shader.PropertyToID("_GlowStrength");
+        private static readonly int SpawnPulseSpeedId = Shader.PropertyToID("_PulseSpeed");
+        private static readonly int SpawnShadowTintId = Shader.PropertyToID("_ShadowTint");
+        private static readonly int SpawnShadowFloorId = Shader.PropertyToID("_ShadowFloor");
+        private static readonly int SpawnShadeSoftnessId = Shader.PropertyToID("_ShadeSoftness");
+        private static readonly int SpawnForwardSignId = Shader.PropertyToID("_ForwardSign");
 
         private static Color Linear(Color c)
         {
@@ -32,24 +61,51 @@ namespace P1.Editor
         {
             if (style == null)
             {
-                Debug.LogWarning("[ArenaAtmosphereBuilder] 未提供 ArenaStyleSO，跳过日光/雾/天空/后处理。");
+                Debug.LogWarning("[ArenaAtmosphereBuilder] 未提供 ArenaStyleSO，跳过日光/雾/天空/水面/后处理。");
                 return;
             }
 
             ApplySunAndEnvironment(style);
             ApplyFog(style);
             ApplySkybox(style);
+            ApplyWater(style);
+            ApplySpawnPads(style);
             ApplyPostProcess(style);
-
-            // 让相机看到天空盒（相机可能由 Scaffolder 稍后创建，找不到就跳过）。
-            Camera cam = Camera.main;
-            if (cam != null)
-            {
-                cam.clearFlags = CameraClearFlags.Skybox;
-            }
+            EnsureCameraData(style);
 
             DynamicGI.UpdateEnvironment();
-            Debug.Log("[ArenaAtmosphereBuilder] P7-B 日光/雾/天空/后处理已应用。");
+            Debug.Log("[ArenaAtmosphereBuilder] P7-B / P30 日光/雾/天空/水面/出生台/后处理已应用。");
+        }
+
+        private static void EnsureCameraData(ArenaStyleSO style)
+        {
+            Camera cam = Camera.main;
+            if (cam == null) return;
+
+            cam.clearFlags = CameraClearFlags.Skybox;
+            var data = cam.GetUniversalAdditionalCameraData();
+            if (data != null)
+            {
+                data.renderPostProcessing = style.postProcessingEnabled;
+                data.renderShadows = true;
+                if (Application.isMobilePlatform)
+                {
+                    data.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
+                    data.antialiasingQuality = AntialiasingQuality.Low;
+                }
+                else
+                {
+                    data.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
+                    data.antialiasingQuality = AntialiasingQuality.High;
+                }
+                EditorUtility.SetDirty(data);
+                // GetUniversalAdditionalCameraData 可能刚把组件加到相机上：只 SetDirty 组件
+                // 不一定会把所在场景标脏，后续 SaveScene 可能漏掉这个新组件（P29 实测）。
+                if (cam.gameObject.scene.IsValid())
+                {
+                    UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(cam.gameObject.scene);
+                }
+            }
         }
 
         private static void ApplySunAndEnvironment(ArenaStyleSO style)
@@ -59,7 +115,8 @@ namespace P1.Editor
             {
                 sun.type = LightType.Directional;
                 sun.color = Linear(style.sunColor);
-                sun.intensity = style.sunIntensity;
+                // 日光微调提亮（+8% 照度），与海港明快日照契约对齐
+                sun.intensity = style.sunIntensity * 1.08f;
                 sun.shadows = LightShadows.Soft;
                 sun.shadowStrength = style.shadowStrength;
                 sun.transform.rotation = Quaternion.Euler(style.sunEuler);
@@ -67,10 +124,13 @@ namespace P1.Editor
             }
 
             RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = Linear(style.ambientSky);
-            RenderSettings.ambientEquatorColor = Linear(style.ambientEquator);
+            // 环境天顶提亮微调：避免深部阴影发暗发灰，强化晴朗天空漫反射
+            Color liftedSky = Color.Lerp(style.ambientSky, new Color(0.40f, 0.56f, 0.82f, 1f), 0.22f);
+            Color liftedEquator = Color.Lerp(style.ambientEquator, new Color(0.60f, 0.58f, 0.54f, 1f), 0.15f);
+            RenderSettings.ambientSkyColor = Linear(liftedSky);
+            RenderSettings.ambientEquatorColor = Linear(liftedEquator);
             RenderSettings.ambientGroundColor = Linear(style.ambientGround);
-            RenderSettings.ambientIntensity = style.ambientIntensity;
+            RenderSettings.ambientIntensity = Mathf.Max(style.ambientIntensity, 0.82f);
             RenderSettings.reflectionIntensity = style.reflectionIntensity;
         }
 
@@ -78,7 +138,10 @@ namespace P1.Editor
         {
             RenderSettings.fog = style.fogEnabled;
             RenderSettings.fogMode = FogMode.Linear;
-            RenderSettings.fogColor = Linear(style.fogColor);
+            // 雾色贴近 skyHorizon 的亮蓝白，彻底消除原本洗灰全场的灰蒙蒙工业烟尘感
+            Color clearSkyFog = Color.Lerp(style.fogColor, style.skyHorizon, 0.85f);
+            RenderSettings.fogColor = Linear(clearSkyFog);
+            // 竞技场 40x56m，fogStart 70m 确保近中景全部通透无雾，fogEnd 190m 让远景柔和融入天际线（P30 场地精修调优值）
             RenderSettings.fogStartDistance = style.fogStartDistance;
             RenderSettings.fogEndDistance = style.fogEndDistance;
         }
@@ -92,14 +155,86 @@ namespace P1.Editor
             sky.SetColor(SkyHorizonId, Linear(style.skyHorizon));
             sky.SetColor(SkyGroundId, Linear(style.skyGround));
             sky.SetColor(SkySunColorId, Linear(style.sunDisc));
+            if (sky.HasProperty(SkySunIntensityId))
+            {
+                sky.SetFloat(SkySunIntensityId, style.skySunIntensity);
+            }
             sky.SetColor(SkyCloudColorId, Linear(style.cloudColor));
             sky.SetFloat(SkyCloudStrengthId, style.cloudStrength);
+
+            // 新增天空盒属性兜底设置
+            if (sky.HasProperty(SkyHorizonWarmthColorId))
+            {
+                sky.SetColor(SkyHorizonWarmthColorId, Linear(new Color(1.0f, 0.94f, 0.84f, 1.0f)));
+            }
+            if (sky.HasProperty(SkyHorizonWarmthId))
+            {
+                sky.SetFloat(SkyHorizonWarmthId, 0.35f);
+            }
+            if (sky.HasProperty(SkyCloudLayer2StrengthId))
+            {
+                sky.SetFloat(SkyCloudLayer2StrengthId, 0.25f);
+            }
+            if (sky.HasProperty(SkyCloudEdgeCrispnessId))
+            {
+                sky.SetFloat(SkyCloudEdgeCrispnessId, 0.06f);
+            }
 
             Vector3 sunDir = Quaternion.Euler(style.sunEuler) * Vector3.back;
             sky.SetVector(SkySunDirectionId, new Vector4(sunDir.x, sunDir.y, sunDir.z, 0f));
 
             EditorUtility.SetDirty(sky);
             RenderSettings.skybox = sky;
+        }
+
+        private static void ApplyWater(ArenaStyleSO style)
+        {
+            Material water = AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Materials/Mat_Water.mat");
+            if (water == null) return;
+
+            water.SetColor(WaterShallowColorId, Linear(style.waterShallow));
+            water.SetColor(WaterDeepColorId, Linear(style.waterDeep));
+            water.SetColor(WaterHorizonColorId, Linear(style.waterHorizon));
+
+            if (water.HasProperty(WaterWaveScaleId)) water.SetFloat(WaterWaveScaleId, 1.0f);
+            if (water.HasProperty(WaterWaveSpeedId)) water.SetFloat(WaterWaveSpeedId, 0.18f);
+            if (water.HasProperty(WaterWaveStrengthId)) water.SetFloat(WaterWaveStrengthId, 0.35f);
+            if (water.HasProperty(WaterWaveNormalStrengthId)) water.SetFloat(WaterWaveNormalStrengthId, 0.36f);
+            // P30 返修：glitter 收敛——更弱、更稀疏，远看是大片蓝面上的稀疏波峰亮点
+            if (water.HasProperty(WaterGlitterStrengthId)) water.SetFloat(WaterGlitterStrengthId, 0.72f);
+            if (water.HasProperty(WaterGlitterThresholdId)) water.SetFloat(WaterGlitterThresholdId, 0.972f);
+            if (water.HasProperty(WaterShoreDistanceId)) water.SetFloat(WaterShoreDistanceId, 12.0f);
+            if (water.HasProperty(WaterFoamStrengthId)) water.SetFloat(WaterFoamStrengthId, 0.65f);
+
+            EditorUtility.SetDirty(water);
+        }
+
+        private static void ApplySpawnPads(ArenaStyleSO style)
+        {
+            ConfigureSpawnPadMaterial("Assets/_Project/Materials/Mat_SpawnPad_TeamA.mat", style, style.teamAPad, 1.0f);
+            ConfigureSpawnPadMaterial("Assets/_Project/Materials/Mat_SpawnPad_TeamB.mat", style, style.teamBPad, -1.0f);
+            ConfigureSpawnPadMaterial("Assets/_Project/Materials/Mat_SpawnPad.mat", style, style.hazardYellow, 1.0f);
+        }
+
+        private static void ConfigureSpawnPadMaterial(string path, ArenaStyleSO style, Color teamColor, float forwardSign)
+        {
+            Material mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null) return;
+
+            var steelBase = new Color(0.22f, 0.25f, 0.29f, 1f);
+            mat.SetColor(SpawnBaseColorId, Linear(steelBase));
+            mat.SetColor(SpawnPlatformColorId, Linear(style.concreteMid));
+            mat.SetColor(SpawnRingColorId, Linear(new Color(0.92f, 0.94f, 0.98f, 1f)));
+            mat.SetColor(SpawnChevronColorId, Linear(style.hazardYellow));
+            mat.SetColor(SpawnTeamColorId, Linear(teamColor));
+            mat.SetColor(SpawnShadowTintId, Linear(style.shadowTint));
+            mat.SetFloat(SpawnShadowFloorId, style.shadowFloor);
+            mat.SetFloat(SpawnShadeSoftnessId, style.shadeSoftness);
+            mat.SetFloat(SpawnGlowStrengthId, 0.25f);
+            if (mat.HasProperty(SpawnPulseSpeedId)) mat.SetFloat(SpawnPulseSpeedId, 1.6f);
+            mat.SetFloat(SpawnForwardSignId, forwardSign);
+
+            EditorUtility.SetDirty(mat);
         }
 
         private static void ApplyPostProcess(ArenaStyleSO style)

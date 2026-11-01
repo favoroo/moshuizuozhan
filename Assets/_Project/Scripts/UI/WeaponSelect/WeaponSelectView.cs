@@ -52,6 +52,10 @@ namespace P1.UI.WeaponSelect
         private TextMeshProUGUI _headerTitle;
         private Button _closeButton;
 
+        private RectTransform _profileBadgeRoot;
+        private TextMeshProUGUI _profileBadgeText;
+        private Image _profileBadgeXpFill;
+
         private readonly List<WeaponCardView> _cards = new List<WeaponCardView>();
         private WeaponConfigSO[] _configs = new WeaponConfigSO[WeaponSelectMath.WeaponCount];
         private Sprite[] _icons = new Sprite[WeaponSelectMath.WeaponCount];
@@ -197,14 +201,15 @@ namespace P1.UI.WeaponSelect
             _drawerBg = drawerGo.GetComponent<UIInkShapeGraphic>();
             _drawerBg.Shape = UIInkShape.SharpRect;
             _drawerBg.CornerRadius = ComicStyle.CornerSharp;
-            _drawerBg.BorderWidth = ComicStyle.BorderHeavy;
+            // t-1 抽屉面板：纸白底 + 3px 墨框 + 弹窗硬影 (8,-9)（抽屉是模态层，用弹窗档）
+            _drawerBg.BorderWidth = ComicStyle.BorderThin;
             _drawerBg.BorderColor = ComicStyle.Ink;
             _drawerBg.color = ComicStyle.Paper;
-            _drawerBg.HardShadow = false;
             _drawerBg.Halftone = false;
             _drawerBg.GlossAlpha = 0f;
             _drawerBg.DrawGloss = false;
             _drawerBg.raycastTarget = true;
+            UIThemeSO.Resolve(theme).ApplyHardShadow(_drawerBg, UIHardShadowLevel.Dialog);
 
             // 4. Header：墨底标题条 + 黄色收起按钮
             BuildHeader();
@@ -295,6 +300,7 @@ namespace P1.UI.WeaponSelect
 
             var closeJelly = closeGo.GetComponent<UIJellyButton>();
             closeJelly.Configure(theme, _closeButton, closeBg);
+            closeJelly.EnableThemeHardShadow(); // 按钮硬影 (3,-4) + 0ms 压印 + 0.1s Cubic-Out 回弹
 
             // 4.2 标题条（墨底白字直角块，保留 TitleBubble/Title 测试契约路径）
             var bubbleGo = new GameObject("TitleBubble", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
@@ -357,7 +363,7 @@ namespace P1.UI.WeaponSelect
             subRect.anchorMax = new Vector2(0f, 1f);
             subRect.pivot = new Vector2(0f, 1f);
             subRect.anchoredPosition = new Vector2(0f, -(bubbleH + 10f));
-            subRect.sizeDelta = new Vector2(_drawerWidth - inset * 2f - closeW - 12f, _mobile ? 34f : 24f);
+            subRect.sizeDelta = new Vector2(Mathf.Max(200f, _drawerWidth - inset * 2f - (_mobile ? 300f : 230f) - 16f), _mobile ? 34f : 24f);
             var headerSubtitle = subGo.GetComponent<TextMeshProUGUI>();
             string subtitleText = _mobile
                 ? "选择本局出战武器 · 点卡片切换"
@@ -369,6 +375,109 @@ namespace P1.UI.WeaponSelect
             headerSubtitle.textWrappingMode = TextWrappingModes.NoWrap;
             headerSubtitle.text = subtitleText;
             headerSubtitle.raycastTarget = false;
+
+            // 4.4 个人 Profile 徽章（段位名 + Lv + XP 细条）
+            BuildProfileBadge(headerGo.transform, bubbleH);
+        }
+
+        private void BuildProfileBadge(Transform headerParent, float bubbleH)
+        {
+            try
+            {
+                var badgeGo = new GameObject("ProfileBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                badgeGo.transform.SetParent(headerParent, false);
+                _profileBadgeRoot = (RectTransform)badgeGo.transform;
+                _profileBadgeRoot.anchorMin = new Vector2(1f, 1f);
+                _profileBadgeRoot.anchorMax = new Vector2(1f, 1f);
+                _profileBadgeRoot.pivot = new Vector2(1f, 1f);
+                _profileBadgeRoot.anchoredPosition = new Vector2(0f, -(bubbleH + 6f));
+                // 字号底线 18（移动端 ×1.28 → 24），盒子同步抬高到能放下 18/24 号粗体
+                _profileBadgeRoot.sizeDelta = new Vector2(_mobile ? 300f : 220f, _mobile ? 40f : 32f);
+
+                var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
+                badgeShape.Shape = UIInkShape.SharpRect;
+                badgeShape.CornerRadius = ComicStyle.CornerSharp;
+                badgeShape.BorderWidth = ComicStyle.BorderThin;
+                badgeShape.BorderColor = ComicStyle.Ink;
+                badgeShape.color = ComicStyle.PaperAlt;
+                badgeShape.HardShadow = false;
+                badgeShape.Halftone = false;
+                badgeShape.raycastTarget = false;
+
+                // 段位名 + Lv 标签
+                var txtGo = new GameObject("BadgeLabel", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+                txtGo.transform.SetParent(_profileBadgeRoot, false);
+                var txtRt = (RectTransform)txtGo.transform;
+                txtRt.anchorMin = new Vector2(0f, 0f);
+                txtRt.anchorMax = new Vector2(1f, 1f);
+                txtRt.offsetMin = new Vector2(8f, _mobile ? 8f : 6f);
+                txtRt.offsetMax = new Vector2(-8f, 0f);
+
+                _profileBadgeText = txtGo.GetComponent<TextMeshProUGUI>();
+                _profileBadgeText.font = theme.ResolveFont(true, "RANK · LV. 1");
+                _profileBadgeText.fontSize = UITypography.FontSnapped(18f); // 桌面 18 / 移动端 24
+                _profileBadgeText.fontStyle = FontStyles.Bold;
+                _profileBadgeText.alignment = TextAlignmentOptions.MidlineLeft;
+                _profileBadgeText.color = ComicStyle.Ink;
+                _profileBadgeText.textWrappingMode = TextWrappingModes.NoWrap;
+                _profileBadgeText.overflowMode = TextOverflowModes.Overflow;
+                _profileBadgeText.raycastTarget = false;
+
+                // XP 细条底轨
+                var trackGo = new GameObject("XpTrack", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                trackGo.transform.SetParent(_profileBadgeRoot, false);
+                var trackRt = (RectTransform)trackGo.transform;
+                trackRt.anchorMin = new Vector2(0f, 0f);
+                trackRt.anchorMax = new Vector2(1f, 0f);
+                trackRt.pivot = new Vector2(0.5f, 0f);
+                trackRt.anchoredPosition = new Vector2(0f, 2f);
+                trackRt.sizeDelta = new Vector2(-8f, _mobile ? 4f : 3f);
+
+                var trackImg = trackGo.GetComponent<Image>();
+                UIFlatSprite.MakeFlat(trackImg, filled: false);
+                trackImg.color = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.2f);
+                trackImg.raycastTarget = false;
+
+                // XP 细条填充
+                var fillGo = new GameObject("XpFill", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                fillGo.transform.SetParent(trackGo.transform, false);
+                var fillRt = (RectTransform)fillGo.transform;
+                fillRt.anchorMin = Vector2.zero;
+                fillRt.anchorMax = Vector2.one;
+                fillRt.sizeDelta = Vector2.zero;
+
+                _profileBadgeXpFill = fillGo.GetComponent<Image>();
+                UIFlatSprite.MakeFlat(_profileBadgeXpFill, filled: true);
+                _profileBadgeXpFill.color = ComicStyle.Yellow;
+                _profileBadgeXpFill.raycastTarget = false;
+
+                RefreshProfileBadge();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[WeaponSelectView] 构建 Profile 徽章失败: " + ex);
+            }
+        }
+
+        /// <summary>
+        /// 从 PlayerProfile 缓存刷新徽章信息（段位名 + Lv + XP 细条）。
+        /// </summary>
+        public void RefreshProfileBadge()
+        {
+            if (_profileBadgeText == null || _profileBadgeXpFill == null) return;
+            try
+            {
+                PlayerProfile profile = PlayerProfile.Current;
+                if (profile != null)
+                {
+                    _profileBadgeText.text = $"{profile.RankName.ToUpper()} · LV. {profile.Level}";
+                    _profileBadgeXpFill.fillAmount = profile.LevelProgress01;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[WeaponSelectView] 刷新 Profile 徽章数据异常: " + ex);
+            }
         }
 
         private void BuildScrollContent()
@@ -433,7 +542,7 @@ namespace P1.UI.WeaponSelect
                     (int)_metrics.ScrollRightInset,
                     (int)_metrics.ScrollTopInset,
                     8);
-                vlg.spacing = 10f;
+                vlg.spacing = 12f; // ≥10px：给卡片面板硬影 (4,-5) 留出空间，不被下一张卡盖住
                 vlg.childControlWidth = true;
                 vlg.childControlHeight = false;
                 vlg.childForceExpandWidth = true;
@@ -442,21 +551,22 @@ namespace P1.UI.WeaponSelect
         }
 
         /// <summary>
-        /// 抽屉收起时的入口：左下角整备卡。
-        /// 纸白直角卡 + 圆形武器色盘 + 「武器整备 / 当前武器」两行 + 黄色箭头块，取代旧的纯黄方块页签。
+        /// 首页英雄卡内嵌「武器整备」卡槽：
+        /// 纸白直角卡 + 圆形武器色盘 + 「武器整备 / 当前武器」两行 + 黄色箭头块，取代旧的底部孤立小卡片。
         /// </summary>
         private void BuildDrawerToggleButton()
         {
-            float margin = MenuLayoutMath.Home(_mobile).Margin;
+            HomeBox slot = MenuLayoutMath.Home(_mobile).HeroWeaponSlot;
+            Vector2 actualSize = ResolveLoadoutSize(slot);
 
             var btnGo = new GameObject("DrawerToggleButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(UIJellyButton));
             btnGo.transform.SetParent(_safeAreaRoot, false);
             _toggleButtonRoot = btnGo.GetComponent<RectTransform>();
-            _toggleButtonRoot.anchorMin = new Vector2(0f, 0f);
-            _toggleButtonRoot.anchorMax = new Vector2(0f, 0f);
-            _toggleButtonRoot.pivot = new Vector2(0f, 0f);
-            _toggleButtonRoot.anchoredPosition = new Vector2(margin, margin);
-            _toggleButtonRoot.sizeDelta = _loadoutMetrics.Size;
+            _toggleButtonRoot.anchorMin = new Vector2(0f, 1f);
+            _toggleButtonRoot.anchorMax = new Vector2(0f, 1f);
+            _toggleButtonRoot.pivot = new Vector2(0f, 1f);
+            _toggleButtonRoot.anchoredPosition = slot.AnchoredPosition;
+            _toggleButtonRoot.sizeDelta = actualSize;
 
             _toggleButtonBg = btnGo.GetComponent<UIInkShapeGraphic>();
             _toggleButtonBg.Shape = UIInkShape.SharpRect;
@@ -469,7 +579,7 @@ namespace P1.UI.WeaponSelect
             _toggleButtonBg.raycastTarget = true;
 
             float iconD = _loadoutMetrics.IconDiameter;
-            float pad = _mobile ? 22f : 16f;
+            float pad = _mobile ? 22f : 18f;
 
             // 圆形武器色盘
             var plateGo = new GameObject("LoadoutIconPlate", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
@@ -499,27 +609,28 @@ namespace P1.UI.WeaponSelect
             _toggleIconImage.preserveAspect = true;
             _toggleIconImage.raycastTarget = false;
 
-            // 两行文字：标题 + 当前武器
-            float textLeft = pad + iconD + (_mobile ? 20f : 14f);
+            // 两行文字：微标 + 当前武器
+            float textLeft = pad + iconD + (_mobile ? 22f : 18f);
             float chevron = _loadoutMetrics.ChevronSize;
-            float textRight = chevron + (_mobile ? 34f : 26f);
+            float textRight = chevron + pad + (_mobile ? 22f : 16f);
 
             var titleGo = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
             titleGo.transform.SetParent(btnGo.transform, false);
             var titleRect = titleGo.GetComponent<RectTransform>();
             titleRect.anchorMin = new Vector2(0f, 0f);
             titleRect.anchorMax = new Vector2(1f, 1f);
-            titleRect.offsetMin = new Vector2(textLeft, _loadoutMetrics.Size.y * 0.48f);
-            titleRect.offsetMax = new Vector2(-textRight, -(_mobile ? 20f : 12f));
+            titleRect.offsetMin = new Vector2(textLeft, _loadoutMetrics.Size.y * 0.52f);
+            titleRect.offsetMax = new Vector2(-textRight, -pad);
             _toggleButtonText = titleGo.GetComponent<TextMeshProUGUI>();
             _toggleButtonText.font = theme.ResolveFont(true, "武器整备");
             _toggleButtonText.fontSize = UITypography.FontSnapped(_loadoutMetrics.TitleFont);
             _toggleButtonText.fontStyle = FontStyles.Bold;
             _toggleButtonText.alignment = TextAlignmentOptions.MidlineLeft;
-            _toggleButtonText.color = ComicStyle.Ink;
+            _toggleButtonText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.65f);
+            _toggleButtonText.characterSpacing = 1.2f;
             _toggleButtonText.textWrappingMode = TextWrappingModes.NoWrap;
             _toggleButtonText.overflowMode = TextOverflowModes.Overflow;
-            _toggleButtonText.text = "武器整备";
+            _toggleButtonText.text = "武器整备 · EQUIPMENT";
             _toggleButtonText.raycastTarget = false;
 
             var nameGo = new GameObject("WeaponName", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -527,17 +638,18 @@ namespace P1.UI.WeaponSelect
             var nameRect = nameGo.GetComponent<RectTransform>();
             nameRect.anchorMin = new Vector2(0f, 0f);
             nameRect.anchorMax = new Vector2(1f, 1f);
-            nameRect.offsetMin = new Vector2(textLeft, _mobile ? 22f : 14f);
-            nameRect.offsetMax = new Vector2(-textRight, -(_loadoutMetrics.Size.y * 0.52f));
+            nameRect.offsetMin = new Vector2(textLeft, pad);
+            nameRect.offsetMax = new Vector2(-textRight, -(_loadoutMetrics.Size.y * 0.44f));
             _toggleWeaponText = nameGo.GetComponent<TextMeshProUGUI>();
-            _toggleWeaponText.font = theme.ResolveFont(false, "喷射小枪");
+            _toggleWeaponText.font = theme.ResolveFont(true, "喷射小枪");
             _toggleWeaponText.fontSize = UITypography.FontSnapped(_loadoutMetrics.NameFont);
-            _toggleWeaponText.fontStyle = FontStyles.Normal;
+            _toggleWeaponText.fontStyle = FontStyles.Bold;
             _toggleWeaponText.alignment = TextAlignmentOptions.MidlineLeft;
-            _toggleWeaponText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.72f);
+            _toggleWeaponText.color = ComicStyle.Ink;
+            _toggleWeaponText.characterSpacing = 0.5f;
             _toggleWeaponText.textWrappingMode = TextWrappingModes.NoWrap;
             _toggleWeaponText.overflowMode = TextOverflowModes.Overflow;
-            _toggleWeaponText.text = "当前武器";
+            _toggleWeaponText.text = "喷射小枪";
             _toggleWeaponText.raycastTarget = false;
 
             // 右侧黄色箭头块
@@ -547,7 +659,7 @@ namespace P1.UI.WeaponSelect
             chevRect.anchorMin = new Vector2(1f, 0.5f);
             chevRect.anchorMax = new Vector2(1f, 0.5f);
             chevRect.pivot = new Vector2(1f, 0.5f);
-            chevRect.anchoredPosition = new Vector2(-(_mobile ? 22f : 16f), 0f);
+            chevRect.anchoredPosition = new Vector2(-pad, 0f);
             chevRect.sizeDelta = new Vector2(chevron, chevron);
 
             var chevShape = chevGo.GetComponent<UIInkShapeGraphic>();
@@ -582,6 +694,7 @@ namespace P1.UI.WeaponSelect
 
             var toggleJelly = btnGo.GetComponent<UIJellyButton>();
             toggleJelly.Configure(theme, _toggleButton, _toggleButtonBg);
+            toggleJelly.EnableThemeHardShadow(); // 整备卡是首页上的按钮，按钮档硬影 (3,-4)
 
             RefreshLoadoutCard();
             UpdateToggleButtonState();
@@ -653,6 +766,7 @@ namespace P1.UI.WeaponSelect
 
         public void SetDrawerOpen(bool open)
         {
+            bool wasOpen = _isDrawerOpen;
             _isDrawerOpen = open;
             _targetDrawerX = open ? 24f : ClosedDrawerX();
             if (_backdropGo != null)
@@ -661,9 +775,34 @@ namespace P1.UI.WeaponSelect
             }
             UpdateToggleButtonState();
 
-            if (open && _toggleMotion != null)
+            if (open)
             {
-                _toggleMotion.Punch(0.06f);
+                RefreshProfileBadge();
+                if (!wasOpen)
+                {
+                    PlayCardEntrance();
+                }
+                if (_toggleMotion != null)
+                {
+                    _toggleMotion.Punch(0.06f);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 抽屉打开的入场：7 张卡片按主题 <c>entranceStagger</c>（0.05s/张）错峰 pop-in，
+        /// 单张走 0.22s Back-Out + alpha（Docs/UI-GeometricBold.md 动效表）。
+        /// </summary>
+        private void PlayCardEntrance()
+        {
+            UIThemeSO resolved = UIThemeSO.Resolve(theme);
+            float stagger = resolved.entranceStagger;
+            for (int i = 0; i < _cards.Count; i++)
+            {
+                if (_cards[i] != null)
+                {
+                    _cards[i].PlayEntrance(i * stagger);
+                }
             }
         }
 
@@ -687,17 +826,29 @@ namespace P1.UI.WeaponSelect
             return Mathf.Max(0f, left);
         }
 
+        private Vector2 ResolveLoadoutSize(HomeBox slot)
+        {
+            float heroWidth = MenuLayoutMath.Home(_mobile).HeroBox.x;
+            var heroCard = GameObject.Find("HomeHeroCard")?.GetComponent<RectTransform>();
+            if (heroCard != null && heroCard.sizeDelta.x > 10f)
+            {
+                heroWidth = heroCard.sizeDelta.x;
+            }
+            float innerWidth = heroWidth - MenuLayoutMath.Home(_mobile).HeroPadding.x * 2f;
+            float width = Mathf.Min(slot.Width, innerWidth);
+            return new Vector2(width, slot.Height);
+        }
+
         private void UpdateToggleButtonState()
         {
             if (_toggleButtonRoot == null) return;
 
             _toggleButtonRoot.gameObject.SetActive(!_isDrawerOpen);
-            if (_toggleButtonText != null) _toggleButtonText.text = "武器整备";
             if (!_isDrawerOpen)
             {
-                _toggleButtonRoot.anchoredPosition = new Vector2(
-                    MenuLayoutMath.Home(_mobile).Margin,
-                    MenuLayoutMath.Home(_mobile).Margin);
+                HomeBox slot = MenuLayoutMath.Home(_mobile).HeroWeaponSlot;
+                _toggleButtonRoot.anchoredPosition = slot.AnchoredPosition;
+                _toggleButtonRoot.sizeDelta = ResolveLoadoutSize(slot);
             }
         }
 
@@ -732,21 +883,28 @@ namespace P1.UI.WeaponSelect
                 WeaponConfigSO cfg = SelectedConfig;
                 string cnName = WeaponSelectMath.GetWeaponChineseName(
                     cfg != null ? cfg.weaponKind : WeaponSelectMath.IndexToKind(_selectedIndex));
-                string text = $"{cnName} · 更换";
-                _toggleWeaponText.font = theme.ResolveFont(false, text);
-                _toggleWeaponText.text = text;
+                _toggleWeaponText.font = theme.ResolveFont(true, cnName);
+                _toggleWeaponText.text = cnName;
             }
         }
 
         public void SetVisible(bool visible)
         {
-            if (gameObject.activeSelf != visible)
+            bool wasActive = gameObject.activeSelf;
+            if (wasActive != visible)
             {
                 gameObject.SetActive(visible);
             }
             if (!visible && _backdropGo != null)
             {
                 _backdropGo.SetActive(false);
+            }
+
+            // 重新显示时抽屉可能还开着：重播一次卡片入场。
+            // 否则「错峰入场途中被 SetVisible(false) 打断」的卡片 CanvasGroup 会停在 alpha 0。
+            if (visible && !wasActive && _isDrawerOpen)
+            {
+                PlayCardEntrance();
             }
         }
 

@@ -43,14 +43,14 @@ Material:
     - _EdgeLineWidth: 0.05
     - _InkGrainScale: 1.6
     - _InkGrainStrength: 0.35
-    - _ShadeSoftness: 0.03
+    - _ShadeSoftness: 0.1
     - _ShadeThreshold: 0.5
     - _WallDripStrength: 0.4
     - _WallEnvSpec: 0.8
     - _WallWetness: 0.6
     m_Colors:
-    - _EdgeLineColor: {r: 0.008540383, g: 0.010022826, b: 0.015325204, a: 1}
-    - _ShadowTint: {r: 0.13286833, g: 0.17064494, b: 0.34239164, a: 1}
+    - _EdgeLineColor: {r: 0.0173891, g: 0.013411746, b: 0.027211785, a: 1}
+    - _ShadowTint: {r: 0.19599415, g: 0.21404114, b: 0.3672465, a: 1}
     - _Tint: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

@@ -39,11 +39,11 @@ Material:
     - _Metallic: 0
     - _RimPower: 3
     - _RimStrength: 0.14400001
-    - _ShadeSoftness: 0.03
+    - _ShadeSoftness: 0.1
     - _ShadeThreshold: 0.5
-    - _ShadowFloor: 0.42
+    - _ShadowFloor: 0.5
     - _Smoothness: 0.15
-    - _SpecSoftness: 0.02
+    - _SpecSoftness: 0.04
     - _SpecStrength: 0.5
     - _SpecThreshold: 0.95
     - _SurfaceAOStrength: 0.45
@@ -54,6 +54,6 @@ Material:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _RimColor: {r: 0.5225216, g: 0.71056664, b: 1, a: 1}
-    - _ShadowTint: {r: 0.13286833, g: 0.17064494, b: 0.34239164, a: 1}
+    - _ShadowTint: {r: 0.19599415, g: 0.21404114, b: 0.3672465, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

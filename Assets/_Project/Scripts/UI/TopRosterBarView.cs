@@ -29,6 +29,15 @@ namespace P1.UI
         [SerializeField] private RectTransform teamAContainer;
         [SerializeField] private RectTransform teamBContainer;
 
+        /// <summary>安全区顶部内边距（规范要求 ≥12px）：整条战况条再往下让。</summary>
+        private const float TopSafePadding = 12f;
+
+        /// <summary>本地玩家「YOU」角标悬在槽上方的额外高度：上移 4 + 角标高 24。</summary>
+        private const float YouBadgeOverhead = 24f + 4f;
+
+        /// <summary>根节点固定宽度（只作容器参考，子容器按中心偏移排布，可越出根矩形）。</summary>
+        private const float RootWidth = 1360f;
+
         private float _rebindTimer = 0f;
         private bool _hasBoundCombatants;
         private bool _isMobileLayout;
@@ -182,6 +191,10 @@ namespace P1.UI
             float containerWidth = 4f * slotSize + 3f * spacing;
             float centerGap = _isMobileLayout ? 360f : 340f;
 
+            // 纵向：根高 = 槽高，槽顶与根顶对齐；根顶再下移「安全内边距 + YOU 角标高度」。
+            // 旧版根高 84、锚点 -8，槽顶实际在 -14，YOU 角标顶到 +14 —— 被屏幕顶边裁掉一截。
+            ApplyRootMetrics(slotSize);
+
             if (teamAContainer != null)
             {
                 teamAContainer.anchoredPosition = new Vector2(-centerGap, 0f);
@@ -222,6 +235,25 @@ namespace P1.UI
             }
         }
 
+        /// <summary>
+        /// 根节点纵向几何（桌面 / 移动共用同一套推导）：
+        /// 根高 = 槽高（容器垂直居中后槽顶恰好等于根顶），根顶下移 12px 安全内边距 + YOU 角标 28px。
+        /// 这样 84px 槽 + 3px 色签硬影 + 12px 顶部内边距全部落在屏内，不再被屏幕顶边裁切。
+        /// </summary>
+        private void ApplyRootMetrics(float slotSize)
+        {
+            RectTransform rootRect = transform as RectTransform;
+            if (rootRect == null) rootRect = GetComponent<RectTransform>();
+            if (rootRect == null) return;
+
+            // 子容器按根中心偏移排布，可越出根矩形；根只提供纵向基准
+            rootRect.anchorMin = new Vector2(0.5f, 1f);
+            rootRect.anchorMax = new Vector2(0.5f, 1f);
+            rootRect.pivot = new Vector2(0.5f, 1f);
+            rootRect.sizeDelta = new Vector2(RootWidth, slotSize);
+            rootRect.anchoredPosition = new Vector2(0f, -(TopSafePadding + YouBadgeOverhead));
+        }
+
         private void BuildHierarchy()
         {
             UIThemeSO resolvedTheme = UIThemeSO.Resolve(theme);
@@ -250,9 +282,6 @@ namespace P1.UI
             }
 #endif
 
-            RectTransform rootRect = GetComponent<RectTransform>();
-            if (rootRect == null) rootRect = gameObject.AddComponent<RectTransform>();
-
             float slotSize = _isMobileLayout ? 84f : 72f;
             float spacing = _isMobileLayout ? 8f : 10f;
             float containerWidth = 4f * slotSize + 3f * spacing;
@@ -261,12 +290,10 @@ namespace P1.UI
             // 半边距至少要 248；取 340 保证百分比不被头像压住。
             float centerGap = _isMobileLayout ? 360f : 340f;
 
-            // 根节点锚定在顶部居中（宽度只作容器参考；子容器按中心偏移排布，可越出根矩形）
-            rootRect.anchorMin = new Vector2(0.5f, 1f);
-            rootRect.anchorMax = new Vector2(0.5f, 1f);
-            rootRect.pivot = new Vector2(0.5f, 1f);
-            rootRect.anchoredPosition = new Vector2(0f, -8f);
-            rootRect.sizeDelta = new Vector2(1360f, 84f);
+            // 根节点锚定在顶部居中（宽度只作容器参考；子容器按中心偏移排布，可越出根矩形）。
+            // 纵向偏移由 ApplyRootMetrics 统一推导：槽顶 = 根顶，再留 12px 安全内边距 + YOU 角标高度，
+            // 避免 84px 头像槽被屏幕顶边裁掉一截。
+            ApplyRootMetrics(slotSize);
 
             // 1. 左侧队伍 A 容器（内边缘固定在中心左侧 centerGap 处，整体向屏幕左侧外移）
             if (teamAContainer == null)
@@ -349,14 +376,13 @@ namespace P1.UI
             bgShape.CornerRadius = ComicStyle.CornerSharp;
             bgShape.BorderWidth = ComicStyle.Border;
             bgShape.BorderColor = ComicStyle.Ink;
-            bgShape.HardShadow = false;
-            bgShape.ShadowOffset = Vector2.zero;
-            bgShape.ShadowColor = ComicStyle.Ink;
             bgShape.Halftone = false;
             bgShape.GlossAlpha = 0f;
             bgShape.DrawGloss = false;
             bgShape.InnerRimAlpha = 0f;
             bgShape.color = resolvedTheme.GetTeamColor(slotTeam);
+            // 头像槽（72px）用色签档硬影 (2,-3)：多槽横排时留 8px 可见阴影，不互相糊住
+            resolvedTheme.ApplyHardShadow(bgShape, UIHardShadowLevel.Tag);
 
             // 2. 乌贼图标与兜底
             var squidGo = new GameObject("SquidIcon", typeof(RectTransform), typeof(Image));
@@ -472,7 +498,7 @@ namespace P1.UI
             badgeRect.anchorMax = new Vector2(1f, 0f);
             badgeRect.pivot = new Vector2(1f, 0f);
             badgeRect.anchoredPosition = new Vector2(6f, -6f);
-            badgeRect.sizeDelta = new Vector2(28f, 28f);
+            badgeRect.sizeDelta = new Vector2(34f, 30f);
 
             var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
             badgeShape.Shape = UIInkShape.SharpRect;
@@ -480,7 +506,8 @@ namespace P1.UI
             badgeShape.BorderWidth = ComicStyle.BorderThin;
             badgeShape.BorderColor = ComicStyle.Paper;
             badgeShape.color = ComicStyle.Ink;
-            badgeShape.HardShadow = false;
+            // 复活秒数角标 = 色签档硬影 (2,-3)
+            resolvedTheme.ApplyHardShadow(badgeShape, UIHardShadowLevel.Tag);
 
             var countTextGo = new GameObject("CountdownText", typeof(RectTransform), typeof(TextMeshProUGUI));
             countTextGo.transform.SetParent(badgeGo.transform, false);
@@ -491,13 +518,13 @@ namespace P1.UI
 
             var tmp = countTextGo.GetComponent<TextMeshProUGUI>();
             tmp.font = resolvedTheme.ResolveFont(true, "9");
-            tmp.fontSize = UITypography.FontSnapped(16f);
+            tmp.fontSize = UITypography.FontSnapped(18f);
             tmp.fontStyle = FontStyles.Bold;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.color = ComicStyle.Yellow;
             badgeGo.SetActive(false);
 
-            // 7. 本地玩家「YOU」黄底黑字角标（直角色块、无阴影）
+            // 7. 本地玩家「YOU」黄底黑字角标（直角色块 + 色签档硬影）
             var youGo = new GameObject("YouIndicator", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             youGo.transform.SetParent(slotGo.transform, false);
             var youRect = youGo.GetComponent<RectTransform>();
@@ -505,16 +532,15 @@ namespace P1.UI
             youRect.anchorMax = new Vector2(0.5f, 1f);
             youRect.pivot = new Vector2(0.5f, 0f);
             youRect.anchoredPosition = new Vector2(0f, 4f);
-            youRect.sizeDelta = new Vector2(46f, 22f);
+            youRect.sizeDelta = new Vector2(52f, 24f);
 
             var youShape = youGo.GetComponent<UIInkShapeGraphic>();
             youShape.Shape = UIInkShape.SharpRect;
             youShape.CornerRadius = ComicStyle.CornerSharp;
             youShape.BorderWidth = ComicStyle.BorderThin;
             youShape.BorderColor = ComicStyle.Ink;
-            youShape.HardShadow = false;
-            youShape.ShadowOffset = Vector2.zero;
             youShape.color = ComicStyle.Yellow;
+            resolvedTheme.ApplyHardShadow(youShape, UIHardShadowLevel.Tag);
 
             var youTextGo = new GameObject("YouText", typeof(RectTransform), typeof(TextMeshProUGUI));
             youTextGo.transform.SetParent(youGo.transform, false);
@@ -525,7 +551,7 @@ namespace P1.UI
 
             var youTmp = youTextGo.GetComponent<TextMeshProUGUI>();
             youTmp.font = resolvedTheme.ResolveFont(true, "YOU");
-            youTmp.fontSize = UITypography.FontSnapped(14f);
+            youTmp.fontSize = UITypography.FontSnapped(18f);
             youTmp.fontStyle = FontStyles.Bold;
             youTmp.alignment = TextAlignmentOptions.Center;
             youTmp.color = ComicStyle.Ink;

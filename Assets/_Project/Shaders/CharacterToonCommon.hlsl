@@ -39,12 +39,22 @@ CBUFFER_START(UnityPerMaterial)
     float _ShadowFloor;
     float _SpecThreshold;
     float _SpecSoftness;
+    // P31 可选 albedo 细节层（纹理属性不进 CBUFFER，但 _ST 缩放偏移要进以保持 SRP Batcher 兼容）
+    float4 _BaseMap_ST;
+    float4 _DetailNormalMap_ST;
+    float _DetailNormalStrength;
 #if defined(CHARACTER_TOON_OUTLINE)
     // 描边属性仅在 CharacterToonOutlined 中启用，放于 CBUFFER 末尾保持前序字段一致
     float _OutlineWidth;
     half4 _OutlineColor;
 #endif
 CBUFFER_END
+
+// P31 可选 albedo / 细节法线纹理（默认 white / bump，材质不赋值时零视觉差异）
+TEXTURE2D(_BaseMap);
+SAMPLER(sampler_BaseMap);
+TEXTURE2D(_DetailNormalMap);
+SAMPLER(sampler_DetailNormalMap);
 
 // 阴影投射所用的光源方向与光源位置（由 URP 阴影管线 per-light 传入，不在 UnityPerMaterial 内）
 float3 _LightDirection;
@@ -85,11 +95,22 @@ Varyings vert(Attributes input)
 
 half4 frag(Varyings input) : SV_Target
 {
-    // 基础色（程序化角色网格可能未烘焙顶点色，故不乘顶点色）
-    half4 albedo = _BaseColor;
+    // P31 albedo 细节层：默认 white（不贴图时与旧版纯色完全一致），
+    // 贴图时以乘法混入织物/壳面肌理，程序化网格 UV 未展开也不影响正确性。
+    float2 baseUV = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+    half3 albedoTex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUV).rgb;
+    half4 albedo = half4(_BaseColor.rgb * albedoTex, _BaseColor.a);
 
     float3 N = normalize(input.normalWS);
     float3 V = normalize(GetCameraPositionWS() - input.positionWS);
+
+    // P31 细节法线：强度 0（默认）时 UnpackNormalScale 返回平面，零扰动零开销差异
+    float3 detailN = UnpackNormalScale(
+        SAMPLE_TEXTURE2D(_DetailNormalMap, sampler_DetailNormalMap, baseUV * _DetailNormalMap_ST.xy),
+        _DetailNormalStrength);
+    float3 refT = normalize(cross(float3(0.0, 1.0, 0.0), N));
+    float3 refB = cross(N, refT);
+    N = normalize(N + refT * detailN.x + refB * detailN.y);
 
     // 主光采样与阴影衰减
     float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
@@ -100,7 +121,7 @@ half4 frag(Varyings input) : SV_Target
     float3 H = normalize(L + V);
     half NdotH = saturate(dot(N, H));
 
-    half band = P1ToonBand(dot(N, L), _ShadeThreshold, _ShadeSoftness);
+    half band = P1ToonTriBand(dot(N, L), _ShadeThreshold, _ShadeSoftness);
     half shadowTerm = P1ToonShadowTerm(shadowAtten, _ShadowFloor, 0.02);
     half3 ambient = P1ToonAmbient(N, _ShadowTint.rgb, 0.72, 0.18);
     half3 shadeTint = lerp(_ShadowTint.rgb, half3(1,1,1), 0.30);
@@ -114,7 +135,12 @@ half4 frag(Varyings input) : SV_Target
     half3 emission = _EmissionColor.rgb * _EmissionStrength;
 
     // 汇总各光照分量
-    half3 finalRgb = diffuse + specular + rim + emission;
+    // 2026-11-01 白光问题收口：二值卡通高光带（smoothness 0.5×0.55 ≈ 0.275 × 太阳 1.6 ≈ +0.44 HDR）
+    // 会在半向量对齐的瞬间把发顶/白衣/墨罐这些光滑部件从 ~0.9 直接顶到 HDR≈1.4，
+    // 越过全局 Bloom 阈值 1.05，被放大成"满场角色乱闪大团白晕"（站立不动也会随待机摇头周期性触发）。
+    // 角色不需要任何 Bloom（emission 默认 0），这里把输出钉在 0.99：乘 postExposure(0.08→×1.057)
+    // 后恰好压在阈值 1.05 之下，角色永远不进 Bloom；需要起辉的场景物件请走 PropLit 自发光，不要改回这里。
+    half3 finalRgb = min(diffuse + specular + rim + emission, half3(0.99, 0.99, 0.99));
 
     // 6. 雾效收尾
     finalRgb = MixFog(finalRgb, input.fogFactor);

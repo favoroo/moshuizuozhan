@@ -11,11 +11,27 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
 // 半兰伯特二分色阶：0 = 暗部，1 = 亮部。softness 控制交界抗锯齿宽度，越小越硬。
+// 保留给需要硬切换的对外接口；默认 Toon 漫反射已迁移到 P1ToonTriBand 三阶版。
 half P1ToonBand(float NdotL, float threshold, float softness)
 {
     float halfLambert = NdotL * 0.5 + 0.5;
     float s = max(softness, 0.001);
     return (half)smoothstep(threshold - s, threshold + s, halfLambert);
+}
+
+// 半兰伯特三阶色阶：0 = 暗部，0.5 = 中调，1.0 = 亮部。
+// 在 threshold 附近做暗→中过渡，在 (threshold, 1) 中点做中→亮过渡，
+// 亮暗面不再是硬切换，而是"暗 → 中调 → 亮"的柔和三阶：
+// 这是把卡通风从 Flash 质感推进到"Splatoon 式软卡通"的核心。
+// softness 扩大可同时放大两个过渡带的宽度。
+half P1ToonTriBand(float NdotL, float threshold, float softness)
+{
+    float halfLambert = saturate(NdotL * 0.5 + 0.5);
+    float s = max(softness, 0.001);
+    float midCenter = (1.0 + threshold) * 0.5;
+    float lo = smoothstep(threshold - s, threshold + s, halfLambert);
+    float hi = smoothstep(midCenter - s, midCenter + s, halfLambert);
+    return (half)(lo * 0.5 + hi * 0.5);
 }
 
 // 实时阴影衰减：把软阴影收成较清晰的明暗交界，并保留 shadowFloor 的最低直射亮度，
@@ -35,6 +51,7 @@ half3 P1ToonAmbient(float3 normalWS, half3 shadowTint, half scale, half floorStr
 }
 
 // 卡通漫反射：albedo ×（环境光 + 主光 × 色阶 × 阴影项 × 冷暖染色）。
+// 内部走三阶柔和过渡（暗→中→亮），签名不变；想要硬切风格的调用方直接改用 P1ToonBand。
 half3 P1ToonDiffuse(
     half3 albedo,
     half3 lightColor,
@@ -46,7 +63,7 @@ half3 P1ToonDiffuse(
     half3 shadowTint,
     half3 ambient)
 {
-    half band = P1ToonBand(NdotL, threshold, softness);
+    half band = P1ToonTriBand(NdotL, threshold, softness);
     half shadowTerm = P1ToonShadowTerm(shadowAtten, shadowFloor, softness);
     // 阴影色与白色混合 25%，避免暖色反照率被纯蓝阴影压成脏褐色。
     half3 shadeTint = lerp(shadowTint, half3(1.0, 1.0, 1.0), 0.25);

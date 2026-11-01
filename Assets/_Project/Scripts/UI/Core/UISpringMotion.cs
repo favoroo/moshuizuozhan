@@ -38,6 +38,13 @@ namespace P1.UI
         [Tooltip("按下时的压缩倍率（active:scale-95）")]
         [SerializeField, Range(0.7f, 1f)] private float pressScale = 0.95f;
 
+        [Header("t-1 按压物理（主题驱动）")]
+        [Tooltip("按下 0ms 硬切到 pressScale（主题 pressInstant=true 时生效）")]
+        [SerializeField] private bool pressInstantFallback = true;
+
+        [Tooltip("松开回弹时长（秒）：Cubic-Out 回到常态；主题数值优先")]
+        [SerializeField, Range(0.05f, 0.2f)] private float reboundFallbackDuration = 0.1f;
+
         [Header("几何风（P14）")]
         [Tooltip("交互参数优先读 UIThemeSO（1.05 / 0.95 / 0°）；关掉才用上面的手填值")]
         [SerializeField] private bool useThemeInteraction = true;
@@ -67,6 +74,8 @@ namespace P1.UI
         private Vector3 _scaleTo;
         private float _scaleT = 1f;
         private float _scaleDuration = 0.1f;
+        private UICubicBezier _scaleEasing = new UICubicBezier(0f, 0f, 1f, 1f);
+        private bool _releasedFromPress;
 
         private float _tiltCurrent;
         private float _tiltFrom;
@@ -183,8 +192,15 @@ namespace P1.UI
             if (_pressed == value) return;
             _pressed = value;
             if (value) _hovered = false;
+            _releasedFromPress = !value;
             _running = true;
             ApplyInteractionTargets();
+
+            // t-1：按下 0ms 硬切，绝不等下一帧（也不补间）。
+            if (value && UseInstantPress())
+            {
+                SnapScale(CurrentInteractionTarget());
+            }
         }
 
         public void SetHovered(bool value)
@@ -192,6 +208,7 @@ namespace P1.UI
             Build();
             if (_hovered == value) return;
             _hovered = value;
+            _releasedFromPress = false;
             _running = true;
             ApplyInteractionTargets();
         }
@@ -240,7 +257,11 @@ namespace P1.UI
             _scaleFrom = _currentScale;
             _scaleTo = _homeScale;
             _scaleT = 0f;
-            _scaleDuration = CurrentSettings().entranceDuration;
+
+            // t-1 入场：0.22s Back-Out（轻过冲）或旧档 linear，时长夹在 0.05~0.3 秒。
+            UIThemeSO settings = CurrentSettings();
+            _scaleDuration = settings.ClampEntranceDuration(settings.entranceDuration);
+            _scaleEasing = settings.entranceBackOut ? UICubicBezier.BackOut : settings.entranceEasing;
             transform.localScale = _currentScale;
 
             _tiltCurrent = 0f;
@@ -268,30 +289,68 @@ namespace P1.UI
         private void ApplyInteractionTargets()
         {
             UIThemeSO settings = CurrentSettings();
-            float useHoverScale = useThemeInteraction ? settings.hoverScale : hoverScale;
-            float usePressScale = useThemeInteraction ? settings.pressScale : pressScale;
-            float useTilt = useThemeInteraction ? 0f : hoverTiltDegrees;
 
-            Vector3 target = _homeScale;
-            if (_leaving) target = _homeScale * 0.9f;
-            else if (_pressed) target = _homeScale * usePressScale;
-            else if (_hovered) target = _homeScale * useHoverScale;
-
+            Vector3 target = CurrentInteractionTarget();
             float duration = _pressed ? settings.pressDuration : settings.hoverDuration;
-            StartScaleTween(target, duration);
+            UICubicBezier easing = new UICubicBezier(0f, 0f, 1f, 1f);
 
+            // 松开按压：默认 0.1s Cubic-Out 回弹（t-1），而不是继续 hover 硬切。
+            // 关掉 useThemeInteraction 的旧组件走自己的字段，行为与旧版一致。
+            if (!_pressed && _releasedFromPress)
+            {
+                duration = useThemeInteraction ? settings.pressReboundDuration : reboundFallbackDuration;
+                easing = useThemeInteraction ? settings.pressReboundEasing : UICubicBezier.EaseOut;
+            }
+
+            StartScaleTween(target, duration, easing);
+
+            float useTilt = useThemeInteraction ? 0f : hoverTiltDegrees;
             float tiltTarget = !_leaving && _hovered && !_pressed ? useTilt : 0f;
             _tiltFrom = _tiltCurrent;
             _tiltTo = tiltTarget;
             _tiltT = 0f;
         }
 
+        private Vector3 CurrentInteractionTarget()
+        {
+            UIThemeSO settings = CurrentSettings();
+            float useHoverScale = useThemeInteraction ? settings.hoverScale : hoverScale;
+            float usePressScale = useThemeInteraction ? settings.pressScale : pressScale;
+
+            if (_leaving) return _homeScale * 0.9f;
+            if (_pressed) return _homeScale * usePressScale;
+            if (_hovered) return _homeScale * useHoverScale;
+            return _homeScale;
+        }
+
+        private bool UseInstantPress()
+        {
+            if (!useThemeInteraction) return pressInstantFallback;
+            return CurrentSettings().pressInstant;
+        }
+
+        /// <summary>0ms 硬切到目标缩放（按压瞬间用）。</summary>
+        private void SnapScale(Vector3 target)
+        {
+            _currentScale = target;
+            _scaleFrom = target;
+            _scaleTo = target;
+            _scaleT = 1f;
+            transform.localScale = target;
+        }
+
         private void StartScaleTween(Vector3 target, float duration)
+        {
+            StartScaleTween(target, duration, new UICubicBezier(0f, 0f, 1f, 1f));
+        }
+
+        private void StartScaleTween(Vector3 target, float duration, UICubicBezier easing)
         {
             _scaleFrom = _currentScale;
             _scaleTo = target;
             _scaleT = 0f;
             _scaleDuration = Mathf.Max(0.01f, UIThemeSO.Resolve(theme).ClampDuration(duration));
+            _scaleEasing = easing;
         }
 
         private void Update()
@@ -310,11 +369,11 @@ namespace P1.UI
 
             UIThemeSO settings = CurrentSettings();
 
-            // 缩放：100ms 内线性硬切（timed lerp），无回弹
+            // 缩放：默认 100ms 线性硬切（timed lerp）；松开回弹 / 入场走各自的缓动曲线
             if (_scaleT < 1f)
             {
                 _scaleT = Mathf.Min(1f, _scaleT + deltaTime / _scaleDuration);
-                _currentScale = Vector3.LerpUnclamped(_scaleFrom, _scaleTo, _scaleT);
+                _currentScale = Vector3.LerpUnclamped(_scaleFrom, _scaleTo, _scaleEasing.Evaluate(_scaleT));
             }
 
             // 点击脉冲：40ms 线性衰减后归零（纯位移反馈，不做曲线抖动）

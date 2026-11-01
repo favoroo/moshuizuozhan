@@ -94,6 +94,9 @@ namespace P1.Ink
         /// <summary>最近一次命令缓冲执行的 CPU 耗时（毫秒）。</summary>
         public double LastCommandMs { get; private set; }
 
+        /// <summary>累计命令缓冲执行次数（性能探针用于判定「本帧是否发生了新提交」）。</summary>
+        public int CommandExecuteCount { get; private set; }
+
         /// <summary>累计落墨次数（诊断用）。</summary>
         public int TotalSplatCount { get; private set; }
 
@@ -461,6 +464,7 @@ namespace P1.Ink
             Graphics.ExecuteCommandBuffer(_cmd);
             long end = System.Diagnostics.Stopwatch.GetTimestamp();
             LastCommandMs = (end - start) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            CommandExecuteCount++;
         }
 
         private static float ClassifyKind(float radius)

@@ -29,6 +29,10 @@ Shader "P1/PropLit"
         _SpecStrength ("Spec Strength", Range(0.0, 2.0)) = 0.5
         _SpecThreshold ("Spec Threshold", Range(0.5, 0.999)) = 0.95
         _SpecSoftness ("Spec Softness", Range(0.001, 0.1)) = 0.02
+
+        // P31 可选 albedo 细节层：默认 white 不贴图，与旧版纯色行为一致（向后兼容）
+        [Header(Albedo Detail P31)]
+        _BaseMap ("Albedo Map (optional)", 2D) = "white" {}
     }
 
     SubShader
@@ -72,6 +76,11 @@ Shader "P1/PropLit"
             SAMPLER(sampler_SurfaceN);
             TEXTURE2D(_SurfaceRMO);
             SAMPLER(sampler_SurfaceRMO);
+            TEXTURE2D(_BaseMap);
+            SAMPLER(sampler_BaseMap);
+
+            // 全局自发光强度（由 Core/RenderEnvGlobals 每帧推送，不在 CBUFFER 中以保持 SRP Batcher 兼容）
+            float _P1EmissiveStrength;
 
             struct Attributes
             {
@@ -113,6 +122,7 @@ Shader "P1/PropLit"
                 float _SurfaceNormalStrength;
                 float _SurfaceAOStrength;
                 float _SurfaceSmoothnessScale;
+                float4 _BaseMap_ST;
             CBUFFER_END
 
             Varyings vert(Attributes input)
@@ -132,8 +142,10 @@ Shader "P1/PropLit"
 
             half4 frag(Varyings input) : SV_Target
             {
-                // 顶点色与基础色混合
-                half4 albedo = _BaseColor * input.color;
+                // 顶点色与基础色混合；P31 可选 albedo 细节层（默认 white 与旧版一致）
+                float2 baseUV = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+                half4 albedo = _BaseColor * input.color *
+                    half4(SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUV).rgb, 1.0);
 
                 float3 geomN = normalize(input.normalWS);
                 float3 viewDirWS = normalize(GetCameraPositionWS() - input.positionWS);
@@ -168,7 +180,7 @@ Shader "P1/PropLit"
                     float3 worldN = normalize(geomN + (surfT * tsN.x + surfB * tsN.y));
 
                     half4 rmo = SAMPLE_TEXTURE2D(_SurfaceRMO, sampler_SurfaceRMO, surfUV);
-                    half ao = clamp(lerp(1.0, rmo.g, _SurfaceAOStrength), 0.35, 1.0);
+                    half ao = clamp(lerp(1.0, rmo.g, _SurfaceAOStrength), 0.22, 1.0);
                     float metallic = saturate(max(_Metallic, rmo.r));
                     float smoothness = saturate(lerp(_Smoothness, rmo.a * _SurfaceSmoothnessScale, 0.85));
                     albedo.rgb *= (0.88 + 0.24 * rmo.b);
@@ -178,6 +190,10 @@ Shader "P1/PropLit"
                     float metallic = _Metallic;
                     float smoothness = _Smoothness;
                 #endif
+
+                // 道具接触地面自然微遮蔽（让箱体与地面接触更扎实稳重）
+                float contactGround = smoothstep(-0.15, 0.28, input.positionWS.y);
+                ao *= lerp(0.84, 1.0, contactGround);
 
                 // 主光采样与阴影衰减
                 float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
@@ -194,17 +210,21 @@ Shader "P1/PropLit"
                                               _ShadeThreshold, _ShadeSoftness, _ShadowFloor, _ShadowTint.rgb, ambient);
                 diffuse *= ao;
 
+                // 阶梯高光 + 湿润微高光（码头海风微光泽）
                 half spec = P1ToonSpec(NdotH, _SpecThreshold, _SpecSoftness, _SpecStrength * (0.5 + metallic) * (0.3 + 1.4 * smoothness), shadowAtten);
+                half wetMicroSpec = (half)pow(NdotH, 48.0) * (0.07 + 0.16 * smoothness) * shadowAtten;
                 half3 specColor = lerp(mainLight.color, mainLight.color * albedo.rgb, metallic);
-                half3 specular = specColor * spec;
+                half3 specular = specColor * spec + (half3)mainLight.color * (wetMicroSpec * (0.5 + metallic * 0.5));
 
-                half rim = P1ToonRim(saturate(dot(worldN, viewDirWS)), _RimPower, shadowAtten) * _RimStrength;
-                half3 emission = _EmissionColor.rgb * _EmissionStrength;
+                // 边缘光与全屏描边协调：提高锐度、微调强度，避免在轮廓黑边内侧产生过曝白圈
+                half rim = P1ToonRim(saturate(dot(worldN, viewDirWS)), max(_RimPower, 3.2), shadowAtten) * (_RimStrength * 0.82) * ao;
+                half3 emission = _EmissionColor.rgb * _EmissionStrength * _P1EmissiveStrength;
 
-                // 环境镜面（纯数学，不分支）
+                // 环境镜面（桌面端 Cubemap + 移动端解析天空回退；由 P1InkEnvSpecularFull 内部处理）
                 float3 R = reflect(-viewDirWS, worldN);
                 float rough = saturate(1.0 - smoothness);
-                half3 envSpec = P1InkEnvSpecular(R, rough, saturate(dot(worldN, viewDirWS)));
+                float NdotV = saturate(dot(worldN, viewDirWS));
+                half3 envSpec = P1InkEnvSpecularFull(R, rough, NdotV, half3(1.0, 1.0, 1.0));
                 envSpec *= lerp(half3(1.0, 1.0, 1.0), albedo.rgb, metallic) * ao;
 
                 half3 finalRgb = diffuse + specular + _RimColor.rgb * rim + emission + envSpec;
@@ -273,6 +293,7 @@ Shader "P1/PropLit"
                 float _SurfaceNormalStrength;
                 float _SurfaceAOStrength;
                 float _SurfaceSmoothnessScale;
+                float4 _BaseMap_ST;
             CBUFFER_END
 
             float3 _LightDirection;
@@ -361,6 +382,7 @@ Shader "P1/PropLit"
                 float _SurfaceNormalStrength;
                 float _SurfaceAOStrength;
                 float _SurfaceSmoothnessScale;
+                float4 _BaseMap_ST;
             CBUFFER_END
 
             DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)

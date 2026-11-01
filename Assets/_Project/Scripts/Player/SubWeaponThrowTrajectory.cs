@@ -6,9 +6,9 @@ using UnityEngine;
 namespace P1.Player
 {
     /// <summary>
-    /// 副武器手雷弹道预测线与预测落点爆炸预警圈：
-    /// 主路径 <see cref="UpdateTrajectorySim"/> 用与实飞完全相同的常数仿真 64 点虚线（inkwave 做法），
-    /// 预测落点环即真实弹道首个接触面；旧插值抛物线接口 <see cref="UpdateTrajectory"/> 保留兼容。
+    /// 副武器手雷弹道预测线与预测落点爆炸预警圈（旧「按住瞄准」预览）：
+    /// 手雷现已改为一键直投，玩家链路不再调用本组件；组件与两个更新接口保留，
+    /// 供旧测试 / 编辑器工具 / 后续可选预览功能使用。
     /// </summary>
     public class SubWeaponThrowTrajectory : MonoBehaviour
     {

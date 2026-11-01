@@ -4,95 +4,87 @@ using P1.Player;
 namespace P1.Tests
 {
     /// <summary>
-    /// 副武器手雷「按住瞄准 / 松开投掷」仲裁回归：
-    /// 核心场景 = 按下沿绝不立即投掷。旧实现按下即投（扣 70 墨 + 0.6s 冷却），
-    /// 松开沿投第 2 颗时因墨水不足 / 冷中被静默拒绝，表现为「瞄准后松手丢不出来」。
+    /// 副武器手雷「按下即投」仲裁回归：
+    /// 按下沿立刻投掷，按住不会连投，松开不会补投；不再存在瞄准态。
     /// </summary>
     [TestFixture]
     public class SubBombThrowArbiterTests
     {
         [Test]
-        public void PressEdge_DoesNotThrow_OnlyStartsAiming()
+        public void PressEdge_ThrowsImmediately_OnSameFrame()
         {
             var arbiter = new SubBombThrowArbiter();
 
-            Assert.IsFalse(arbiter.Tick(true, true, false, false, false), "按下沿不得立即投掷（旧 bug 回归）");
-            Assert.IsTrue(arbiter.IsAiming, "按下沿应进入瞄准态");
+            Assert.IsTrue(arbiter.Tick(true, true, false, false, false), "按下沿必须立刻投掷");
+            Assert.IsFalse(arbiter.IsAiming, "新版不再有瞄准态");
         }
 
         [Test]
-        public void HoldThenRelease_ThrowsExactlyOnce()
+        public void Hold_DoesNotRepeatThrow()
         {
             var arbiter = new SubBombThrowArbiter();
 
-            Assert.IsFalse(arbiter.Tick(true, true, false, false, false), "按下 → 瞄准");
-            Assert.IsFalse(arbiter.Tick(false, true, false, false, false), "按住 → 维持瞄准");
-            Assert.IsFalse(arbiter.Tick(false, true, false, false, false));
-            Assert.IsTrue(arbiter.Tick(false, true, true, false, false), "松开沿应投掷");
-            Assert.IsFalse(arbiter.IsAiming, "投掷后应退出瞄准态");
-            Assert.IsFalse(arbiter.Tick(false, false, true, false, false), "同一次松手只投一颗");
+            Assert.IsTrue(arbiter.Tick(true, true, false, false, false), "按下沿投第一颗");
+            for (int i = 0; i < 5; i++)
+            {
+                Assert.IsFalse(arbiter.Tick(false, true, false, false, false), "按住期间不得连投");
+            }
         }
 
         [Test]
-        public void QuickTap_ThrowsOnRelease()
+        public void Release_DoesNotThrowSecondBomb()
         {
             var arbiter = new SubBombThrowArbiter();
 
-            Assert.IsFalse(arbiter.Tick(true, true, false, false, false), "按下 → 瞄准");
-            Assert.IsTrue(arbiter.Tick(false, false, true, false, false), "短按松手也必须投出");
+            Assert.IsTrue(arbiter.Tick(true, true, false, false, false));
+            Assert.IsFalse(arbiter.Tick(false, true, true, false, false), "松开沿不得补投第二颗");
+            Assert.IsFalse(arbiter.Tick(false, false, true, false, false), "同一次松手只处理一次");
         }
 
         [Test]
-        public void PressAndReleaseAdjacentFrames_ThrowsOnHeldLost()
+        public void QuickTap_ThrowsOnPress()
         {
             var arbiter = new SubBombThrowArbiter();
 
-            Assert.IsFalse(arbiter.Tick(true, true, false, false, false), "按下（同帧松开沿被按下沿优先）");
-            Assert.IsTrue(arbiter.Tick(false, false, false, false, false), "下一帧 held 已消失应补投，绝不吞键");
+            // 同帧按下 + 松开：按下沿优先，仍然只投一次
+            Assert.IsTrue(arbiter.Tick(true, true, true, false, false), "按下沿必须立刻投出");
+            Assert.IsFalse(arbiter.Tick(false, false, true, false, false), "松开不得补投");
         }
 
         [Test]
-        public void TouchInjection_ThrowsWithoutPriorAim()
+        public void TouchInjection_ThrowsImmediately()
         {
             var arbiter = new SubBombThrowArbiter();
 
-            // 触屏短按（< 0.22s）：从未建立瞄准态，pointer-up 注入应直接快投
-            Assert.IsTrue(arbiter.Tick(false, false, false, true, false), "触屏短按松手 = 快投");
+            Assert.IsTrue(arbiter.Tick(false, false, false, true, false), "触屏 pointer-down 注入 = 立即投掷");
         }
 
         [Test]
-        public void TouchHoldThenInjection_ThrowsOnce()
+        public void TouchInjection_AndDesktopPress_SameFrame_ThrowsOnce()
         {
             var arbiter = new SubBombThrowArbiter();
 
-            Assert.IsFalse(arbiter.Tick(false, true, false, false, false), "长按（TouchBombHeld）→ 瞄准");
-            Assert.IsTrue(arbiter.IsAiming);
-            Assert.IsTrue(arbiter.Tick(false, false, false, true, false), "触屏长按松手 = 投掷");
-            Assert.IsFalse(arbiter.IsAiming);
+            Assert.IsTrue(arbiter.Tick(true, true, false, true, false), "同一帧只产生一次投掷事件");
         }
 
         [Test]
-        public void SpecialActive_CancelsAim_AndNeverThrows()
+        public void SpecialActive_BlocksPressAndTouch()
         {
             var arbiter = new SubBombThrowArbiter();
 
-            Assert.IsFalse(arbiter.Tick(true, true, false, false, false), "先进入瞄准");
-            Assert.IsFalse(arbiter.Tick(false, true, false, false, true), "大招中不得投掷");
-            Assert.IsFalse(arbiter.IsAiming, "大招应取消瞄准态");
-            Assert.IsFalse(arbiter.Tick(false, false, true, false, true), "大招中松手也不投");
-            Assert.IsFalse(arbiter.Tick(false, false, true, false, false), "大招结束后残留松手不补投");
+            Assert.IsFalse(arbiter.Tick(true, true, false, false, true), "大招中按下不得投掷");
+            Assert.IsFalse(arbiter.Tick(false, false, false, true, true), "大招中触屏注入不得投掷");
+            Assert.IsFalse(arbiter.IsAiming, "大招中也不存在瞄准态");
         }
 
         [Test]
-        public void Reset_ClearsAiming_AimRestoresWhileStillHeld()
+        public void Reset_DoesNotResurrectThrow()
         {
             var arbiter = new SubBombThrowArbiter();
 
-            Assert.IsFalse(arbiter.Tick(true, true, false, false, false));
             arbiter.Reset();
-            Assert.IsFalse(arbiter.IsAiming, "Reset 应清空瞄准态（死亡 / 暂停早退同步）");
-            Assert.IsFalse(arbiter.Tick(false, true, false, false, false), "Reset 后仍按住应兜底恢复瞄准");
-            Assert.IsTrue(arbiter.IsAiming);
+            Assert.IsFalse(arbiter.IsAiming, "Reset 后仍然没有瞄准态");
+            Assert.IsFalse(arbiter.Tick(false, false, true, false, false), "Reset 后残留松手不得补投");
         }
     }
 }

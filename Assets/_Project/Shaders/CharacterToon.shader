@@ -26,6 +26,12 @@ Shader "P1/CharacterToon"
         _ShadowFloor      ("Shadow Floor", Range(0.0, 1.0)) = 0.55
         _SpecThreshold    ("Spec Threshold", Range(0.5, 0.999)) = 0.93
         _SpecSoftness     ("Spec Softness", Range(0.001, 0.1)) = 0.02
+
+        // P31 可选 albedo 细节层：默认 white，不贴图时行为与旧版完全一致（向后兼容）
+        [Header(Albedo Detail P31)]
+        _BaseMap          ("Albedo Map (optional)", 2D) = "white" {}
+        _DetailNormalMap  ("Detail Normal (optional)", 2D) = "bump" {}
+        _DetailNormalStrength ("Detail Normal Strength", Range(0, 1)) = 0.0
     }
 
     SubShader

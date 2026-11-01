@@ -27,6 +27,12 @@ Shader "P1/CharacterToonOutlined"
         _SpecThreshold    ("Spec Threshold", Range(0.5, 0.999)) = 0.93
         _SpecSoftness     ("Spec Softness", Range(0.001, 0.1)) = 0.02
 
+        // P31 可选 albedo 细节层：默认 white，不贴图时行为与旧版完全一致（向后兼容）
+        [Header(Albedo Detail P31)]
+        _BaseMap          ("Albedo Map (optional)", 2D) = "white" {}
+        _DetailNormalMap  ("Detail Normal (optional)", 2D) = "bump" {}
+        _DetailNormalStrength ("Detail Normal Strength", Range(0, 1)) = 0.0
+
         // 蛋形身体描边属性（仅 Outlined 材质独有，用于反向法线外扩 Pass）
         _OutlineWidth     ("Outline Width (Object Space)", Float) = 0.012
         _OutlineColor     ("Outline Color", Color) = (0.09,0.10,0.13,1)

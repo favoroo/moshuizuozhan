@@ -11,13 +11,15 @@ namespace P1.UI
     ///   不适合塞进 ScriptableObject。
     ///
     /// 规范红线（改 UI 前必读，详见 Docs/UI-GeometricBold.md）：
-    /// - 纯色大色块 + 黑白为主 + 1~2 种强调色；禁止渐变、阴影、网点、柔光；
+    /// - 纯色大色块 + 黑白为主 + 1~2 种强调色；禁止渐变、柔光、模糊阴影；
+    /// - 唯一允许的立体感来源是「零模糊硬偏移阴影」（ShadowButton/Panel/Hero/Dialog… 档位）；
     /// - 面板/按钮一律直角（CornerSharp=0），圆角只给正圆/胶囊（CornerBubble）；
-    /// - 交互一律 ≤100ms linear 硬切，禁止弹簧/bounce/摆动；
+    /// - 交互一律硬切（按下 0ms、松开 0.1s Cubic-Out），禁止弹簧/bounce/摆动；
     /// - 移动端字号 ≥ 桌面，全部走 UITypography.Font()。
     ///
     /// 兼容说明：旧漫画风的 token 名全部保留（Ink/Paper/Border/CornerSharp/ShadowOffset…），
-    /// 26 个调用方文件无需改签名即可换肤；阴影/网点类 token 已归零即"视觉禁用"。
+    /// 26 个调用方文件无需改签名即可换肤；ShadowOffset/HoverShadowOffset 两个旧常量保留为 0，
+    /// 新代码请改用 Shadow* 向量档位。
     /// </summary>
     public static class ComicStyle
     {
@@ -45,9 +47,23 @@ namespace P1.UI
         /// <summary>全圆角：正圆/胶囊（头像、大招球、Tag）。</summary>
         public const float CornerBubble = 999f;
 
-        /// <summary>几何风禁止阴影：偏移归零后即使调用方打开 hardShadow 也画不出来。</summary>
+        /// <summary>
+        /// 兼容常量（旧调用方仍引用）：真正画阴影请用下面的 Shadow* 档位。
+        /// t-1 已解禁「零模糊硬偏移阴影」，见 Docs/UI-GeometricBold.md。
+        /// </summary>
         public const float ShadowOffset = 0f;
         public const float HoverShadowOffset = 0f;
+
+        // ---------- 硬偏移阴影档位（t-1，uGUI y 向上：右下 = 正 x / 负 y） ----------
+        // 唯一允许的立体感来源：同形状纯色偏移底板、零模糊、不透明纯墨黑。
+
+        public static readonly Vector2 ShadowTag = new Vector2(2f, -3f);
+        public static readonly Vector2 ShadowButton = new Vector2(3f, -4f);
+        public static readonly Vector2 ShadowButtonHover = new Vector2(5f, -6f);
+        public static readonly Vector2 ShadowButtonPressed = Vector2.zero;
+        public static readonly Vector2 ShadowPanel = new Vector2(4f, -5f);
+        public static readonly Vector2 ShadowHero = new Vector2(6f, -7f);
+        public static readonly Vector2 ShadowDialog = new Vector2(8f, -9f);
 
         // 网点/动作线是漫画语言，几何风全局禁用（保留常量名给旧调用方编译）。
         public const float HalftoneSpacing = 8f;
@@ -66,8 +82,8 @@ namespace P1.UI
         /// <summary>几何风不做倾斜：保持 0。</summary>
         public const float HoverTiltDegrees = 0f;
 
-        /// <summary>按下压缩（active:scale-95）。</summary>
-        public const float PressScale = 0.95f;
+        /// <summary>按下压缩（active:scale-97；t-1 用更克制的 3%）。</summary>
+        public const float PressScale = 0.97f;
 
         /// <summary>鼠标/触屏按下时的硬位移（UI px）：按下层回落，抬起弹回。</summary>
         public const float PressOffsetY = -3f;

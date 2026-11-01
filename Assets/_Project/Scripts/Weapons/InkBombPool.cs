@@ -17,6 +17,9 @@ namespace P1.Weapons
     {
         public static InkBombPool Instance { get; private set; }
 
+        /// <summary>当前在飞/引信中的手雷数量（测试断言与调试面板用，只读）。</summary>
+        public int ActiveBombCount => _active.Count;
+
         private struct ActiveBomb
         {
             public Transform BombTransform;
@@ -125,9 +128,11 @@ namespace P1.Weapons
         {
             ActiveBomb b = _pool.Count > 0 ? _pool.Dequeue() : CreateBombNode(_active.Count + 16);
 
+            // 队色传原始 sRGB 即可：材质色 / MaterialPropertyBlock 会自动转 Linear，
+            // 手动 .linear 会二次转换，手雷整颗发深红（v0.1.7 实测）。
             Color teamCol = InkSurfaceController.Instance != null
-                ? InkSurfaceController.Instance.GetTeamColorLinear(team)
-                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f).linear : new Color(0.15f, 0.42f, 1f).linear);
+                ? InkSurfaceController.Instance.GetTeamColor(team)
+                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f) : new Color(0.15f, 0.42f, 1f));
 
             b.Position = startPos;
             b.Velocity = throwVelocity;
@@ -303,10 +308,22 @@ namespace P1.Weapons
 
         private void DetonateBomb(in ActiveBomb b)
         {
-            // 1. 2.7m 涂地（同时覆盖附近可涂墙面）
+            // 1. 2.7m 涂地（同时覆盖附近可涂墙面，仅地面格登记个人涂地统计）
             if (InkSurfaceController.Instance != null)
             {
-                int changed = InkSurfaceController.Instance.PaintSphereWithWalls(b.LandingPos, b.SplatRadius, b.Team);
+                int groundChanged = InkSurfaceController.Instance.PaintCircle(b.LandingPos, b.SplatRadius, b.Team);
+                if (b.Attacker != null && groundChanged > 0)
+                {
+                    MatchStatsService.RegisterTurf(b.Attacker, groundChanged * InkSurfaceController.Instance.CellArea);
+                }
+
+                int wallChanged = 0;
+                if (InkWallSurface.ActiveCount > 0)
+                {
+                    wallChanged = InkWallSurface.PaintAllInSphere(b.LandingPos, b.SplatRadius, b.Team);
+                }
+
+                int changed = groundChanged + wallChanged;
                 if (changed > 0)
                 {
                     b.OnCellsPainted?.Invoke(changed);

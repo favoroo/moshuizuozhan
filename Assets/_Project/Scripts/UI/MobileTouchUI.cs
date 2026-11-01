@@ -9,9 +9,10 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 移动端触控交互系统（几何大胆风 Geometric Bold P14）：
-    /// 1. 左侧：半屏动态浮动摇杆（Floating Joystick），纯色块底盘（黑底白圈 + 白底黑边把手），拖动高亮硬切；
-    /// 2. 右侧：几何纯色实心大色块按键群（实心队伍色 + 4px 墨边 + 白色超粗大字，无阴影无网点）；
+    /// 移动端触控交互系统（t-1 新野兽派 P19 波次2b）：
+    /// 1. 左侧：半屏动态浮动摇杆（Floating Joystick），墨黑底盘 + 细纸白实线环 + 纸白把手；
+    /// 2. 右侧：动作键群 = 墨黑半透明底 + 功能色 4~5px 描边 + 功能色图标 + 纸白标签，
+    ///    按下才整块翻功能色实底（功能色只做编码，不再铺 5 块高饱和大色饼）；
     /// 3. 右半屏：滑屏转视角感应区（每帧触摸增量驱动相机 Yaw/Pitch）；
     /// 4. 图标库统一走 UIIconLibrary，缺失时安全隐藏并由文字兜底，绝无白方块；
     /// 5. 尺寸与排布默认值统一暴露为 DefaultLayout，便于运行时与测试共享；
@@ -69,6 +70,11 @@ namespace P1.UI
         private MobileActionButton _leftFireButton;
         private Button _settingsEntryButton;
 
+        /// <summary>手雷按钮圆形命中区向外扩展的透明命中边距（参考分辨率像素）：防边缘按压漏给下层滑屏区。</summary>
+        private const float BombButtonHitPadding = 14f;
+
+        private int _lastBombDenyStamp;
+
         private MatchManager _match;
         private bool _subscribedMatch;
         private bool _subscribedSettings;
@@ -76,6 +82,12 @@ namespace P1.UI
 
         private static Sprite _circleFillSprite;
         private static Sprite _circleRingSprite;
+
+        /// <summary>
+        /// 动作键专用细环（128px 纹理上 4px 环宽）：132~176px 的按键拉到屏幕后约 4.1~5.5px，
+        /// 与摇杆共用 2px 环会偏细，故单独烘一张。
+        /// </summary>
+        private static Sprite _actionRingSprite;
 
         public bool IsShown => _canvas != null && _canvas.gameObject.activeInHierarchy;
         public DynamicFloatingJoystick FloatingJoystick => _floatingJoystick;
@@ -193,6 +205,18 @@ namespace P1.UI
             UnsubscribeMatch();
             UnsubscribeSettings();
             ResetAllInputs();
+        }
+
+        // 切后台 / 失焦时系统手势会吞掉 pointer-up，按钮的按住状态会永久卡死
+        // （表现为开火键失灵、手雷按钮视觉不复原），此处统一清屏兜底。
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            if (!hasFocus) ResetAllInputs();
+        }
+
+        private void OnApplicationPause(bool paused)
+        {
+            if (paused) ResetAllInputs();
         }
 
         private void OnDestroy()
@@ -429,6 +453,24 @@ namespace P1.UI
                     player.TouchBombTriggered = true;
                 }
                 player.TouchBombHeld = _bombButton.IsAimingHeld;
+
+                // 冷却硬切显示（径向暗色扇形收缩 + 按钮标签倒计时 + 墨边翻黄）+ 拒绝闪红。
+                // 拒绝走轮询戳而非事件订阅：LocalPlayer 重开/复活会换实例，轮询无需管理订阅生命周期。
+                var weapon = player.Weapon;
+                if (weapon != null)
+                {
+                    float cdDuration = weapon.BombCooldownDuration;
+                    float cdRemaining = weapon.BombCooldownRemaining;
+                    _bombButton.UpdateBombCooldown01(cdDuration > 0f
+                        ? cdRemaining / cdDuration
+                        : 0f, cdRemaining);
+
+                    if (player.SubBombDenyStamp != _lastBombDenyStamp)
+                    {
+                        _lastBombDenyStamp = player.SubBombDenyStamp;
+                        _bombButton.NotifyDenied();
+                    }
+                }
             }
 
             // 6. 大招
@@ -502,7 +544,9 @@ namespace P1.UI
                 joystickKnobIcon);
             _floatingJoystick.FixedBase = GameSettingsService.FixedJoystick;
 
-            // 3. 右下角漫画风人体工学操作按键群
+            // 3. 右下角 t-1 人体工学操作按键群
+            //    样式：墨黑半透明底 + 功能色 4px 描边 + 功能色图标；功能色只做「功能编码」，
+            //    按下去才允许整块翻成功能色实底（消除过去的 5 块高饱和大色饼）。
             var fireCfg = DefaultLayout[0];
             var swimCfg = DefaultLayout[1];
             var jumpCfg = DefaultLayout[2];
@@ -512,44 +556,45 @@ namespace P1.UI
             _fireButton = MobileActionButton.Create(
                 _safeArea, "FireButton", fireCfg.label,
                 fireCfg.pos, fireCfg.size,
-                new Color(1f, 0.44f, 0.08f, 1f), // 鲜明橙墨色
-                fireIcon, _circleFillSprite, _circleRingSprite,
+                ComicStyle.FromHex(0xFF7314), // 队伍橙（射击）
+                fireIcon, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.HoldWithAimDrag);
 
             _swimButton = MobileActionButton.Create(
                 _safeArea, "SwimButton", swimCfg.label,
                 swimCfg.pos, swimCfg.size,
-                new Color(0.12f, 0.52f, 0.98f, 1f), // 亮蓝墨水色
-                swimIcon, _circleFillSprite, _circleRingSprite,
+                ComicStyle.Blue, // 队伍蓝（潜行）
+                swimIcon, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.Hold);
 
             _jumpButton = MobileActionButton.Create(
                 _safeArea, "JumpButton", jumpCfg.label,
                 jumpCfg.pos, jumpCfg.size,
-                new Color(0.18f, 0.85f, 0.48f, 1f), // 翡翠薄荷绿
-                jumpIcon, _circleFillSprite, _circleRingSprite,
+                ComicStyle.Green, // 语义绿（跳跃）
+                jumpIcon, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.Tap);
 
             _bombButton = MobileActionButton.Create(
                 _safeArea, "BombButton", bombCfg.label,
                 bombCfg.pos, bombCfg.size,
-                new Color(0.58f, 0.28f, 0.95f, 1f), // 荧光紫
-                bombIcon, _circleFillSprite, _circleRingSprite,
-                MobileButtonMode.BombTapOrHoldAim);
+                new Color(0.58f, 0.28f, 0.95f, 1f), // 荧光紫（副武器）
+                bombIcon, _circleFillSprite, _actionRingSprite,
+                MobileButtonMode.BombTapOrHoldAim,
+                hitPadding: BombButtonHitPadding);
 
             _specialButton = MobileActionButton.Create(
                 _safeArea, "SpecialButton", specialCfg.label,
                 specialCfg.pos, specialCfg.size,
-                new Color(1f, 0.76f, 0.12f, 1f), // 炫金墨水色
-                specialIcon, _circleFillSprite, _circleRingSprite,
+                ComicStyle.Yellow, // 主行动金（大招）
+                specialIcon, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.Special);
 
             // 3b. 左开火键（3/4 指方案专用，2 指方案默认隐藏；左上角锚定，便于左食指开火）
             _leftFireButton = MobileActionButton.Create(
                 _safeArea, "LeftFireButton", "射击",
                 MobileLayoutPresets.ThreeFingerLeftFirePos, MobileLayoutPresets.LeftFireSize,
-                new Color(1f, 0.44f, 0.08f, 1f),
-                fireIcon, _circleFillSprite, _circleRingSprite,
+                ComicStyle.FromHex(0xFF7314),
+                fireIcon, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.Hold, new Vector2(0f, 0f));
             _leftFireButton.gameObject.SetActive(false);
 
@@ -603,7 +648,7 @@ namespace P1.UI
 
             _customizer.OnClosed += HandleCustomizerClosed;
 
-            // 5. 屏幕左上角悬浮【⚙️ 键位】快速编辑入口（132x64，字号 20）
+            // 5. 屏幕左上角悬浮【⚙️ 键位】快速编辑入口（168x72，字号 24，齿轮 32px）
             // 左上角最内侧 (24,-24) 的 88x88 留给 PauseMenuOverlay 的移动端暂停按钮，
             // 键位入口横排在暂停按钮右侧并与之垂直居中对齐，避免占用第二行遮挡视野。
             CreateSettingsEntryButton(_safeArea);
@@ -676,9 +721,9 @@ namespace P1.UI
             rt.anchorMax = new Vector2(0f, 1f);
             rt.pivot = new Vector2(0f, 1f);
             // 暂停按钮占 (24,-24) 的 88x88；键位入口贴在其右侧（间隔 12px），
-            // 用 -36 让 64 高的小标签与 88 高的暂停按钮垂直中心对齐（-68）。
-            rt.anchoredPosition = new Vector2(124f, -36f);
-            rt.sizeDelta = new Vector2(136f, 64f);
+            // 用 -32 让 72 高的小标签与 88 高的暂停按钮垂直中心对齐（-68）。
+            rt.anchoredPosition = new Vector2(124f, -32f);
+            rt.sizeDelta = new Vector2(168f, 72f);
 
             // 纸面底盘 + 4px 墨边（直角 SharpRect）
             var shapeGo = new GameObject("Visual", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
@@ -713,7 +758,13 @@ namespace P1.UI
             btn.onClick.AddListener(OpenLayoutCustomizer);
             _settingsEntryButton = btn;
 
-            // 齿轮图标
+            // t-1 按压反馈：0ms 硬切 scale 0.97 + 松开 0.1s Cubic-Out 回弹（走主题交互）
+            var motion = go.AddComponent<UISpringMotion>();
+            motion.SetTheme(null);
+            var jelly = go.AddComponent<UIJellyButton>();
+            jelly.Configure(null, btn, shape);
+
+            // 齿轮图标（显示尺寸 ≥24px）
             var gearSprite = UIIconLibrary.Get("glyph_gear");
             if (gearSprite != null)
             {
@@ -723,8 +774,8 @@ namespace P1.UI
                 iconRt.anchorMin = new Vector2(0f, 0.5f);
                 iconRt.anchorMax = new Vector2(0f, 0.5f);
                 iconRt.pivot = new Vector2(0f, 0.5f);
-                iconRt.anchoredPosition = new Vector2(10f, 0f);
-                iconRt.sizeDelta = new Vector2(28f, 28f);
+                iconRt.anchoredPosition = new Vector2(12f, 0f);
+                iconRt.sizeDelta = new Vector2(32f, 32f);
                 var iconImg = iconGo.GetComponent<Image>();
                 iconImg.sprite = gearSprite;
                 iconImg.color = ComicStyle.Ink;
@@ -737,12 +788,12 @@ namespace P1.UI
             var trt = textGo.GetComponent<RectTransform>();
             trt.anchorMin = Vector2.zero;
             trt.anchorMax = Vector2.one;
-            trt.offsetMin = new Vector2(gearSprite != null ? 40f : 0f, 0f);
+            trt.offsetMin = new Vector2(gearSprite != null ? 48f : 0f, 0f);
             trt.offsetMax = Vector2.zero;
 
             var txt = textGo.GetComponent<TextMeshProUGUI>();
             txt.text = gearSprite != null ? "操作" : "⚙️ 操作";
-            txt.fontSize = UITypography.FontSnapped(22f);
+            txt.fontSize = UITypography.FontSnapped(24f);
             txt.fontStyle = FontStyles.Bold;
             txt.alignment = TextAlignmentOptions.Center;
             txt.color = ComicStyle.Ink;
@@ -755,26 +806,52 @@ namespace P1.UI
 
         private static void EnsureCircleSprites()
         {
-            if (_circleFillSprite != null && _circleRingSprite != null) return;
+            if (_circleFillSprite != null && _circleRingSprite != null && _actionRingSprite != null) return;
 
             const int size = 128;
             Vector2 center = new Vector2(size * 0.5f, size * 0.5f);
             float radius = size * 0.5f - 2f;
 
+            // 摇杆底盘 340px 拉到屏幕后环宽 = ringWidth * 340/128：
+            // 旧 8px 环 = 21px 粗（规范 4~5px），现 2px 环 ≈ 5.3px。
+            _circleRingSprite = BuildRingSprite(size, center, radius, 2f);
+            // 动作键 132~176px：4px 环拉到屏幕约 4.1~5.5px（左开火 1.7 倍放大约 7px）。
+            _actionRingSprite = BuildRingSprite(size, center, radius, 4f);
+
             var fillTex = new Texture2D(size, size, TextureFormat.RGBA32, false);
             fillTex.wrapMode = TextureWrapMode.Clamp;
             fillTex.filterMode = FilterMode.Bilinear;
+
+            var fillColors = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    int idx = y * size + x;
+                    float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), center);
+                    float outerAlpha = Mathf.Clamp01((radius - d) / 1.5f);
+                    fillColors[idx] = new Color32(255, 255, 255, (byte)(outerAlpha * 255f));
+                }
+            }
+
+            fillTex.SetPixels32(fillColors);
+            fillTex.Apply(false, false);
+            _circleFillSprite = Sprite.Create(fillTex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+        }
+
+        /// <summary>生成「白色 alpha 环」纹理精灵（颜色交给 Image.color 染色）。</summary>
+        private static Sprite BuildRingSprite(int size, Vector2 center, float radius, float ringWidth)
+        {
+            // 抗锯齿只占 0.75 纹理像素：1.5px 的双边过渡会把 2px 细环的峰值压到 44%（发灰），
+            // 0.75 时峰值 alpha=1 的实心带 ≈ ringWidth - 1.5，屏幕观感就是 ringWidth 的等比宽度。
+            const float aa = 0.75f;
 
             var ringTex = new Texture2D(size, size, TextureFormat.RGBA32, false);
             ringTex.wrapMode = TextureWrapMode.Clamp;
             ringTex.filterMode = FilterMode.Bilinear;
 
-            var fillColors = new Color32[size * size];
             var ringColors = new Color32[size * size];
-
-            // 6px 墨线边框对应的纹理宽度（基于 128 像素图）
-            float ringWidth = 8f;
-            float innerR = radius - ringWidth;
+            float innerR = radius - Mathf.Max(1f, ringWidth);
 
             for (int y = 0; y < size; y++)
             {
@@ -783,25 +860,16 @@ namespace P1.UI
                     int idx = y * size + x;
                     float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), center);
 
-                    float outerAlpha = Mathf.Clamp01((radius - d) / 1.5f);
-                    byte aFill = (byte)(outerAlpha * 255f);
-                    fillColors[idx] = new Color32(255, 255, 255, aFill);
-
-                    float innerAlpha = Mathf.Clamp01((d - innerR) / 1.5f);
-                    float ringAlpha = outerAlpha * innerAlpha;
-                    byte aRing = (byte)(ringAlpha * 255f);
+                    float outerAlpha = Mathf.Clamp01((radius - d) / aa);
+                    float innerAlpha = Mathf.Clamp01((d - innerR) / aa);
+                    byte aRing = (byte)(outerAlpha * innerAlpha * 255f);
                     ringColors[idx] = new Color32(255, 255, 255, aRing);
                 }
             }
 
-            fillTex.SetPixels32(fillColors);
-            fillTex.Apply(false, false);
-
             ringTex.SetPixels32(ringColors);
             ringTex.Apply(false, false);
-
-            _circleFillSprite = Sprite.Create(fillTex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
-            _circleRingSprite = Sprite.Create(ringTex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+            return Sprite.Create(ringTex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
         }
     }
 
@@ -848,10 +916,17 @@ namespace P1.UI
     /// <summary>
     /// 左半屏动态浮动摇杆：
     /// 包含左半屏触控感应区与动态居中底座。手指落在左半屏任意位置，摇杆底座瞬间出现在指下并平滑跟踪拖拽。
-    /// 采用漫画风格重绘：6px 墨线粗环 + 纸面/硬阴影把手。
+    /// t-1 外观：墨黑底盘 + 细纸白实线环 + 纸白把手 + 墨黑细环（环宽 4~5px，不再是 21px 大圆环）。
+    /// 按压反馈：按下 0ms 硬切 scale 0.97，松开 0.1s Cubic-Out 回弹（只看视觉，不影响输入判定）。
     /// </summary>
     public class DynamicFloatingJoystick : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
     {
+        /// <summary>按压缩放：与动作键一致（0ms 硬切）。</summary>
+        private const float PressedScale = ComicStyle.PressScale;
+
+        /// <summary>松开回弹时长（秒）：Cubic-Out，禁止弹簧/过冲。</summary>
+        private const float PressReboundSeconds = 0.1f;
+
         public Vector2 Value { get; private set; }
         public RectTransform VisualContainer => _container;
         public CanvasGroup CanvasGroup => _canvasGroup;
@@ -867,6 +942,11 @@ namespace P1.UI
         private Vector2 _centerPos;
         private float _baseAlpha = MobileLayoutPresets.DefaultMoveStickAlpha;
         private int _activePointerId = -999;
+
+        // 按压回弹（0.1s Cubic-Out）：只驱动视觉容器缩放，绝不参与 Value 计算。
+        // _pressHomeScale 记录按下前的基准缩放，避免把自定义布局里的摇杆缩放重置回 1.0。
+        private float _pressReboundT = 1f;
+        private Vector3 _pressHomeScale = Vector3.one;
 
         /// <summary>固定摇杆：底座不跟手，以配置位置为中心；按下点离底座过远时不激活。</summary>
         public bool FixedBase { get; set; }
@@ -936,7 +1016,7 @@ namespace P1.UI
             bgImg.color = ComicStyle.Ink;
             bgImg.raycastTarget = false;
 
-            // 几何风 4px 纸白实线外环（黑底白圈）
+            // 几何风细纸白实线外环（黑底白圈；2px 纹理环拉到 340px 约 5.3px）
             var ringGo = new GameObject("BaseRing", typeof(RectTransform), typeof(Image));
             ringGo.transform.SetParent(containerRt, false);
             var ringRt = ringGo.GetComponent<RectTransform>();
@@ -964,7 +1044,7 @@ namespace P1.UI
             knobImg.color = ComicStyle.Paper;
             knobImg.raycastTarget = false;
 
-            // 把手 4px 墨黑实线环（白底黑边）
+            // 把手墨黑细实线环（白底黑边）
             var knobRingGo = new GameObject("KnobRing", typeof(RectTransform), typeof(Image));
             knobRingGo.transform.SetParent(knobRt, false);
             var knobRingRt = knobRingGo.GetComponent<RectTransform>();
@@ -1028,6 +1108,14 @@ namespace P1.UI
 
             // 几何大胆风：硬切高亮（满不透明度 1.0）
             if (_canvasGroup != null) _canvasGroup.alpha = 1.0f;
+
+            // t-1 按压：0ms 硬切 scale 0.97（纯视觉，不影响 Value / 触摸判定）
+            _pressReboundT = 1f;
+            if (_container != null)
+            {
+                _pressHomeScale = _container.localScale;
+                _container.localScale = _pressHomeScale * PressedScale;
+            }
         }
 
         public void OnDrag(PointerEventData eventData)
@@ -1057,11 +1145,19 @@ namespace P1.UI
         {
             if (eventData.pointerId != _activePointerId) return;
 
-            ResetJoystick();
+            // 松开 0.1s Cubic-Out 回弹（与动作键同一套 t-1 按压物理）
+            ResetJoystick(rebound: true);
         }
 
         public void ResetJoystick()
         {
+            ResetJoystick(rebound: false);
+        }
+
+        private void ResetJoystick(bool rebound)
+        {
+            bool wasPressed = _activePointerId != -999 || _pressReboundT < 1f;
+
             _activePointerId = -999;
             Value = Vector2.zero;
 
@@ -1071,8 +1167,31 @@ namespace P1.UI
                 var kImg = _knob.GetComponent<Image>();
                 if (kImg != null) kImg.color = ComicStyle.Paper;
             }
-            if (_container != null) _container.anchoredPosition = _defaultPos;
+            if (_container != null)
+            {
+                _container.anchoredPosition = _defaultPos;
+
+                // 回弹从「按下态」起步；外部复位（编辑/失焦/切后台）直接回到基准缩放。
+                // 没有按压时以当前缩放为新基准，避免把自定义布局里的摇杆缩放重置回 1.0。
+                if (rebound) _container.localScale = _pressHomeScale * PressedScale;
+                else if (wasPressed) _container.localScale = _pressHomeScale;
+                else _pressHomeScale = _container.localScale;
+            }
             if (_canvasGroup != null) _canvasGroup.alpha = _baseAlpha;
+
+            _pressReboundT = rebound ? 0f : 1f;
+        }
+
+        private void Update()
+        {
+            if (_pressReboundT >= 1f || _container == null) return;
+
+            float deltaTime = Time.unscaledDeltaTime;
+            if (deltaTime <= 0f) return;
+
+            _pressReboundT = Mathf.Min(1f, _pressReboundT + deltaTime / PressReboundSeconds);
+            float eased = UICubicBezier.EaseOut.Evaluate(_pressReboundT);
+            _container.localScale = _pressHomeScale * Mathf.Lerp(PressedScale, 1f, eased);
         }
 
         /// <summary>把自定义位置同步为新的默认位置，ResetJoystick 不再弹回建层时的旧坐标。</summary>
@@ -1203,16 +1322,21 @@ namespace P1.UI
     }
 
     /// <summary>
-    /// 移动端几何大胆风触控按钮（Geometric Bold P14）：
-    /// 1. 实心大色块填充 + 4px 墨黑实线粗边框（#141414）+ 白色超粗大标签，无阴影无网点；
-    /// 2. 按下时 scale 0.96 + 纯墨底颜色硬切，松开 50ms 内复原，禁止软 alpha 与回弹；
+    /// 移动端 t-1 新野兽派触控按钮：
+    /// 1. 常态 = 墨黑半透明底（62%）+ 功能色 4px 描边 + 功能色图标 + 纸白标签；
+    ///    功能色只做「功能编码」，不再整块高饱和实底；
+    /// 2. 按下 0ms 硬切：整块翻成功能色实底（图标/标签转墨黑）+ scale 0.97；
+    ///    松开 0.1s Cubic-Out 回弹到常态，禁止弹簧/过冲/呼吸；
     /// 3. 标签字号走 UITypography.FontSnapped(max(24, size*0.20))，物理极佳可读；
     /// 4. 图标安全查找，缺失时隐藏并由中文标签兜底，绝无白块；
     /// 5. 支持像素级圆形命中测试，防止误触透明角落；
-    /// 6. 支持开火按住、滑拽瞄准、手雷短按投掷/长按瞄准、大招就绪状态。
+    /// 6. 支持开火按住、滑拽瞄准、手雷按下即投、大招就绪状态。
     /// </summary>
     public class MobileActionButton : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
     {
+        /// <summary>松开回弹时长（秒）：Cubic-Out 回到基准缩放，禁止弹簧。</summary>
+        private const float PressReboundSeconds = 0.1f;
+
         public RectTransform RectTransform => _rectTransform;
         public CanvasGroup CanvasGroup => _canvasGroup;
 
@@ -1238,6 +1362,30 @@ namespace P1.UI
         private bool _hasSpecialState;
         private float _baseScale = 1f;
         private float _baseAlpha = 1f;
+        private string _defaultLabelText = "手雷";
+
+        // t-1 按压物理：按下 0ms 硬切 scale 0.97，松开 0.1s Cubic-Out 回弹。
+        // 只驱动 localScale，不参与任何输入判定（开火按住/长按潜行不受影响）。
+        private float _pressReboundT = 1f;
+
+        /// <summary>动作键常态底：墨黑半透明（看得清战况，又给功能色描边/图标垫深底）。</summary>
+        private static Color ActionFill => ComicStyle.WithAlpha(ComicStyle.Ink, 0.62f);
+
+        // 多指/丢 pointer-up 加固：只跟踪按下时的那根手指
+        private int _activePointerId = int.MinValue;
+        // 保留旧字段：手雷已改为一键直投，不再有按住瞄准阈值（属性仍可写以兼容旧测试）
+        private float _aimHoldSeconds = DefaultAimHoldSeconds;
+        // 手雷冷却显示（硬切径向扇形 + 按钮标签倒计时）与拒绝闪红
+        private Image _cooldownFillImage;
+        private Color _defaultRingColor = ComicStyle.Ink;
+        private float _cooldown01;
+        private float _denyFlashUntil;
+        private int _lastCooldownTenths = int.MinValue;
+
+        /// <summary>保留旧常量：手雷已改为一键直投，不再读取该阈值。</summary>
+        private const float DefaultAimHoldSeconds = 0.15f;
+        private const float DenyFlashSeconds = 0.2f;
+        private static readonly Color DenyFlashColor = new Color(0.94f, 0.22f, 0.22f, 1f);
 
         public bool IsHeld => _isHeld;
         public bool IsAimingHeld => _isAimingHeld;
@@ -1246,7 +1394,14 @@ namespace P1.UI
         public float BaseScale => _baseScale;
         public float BaseAlpha => _baseAlpha;
 
-        /// <summary>自定义尺寸（相对基准的缩放）；按下/抬起/大招呼吸都在此基准上乘系数，不再重置回 1.0。</summary>
+        /// <summary>保留旧接口：手雷已改为一键直投，该阈值不再参与判定。</summary>
+        public float AimHoldSeconds
+        {
+            get => _aimHoldSeconds;
+            set => _aimHoldSeconds = Mathf.Max(0f, value);
+        }
+
+        /// <summary>自定义尺寸（相对基准的缩放）；按下/回弹都在此基准上乘系数，不再重置回 1.0。</summary>
         public void SetBaseScale(float scale)
         {
             _baseScale = Mathf.Clamp(scale, MobileLayoutConfig.MinScale, MobileLayoutConfig.MaxScale);
@@ -1268,7 +1423,9 @@ namespace P1.UI
 
         private float GetSpecialStateAlpha()
         {
-            return _mode == MobileButtonMode.Special && _hasSpecialState && !_lastReadyState ? 0.55f : 1f;
+            if (_mode == MobileButtonMode.Special && _hasSpecialState && !_lastReadyState) return 0.55f;
+            if (_cooldown01 > 0f) return 0.8f;
+            return 1f;
         }
 
         public Vector2 ConsumeLookDelta()
@@ -1295,14 +1452,17 @@ namespace P1.UI
             Sprite icon,
             Sprite fillSprite,
             Sprite ringSprite,
-            MobileButtonMode mode)
+            MobileButtonMode mode,
+            float hitPadding = 0f)
         {
             return Create(parent, name, label, anchoredPos, size, mainColor, icon, fillSprite, ringSprite, mode,
-                new Vector2(1f, 0f));
+                new Vector2(1f, 0f), hitPadding);
         }
 
         /// <summary>
         /// 带锚点重载：默认仍锚定右下角；左开火键传 (0,0) 锚定左下角。
+        /// <paramref name="hitPadding"/> &gt; 0 时生成一个向外扩展的透明命中体，并把圆形底盘移出
+        /// raycast——防止按在圆形 alpha 命中区之外时，按压漏给下层的滑屏转视角区。
         /// </summary>
         public static MobileActionButton Create(
             Transform parent,
@@ -1315,7 +1475,8 @@ namespace P1.UI
             Sprite fillSprite,
             Sprite ringSprite,
             MobileButtonMode mode,
-            Vector2 anchor)
+            Vector2 anchor,
+            float hitPadding = 0f)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasGroup));
             go.transform.SetParent(parent, false);
@@ -1326,6 +1487,22 @@ namespace P1.UI
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.anchoredPosition = anchoredPos;
             rt.sizeDelta = new Vector2(size, size);
+
+            // 0. 命中区扩展（可选）：透明矩形命中体垫在最底层，覆盖整个矩形 + 外扩边距
+            if (hitPadding > 0f)
+            {
+                var hitGo = new GameObject("HitPad", typeof(RectTransform), typeof(Image));
+                hitGo.transform.SetParent(go.transform, false);
+                hitGo.transform.SetAsFirstSibling();
+                var hitRt = hitGo.GetComponent<RectTransform>();
+                hitRt.anchorMin = Vector2.zero;
+                hitRt.anchorMax = Vector2.one;
+                hitRt.offsetMin = new Vector2(-hitPadding, -hitPadding);
+                hitRt.offsetMax = new Vector2(hitPadding, hitPadding);
+                var hitImg = hitGo.GetComponent<Image>();
+                hitImg.color = Color.clear;
+                hitImg.raycastTarget = true;
+            }
 
             var group = go.GetComponent<CanvasGroup>();
 
@@ -1352,7 +1529,7 @@ namespace P1.UI
             contentRt.offsetMin = Vector2.zero;
             contentRt.offsetMax = Vector2.zero;
 
-            // 3. 底盘背景（实心大色块填充，带像素级透明穿透）
+            // 3. 底盘背景：墨黑半透明（t-1 触控层不再用 5 色高饱和实底）
             var bgGo = new GameObject("Bg", typeof(RectTransform), typeof(Image));
             bgGo.transform.SetParent(contentRt, false);
             var bgRt = bgGo.GetComponent<RectTransform>();
@@ -1362,11 +1539,12 @@ namespace P1.UI
             bgRt.offsetMax = Vector2.zero;
             var bgImg = bgGo.GetComponent<Image>();
             bgImg.sprite = fillSprite;
-            bgImg.color = mainColor;
-            bgImg.raycastTarget = true;
+            bgImg.color = ActionFill;
+            // 有 HitPad 时命中统一走外扩矩形（全圆 + 边距都可按）；无 HitPad 保持圆形 alpha 命中
+            bgImg.raycastTarget = hitPadding <= 0f;
             bgImg.alphaHitTestMinimumThreshold = 0.1f;
 
-            // 4. 4px 墨黑实线粗边框（#141414）
+            // 4. 功能色细描边（屏幕实际 4~5px）：功能色只出现在描边与图标上
             var ringGo = new GameObject("InkBorder", typeof(RectTransform), typeof(Image));
             ringGo.transform.SetParent(contentRt, false);
             var ringRt = ringGo.GetComponent<RectTransform>();
@@ -1376,8 +1554,31 @@ namespace P1.UI
             ringRt.offsetMax = Vector2.zero;
             var ringImg = ringGo.GetComponent<Image>();
             ringImg.sprite = ringSprite;
-            ringImg.color = ComicStyle.Ink;
+            ringImg.color = mainColor;
             ringImg.raycastTarget = false;
+
+            // 4.5 手雷冷却遮罩（仅 Bomb 模式）：径向暗色扇形表示剩余冷却，硬切更新禁 tween
+            Image cooldownFillImg = null;
+            if (mode == MobileButtonMode.BombTapOrHoldAim && fillSprite != null)
+            {
+                var cdGo = new GameObject("CooldownFill", typeof(RectTransform), typeof(Image));
+                cdGo.transform.SetParent(contentRt, false);
+                var cdRt = cdGo.GetComponent<RectTransform>();
+                cdRt.anchorMin = Vector2.zero;
+                cdRt.anchorMax = Vector2.one;
+                cdRt.offsetMin = Vector2.zero;
+                cdRt.offsetMax = Vector2.zero;
+                cooldownFillImg = cdGo.GetComponent<Image>();
+                cooldownFillImg.sprite = fillSprite;
+                cooldownFillImg.color = new Color(0.08f, 0.08f, 0.09f, 0.62f);
+                cooldownFillImg.type = Image.Type.Filled;
+                cooldownFillImg.fillMethod = Image.FillMethod.Radial360;
+                cooldownFillImg.fillOrigin = (int)Image.Origin360.Top;
+                cooldownFillImg.fillClockwise = true;
+                cooldownFillImg.fillAmount = 0f;
+                cooldownFillImg.raycastTarget = false;
+                cooldownFillImg.enabled = false;
+            }
 
             // 5. 中心图标（若为 null 必须隐藏，绝不留白块）
             Image iconImg = null;
@@ -1393,7 +1594,7 @@ namespace P1.UI
 
                 iconImg = iconGo.GetComponent<Image>();
                 iconImg.sprite = icon;
-                iconImg.color = ComicStyle.Paper;
+                iconImg.color = mainColor; // 功能色图标（按下/大招就绪时翻墨黑）
                 iconImg.preserveAspect = true;
                 iconImg.raycastTarget = false;
             }
@@ -1432,43 +1633,114 @@ namespace P1.UI
             btn._labelText = txt;
             btn._canvasGroup = group;
             btn._baseColor = mainColor;
+            btn._defaultRingColor = ringImg.color;
+            btn._cooldownFillImage = cooldownFillImg;
+            btn._defaultLabelText = label;
 
             return btn;
         }
 
         private void Update()
         {
-            if (_mode == MobileButtonMode.BombTapOrHoldAim &&
-                _isHeld &&
-                !_isAimingHeld &&
-                Time.unscaledTime - _pointerDownTime > 0.22f)
-            {
-                _isAimingHeld = true;
-            }
+            TickDenyFlash();
+            AdvancePressFeedback(Time.unscaledDeltaTime);
+        }
+
+        /// <summary>
+        /// 按压回弹步进（0.1s Cubic-Out 回到基准缩放）。Update 每帧调用；
+        /// 测试可直接喂 deltaTime 一次走完，不需要真实帧。
+        /// 只写 localScale，绝不触碰 _isHeld/_tapped 等输入状态（开火节流、长按潜行不受影响）。
+        /// </summary>
+        public void AdvancePressFeedback(float deltaTime)
+        {
+            if (_pressReboundT >= 1f || deltaTime <= 0f) return;
+
+            _pressReboundT = Mathf.Min(1f, _pressReboundT + deltaTime / PressReboundSeconds);
+            if (_rectTransform == null) return;
+
+            float eased = UICubicBezier.EaseOut.Evaluate(_pressReboundT);
+            _rectTransform.localScale = Vector3.one * (_baseScale * Mathf.Lerp(ComicStyle.PressScale, 1f, eased));
+        }
+
+        /// <summary>大招就绪的「实底强调」态（硬切高亮，不做呼吸缩放）。</summary>
+        private bool IsSpecialReadyVisual =>
+            _mode == MobileButtonMode.Special && _hasSpecialState && _lastReadyState;
+
+        /// <summary>常态：墨黑半透明底 + 功能色描边/图标 + 纸白标签（冷却/就绪另有硬切）。</summary>
+        private void ApplyIdleVisual()
+        {
+            if (_bgImage != null) _bgImage.color = GetDefaultBgColor();
+
+            // 拒绝闪红期间保住红色描边，等 TickDenyFlash 复原
+            if (_ringImage != null && Time.unscaledTime >= _denyFlashUntil) _ringImage.color = GetIdleRingColor();
+
+            ApplyContentColors(pressed: false);
+        }
+
+        /// <summary>按下：0ms 整块翻功能色实底，描边/图标/标签转墨黑（硬切，不补间）。</summary>
+        private void ApplyPressedVisual()
+        {
+            if (_bgImage != null) _bgImage.color = _baseColor;
+            if (_ringImage != null) _ringImage.color = ComicStyle.Ink;
+            ApplyContentColors(pressed: true);
+        }
+
+        private void ApplyContentColors(bool pressed)
+        {
+            bool dark = pressed || IsSpecialReadyVisual;
+
+            if (_iconImage != null) _iconImage.color = dark ? ComicStyle.Ink : _baseColor;
+            if (_labelText == null) return;
+
+            if (dark) _labelText.color = ComicStyle.Ink;
+            else if (_mode == MobileButtonMode.BombTapOrHoldAim && _cooldown01 > 0f) _labelText.color = ComicStyle.Yellow;
+            else _labelText.color = ComicStyle.Paper;
+        }
+
+        private Color GetIdleRingColor()
+        {
+            if (IsSpecialReadyVisual) return ComicStyle.Paper; // 实底上留纸白 4px 边，仍能读清圆形
+            if (_mode == MobileButtonMode.BombTapOrHoldAim && _cooldown01 > 0f) return ComicStyle.Yellow;
+            return _defaultRingColor;
         }
 
         public void OnPointerDown(PointerEventData eventData)
         {
+            // 已有手指按住时忽略其他手指：第二根手指不得重置按住计时与拖拽状态
+            if (_isHeld && eventData.pointerId != _activePointerId) return;
+
+            _activePointerId = eventData.pointerId;
             _isHeld = true;
             _pointerDownTime = Time.unscaledTime;
             _lookDelta = Vector2.zero;
             HasDragAim = false;
             DragAimValue = Vector2.zero;
 
-            // 几何大胆风硬切反馈：scale 乘 0.96（测试硬编码断言），纯黑底颜色硬切
+            // 上一根手指丢失 pointer-up（系统手势/切后台/来电话）会留下 _tapped/_isAimingHeld 残留，
+            // 不清理会让一次残留事件被重复消费或按钮状态卡死
+            _tapped = false;
+            _isAimingHeld = false;
+            _denyFlashUntil = 0f;
+
+            // t-1 按压：0ms 硬切 scale 0.97 + 整块翻功能色实底（功能色只在按下时铺满）
             if (_contentContainer != null) _contentContainer.anchoredPosition = Vector2.zero;
             if (_shadowImage != null) _shadowImage.enabled = false;
-            _rectTransform.localScale = Vector3.one * (_baseScale * 0.96f);
-            _bgImage.color = ComicStyle.Ink;
+            _pressReboundT = 1f;
+            _rectTransform.localScale = Vector3.one * (_baseScale * ComicStyle.PressScale);
+            ApplyPressedVisual();
 
-            if (_mode == MobileButtonMode.Tap || _mode == MobileButtonMode.Special)
+            if (_mode == MobileButtonMode.Tap || _mode == MobileButtonMode.Special ||
+                _mode == MobileButtonMode.BombTapOrHoldAim)
             {
+                // 手雷一键直投：pointer-down 即产生一次性投掷事件，不等松开
                 _tapped = true;
             }
         }
 
         public void OnDrag(PointerEventData eventData)
         {
+            if (eventData.pointerId != _activePointerId) return;
+
             if (_mode == MobileButtonMode.HoldWithAimDrag)
             {
                 // 3/4 指玩家可用右食指按住开火、右拇指在滑屏区瞄准；
@@ -1483,28 +1755,24 @@ namespace P1.UI
             }
             else if (_mode == MobileButtonMode.BombTapOrHoldAim)
             {
-                if (!_isAimingHeld && Time.unscaledTime - _pointerDownTime > 0.22f)
-                {
-                    _isAimingHeld = true;
-                }
-
-                if (_isAimingHeld)
-                {
-                    _lookDelta += eventData.delta;
-                }
+                // 手雷一键直投：按住拖动不再进入瞄准/转视角，投掷已在 pointer-down 发生
+                _isAimingHeld = false;
             }
         }
 
         public void OnPointerUp(PointerEventData eventData)
         {
+            if (eventData.pointerId != _activePointerId) return;
+            _activePointerId = int.MinValue;
+
             _isHeld = false;
             _lookDelta = Vector2.zero;
 
-            // 硬切复原（<=50ms 内立即恢复，禁止回弹）
+            // 颜色硬切复原；缩放交给 0.1s Cubic-Out 回弹（从按下态起步，不做瞬时跳变）
             if (_contentContainer != null) _contentContainer.anchoredPosition = Vector2.zero;
             if (_shadowImage != null) _shadowImage.enabled = false;
-            _rectTransform.localScale = Vector3.one * _baseScale;
-            _bgImage.color = GetDefaultBgColor();
+            ApplyIdleVisual();
+            _pressReboundT = 0f;
 
             if (_mode == MobileButtonMode.HoldWithAimDrag)
             {
@@ -1513,26 +1781,95 @@ namespace P1.UI
             }
             else if (_mode == MobileButtonMode.BombTapOrHoldAim)
             {
-                float duration = Time.unscaledTime - _pointerDownTime;
-                if (_isAimingHeld)
+                // 投掷已在 pointer-down 发生；松开只负责复原视觉，绝不补投第二颗。
+                // 旧逻辑在 pointer-up 注入投掷事件，配合「按下不投」造成明显的松手延迟感。
+                _isAimingHeld = false;
+            }
+        }
+
+        /// <summary>
+        /// 手雷冷却显示（0 = 就绪，1 = 刚投出）：径向暗色扇形收缩 + 墨边翻黄 + 按钮标签倒计时。
+        /// remainingSeconds &lt; 0 时（旧调用方）只显示「冷却」文字。
+        /// </summary>
+        public void UpdateBombCooldown01(float cooldown01, float remainingSeconds = -1f)
+        {
+            cooldown01 = Mathf.Clamp01(cooldown01);
+            bool cooling = cooldown01 > 0.0001f;
+
+            if (!Mathf.Approximately(cooldown01, _cooldown01))
+            {
+                _cooldown01 = cooldown01;
+
+                if (_cooldownFillImage != null)
                 {
-                    _isAimingHeld = false;
-                    _tapped = true;
+                    _cooldownFillImage.enabled = cooling;
+                    if (cooling) _cooldownFillImage.fillAmount = cooldown01;
                 }
-                else if (duration <= 0.22f)
+
+                // 冷却中：描边硬切翻黄（功能色编码），底色仍是墨黑半透明
+                if (!_isHeld) ApplyIdleVisual();
+                if (_canvasGroup != null) _canvasGroup.alpha = _baseAlpha * GetSpecialStateAlpha();
+            }
+
+            if (_mode != MobileButtonMode.BombTapOrHoldAim || _labelText == null) return;
+
+            if (cooling)
+            {
+                int tenths = remainingSeconds >= 0f
+                    ? Mathf.Max(1, Mathf.CeilToInt(remainingSeconds * 10f))
+                    : -1;
+                if (tenths != _lastCooldownTenths)
                 {
-                    _tapped = true;
+                    _lastCooldownTenths = tenths;
+                    _labelText.text = tenths > 0 ? $"{tenths / 10f:0.0}s" : "冷却";
                 }
+            }
+            else if (_lastCooldownTenths != int.MinValue)
+            {
+                _lastCooldownTenths = int.MinValue;
+                _labelText.text = _defaultLabelText;
+            }
+
+            // 文字更新后统一上色：按下=墨黑、冷却=黄、常态=纸白（颜色硬切，不补间）
+            ApplyContentColors(_isHeld);
+        }
+
+        /// <summary>投掷被拒（冷却中按下）的硬切反馈：墨边闪红 + scale 0.97，0.2s 后由 Update 复原（0.1s 回弹）。</summary>
+        public void NotifyDenied()
+        {
+            _denyFlashUntil = Time.unscaledTime + DenyFlashSeconds;
+            if (_ringImage != null) _ringImage.color = DenyFlashColor;
+            if (_rectTransform != null)
+            {
+                _pressReboundT = 1f;
+                _rectTransform.localScale = Vector3.one * (_baseScale * ComicStyle.PressScale);
+            }
+        }
+
+        private void TickDenyFlash()
+        {
+            if (_denyFlashUntil <= 0f) return;
+            if (Time.unscaledTime < _denyFlashUntil) return;
+
+            _denyFlashUntil = 0f;
+            if (_ringImage != null)
+            {
+                _ringImage.color = GetIdleRingColor();
+            }
+            if (_rectTransform != null && !_isHeld)
+            {
+                // 拒绝抖动结束后同样走 0.1s Cubic-Out，不做瞬时跳回
+                _pressReboundT = 0f;
             }
         }
 
         private Color GetDefaultBgColor()
         {
-            if (_mode == MobileButtonMode.Special && _hasSpecialState && !_lastReadyState)
-            {
-                return new Color(0.24f, 0.24f, 0.26f, 0.95f);
-            }
-            return _baseColor;
+            // 大招就绪：整块翻功能色实底做「就绪强调」（硬切高亮，无呼吸缩放）
+            if (IsSpecialReadyVisual) return _baseColor;
+
+            // 未就绪 / 冷却中 / 常态一律回到墨黑半透明底
+            return ActionFill;
         }
 
         public void ResetState()
@@ -1545,11 +1882,24 @@ namespace P1.UI
             DragAimValue = Vector2.zero;
             _hasSpecialState = false;
             _lastChargePercentInt = -1;
+            _activePointerId = int.MinValue;
+            _denyFlashUntil = 0f;
+            _cooldown01 = -1f; // 强制下一次 UpdateBombCooldown01 生效
+            _lastCooldownTenths = int.MinValue;
 
             if (_contentContainer != null) _contentContainer.anchoredPosition = Vector2.zero;
             if (_shadowImage != null) _shadowImage.enabled = false;
             if (_rectTransform != null) _rectTransform.localScale = Vector3.one * _baseScale;
+            _pressReboundT = 1f;
+            if (_cooldownFillImage != null) _cooldownFillImage.enabled = false;
             if (_bgImage != null) _bgImage.color = GetDefaultBgColor();
+            if (_ringImage != null) _ringImage.color = GetIdleRingColor();
+            ApplyContentColors(pressed: false);
+            if (_labelText != null && _mode == MobileButtonMode.BombTapOrHoldAim)
+            {
+                _labelText.text = _defaultLabelText;
+                _labelText.color = ComicStyle.Paper;
+            }
             if (_canvasGroup != null) _canvasGroup.alpha = _baseAlpha * GetSpecialStateAlpha();
         }
 
@@ -1564,14 +1914,10 @@ namespace P1.UI
 
             int chargePct = Mathf.FloorToInt(charge01 * 100f);
 
+            // 只做颜色/文字的硬切；缩放完全交给按压反馈（满能不再呼吸缩放）
             if (isReady)
             {
                 _canvasGroup.alpha = _baseAlpha;
-                _bgImage.color = _isHeld ? ComicStyle.Ink : _baseColor;
-                _ringImage.color = ComicStyle.Ink;
-
-                float breath = 1f + 0.04f * Mathf.Sin(Time.unscaledTime * 5.5f);
-                if (!_isHeld) _rectTransform.localScale = Vector3.one * (_baseScale * breath);
                 if (_labelText != null && (!_hasSpecialState || !_lastReadyState))
                 {
                     _labelText.text = "大招就绪!";
@@ -1580,9 +1926,6 @@ namespace P1.UI
             else
             {
                 _canvasGroup.alpha = _baseAlpha * 0.55f;
-                _bgImage.color = _isHeld ? ComicStyle.Ink : new Color(0.24f, 0.24f, 0.26f, 0.95f);
-                _ringImage.color = ComicStyle.Ink;
-                if (!_isHeld) _rectTransform.localScale = Vector3.one * _baseScale;
                 if (_labelText != null && (!_hasSpecialState || _lastReadyState || _lastChargePercentInt != chargePct))
                 {
                     _labelText.text = $"{chargePct}%";
@@ -1592,6 +1935,10 @@ namespace P1.UI
             _hasSpecialState = true;
             _lastReadyState = isReady;
             _lastChargePercentInt = chargePct;
+
+            // 状态位更新后重新落一次颜色（就绪/未就绪的功能色/纸白/墨黑切换是硬切）
+            if (_isHeld) ApplyContentColors(pressed: true);
+            else ApplyIdleVisual();
         }
     }
 }

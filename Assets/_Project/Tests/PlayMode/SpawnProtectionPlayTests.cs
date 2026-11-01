@@ -67,7 +67,10 @@ namespace P1.Tests
             Assert.IsTrue(health.IsSpawnProtected, "复活后应进入出生保护");
             Assert.AreEqual(3f, health.SpawnProtectionDuration, 0.01f,
                 "PlayerConfigSO 默认出生保护时长应为 3s");
-            Assert.AreEqual(3f, health.SpawnProtectionRemaining, 0.35f,
+            // 8 倍时间倍率下一次 60FPS 帧就是 0.13 游戏秒，加速等待到达 4.3s 时
+            // 复活最多已经过去 ~0.4s；容差按这个帧粒度放宽到 0.5s，
+            // 仍能区分「满 3s 保护」与「没给保护 / 只给 1s」。
+            Assert.AreEqual(3f, health.SpawnProtectionRemaining, 0.5f,
                 "出生保护应从满 3s 开始倒计时");
 
             float hp = health.CurrentHealth;

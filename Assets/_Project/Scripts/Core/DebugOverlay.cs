@@ -42,7 +42,7 @@ namespace P1.Core
 
             if (kb.f3Key.wasPressedThisFrame && PlayerController.LocalPlayer != null)
             {
-                PlayerController.LocalPlayer.Weapon.AddSpecialPoints(500);
+                PlayerController.LocalPlayer.Weapon.AddSpecialPointsRaw(500);
                 PlayerController.LocalPlayer.Motor.RefillInkFull();
                 Debug.Log("[DebugOverlay] F3: 已充满大招能量与墨水槽。");
             }
@@ -85,7 +85,11 @@ namespace P1.Core
                 var h = player.Health;
                 string mode = m.IsWallClimbing
                     ? "墙面潜行攀爬"
-                    : (m.IsSwimming ? "潜行形态 (乌贼)" : (w.IsPerformingSpecial ? "大招跃起砸地" : "人形状态"));
+                    : (m.IsSwimming
+                        ? "潜墨形态 (乌贼·己方墨)"
+                        : (m.IsInSquidForm
+                            ? "乌贼形态 (干地)"
+                            : (w.IsPerformingSpecial ? "大招跃起砸地" : "人形状态")));
                 GUILayout.Label($"状态: {mode} | 脚下墨水: {m.FootInkTeam} | 移速: {m.CurrentMoveSpeed:F1} m/s", _labelStyle);
                 GUILayout.Label($"墨水: {m.CurrentInk:F0}/{m.MaxInk:F0} | 生命: {h.CurrentHealth:F0}/{h.MaxHealth:F0} | 大招: {(w.SpecialCharge01 * 100f):F0}%", _labelStyle);
             }

@@ -240,9 +240,10 @@ namespace P1.Weapons
         public float splatlingMoveSpeedFiring = 3.4f;
 
         [Header("副武器：弹道手雷 (Splat Bomb，对齐 inkwave)")]
-        [Tooltip("投掷一次消耗的墨水量：70% 墨水罐（满罐 100）")]
-        public float bombInkCost = 70f;
-        public float bombCooldown = 0.6f;
+        [Tooltip("投掷一次消耗的墨水量：默认 0 = 手雷与墨水脱钩，只受冷却限制（配置为正数时恢复扣墨行为）")]
+        public float bombInkCost = 0f;
+        [Tooltip("投掷冷却（秒）：默认 6s。手雷不再受墨水限制，用冷却防刷")]
+        public float bombCooldown = 6f;
         [Tooltip("出手初速（米/秒）：inkwave SUB.bomb.throwSpeed = 13.5。远近由相机俯仰决定：平抛约 8m、抬头最远约 10.5m、低头贴脚丢")]
         public float bombThrowSpeed = 13.5f;
         [Tooltip("手雷飞行重力（米/秒²）：inkwave 炸弹积分器 = 24（角色重力 25）")]
@@ -284,8 +285,10 @@ namespace P1.Weapons
         public SpecialKind specialKind = SpecialKind.Slam;
 
         [Header("大招：Tidal Slam 超级降落")]
-        [Tooltip("攒满大招所需的涂地积分（每新涂/改写 1 格得 1 分）")]
+        [Tooltip("攒满大招所需的能量点")]
         public float specialPointsRequired = 180f;
+        [Tooltip("充能速率：每新涂 1 平方米地面获得的能量点（1.0 ≈ 射击系约 26 发新地充满）。获得点数 = 新涂格数 × 格面积 × 此值；按面积计价与网格分辨率无关")]
+        public float specialPointsPerSquareMeter = 1f;
         [Tooltip("起跳升空时间（秒）：0.55s，期间无敌")]
         public float specialWindupDuration = 0.55f;
         [Tooltip("顶点滞空时间（秒）")]
@@ -360,6 +363,10 @@ namespace P1.Weapons
         public float trailVisualScale = 0f;
         [Tooltip("撞击地面/墙面时的涟漪强度倍率。0 = 使用武器类别默认值")]
         public float impactRippleScale = 0f;
+        [Tooltip("后坐力/镜头冲击弹簧角频率（rad/s）：越大回弹越快。0 = 使用武器类别默认值（见 WeaponFeelProfile）")]
+        public float feelSpringOmega = 0f;
+        [Tooltip("镜头冲击热积累衰减率（/s）：越小持续连发时视轴后拉越明显。0 = 使用武器类别默认值")]
+        public float cameraKickDecayRate = 0f;
 
         private void OnValidate()
         {
@@ -423,6 +430,8 @@ namespace P1.Weapons
             projectileVisualScale = Mathf.Max(0f, projectileVisualScale);
             trailVisualScale = Mathf.Max(0f, trailVisualScale);
             impactRippleScale = Mathf.Max(0f, impactRippleScale);
+            feelSpringOmega = Mathf.Max(0f, feelSpringOmega);
+            cameraKickDecayRate = Mathf.Max(0f, cameraKickDecayRate);
         }
 
 #if UNITY_EDITOR
@@ -663,11 +672,11 @@ namespace P1.Weapons
             Debug.Log($"[WeaponConfigSO] P3-B 大招/副武器配置已同步到 {applied} 份武器资产");
         }
 
-        /// <summary>副武器 Splat Bomb 规范：耗墨 70、最远投掷 12m、落地 0.95s 引信、核心 180 秒杀、涂地 2.7m。</summary>
+        /// <summary>副武器 Splat Bomb 规范：与墨水脱钩（0 耗墨）、6s 冷却、最远投掷 12m、落地 0.95s 引信、核心 180 秒杀、涂地 2.7m。</summary>
         public static void ApplyBombSpec(WeaponConfigSO config)
         {
-            config.bombInkCost = 70f;
-            config.bombCooldown = 0.6f;
+            config.bombInkCost = 0f;
+            config.bombCooldown = 6f;
             config.bombThrowSpeed = 13.5f;
             config.bombThrowGravity = 24f;
             config.bombThrowUpBoost = 1.5f;

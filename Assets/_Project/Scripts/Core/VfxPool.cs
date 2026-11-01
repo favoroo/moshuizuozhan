@@ -119,11 +119,15 @@ namespace P1.Core
 
         private void InitializeResources()
         {
-            Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (unlitShader == null)
-                unlitShader = Shader.Find("Sprites/Default");
+            Shader particleShader = Shader.Find("P1/InkVfx");
+            if (particleShader == null)
+                particleShader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (particleShader == null)
+                particleShader = Shader.Find("Sprites/Default");
 
-            _sharedParticleMat = new Material(unlitShader) { name = "VfxInkParticleMat" };
+            _sharedParticleMat = new Material(particleShader) { name = "VfxInkParticleMat" };
+            if (_sharedParticleMat.HasProperty(BaseColorProp))
+                _sharedParticleMat.SetColor(BaseColorProp, Color.white);
 
             // 冲击环改用加法混合：旧版 URP/Unlit 是不透明材质，环的 alpha 淡出根本不生效，
             // 只能靠「变白→突然消失」收尾；加法混合后 1-t 的 alpha 才会真的让冲击波淡掉。
@@ -183,7 +187,7 @@ namespace P1.Core
         /// 约 2/3 液滴顺着弹道贯穿方向飞出、1/3 逆着弹道回溅向射击者，再叠一枚短促高光让远处也读得出命中。
         /// damage01 = 伤害 / 基准（Inkwave 为 amount/60，夹在 0.3~1.5）；击杀走 <see cref="SpawnKillBurst"/>，不经此入口。
         /// </summary>
-        public void SpawnHitSplash(Vector3 worldPos, Vector3 shotDirection, Color color, float damage01)
+        public void SpawnHitSplash(Vector3 worldPos, Vector3 shotDirection, Color color, float damage01, bool highlight = false)
         {
             float k = Mathf.Clamp(damage01, 0.3f, 1.5f);
             Vector3 dir = shotDirection;
@@ -202,7 +206,10 @@ namespace P1.Core
 
             // 绕弹道轴的甩出墨珠 + 短促高光（0.08s，命中在远处也能一眼读出）
             SpawnSatelliteDroplets(worldPos, dir, color, radius, Mathf.RoundToInt(2f + 2f * k), dir);
-            SpawnImpactFlash(worldPos, dir, color, radius * 1.1f);
+            // 高光只给本地玩家相关的命中：全员命中都放时，每个角色胸口都会是一团
+            // 加法混合的白盘，被 Bloom 放大后整屏幕乱闪白光，也读不出"这一下是我打的"。
+            if (highlight)
+                SpawnImpactFlash(worldPos, dir, color, radius * 1.1f);
         }
 
         /// <summary>
@@ -336,8 +343,11 @@ namespace P1.Core
             {
                 position = worldPos + up * 0.04f,
                 velocity = Vector3.zero,
-                startColor = new Color(color.r, color.g, color.b, 0.55f),
-                startSize = Mathf.Clamp(radius * 1.9f, 0.4f, 3.2f),
+                // 亮度/尺寸都收紧：加法混合的白盘一旦超过 Bloom threshold 就会被放大成
+                // 一大片白光（角色胸口整块发白）。高光只用来"确认这一下是我打的"，
+                // 不需要覆盖整个角色，因此上限从 3.2m/0.55 收到 1.5m/0.32。
+                startColor = new Color(color.r, color.g, color.b, 0.32f),
+                startSize = Mathf.Clamp(radius * 1.4f, 0.35f, 1.5f),
                 startLifetime = 0.08f,
                 rotation = Random.Range(0f, 360f)
             };
@@ -791,6 +801,25 @@ namespace P1.Core
             mesh.triangles = tris;
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        /// <summary>
+        /// 把 URP 材质切换为透明表面混合模式（Lit/Unlit 均适用；缺属性时静默跳过）。
+        /// 程序化生成的地面指示类特效（预警盘、免疫提示环等）用它拿到 SrcAlpha 混合；
+        /// 与 InkCharacterMotor.MakeTransparent 同一写法，收在 VfxPool 供 VFX 域复用。
+        /// </summary>
+        public static void MakeUrpUnlitTransparent(Material m)
+        {
+            if (m == null)
+                return;
+            m.SetFloat("_Surface", 1f);
+            m.SetFloat("_Blend", 0f);
+            m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            m.SetFloat("_ZWrite", 0f);
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            // 运行时手动切透明必须显式改队列，否则仍排 Opaque(2000)，会被不透明体遮挡/覆盖
+            m.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
         }
     }
 }

@@ -24,6 +24,9 @@ namespace P1.Weapons
 
         public override bool IsRolling => _isRolling;
 
+        /// <summary>挥击前摇期间为 true（表现层据此把滚筒抡过肩）；Tick 走完前摇的同一帧回到 false。</summary>
+        public override bool IsFlicking => _flickWindup >= 0f;
+
         public override void Reset()
         {
             _cooldown = 0f;

@@ -3,6 +3,7 @@ using P1.Core;
 using P1.Ink;
 using P1.Player;
 using P1.Weapons;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -15,7 +16,9 @@ namespace P1.UI
     /// 1. 小枪：中心点 + 扩散圆环 + 4个随 Bloom 散布角度动态扩张/收缩的刻度角；
     /// 2. 滚筒：宽屏扇面横向指示条；
     /// 3. 蓄力狙：同心圆 + 左右收紧瞄准线 + 360° 动态蓄力进度环 (Charge01) + 满蓄力过冲脉冲；
-    /// 4. 副武器瞄准微胶囊：按住副武器键时长条滑出，显示手雷耗墨与就绪状态。
+    /// 4. 副武器冷却微胶囊：手雷投出后显示倒计时与充能条，就绪时短促 READY。
+    /// P30 可读性重做：对齐 Inkwave 的「白芯 + 墨色硬描边」对比策略（旧版墨芯白边在亮地面只剩发丝线）；
+    /// 刻度静止时收在环带内侧，开火随 Bloom 越过环带外扫，不再与环带重叠糊成一团。
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     public class WeaponReticleUI : MonoBehaviour
@@ -30,9 +33,8 @@ namespace P1.UI
         private RectTransform _rollerContainer;
         private RectTransform _chargerContainer;
 
-        // 小枪组件
-        private RectTransform[] _shooterTicks = new RectTransform[4];
-        private Image[] _shooterTickImages = new Image[4];
+        // 小枪组件（刻度为白芯 + 墨边双层条，见 OutlinedBar）
+        private readonly OutlinedBar[] _shooterBars = new OutlinedBar[4];
         private Image _shooterRing;
         private Image _shooterCenterDot;
 
@@ -44,30 +46,32 @@ namespace P1.UI
         private Image _chargerCenterDot;
         private Image _chargerTrackRing;
         private Image _chargerFillRing;
-        private Image _chargerLineLeftImage;
-        private Image _chargerLineRightImage;
-        private RectTransform _chargerLineLeft;
-        private RectTransform _chargerLineRight;
+        private OutlinedBar _chargerLineLeftBar;
+        private OutlinedBar _chargerLineRightBar;
 
-        // 副武器微胶囊组件
+        // 副武器冷却微胶囊组件（旧名 SubAimBadge，保留节点名以兼容旧测试/装配）
         private RectTransform _subAimBadge;
         private CanvasGroup _subAimCanvasGroup;
         private Image _subAimFill;
-        private Text _subAimText;
+        private TMP_Text _subAimTimeText;
+        private float _bombReadyFlashTimer;
+        private bool _bombWasCooling;
+        private int _lastBombCooldownTenths = int.MinValue;
 
         // 程序化生成的 UI 贴图与 Sprite
         private Sprite _dotSprite;
         private Sprite _ringSprite;
         private Sprite _ringDashedSprite;
-        private Sprite _boxSprite;
         private Sprite _pillSprite;
         private Sprite _arcSprite;
+
+        /// <summary>白芯刻度条四周的墨边厚度（像素，单侧）。</summary>
+        private const float BarOutline = 1.5f;
 
         // 打击标记（Hit Marker, P6-A）
         private RectTransform _hitMarkerRoot;
         private CanvasGroup _hitMarkerGroup;
-        private readonly Image[] _hitTicks = new Image[4];
-        private readonly RectTransform[] _hitTickRects = new RectTransform[4];
+        private readonly OutlinedBar[] _hitBars = new OutlinedBar[4];
         private Image _hitRing;
         private RectTransform _hitRingRect;
         private float _hitMarkerTimer;
@@ -145,13 +149,19 @@ namespace P1.UI
         /// <summary>准星当前是否锁定敌人（染红 + 放大）。</summary>
         public bool IsOnTarget => _targetWeight > 0.5f;
 
+        /// <summary>手雷冷却徽标当前是否可见（调试 / 自动化测试用）。</summary>
+        public bool IsBombCooldownBadgeVisible =>
+            _subAimBadge != null && _subAimBadge.gameObject.activeSelf;
+
+        /// <summary>手雷冷却徽标的充能进度 0~1（1 = 就绪；调试 / 自动化测试用）。</summary>
+        public float BombCooldownBadgeFill01 => _subAimFill != null ? _subAimFill.fillAmount : 0f;
+
         private WeaponKind _lastKind = WeaponKind.Shooter;
         private int _lastShotsFired = -1;
         private float _shotPunch;
         private float _shooterWeight = 1f;
         private float _rollerWeight = 0f;
         private float _chargerWeight = 0f;
-        private float _subAimWeight = 0f;
         private float _farWeight;
         private float _targetWeight;
 
@@ -229,7 +239,6 @@ namespace P1.UI
             DestroySpriteAndTexture(ref _dotSprite);
             DestroySpriteAndTexture(ref _ringSprite);
             DestroySpriteAndTexture(ref _ringDashedSprite);
-            DestroySpriteAndTexture(ref _boxSprite);
             DestroySpriteAndTexture(ref _pillSprite);
             DestroySpriteAndTexture(ref _arcSprite);
         }
@@ -250,7 +259,9 @@ namespace P1.UI
 
         private void GenerateProceduralSprites()
         {
-            // 1. 圆点 Sprite (64x64)：墨黑实心 + 白色硬描边（几何风纯色硬边，无柔光）
+            // 对比度策略（P30 准星重做）：对齐 INKWAVE 的「白色主体 + 墨色硬描边」，
+            // 在亮地面（白芯起作用）与暗墨面（墨边起作用）上都可读；旧版墨芯白边在亮场景里只剩发丝线。
+            // 1. 圆点 Sprite (64x64)：白芯 + 墨色硬描边（几何风纯色硬边，无柔光）
             Texture2D dotTex = new Texture2D(64, 64, TextureFormat.RGBA32, false) { name = "ReticleDotTex" };
             Color[] dotCols = new Color[64 * 64];
             for (int y = 0; y < 64; y++)
@@ -258,13 +269,13 @@ namespace P1.UI
                 for (int x = 0; x < 64; x++)
                 {
                     float dist = Vector2.Distance(new Vector2(x, y), new Vector2(31.5f, 31.5f));
-                    if (dist <= 18f)
-                    {
-                        dotCols[y * 64 + x] = ComicStyle.Ink;
-                    }
-                    else if (dist <= 26.5f)
+                    if (dist <= 17f)
                     {
                         dotCols[y * 64 + x] = Color.white;
+                    }
+                    else if (dist <= 30f)
+                    {
+                        dotCols[y * 64 + x] = ComicStyle.Ink;
                     }
                     else
                     {
@@ -276,7 +287,7 @@ namespace P1.UI
             dotTex.Apply();
             _dotSprite = Sprite.Create(dotTex, new Rect(0, 0, 64, 64), new Vector2(0.5f, 0.5f));
 
-            // 2. 细圆环 Sprite (128x128)：墨黑实心环 + 白色双侧硬描边（几何风纯色硬边，无柔光）
+            // 2. 圆环 Sprite (128x128)：白芯环带 + 墨色双侧硬描边（几何风纯色硬边，无柔光）
             Texture2D ringTex = new Texture2D(128, 128, TextureFormat.RGBA32, false) { name = "ReticleRingTex" };
             Color[] ringCols = new Color[128 * 128];
             for (int y = 0; y < 128; y++)
@@ -285,13 +296,13 @@ namespace P1.UI
                 {
                     float dist = Vector2.Distance(new Vector2(x, y), new Vector2(63.5f, 63.5f));
                     float ringDiff = Mathf.Abs(dist - 56f);
-                    if (ringDiff <= 2.8f)
-                    {
-                        ringCols[y * 128 + x] = ComicStyle.Ink;
-                    }
-                    else if (ringDiff <= 5.2f)
+                    if (ringDiff <= 3f)
                     {
                         ringCols[y * 128 + x] = Color.white;
+                    }
+                    else if (ringDiff <= 5.5f)
+                    {
+                        ringCols[y * 128 + x] = ComicStyle.Ink;
                     }
                     else
                     {
@@ -304,22 +315,7 @@ namespace P1.UI
             _ringSprite = Sprite.Create(ringTex, new Rect(0, 0, 128, 128), new Vector2(0.5f, 0.5f));
             _ringDashedSprite = GenerateDashedRingSprite();
 
-            // 3. 刻度矩形贴图 (32x32)：墨黑实心 + 白色硬描边
-            Texture2D boxTex = new Texture2D(32, 32, TextureFormat.RGBA32, false) { name = "ReticleBoxTex" };
-            Color[] boxCols = new Color[32 * 32];
-            for (int y = 0; y < 32; y++)
-            {
-                for (int x = 0; x < 32; x++)
-                {
-                    bool isBorder = x < 4 || x >= 28 || y < 4 || y >= 28;
-                    boxCols[y * 32 + x] = isBorder ? Color.white : ComicStyle.Ink;
-                }
-            }
-            boxTex.SetPixels(boxCols);
-            boxTex.Apply();
-            _boxSprite = Sprite.Create(boxTex, new Rect(0, 0, 32, 32), new Vector2(0.5f, 0.5f));
-
-            // 4. 纯色胶囊贴图 (64x32)：墨黑底 + 白色硬描边（几何风纯色硬边，无柔光）
+            // 3. 纯色胶囊贴图 (64x32)：白芯 + 墨色硬描边（几何风纯色硬边，无柔光）
             Texture2D pillTex = new Texture2D(64, 32, TextureFormat.RGBA32, false) { name = "ReticlePillTex" };
             Color[] pillCols = new Color[64 * 32];
             for (int y = 0; y < 32; y++)
@@ -331,11 +327,11 @@ namespace P1.UI
                     float dist = Mathf.Sqrt(dx * dx + dy * dy);
                     if (dist <= 11f)
                     {
-                        pillCols[y * 64 + x] = ComicStyle.Ink;
+                        pillCols[y * 64 + x] = Color.white;
                     }
                     else if (dist <= 15.5f)
                     {
-                        pillCols[y * 64 + x] = Color.white;
+                        pillCols[y * 64 + x] = ComicStyle.Ink;
                     }
                     else
                     {
@@ -347,7 +343,7 @@ namespace P1.UI
             pillTex.Apply();
             _pillSprite = Sprite.Create(pillTex, new Rect(0, 0, 64, 32), new Vector2(0.5f, 0.5f));
 
-            // 5. 受击方向弧贴图 (256x256)：纯色几何硬边扇面
+            // 4. 受击方向弧贴图 (256x256)：纯色几何硬边扇面
             _arcSprite = GenerateArcSprite();
         }
 
@@ -377,7 +373,7 @@ namespace P1.UI
                     float dy = y - center.y;
                     float dist = Mathf.Sqrt(dx * dx + dy * dy);
                     float ringDiff = Mathf.Abs(dist - 56f);
-                    if (ringDiff > 5.2f)
+                    if (ringDiff > 5.5f)
                     {
                         pixels[y * size + x] = Color.clear;
                         continue;
@@ -391,7 +387,7 @@ namespace P1.UI
                         continue;
                     }
 
-                    pixels[y * size + x] = ringDiff <= 2.8f ? ComicStyle.Ink : Color.white;
+                    pixels[y * size + x] = ringDiff <= 3f ? Color.white : ComicStyle.Ink;
                 }
             }
 
@@ -434,39 +430,96 @@ namespace P1.UI
             return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
         }
 
+        // ================================================================ 白芯刻度条（准星可读性 P30）
+
+        /// <summary>
+        /// 双层直角色条：墨色底板比白芯大一圈硬边描边。细小 UI（刻度/收束线）用贴图描边会在
+        /// 短轴上被压成亚像素碎边，双层 Image 才能保证四边描边宽度一致、亮暗地面都读得清。
+        /// </summary>
+        private sealed class OutlinedBar
+        {
+            public RectTransform Root;
+            public RectTransform Core;
+            public RectTransform Backing;
+            public Image CoreImage;
+            public Image BackingImage;
+
+            /// <summary>设置白芯尺寸；墨边自动外扩 <see cref="BarOutline"/>。</summary>
+            public void SetSize(Vector2 coreSize)
+            {
+                Core.sizeDelta = coreSize;
+                Backing.sizeDelta = coreSize + new Vector2(BarOutline * 2f, BarOutline * 2f);
+            }
+
+            public void SetCoreColor(Color color)
+            {
+                CoreImage.color = color;
+            }
+
+            public void SetBackingColor(Color color)
+            {
+                BackingImage.color = color;
+            }
+        }
+
+        private static OutlinedBar CreateOutlinedBar(Transform parent, string name, Vector2 coreSize, float zAngle = 0f)
+        {
+            var rootGo = new GameObject(name, typeof(RectTransform));
+            rootGo.transform.SetParent(parent, false);
+            RectTransform root = rootGo.GetComponent<RectTransform>();
+            root.localRotation = Quaternion.Euler(0f, 0f, zAngle);
+
+            var backingGo = new GameObject("Backing", typeof(RectTransform), typeof(Image));
+            backingGo.transform.SetParent(root, false);
+            Image backingImg = backingGo.GetComponent<Image>();
+            UIFlatSprite.MakeFlat(backingImg);
+            backingImg.color = ComicStyle.Ink;
+            backingImg.raycastTarget = false;
+
+            var coreGo = new GameObject("Core", typeof(RectTransform), typeof(Image));
+            coreGo.transform.SetParent(root, false);
+            Image coreImg = coreGo.GetComponent<Image>();
+            UIFlatSprite.MakeFlat(coreImg);
+            coreImg.raycastTarget = false;
+
+            var bar = new OutlinedBar
+            {
+                Root = root,
+                Core = coreGo.GetComponent<RectTransform>(),
+                Backing = backingGo.GetComponent<RectTransform>(),
+                CoreImage = coreImg,
+                BackingImage = backingImg
+            };
+            bar.SetSize(coreSize);
+            return bar;
+        }
+
         private void BuildShooterUI()
         {
             var go = new GameObject("ShooterReticle", typeof(RectTransform));
             go.transform.SetParent(transform, false);
             _shooterContainer = go.GetComponent<RectTransform>();
 
-            // 中心圆点 (6x6 px)
+            // 中心圆点 (11x11 px)：白芯 + 墨边
             var dotGo = new GameObject("CenterDot", typeof(Image));
             dotGo.transform.SetParent(_shooterContainer, false);
             _shooterCenterDot = dotGo.GetComponent<Image>();
             _shooterCenterDot.sprite = _dotSprite;
-            _shooterCenterDot.rectTransform.sizeDelta = new Vector2(6f, 6f);
+            _shooterCenterDot.rectTransform.sizeDelta = new Vector2(11f, 11f);
 
-            // 主圆环 (52x52 px)
+            // 主圆环 (60x60 px，环带半径约 26px)
             var ringGo = new GameObject("MainRing", typeof(Image));
             ringGo.transform.SetParent(_shooterContainer, false);
             _shooterRing = ringGo.GetComponent<Image>();
             _shooterRing.sprite = _ringSprite;
-            _shooterRing.rectTransform.sizeDelta = new Vector2(52f, 52f);
+            _shooterRing.rectTransform.sizeDelta = new Vector2(60f, 60f);
 
-            // 4 个刻度角 (Tick Marks: 12x3 px)
+            // 4 个刻度 (白芯 4x12 + 墨边)：静止时收在环带内侧（r≈16，与圆点/环带各留空隙不粘连），
+            // 开火随 Bloom 越过环带向外扫
             float[] angles = new float[] { 0f, 90f, 180f, 270f };
             for (int i = 0; i < 4; i++)
             {
-                var tickGo = new GameObject($"Tick_{i}", typeof(Image));
-                tickGo.transform.SetParent(_shooterContainer, false);
-                var img = tickGo.GetComponent<Image>();
-                img.sprite = _boxSprite;
-                var rt = tickGo.GetComponent<RectTransform>();
-                rt.sizeDelta = new Vector2(3f, 11f);
-                rt.localRotation = Quaternion.Euler(0f, 0f, angles[i]);
-                _shooterTicks[i] = rt;
-                _shooterTickImages[i] = img;
+                _shooterBars[i] = CreateOutlinedBar(_shooterContainer, $"Tick_{i}", new Vector2(4f, 12f), angles[i]);
             }
         }
 
@@ -484,12 +537,13 @@ namespace P1.UI
             _rollerBarRect = barGo.GetComponent<RectTransform>();
             _rollerBarRect.sizeDelta = new Vector2(140f, 14f);
 
-            // 中间瞄准凹槽指示点
+            // 中间瞄准凹槽指示点：白芯条上必须用墨色才能读出来
             var notch = new GameObject("Notch", typeof(Image));
             notch.transform.SetParent(_rollerContainer, false);
             var notchImg = notch.GetComponent<Image>();
             notchImg.sprite = _dotSprite;
-            notch.GetComponent<RectTransform>().sizeDelta = new Vector2(5f, 5f);
+            notchImg.color = ComicStyle.Ink;
+            notch.GetComponent<RectTransform>().sizeDelta = new Vector2(8f, 8f);
         }
 
         private void BuildChargerUI()
@@ -498,20 +552,20 @@ namespace P1.UI
             go.transform.SetParent(transform, false);
             _chargerContainer = go.GetComponent<RectTransform>();
 
-            // 中心双层圆点 (8x8 px)
+            // 中心双层圆点 (10x10 px)
             var dotGo = new GameObject("CenterDot", typeof(Image));
             dotGo.transform.SetParent(_chargerContainer, false);
             _chargerCenterDot = dotGo.GetComponent<Image>();
             _chargerCenterDot.sprite = _dotSprite;
-            _chargerCenterDot.rectTransform.sizeDelta = new Vector2(8f, 8f);
+            _chargerCenterDot.rectTransform.sizeDelta = new Vector2(10f, 10f);
 
-            // 背景导轨环 (暗度 0.3)
+            // 背景导轨环 (暗度 0.55：旧 0.3 在中场调背景上几乎不可见)
             var trackGo = new GameObject("TrackRing", typeof(Image));
             trackGo.transform.SetParent(_chargerContainer, false);
             _chargerTrackRing = trackGo.GetComponent<Image>();
             _chargerTrackRing.sprite = _ringSprite;
             _chargerTrackRing.rectTransform.sizeDelta = new Vector2(62f, 62f);
-            _chargerTrackRing.color = new Color(1f, 1f, 1f, 0.3f);
+            _chargerTrackRing.color = new Color(1f, 1f, 1f, 0.55f);
 
             // 360° 蓄力进度环 (Radial 360 Filled)
             var fillGo = new GameObject("ChargeFillRing", typeof(Image));
@@ -525,77 +579,121 @@ namespace P1.UI
             _chargerFillRing.fillAmount = 0f;
             _chargerFillRing.rectTransform.sizeDelta = new Vector2(62f, 62f);
 
-            // 左右两条蓄力收束横线 (长 16px, 宽 2.5px)
-            var leftGo = new GameObject("LineLeft", typeof(Image));
-            leftGo.transform.SetParent(_chargerContainer, false);
-            var leftImg = leftGo.GetComponent<Image>();
-            leftImg.sprite = _boxSprite;
-            _chargerLineLeftImage = leftImg;
-            _chargerLineLeft = leftGo.GetComponent<RectTransform>();
-            _chargerLineLeft.sizeDelta = new Vector2(16f, 2.5f);
-            _chargerLineLeft.anchoredPosition = new Vector2(-46f, 0f);
+            // 左右两条蓄力收束线 (白芯 18x3.5 + 墨边)，停在进度环外侧，蓄力时向内收 10px
+            _chargerLineLeftBar = CreateOutlinedBar(_chargerContainer, "LineLeft", new Vector2(18f, 3.5f));
+            _chargerLineLeftBar.Root.anchoredPosition = new Vector2(-42f, 0f);
 
-            var rightGo = new GameObject("LineRight", typeof(Image));
-            rightGo.transform.SetParent(_chargerContainer, false);
-            var rightImg = rightGo.GetComponent<Image>();
-            rightImg.sprite = _boxSprite;
-            _chargerLineRightImage = rightImg;
-            _chargerLineRight = rightGo.GetComponent<RectTransform>();
-            _chargerLineRight.sizeDelta = new Vector2(16f, 2.5f);
-            _chargerLineRight.anchoredPosition = new Vector2(46f, 0f);
+            _chargerLineRightBar = CreateOutlinedBar(_chargerContainer, "LineRight", new Vector2(18f, 3.5f));
+            _chargerLineRightBar.Root.anchoredPosition = new Vector2(42f, 0f);
         }
 
+        /// <summary>
+        /// 手雷冷却徽标（旧名 SubAimBadge）：准星下方一条几何风读数——
+        /// 「BOMB █████░░ 5.4s」。手雷投出后显示 6s 冷却倒计时，结束时短促翻黄显示 READY 再隐藏。
+        /// 不再承担「按住瞄准 / 耗墨就绪」的旧语义（手雷已改为一键直投）。
+        /// </summary>
         private void BuildSubAimBadge()
         {
-            var badgeGo = new GameObject("SubAimBadge", typeof(RectTransform));
+            var badgeGo = new GameObject("SubAimBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             badgeGo.transform.SetParent(transform, false);
             _subAimBadge = badgeGo.GetComponent<RectTransform>();
-            _subAimBadge.anchoredPosition = new Vector2(42f, 28f);
+            _subAimBadge.sizeDelta = new Vector2(220f, 36f);
+            _subAimBadge.anchoredPosition = new Vector2(0f, -64f);
             _subAimCanvasGroup = badgeGo.AddComponent<CanvasGroup>();
+            _subAimCanvasGroup.alpha = 1f;
+            _subAimCanvasGroup.blocksRaycasts = false;
+            _subAimCanvasGroup.interactable = false;
 
-            // 胶囊底板
-            var bgGo = new GameObject("Bg", typeof(Image));
-            bgGo.transform.SetParent(_subAimBadge, false);
-            var bgImg = bgGo.GetComponent<Image>();
-            bgImg.sprite = _pillSprite;
-            bgImg.color = new Color(0.08f, 0.06f, 0.12f, 0.88f);
-            bgGo.GetComponent<RectTransform>().sizeDelta = new Vector2(72f, 22f);
+            // 底板：墨黑实心 + 纸白硬边（几何大胆风，无圆角 / 无渐变 / 无阴影）
+            var bg = badgeGo.GetComponent<UIInkShapeGraphic>();
+            bg.raycastTarget = false;
+            bg.Shape = UIInkShape.SharpRect;
+            bg.CornerRadius = ComicStyle.CornerSharp;
+            bg.BorderWidth = ComicStyle.BorderThin;
+            bg.BorderColor = ComicStyle.Paper;
+            bg.color = ComicStyle.Ink;
+            bg.HardShadow = false;
+            bg.ShadowOffset = Vector2.zero;
+            bg.Halftone = false;
+            bg.GlossAlpha = 0f;
+            bg.DrawGloss = false;
+            bg.InnerRimAlpha = 0f;
 
-            // 墨水进度条槽
+            // 左侧标签 "BOMB"（拉丁全大写，18px 粗体，满足 HUD 小字下限）
+            CreateBadgeText("Text", new Vector2(-76f, 0f), new Vector2(60f, 30f),
+                TextAnchor.MiddleLeft, "BOMB", ComicStyle.Paper);
+
+            // 中部冷却进度条：白色 18% 轨道 + 黄色填充（充能式，越满越接近就绪）
             var barBgGo = new GameObject("BarBg", typeof(Image));
             barBgGo.transform.SetParent(_subAimBadge, false);
             var barBg = barBgGo.GetComponent<Image>();
-            barBg.sprite = _pillSprite;
-            barBg.color = new Color(1f, 1f, 1f, 0.2f);
+            UIFlatSprite.MakeFlat(barBg);
+            barBg.color = new Color(1f, 1f, 1f, 0.18f);
+            barBg.raycastTarget = false;
             var barBgRect = barBgGo.GetComponent<RectTransform>();
-            barBgRect.sizeDelta = new Vector2(34f, 6f);
-            barBgRect.anchoredPosition = new Vector2(-12f, 0f);
+            barBgRect.sizeDelta = new Vector2(86f, 10f);
+            barBgRect.anchoredPosition = new Vector2(0f, 0f);
 
-            // 墨水进度填充条
             var barFillGo = new GameObject("BarFill", typeof(Image));
             barFillGo.transform.SetParent(barBgGo.transform, false);
             _subAimFill = barFillGo.GetComponent<Image>();
-            _subAimFill.sprite = _pillSprite;
-            _subAimFill.type = Image.Type.Filled;
-            _subAimFill.fillMethod = Image.FillMethod.Horizontal;
-            _subAimFill.fillAmount = 1f;
-            barFillGo.GetComponent<RectTransform>().sizeDelta = new Vector2(34f, 6f);
+            UIFlatSprite.MakeFlat(_subAimFill, filled: true);
+            _subAimFill.color = ComicStyle.Yellow;
+            _subAimFill.fillAmount = 0f;
+            _subAimFill.raycastTarget = false;
+            var barFillRect = barFillGo.GetComponent<RectTransform>();
+            barFillRect.anchorMin = Vector2.zero;
+            barFillRect.anchorMax = Vector2.one;
+            barFillRect.offsetMin = Vector2.zero;
+            barFillRect.offsetMax = Vector2.zero;
 
-            // 提示文字 "BOMB"
-            var txtGo = new GameObject("Text", typeof(Text));
-            txtGo.transform.SetParent(_subAimBadge, false);
-            _subAimText = txtGo.GetComponent<Text>();
-            _subAimText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            _subAimText.fontSize = 10;
-            _subAimText.alignment = TextAnchor.MiddleCenter;
-            _subAimText.text = "BOMB";
-            _subAimText.color = Color.white;
-            var txtRect = txtGo.GetComponent<RectTransform>();
-            txtRect.sizeDelta = new Vector2(30f, 18f);
-            txtRect.anchoredPosition = new Vector2(18f, 0f);
+            // 右侧倒计时 / READY
+            _subAimTimeText = CreateBadgeText("TimeText", new Vector2(76f, 0f), new Vector2(62f, 30f),
+                TextAnchor.MiddleRight, "6.0s", ComicStyle.Yellow);
 
-            _subAimCanvasGroup.alpha = 0f;
             badgeGo.SetActive(false);
+        }
+
+        /// <summary>
+        /// 副武器徽标文字（BOMB / 冷却秒数 / READY）：走 TMP + 主题 display 字体，
+        /// 不再用 LegacyRuntime.ttf（Arial 兜底字在真机缺字形且没有 SDF 描边）。
+        /// </summary>
+        private TMP_Text CreateBadgeText(string name, Vector2 pos, Vector2 size,
+            TextAnchor anchor, string text, Color color)
+        {
+            var txtGo = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            txtGo.transform.SetParent(_subAimBadge, false);
+            var txt = txtGo.GetComponent<TextMeshProUGUI>();
+            txt.font = UIThemeSO.ResolveGlobalFont(true, ComicStyle.ContainsCjk(text));
+            txt.fontSize = UITypography.FontSnapped(18f);
+            txt.fontStyle = FontStyles.Bold;
+            txt.alignment = ToTmpAlignment(anchor);
+            txt.text = text;
+            txt.color = color;
+            txt.raycastTarget = false;
+            txt.textWrappingMode = TextWrappingModes.NoWrap;
+            txt.overflowMode = TextOverflowModes.Overflow;
+            var rect = txtGo.GetComponent<RectTransform>();
+            rect.sizeDelta = size;
+            rect.anchoredPosition = pos;
+            return txt;
+        }
+
+        private static TextAlignmentOptions ToTmpAlignment(TextAnchor anchor)
+        {
+            switch (anchor)
+            {
+                case TextAnchor.UpperLeft: return TextAlignmentOptions.TopLeft;
+                case TextAnchor.UpperCenter: return TextAlignmentOptions.Top;
+                case TextAnchor.UpperRight: return TextAlignmentOptions.TopRight;
+                case TextAnchor.MiddleLeft: return TextAlignmentOptions.MidlineLeft;
+                case TextAnchor.MiddleCenter: return TextAlignmentOptions.Center;
+                case TextAnchor.MiddleRight: return TextAlignmentOptions.MidlineRight;
+                case TextAnchor.LowerLeft: return TextAlignmentOptions.BottomLeft;
+                case TextAnchor.LowerCenter: return TextAlignmentOptions.Bottom;
+                case TextAnchor.LowerRight: return TextAlignmentOptions.BottomRight;
+                default: return TextAlignmentOptions.Center;
+            }
         }
 
         // ================================================================ 打击标记 (Hit Marker)
@@ -624,24 +722,13 @@ namespace P1.UI
             float[] angles = { 45f, 135f, 225f, 315f };
             for (int i = 0; i < angles.Length; i++)
             {
-                var tickGo = new GameObject($"HitTick_{i}", typeof(RectTransform), typeof(Image));
-                tickGo.transform.SetParent(_hitMarkerRoot, false);
-                var img = tickGo.GetComponent<Image>();
-                img.sprite = _boxSprite;
-                img.raycastTarget = false;
-                img.color = Color.white;
-
-                var rt = tickGo.GetComponent<RectTransform>();
-                rt.anchorMin = new Vector2(0.5f, 0.5f);
-                rt.anchorMax = new Vector2(0.5f, 0.5f);
-                rt.pivot = new Vector2(0.5f, 0.5f);
-                rt.sizeDelta = new Vector2(4.5f, 15f);
-                rt.localRotation = Quaternion.Euler(0f, 0f, angles[i]);
+                OutlinedBar bar = CreateOutlinedBar(_hitMarkerRoot, $"HitTick_{i}", new Vector2(4.5f, 15f), angles[i]);
+                bar.Root.anchorMin = new Vector2(0.5f, 0.5f);
+                bar.Root.anchorMax = new Vector2(0.5f, 0.5f);
+                bar.Root.pivot = new Vector2(0.5f, 0.5f);
                 float rad = angles[i] * Mathf.Deg2Rad;
-                rt.anchoredPosition = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad)) * 9f;
-
-                _hitTicks[i] = img;
-                _hitTickRects[i] = rt;
+                bar.Root.anchoredPosition = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad)) * 9f;
+                _hitBars[i] = bar;
             }
 
             var ringGo = new GameObject("HitRing", typeof(RectTransform), typeof(Image));
@@ -708,12 +795,12 @@ namespace P1.UI
                 : HitFeedbackMath.ComboTint(Color.white, teamColor, combo);
             _hitRingEnabled = fat;
 
-            for (int i = 0; i < _hitTicks.Length; i++)
+            for (int i = 0; i < _hitBars.Length; i++)
             {
-                if (_hitTicks[i] == null) continue;
-                _hitTicks[i].color = _hitMarkerColor;
-                if (_hitTickRects[i] != null)
-                    _hitTickRects[i].sizeDelta = fat ? new Vector2(6.5f, 20f) : new Vector2(4.5f, 15f);
+                OutlinedBar bar = _hitBars[i];
+                if (bar == null) continue;
+                bar.SetCoreColor(_hitMarkerColor);
+                bar.SetSize(fat ? new Vector2(6.5f, 20f) : new Vector2(4.5f, 15f));
             }
 
             if (_hitRing != null)
@@ -819,9 +906,9 @@ namespace P1.UI
             _hitMarkerGroup.alpha = Mathf.Clamp01(alpha);
 
             float spread = 9f + Mathf.Clamp(_hitCombo, 0, 6) * 1.2f + progress * _hitMarkerTravel;
-            for (int i = 0; i < _hitTickRects.Length; i++)
+            for (int i = 0; i < _hitBars.Length; i++)
             {
-                RectTransform tick = _hitTickRects[i];
+                RectTransform tick = _hitBars[i]?.Root;
                 if (tick == null) continue;
 
                 float rad = tick.localRotation.eulerAngles.z * Mathf.Deg2Rad;
@@ -1118,6 +1205,7 @@ namespace P1.UI
             if (player == null || player.Health == null || !player.Health.IsAlive || !MatchManager.InputAllowed)
             {
                 _canvasGroup.alpha = Mathf.MoveTowards(_canvasGroup.alpha, 0f, Time.deltaTime * 6f);
+                HideBombCooldownBadge();
                 return;
             }
 
@@ -1149,7 +1237,11 @@ namespace P1.UI
             // 用 ShotsFired 增量检测，不新增事件订阅；滚筒推地每帧都在结算，排除掉避免持续抖动。
             int shotsFired = weapon.ShotsFired;
             if (_lastShotsFired >= 0 && shotsFired > _lastShotsFired && !weapon.IsRolling)
-                _shotPunch = Mathf.Min(1f, _shotPunch + 0.55f);
+            {
+                // P28：准星弹跳随蓄力刻度分层——蓄力狙点按小跳、满蓄大跳
+                float strength = Mathf.Lerp(0.45f, 1f, Mathf.Clamp01(weapon.LastShotStrength01));
+                _shotPunch = Mathf.Min(1f, _shotPunch + 0.55f * strength);
+            }
             _lastShotsFired = shotsFired;
             _shotPunch = Mathf.MoveTowards(_shotPunch, 0f, unscaledDt * 7f);
 
@@ -1177,8 +1269,8 @@ namespace P1.UI
             // 蓄力狙形态更新
             UpdateCharger(weapon, teamColor);
 
-            // 副武器微胶囊更新
-            UpdateSubAim(player, teamColor);
+            // 副武器冷却徽标更新
+            UpdateSubAim(player);
         }
 
         private void UpdateShooter(WeaponController weapon, Color teamColor)
@@ -1191,15 +1283,16 @@ namespace P1.UI
                 float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
                 _shooterContainer.localScale = Vector3.one * (_shooterWeight * lockScale);
 
-                // 散布 Bloom: 1.2° ~ 5.5° 映射到 24px ~ 42px 刻度距离；开火再叠一层短促外扩
+                // 散布 Bloom: 1.2° ~ 5.5° 映射到 16px ~ 38px 刻度距离（静止收在环带内侧，开火越过环带）；
+                // 开火再叠一层短促外扩
                 float spreadDeg = weapon.CurrentSpreadDegrees;
-                float tickOffset = 24f + (spreadDeg - 1.2f) * 4.2f + _shotPunch * 6f;
+                float tickOffset = 16f + (spreadDeg - 1.2f) * 5.2f + _shotPunch * 5f;
 
                 // 4 个刻度沿自身角度向外偏移
-                _shooterTicks[0].anchoredPosition = new Vector2(0f, tickOffset);
-                _shooterTicks[1].anchoredPosition = new Vector2(-tickOffset, 0f);
-                _shooterTicks[2].anchoredPosition = new Vector2(0f, -tickOffset);
-                _shooterTicks[3].anchoredPosition = new Vector2(tickOffset, 0f);
+                _shooterBars[0].Root.anchoredPosition = new Vector2(0f, tickOffset);
+                _shooterBars[1].Root.anchoredPosition = new Vector2(-tickOffset, 0f);
+                _shooterBars[2].Root.anchoredPosition = new Vector2(0f, -tickOffset);
+                _shooterBars[3].Root.anchoredPosition = new Vector2(tickOffset, 0f);
 
                 // 环根据 Bloom 散布微缩放
                 float ringScale = 1.0f + (spreadDeg - 1.2f) * 0.06f;
@@ -1213,7 +1306,13 @@ namespace P1.UI
                 _shooterRing.color = tint;
                 Sprite ringSprite = _farWeight > 0.5f ? _ringDashedSprite : _ringSprite;
                 if (_shooterRing.sprite != ringSprite) _shooterRing.sprite = ringSprite;
-                for (int i = 0; i < 4; i++) _shooterTickImages[i].color = tint;
+                Color barBacking = ComicStyle.Ink;
+                barBacking.a = alpha;
+                for (int i = 0; i < 4; i++)
+                {
+                    _shooterBars[i].SetCoreColor(tint);
+                    _shooterBars[i].SetBackingColor(barBacking);
+                }
             }
             else if (_shooterContainer.gameObject.activeSelf)
             {
@@ -1265,13 +1364,23 @@ namespace P1.UI
 
                 Color lineColor = tint;
                 lineColor.a = alpha;
-                if (_chargerLineLeftImage != null) _chargerLineLeftImage.color = lineColor;
-                if (_chargerLineRightImage != null) _chargerLineRightImage.color = lineColor;
+                Color lineBacking = ComicStyle.Ink;
+                lineBacking.a = alpha;
+                if (_chargerLineLeftBar != null)
+                {
+                    _chargerLineLeftBar.SetCoreColor(lineColor);
+                    _chargerLineLeftBar.SetBackingColor(lineBacking);
+                }
+                if (_chargerLineRightBar != null)
+                {
+                    _chargerLineRightBar.SetCoreColor(lineColor);
+                    _chargerLineRightBar.SetBackingColor(lineBacking);
+                }
 
-                // 左右两条收紧线：从 ±46px 靠拢到 ±26px (对应 Inkwave var(--ch, 0))
-                float lineOffset = Mathf.Lerp(46f, 26f, ch01);
-                _chargerLineLeft.anchoredPosition = new Vector2(-lineOffset, 0f);
-                _chargerLineRight.anchoredPosition = new Vector2(lineOffset, 0f);
+                // 左右两条收紧线：从 ±42px 靠拢到 ±32px (对应 Inkwave var(--ch, 0) 收 10px)
+                float lineOffset = Mathf.Lerp(42f, 32f, ch01);
+                if (_chargerLineLeftBar != null) _chargerLineLeftBar.Root.anchoredPosition = new Vector2(-lineOffset, 0f);
+                if (_chargerLineRightBar != null) _chargerLineRightBar.Root.anchoredPosition = new Vector2(lineOffset, 0f);
 
                 // 满蓄力闪烁与放大动效
                 if (ch01 >= 0.999f)
@@ -1299,36 +1408,78 @@ namespace P1.UI
             }
         }
 
-        private void UpdateSubAim(PlayerController player, Color teamColor)
+        /// <summary>
+        /// 手雷冷却徽标：投出后显示倒计时与充能条，冷却结束短促显示 READY 再隐藏。
+        /// 旧的「按住瞄准 / 耗墨就绪」语义已随一键直投移除；徽标不再读取墨水。
+        /// </summary>
+        private void UpdateSubAim(PlayerController player)
         {
-            bool isAimingBomb = player.IsAimingBomb;
-            float targetWeight = isAimingBomb ? 1f : 0f;
-            _subAimWeight = Mathf.MoveTowards(_subAimWeight, targetWeight, Time.deltaTime * 10f);
-
-            if (_subAimWeight > 0.01f)
+            var weapon = player != null ? player.Weapon : null;
+            if (weapon == null)
             {
-                if (!_subAimBadge.gameObject.activeSelf) _subAimBadge.gameObject.SetActive(true);
-                _subAimCanvasGroup.alpha = _subAimWeight;
-                _subAimBadge.localScale = Vector3.one * (0.8f + 0.2f * _subAimWeight);
+                HideBombCooldownBadge();
+                return;
+            }
 
-                float bombCost = player.Weapon.Config != null ? player.Weapon.Config.bombInkCost : 55f;
-                float curInk = player.Motor != null ? player.Motor.CurrentInk : 100f;
-                bool enough = curInk >= bombCost;
+            float remaining = weapon.BombCooldownRemaining;
+            float duration = Mathf.Max(0.01f, weapon.BombCooldownDuration);
+            bool cooling = remaining > 0.001f;
 
-                _subAimFill.fillAmount = Mathf.Clamp01(curInk / 100f);
-                if (enough)
+            // 冷却结束瞬间：短促「READY」硬切提示（1.2s 后隐藏），不做慢淡出
+            if (_bombWasCooling && !cooling)
+            {
+                _bombReadyFlashTimer = 1.2f;
+            }
+            _bombWasCooling = cooling;
+
+            if (_bombReadyFlashTimer > 0f)
+            {
+                _bombReadyFlashTimer -= Time.unscaledDeltaTime;
+            }
+
+            if (!cooling && _bombReadyFlashTimer <= 0f)
+            {
+                HideBombCooldownBadge();
+                return;
+            }
+
+            if (!_subAimBadge.gameObject.activeSelf)
+            {
+                _subAimBadge.gameObject.SetActive(true);
+            }
+            _subAimCanvasGroup.alpha = 1f;
+
+            if (cooling)
+            {
+                // 充能式进度：0 → 1 表示剩余冷却逐渐恢复；数字同步倒计时
+                _subAimFill.fillAmount = 1f - Mathf.Clamp01(remaining / duration);
+                _subAimFill.color = ComicStyle.Yellow;
+
+                int tenths = Mathf.Max(1, Mathf.CeilToInt(remaining * 10f));
+                if (tenths != _lastBombCooldownTenths)
                 {
-                    _subAimFill.color = teamColor;
-                    _subAimText.color = Color.white;
-                }
-                else
-                {
-                    // 缺墨警报闪烁
-                    _subAimFill.color = new Color(1f, 0.24f, 0.36f, 1f);
-                    _subAimText.color = new Color(1f, 0.48f, 0.55f, 1f);
+                    _lastBombCooldownTenths = tenths;
+                    _subAimTimeText.text = $"{tenths / 10f:0.0}s";
+                    _subAimTimeText.color = ComicStyle.Yellow;
                 }
             }
-            else if (_subAimBadge.gameObject.activeSelf)
+            else
+            {
+                _subAimFill.fillAmount = 1f;
+                _subAimFill.color = ComicStyle.Yellow;
+                if (_lastBombCooldownTenths != -1)
+                {
+                    _lastBombCooldownTenths = -1;
+                    _subAimTimeText.text = "READY";
+                    _subAimTimeText.color = ComicStyle.Yellow;
+                }
+            }
+        }
+
+        private void HideBombCooldownBadge()
+        {
+            _lastBombCooldownTenths = int.MinValue;
+            if (_subAimBadge != null && _subAimBadge.gameObject.activeSelf)
             {
                 _subAimBadge.gameObject.SetActive(false);
             }

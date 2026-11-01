@@ -23,6 +23,33 @@ float3 _P1EnvSkyGround;     // 地面反射色（线性）
 float  _P1EnvSpecStrength;  // 环境镜面总强度（0 = 关闭，1 = 竞品基准）
 float  _P1EnvSunDiscPower;  // 太阳盘锐度（湿面 ~900，干面拉宽 ~80）
 
+// 桌面端环境 Cubemap 反射（RenderEnvGlobals 每帧推送）
+TEXTURECUBE(_P1EnvCube);
+SAMPLER(sampler_P1EnvCube);
+float  _P1EnvCubeMips;
+float  _P1EnvCubeReady;
+float  _P1EnvCubeStrength;
+
+// 墨水质感参数（RenderEnvGlobals 每帧推送）
+float  _P1InkCoatStrength;
+float  _P1InkCoatRoughness;
+float  _P1InkEdgeRimStrength;
+float  _P1InkEdgeSmoothStrength;
+float  _P1InkTopDetailStrength;
+
+// ----------------------------------------------------------------------------
+// 太阳直射光盘项（glitter），由 P1InkEnvSpecular 与 P1InkEnvSpecularFull 共用
+// ----------------------------------------------------------------------------
+half3 P1InkEnvSunGlint(float3 R, float rough, float NdotV)
+{
+    float3 L = normalize(GetMainLight().direction);
+    float sd = saturate(dot(R, L));
+    float discPow = max(8.0, lerp(_P1EnvSunDiscPower, 80.0, rough));
+    half disc = (half)pow(sd, discPow) * (half)lerp(1.0, 0.25, rough);
+    disc *= (half)saturate(NdotV * 2.0);
+    return _MainLightColor.rgb * disc * 1.2;
+}
+
 // ----------------------------------------------------------------------------
 // 解析天空环境镜面
 // R      : 反射方向（从表面指向场景）
@@ -44,13 +71,7 @@ half3 P1InkEnvSpecular(float3 R, float rough, float NdotV)
     // 太阳盘：湿面窄亮、干面拉宽变暗（粗糙度展宽，模拟微表面积分）。
     // 掠射角强抑制：低视角下 R 会扫进太阳方向形成宽亮带，把整片墨洗白（P18 实测回归），
     // 盘亮度必须随 NdotV 收紧，只保留正上方俯视时的镜面 glitter。
-    float3 L = normalize(GetMainLight().direction);
-    float sd = saturate(dot(R, L));
-    float discPow = max(8.0, lerp(_P1EnvSunDiscPower, 80.0, rough));
-    half disc = (half)pow(sd, discPow) * (half)lerp(1.0, 0.25, rough);
-    disc *= (half)saturate(NdotV * 2.0);
-
-    half3 env = sky + _MainLightColor.rgb * disc * 1.2;
+    half3 env = sky + P1InkEnvSunGlint(R, rough, NdotV);
 
     // 清漆层菲涅尔（F0 = 0.04）。掠射上限压到 0.55：墨水是颜料液体，掠射处若让环境白光
     // 全额进入，会把俯视角大斜率区域的队色整体洗浅（P18 实测）。
@@ -59,6 +80,78 @@ half3 P1InkEnvSpecular(float3 R, float rough, float NdotV)
     half3 spec = env * F * (half)_P1EnvSpecStrength;
     // 单通道硬上限：任何角度下环境镜面都不允许把队色整体洗白（只保留 glitter 峰值）
     return min(spec, (half3)1.0);
+}
+
+// ----------------------------------------------------------------------------
+// 全量环境镜面（桌面端 Cubemap + 解析太阳盘回退）
+// ----------------------------------------------------------------------------
+half3 P1InkEnvSpecularFull(float3 R, float rough, float NdotV, half3 inkTint)
+{
+    half3 result = P1InkEnvSpecular(R, rough, NdotV);
+#if defined(P1_INK_HIGH)
+    if (_P1EnvCubeReady > 0.5)
+    {
+        float lod = rough * max(1.0, _P1EnvCubeMips - 1.0);
+        half3 cube = SAMPLE_TEXTURECUBE_LOD(_P1EnvCube, sampler_P1EnvCube, R, lod).rgb;
+        half lum = Luminance(cube);
+        half3 neutral = lerp(cube, half3(lum, lum, lum), 0.35);
+        half3 tinted = lerp(neutral, neutral * saturate(inkTint * 2.0), 0.25) * (half)_P1EnvCubeStrength;
+
+        half3 env = tinted + P1InkEnvSunGlint(R, rough, NdotV);
+
+        float fres = pow(saturate(1.0 - NdotV), 5.0);
+        half F = (half)(0.04 + 0.51 * fres);
+        half3 spec = env * F * (half)_P1EnvSpecStrength;
+        result = min(spec, (half3)1.5);
+    }
+#endif
+    return result;
+}
+
+// ----------------------------------------------------------------------------
+// 双层清漆镜面高光：尖锐清漆层 + 宽 sheen 层
+// 返回白色光项（由调用方乘 _MainLightColor）
+// ----------------------------------------------------------------------------
+half3 P1InkCoatSpec(float NdotH, float NdotV, float shadowAtten, float wet, float sheen)
+{
+    float rough = clamp(_P1InkCoatRoughness, 0.02, 0.95);
+#if defined(P1_INK_HIGH)
+    float sharpPower = exp2(10.0 * (1.0 - rough) + 1.0);
+    // 注意：不用 (power+8)/8 的 GGX 归一化。roughness≈0.06 时该系数约 170，
+    // 叠加 1.2 的强度与 1.6 光强会得到 100+ 的 HDR 单像素 firefly。
+    // 这里用有上限的直接权重：峰值 ≈ _P1InkCoatStrength（1.2），足够 Bloom 拾取但不爆白。
+    float wetWeight = saturate(wet);
+    float sharpTerm = pow(NdotH, sharpPower)
+                    * (0.35 + 0.65 * wetWeight)
+                    * _P1InkCoatStrength
+                    * shadowAtten * saturate(NdotV * 1.5);
+
+    float sheenPower = exp2(4.0 * (1.0 - rough) + 1.0);
+    float sheenWeight = 0.10 * (saturate(sheen) + saturate(wet) * 0.5);
+    float sheenTerm = pow(NdotH, sheenPower) * sheenWeight * shadowAtten;
+
+    half totalSpec = (half)min(sharpTerm + sheenTerm, 1.0);
+    return half3(totalSpec, totalSpec, totalSpec);
+#else
+    // 移动端降级：单层较宽的高光（1 次 pow，无 sheen 层），保留湿润亮点但避免双 pow 开销。
+    float power = exp2(6.0 * (1.0 - rough) + 1.0);
+    half term = (half)(pow(NdotH, power) * (0.30 + 0.35 * saturate(wet))
+                        * _P1InkCoatStrength * shadowAtten);
+    return half3(term, term, term);
+#endif
+}
+
+// ----------------------------------------------------------------------------
+// 湿润薄缘高光带（供地面与顶面共用）
+// ----------------------------------------------------------------------------
+float P1InkWetRim(float amtEff, float wet, float sheen)
+{
+    // 窄带必须骑在「可见墨缘」上：地面 inkMask 在 amtEff≈0.5 起跳，
+    // 顶面 mask 在 0.55~0.72 起跳。旧的 0.08~0.32 完全落在 mask 外，
+    // 乘上 inkMask 后恒为 0（薄缘高光被吞掉）。这里取 0.30~0.88 的
+    // 内缘带，峰值覆盖 0.5~0.7，并只在新墨湿润/缎面余晖期显形。
+    float rimBand = smoothstep(0.30, 0.52, amtEff) * (1.0 - smoothstep(0.64, 0.88, amtEff));
+    return rimBand * saturate(wet * 1.25 + sheen * 0.5);
 }
 
 // ----------------------------------------------------------------------------

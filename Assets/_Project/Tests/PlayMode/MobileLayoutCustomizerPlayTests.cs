@@ -230,9 +230,13 @@ namespace P1.Tests
 
             // 模拟按下/抬起：旧实现会把 localScale 重置回 1.0，这里必须保持 1.35 基准。
             rig.button.OnPointerDown(new PointerEventData(EventSystem.current));
-            Assert.AreEqual(1.35f * 0.96f, rig.button.RectTransform.localScale.x, 1e-3f);
+            Assert.AreEqual(1.35f * ComicStyle.PressScale, rig.button.RectTransform.localScale.x, 1e-3f);
             rig.button.OnPointerUp(new PointerEventData(EventSystem.current));
-            Assert.AreEqual(1.35f, rig.button.RectTransform.localScale.x, 1e-3f);
+
+            // t-1：松开后走 0.1s Cubic-Out 回弹（编辑态 Time.timeScale=0，用 unscaled 等待）
+            yield return new WaitForSecondsRealtime(0.15f);
+            Assert.AreEqual(1.35f, rig.button.RectTransform.localScale.x, 1e-3f,
+                "回弹结束后必须落在 1.35 自定义基准");
 
             rig.customizer.Close(save: true);
             Assert.IsTrue(MobileLayoutStorage.HasCustomLayout, "保存后必须写入持久化配置");
@@ -374,6 +378,43 @@ namespace P1.Tests
             item.readAlpha = () => button.BaseAlpha;
 
             return (customizer, button);
+        }
+
+        [UnityTest]
+        public IEnumerator Customizer_VisualVerification_CaptureScreenshot()
+        {
+            var rig = CreateTestRig();
+            var canvas = _canvasGo.GetComponent<Canvas>();
+
+            var camGo = new GameObject("TestCam", typeof(Camera));
+            var cam = camGo.GetComponent<Camera>();
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = new Color(0.15f, 0.16f, 0.18f, 1f);
+
+            var rt = new RenderTexture(1920, 1080, 24);
+            cam.targetTexture = rt;
+            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            canvas.worldCamera = cam;
+
+            rig.customizer.Open();
+            yield return null;
+
+            cam.Render();
+            RenderTexture.active = rt;
+            var tex = new Texture2D(1920, 1080, TextureFormat.RGB24, false);
+            tex.ReadPixels(new Rect(0, 0, 1920, 1080), 0, 0);
+            tex.Apply();
+            byte[] bytes = tex.EncodeToPNG();
+            System.IO.Directory.CreateDirectory("Logs");
+            System.IO.File.WriteAllBytes("Logs/customizer_screenshot.png", bytes);
+
+            RenderTexture.active = null;
+            cam.targetTexture = null;
+            Object.DestroyImmediate(rt);
+            Object.DestroyImmediate(tex);
+            Object.DestroyImmediate(camGo);
+
+            rig.customizer.Close(save: false);
         }
     }
 }

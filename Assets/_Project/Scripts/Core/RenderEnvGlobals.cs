@@ -28,6 +28,21 @@ namespace P1.Core
         private static readonly int SpecStrengthId = Shader.PropertyToID("_P1EnvSpecStrength");
         private static readonly int SunDiscPowerId = Shader.PropertyToID("_P1EnvSunDiscPower");
 
+        // P29 渲染基础设施：环境反射 Cubemap 与质感全局标量
+        private static readonly int EnvCubeId = Shader.PropertyToID("_P1EnvCube");
+        private static readonly int EnvCubeMipsId = Shader.PropertyToID("_P1EnvCubeMips");
+        private static readonly int EnvCubeReadyId = Shader.PropertyToID("_P1EnvCubeReady");
+        private static readonly int EnvCubeStrengthId = Shader.PropertyToID("_P1EnvCubeStrength");
+
+        private static readonly int InkCoatStrengthId = Shader.PropertyToID("_P1InkCoatStrength");
+        private static readonly int InkCoatRoughnessId = Shader.PropertyToID("_P1InkCoatRoughness");
+        private static readonly int InkEdgeRimStrengthId = Shader.PropertyToID("_P1InkEdgeRimStrength");
+        private static readonly int InkEdgeSmoothStrengthId = Shader.PropertyToID("_P1InkEdgeSmoothStrength");
+        private static readonly int InkTopDetailStrengthId = Shader.PropertyToID("_P1InkTopDetailStrength");
+        private static readonly int WallDripSpeedId = Shader.PropertyToID("_P1WallDripSpeed");
+        private static readonly int WaterReflectionStrengthId = Shader.PropertyToID("_P1WaterReflectionStrength");
+        private static readonly int EmissiveStrengthId = Shader.PropertyToID("_P1EmissiveStrength");
+
         // 深炭紫回退默认值（与 STYLE.md 的 #15121C 系一致；sRGB 值在这里转线性）
         private static readonly Color FallbackSkyTop = new Color(0.055f, 0.050f, 0.090f, 1f);
         private static readonly Color FallbackSkyHorizon = new Color(0.130f, 0.120f, 0.170f, 1f);
@@ -36,6 +51,49 @@ namespace P1.Core
         private static ArenaStyleSO _style;
         private static bool _styleLookupDone;
         private static bool _tierApplied;
+        private static bool _cubeStateSet;
+        private static float _cubeStrengthOverride = -1f;
+
+        /// <summary>当前已加载的环境风格资产（惰性拾取，未找到时返回 null）。</summary>
+        public static ArenaStyleSO CurrentStyle
+        {
+            get
+            {
+                EnsureStyle();
+                return _style;
+            }
+        }
+
+        /// <summary>
+        /// 设置当前场景的环境反射 Cubemap 与反射强度。
+        /// </summary>
+        public static void SetEnvironmentCube(Cubemap cube, float strength)
+        {
+            _cubeStrengthOverride = strength;
+            _cubeStateSet = true;
+            if (cube != null)
+            {
+                Shader.SetGlobalTexture(EnvCubeId, cube);
+                Shader.SetGlobalFloat(EnvCubeMipsId, cube.mipmapCount);
+                Shader.SetGlobalFloat(EnvCubeReadyId, 1f);
+                Shader.SetGlobalFloat(EnvCubeStrengthId, strength);
+            }
+            else
+            {
+                ClearEnvironmentCube();
+            }
+        }
+
+        /// <summary>
+        /// 清理环境反射 Cubemap 状态，回退为未就绪。
+        /// </summary>
+        public static void ClearEnvironmentCube()
+        {
+            _cubeStrengthOverride = -1f;
+            _cubeStateSet = true;
+            Shader.SetGlobalFloat(EnvCubeReadyId, 0f);
+            Shader.SetGlobalFloat(EnvCubeMipsId, 1f);
+        }
 
         /// <summary>
         /// 推送环境全局并确保平台档位关键词生效。幂等、可每帧调用（几次 SetGlobal* 开销可忽略）。
@@ -57,6 +115,33 @@ namespace P1.Core
             Shader.SetGlobalColor(SkyGroundId, ToLinear(ground));
             Shader.SetGlobalFloat(SpecStrengthId, spec);
             Shader.SetGlobalFloat(SunDiscPowerId, sunDisc);
+
+            if (!_cubeStateSet)
+            {
+                _cubeStateSet = true;
+                Shader.SetGlobalFloat(EnvCubeReadyId, 0f);
+                Shader.SetGlobalFloat(EnvCubeMipsId, 1f);
+            }
+
+            float probe = _style != null ? _style.inkProbeStrength : (_cubeStrengthOverride >= 0f ? _cubeStrengthOverride : 0f);
+            float coat = _style != null ? _style.inkCoatStrength : 1.2f;
+            float coatRough = _style != null ? _style.inkCoatRoughness : 0.06f;
+            float edgeRim = _style != null ? _style.inkEdgeRimStrength : 0.5f;
+            float edgeSmooth = _style != null ? _style.inkEdgeSmoothStrength : 0.7f;
+            float topDetail = _style != null ? _style.inkTopDetailStrength : 1f;
+            float dripSpeed = _style != null ? _style.wallDripSpeed : 1.3f;
+            float waterReflect = _style != null ? _style.waterReflectionStrength : 0.8f;
+            float emissive = _style != null ? _style.emissiveBloomStrength : 2f;
+
+            Shader.SetGlobalFloat(EnvCubeStrengthId, probe);
+            Shader.SetGlobalFloat(InkCoatStrengthId, coat);
+            Shader.SetGlobalFloat(InkCoatRoughnessId, coatRough);
+            Shader.SetGlobalFloat(InkEdgeRimStrengthId, edgeRim);
+            Shader.SetGlobalFloat(InkEdgeSmoothStrengthId, edgeSmooth);
+            Shader.SetGlobalFloat(InkTopDetailStrengthId, topDetail);
+            Shader.SetGlobalFloat(WallDripSpeedId, dripSpeed);
+            Shader.SetGlobalFloat(WaterReflectionStrengthId, waterReflect);
+            Shader.SetGlobalFloat(EmissiveStrengthId, emissive);
         }
 
         /// <summary>按平台开启/关闭高画质关键词（桌面全量，移动降级）。</summary>

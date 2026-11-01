@@ -2,6 +2,7 @@ using NUnit.Framework;
 using P1.Core;
 using P1.Player;
 using P1.UI;
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -173,6 +174,171 @@ namespace P1.Tests
         }
 
         [Test]
+        public void BombButton_PressTriggersImmediately_ReleaseDoesNotRepeat()
+        {
+            var go = new GameObject("TestBombHost", typeof(RectTransform));
+            var btn = MobileActionButton.Create(
+                go.transform, "TestBombBtn", "手雷",
+                new Vector2(-100f, 100f), 100f, Color.white,
+                null, null, null, MobileButtonMode.BombTapOrHoldAim);
+
+            Assert.IsFalse(btn.ConsumeTap(), "初始状态不应有未消费的 Tap");
+
+            // 按下 → 立刻产生投掷事件，不等松开
+            btn.OnPointerDown(new PointerEventData(EventSystem.current));
+            Assert.IsTrue(btn.ConsumeTap(), "按下必须立刻产生一次投掷事件");
+            Assert.IsFalse(btn.ConsumeTap(), "投掷事件只能被消费一次");
+
+            // 松开 → 只复原状态，绝不再补投
+            btn.OnPointerUp(new PointerEventData(EventSystem.current));
+            Assert.IsFalse(btn.ConsumeTap(), "松开不得补投第二颗");
+            Assert.IsFalse(btn.IsAimingHeld, "新版不再有瞄准态");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void BombButton_TwoCompletePresses_TriggersTwice()
+        {
+            // 回归：OnPointerDown 必须清理上次手势残留的 _tapped/_isAimingHeld。
+            // 旧实现丢失 pointer-up（系统手势/切后台）后状态永久卡死，手雷键彻底失灵。
+            var go = new GameObject("TestBombHost2", typeof(RectTransform));
+            var btn = MobileActionButton.Create(
+                go.transform, "TestBombBtn2", "手雷",
+                new Vector2(-100f, 100f), 100f, Color.white,
+                null, null, null, MobileButtonMode.BombTapOrHoldAim);
+
+            for (int i = 0; i < 2; i++)
+            {
+                btn.OnPointerDown(new PointerEventData(EventSystem.current));
+                Assert.IsTrue(btn.ConsumeTap(), $"第 {i + 1} 次按下必须产生恰好一次投掷事件");
+                btn.OnPointerUp(new PointerEventData(EventSystem.current));
+                Assert.IsFalse(btn.ConsumeTap(), $"第 {i + 1} 次松开不得补投");
+            }
+
+            Assert.IsFalse(btn.ConsumeTap(), "不应有多余的投掷事件");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void BombButton_HoldThenRelease_DoesNotDoubleTrigger_AndClearsAiming()
+        {
+            var go = new GameObject("TestBombHost3", typeof(RectTransform));
+            var btn = MobileActionButton.Create(
+                go.transform, "TestBombBtn3", "手雷",
+                new Vector2(-100f, 100f), 100f, Color.white,
+                null, null, null, MobileButtonMode.BombTapOrHoldAim);
+
+            btn.OnPointerDown(new PointerEventData(EventSystem.current));
+            Assert.IsTrue(btn.ConsumeTap(), "按下即投：第一帧就应产生投掷事件");
+
+            // 按住拖动不应进入瞄准态（旧长按瞄准已移除）
+            btn.OnDrag(new PointerEventData(EventSystem.current) { delta = new Vector2(4f, 2f) });
+            Assert.IsFalse(btn.IsAimingHeld, "按住拖动不得进入瞄准态");
+
+            btn.OnPointerUp(new PointerEventData(EventSystem.current));
+            Assert.IsFalse(btn.ConsumeTap(), "长按后松开不得补投第二颗");
+            Assert.IsFalse(btn.IsAimingHeld, "松开后仍无瞄准态");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void BombButton_HitPad_ExpandsHitAreaAndTakesOverRaycast()
+        {
+            // 回归：旧实现圆形 alpha 命中区之外的按压会漏给下层滑屏转视角区，
+            // 表现为「按手雷键只在转视角」。HitPad 外扩矩形接管命中。
+            var go = new GameObject("TestBombHost4", typeof(RectTransform));
+            var btn = MobileActionButton.Create(
+                go.transform, "TestBombBtn4", "手雷",
+                new Vector2(-100f, 100f), 100f, Color.white,
+                null, null, null, MobileButtonMode.BombTapOrHoldAim,
+                hitPadding: 14f);
+
+            var hitPad = btn.transform.Find("HitPad");
+            Assert.IsNotNull(hitPad, "启用 hitPadding 时必须生成 HitPad 命中体");
+            var hitImg = hitPad.GetComponent<Image>();
+            Assert.IsTrue(hitImg.raycastTarget, "HitPad 必须 raycastTarget=true 接管命中");
+            Assert.Less(hitPad.GetComponent<RectTransform>().offsetMin.x, 0f, "HitPad 必须向外扩展命中区");
+
+            var bgImg = btn.transform.Find("Content/Bg").GetComponent<Image>();
+            Assert.IsFalse(bgImg.raycastTarget, "有 HitPad 时圆形底盘必须移出 raycast，防边缘按压漏给滑屏区");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void BombButton_WithoutHitPad_KeepsCircleAlphaHit()
+        {
+            var go = new GameObject("TestBombHost4b", typeof(RectTransform));
+            var btn = MobileActionButton.Create(
+                go.transform, "TestBombBtn4b", "手雷",
+                new Vector2(-100f, 100f), 100f, Color.white,
+                null, null, null, MobileButtonMode.BombTapOrHoldAim);
+
+            Assert.IsNull(btn.transform.Find("HitPad"), "默认（padding=0）不应生成 HitPad");
+            var bgImg = btn.transform.Find("Content/Bg").GetComponent<Image>();
+            Assert.IsTrue(bgImg.raycastTarget, "无 HitPad 时保持圆形 alpha 命中（既有按键行为不变）");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void BombButton_CooldownVisual_ShowsWhileCooling_HidesWhenReady()
+        {
+            var go = new GameObject("TestBombHost5", typeof(RectTransform));
+            // CooldownFill 仅在 fillSprite 非空时创建（生产路径 sprite 恒有），测试补一张白图
+            var tex = Texture2D.whiteTexture;
+            var sprite = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+            var btn = MobileActionButton.Create(
+                go.transform, "TestBombBtn5", "手雷",
+                new Vector2(-100f, 100f), 100f, Color.white,
+                null, sprite, sprite, MobileButtonMode.BombTapOrHoldAim);
+
+            var fill = btn.transform.Find("Content/CooldownFill")?.GetComponent<Image>();
+            Assert.IsNotNull(fill, "手雷按钮必须带 CooldownFill 冷却遮罩");
+            var label = btn.transform.Find("Content/Label")?.GetComponent<TextMeshProUGUI>();
+            Assert.IsNotNull(label, "手雷按钮必须带标签（冷却时显示倒计时）");
+
+            btn.UpdateBombCooldown01(1f, 6f);
+            Assert.IsTrue(fill.enabled, "冷却开始必须显示冷却遮罩");
+            Assert.AreEqual(1f, fill.fillAmount, 1e-4f, "fillAmount 必须等于剩余冷却比例");
+            Assert.AreEqual("6.0s", label.text, "冷却开始必须在按钮上显示剩余秒数");
+
+            btn.UpdateBombCooldown01(0.5f, 3f);
+            Assert.AreEqual(0.5f, fill.fillAmount, 1e-4f, "冷却进度必须随剩余比例收缩");
+            Assert.AreEqual("3.0s", label.text, "按钮倒计时必须随剩余时间更新");
+
+            btn.UpdateBombCooldown01(0f, 0f);
+            Assert.IsFalse(fill.enabled, "冷却结束必须隐藏冷却遮罩");
+            Assert.AreEqual("手雷", label.text, "冷却结束必须恢复按钮默认标签");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void BombButton_NotifyDenied_FlashesRingRed_AndResetRestores()
+        {
+            var go = new GameObject("TestBombHost6", typeof(RectTransform));
+            var btn = MobileActionButton.Create(
+                go.transform, "TestBombBtn6", "手雷",
+                new Vector2(-100f, 100f), 100f, Color.white,
+                null, null, null, MobileButtonMode.BombTapOrHoldAim);
+
+            var ring = btn.transform.Find("Content/InkBorder").GetComponent<Image>();
+            Color before = ring.color;
+
+            btn.NotifyDenied();
+            Assert.AreNotEqual(before, ring.color, "拒绝反馈必须硬切改变墨边颜色");
+
+            btn.ResetState();
+            Assert.AreEqual(before, ring.color, "ResetState 必须复原墨边颜色");
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
         public void SpecialButton_VisualState_DifferentiatesReadyAndCharging()
         {
             var go = new GameObject("TestSpecialHost", typeof(RectTransform));
@@ -226,10 +392,10 @@ namespace P1.Tests
             Assert.IsFalse(inkBg.activeSelf, "与横向墨水条重复的旧墨水条必须在移动端被隐藏");
             Assert.IsFalse(specBg.activeSelf, "与横向大招条重复的旧大招条必须在移动端被隐藏");
 
-            // P14-H：底部信息条改成「屏幕中央、血条上方」的横向仪表条，
-            // 宽 940 居中后左右各留 490px 给摇杆与操作键，因此不能再收窄成 360。
+            // t-1 收尾：底部改成三张并排独立卡，旧面板退化成不可见容器但矩形与三卡区同尺寸；
+            // 宽 1076 居中后左右各留 422px 给摇杆与操作键，因此不能再收窄成 360。
             Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripWidth, panelRt.sizeDelta.x, 0.01f,
-                "底部信息条宽度应固定在屏幕中央 940px");
+                "旧面板容器应与三卡区同宽（332+332+380+16×2）");
             Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripHeightMobile, panelRt.sizeDelta.y, 0.01f,
                 "移动端底部信息条应隐藏键盘提示行后收矮");
             Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripBottomYMobile, panelRt.anchoredPosition.y, 0.01f);
@@ -475,11 +641,12 @@ namespace P1.Tests
             Assert.AreEqual(1.35f, btn.RectTransform.localScale.x, 1e-4f);
 
             btn.OnPointerDown(new PointerEventData(EventSystem.current));
-            Assert.AreEqual(1.35f * 0.96f, btn.RectTransform.localScale.x, 1e-4f,
-                "按下态应在自定义基准上乘 0.96，而不是回到 1.0 基准");
+            Assert.AreEqual(1.35f * ComicStyle.PressScale, btn.RectTransform.localScale.x, 1e-4f,
+                "按下态应在自定义基准上乘 0.97（t-1 规范），而不是回到 1.0 基准");
             btn.OnPointerUp(new PointerEventData(EventSystem.current));
+            btn.AdvancePressFeedback(0.2f); // 走完 0.1s Cubic-Out 回弹（EditMode 不会自动跑 Update）
             Assert.AreEqual(1.35f, btn.RectTransform.localScale.x, 1e-4f,
-                "抬起后必须回到自定义基准，而不是 Vector3.one");
+                "0.1s 回弹结束后必须回到自定义基准，而不是 Vector3.one");
             btn.ResetState();
             Assert.AreEqual(1.35f, btn.RectTransform.localScale.x, 1e-4f,
                 "ResetState 不得抹掉自定义尺寸");

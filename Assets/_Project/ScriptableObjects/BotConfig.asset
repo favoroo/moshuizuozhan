@@ -27,6 +27,7 @@ MonoBehaviour:
   paintGoalSamples: 20
   paintAheadCheckInterval: 0.3
   moveHeadingTurnRateDegrees: 630
+  spawnZoneAvoidBufferMeters: 2
   stuckCheckInterval: 1
   stuckMoveThreshold: 0.35
   refillInkThreshold: 18

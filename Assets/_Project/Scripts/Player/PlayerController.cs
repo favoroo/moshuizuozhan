@@ -48,7 +48,6 @@ namespace P1.Player
         private MaterialPropertyBlock _propBlock;
         private GroundAimReticle _groundReticle;
         private SubWeaponThrowTrajectory _subTrajectory;
-        private bool _isAimingBomb;
         private bool _cursorLockedByUs;
         private readonly SwimFormInputArbiter _swimInput = new SwimFormInputArbiter();
         private readonly SubBombThrowArbiter _bombArbiter = new SubBombThrowArbiter();
@@ -67,14 +66,43 @@ namespace P1.Player
         public bool TouchSwimHeld { get; set; }
         public bool TouchJumpTriggered { get; set; }
         public bool TouchBombTriggered { get; set; }
+
+        /// <summary>保留旧接口：手雷已改为一键直投，不再读取按住状态。</summary>
         public bool TouchBombHeld { get; set; }
         public bool TouchSpecialTriggered { get; set; }
 
         public bool GameplayInputEnabled { get; set; } = true;
-        public bool IsAimingBomb => _isAimingBomb;
+
+        /// <summary>
+        /// 保留旧接口：手雷已改为一键直投，不再有「按住瞄准」态，恒为 false。
+        /// 准星 / 相机 / 旧测试仍可安全读取。
+        /// </summary>
+        public bool IsAimingBomb => false;
         public InkCharacterMotor Motor => _motor;
         public WeaponController Weapon => _weapon;
         public CombatantHealth Health => _health;
+
+        /// <summary>副武器投掷被拒的原因（供触屏按钮反馈与诊断日志）。</summary>
+        public enum SubBombDenyReason
+        {
+            Unknown,
+            /// <summary>手雷冷却中（唯一会触发按钮闪红的原因）。</summary>
+            Cooldown,
+            /// <summary>大招演出中（旧版行为：直接屏蔽副武器）。</summary>
+            SpecialActive,
+            /// <summary>已死亡。</summary>
+            Dead
+        }
+
+        /// <summary>
+        /// 副武器投掷被拒计数戳：每次因冷却被拒时 +1。
+        /// MobileTouchUI 每帧轮询该值变化触发按钮闪红——用轮询而非事件订阅，
+        /// 避免 LocalPlayer 重开/复活换实例时的订阅生命周期管理。
+        /// </summary>
+        public int SubBombDenyStamp { get; private set; }
+
+        /// <summary>最近一次投掷被拒的原因（诊断用）。</summary>
+        public SubBombDenyReason LastSubBombDenyReason { get; private set; } = SubBombDenyReason.Unknown;
 
         /// <summary>屏幕中心射线命中的 3D 世界点（可能是地面、墙面或敌人身体）。</summary>
         public Vector3 AimPoint => _aimPoint;
@@ -91,7 +119,7 @@ namespace P1.Player
         /// <summary>含俯仰的 3D 瞄准方向（相机前向）；武器按它与 <see cref="AimPoint"/> 求实际弹道。</summary>
         public Vector3 AimDirection => _aimDirection;
 
-        /// <summary>瞄准点向下的地面投影；小地图朝向、手雷落点与风暴大招使用。</summary>
+        /// <summary>瞄准点向下的地面投影；小地图朝向与风暴大招落点使用。</summary>
         public Vector3 AimGroundPoint => _aimGroundPoint;
 
         public GroundAimReticle GroundReticle => _groundReticle;
@@ -187,7 +215,6 @@ namespace P1.Player
                 TouchLookDelta = Vector2.zero;
                 _swimInput.Reset();
                 _bombArbiter.Reset();
-                _isAimingBomb = false;
                 _aimTarget = null;
                 _aimFlatDistance = 0f;
                 if (_subTrajectory != null) _subTrajectory.Hide();
@@ -213,26 +240,27 @@ namespace P1.Player
             bool swimHeld = ReadSwimHeld();
             bool fireHeld = ReadFireHeld();
             bool wantsJump = ReadJumpPressed();
-            bool bombHeld = ReadBombHeld();
-            bool bombReleased = ReadBombReleased();
             bool bombPressed = ReadBombPressed();
-            // 触屏「松手投掷」一次性事件在此消费（MobileTouchUI pointer-up 注入，语义与旧版一致）
+            // 触屏按下即投：MobileTouchUI 在 pointer-down 注入 TouchBombTriggered
             bool touchBombThrow = TouchBombTriggered;
             TouchBombTriggered = false;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (touchBombThrow)
+            {
+                Debug.Log($"[Bomb] 触屏投掷注入: special={_weapon.IsPerformingSpecial}");
+            }
+#endif
             bool specialReadyPressed = ReadSpecialPressed() && _weapon.IsSpecialReady;
 
-            // 副武器手雷「按住瞄准 / 松开投掷」仲裁（状态机见 SubBombThrowArbiter）：
-            // 按下沿只瞄准，松开沿才投掷——修复「按下即投扣墨 + 松开补投被拒」的丢雷假象；
-            // 瞄准经 wantsBombIntent 压住潜行并自动出水，潜泳中按雷键不再吞投掷
+            // 副武器手雷一键直投：按下沿 / 触屏按下注入立即投出，无瞄准态、无弹道预览
             bool executeBombThrow = _bombArbiter.Tick(
                 bombPressed,
-                bombHeld,
-                bombReleased,
+                false,
+                false,
                 touchBombThrow,
                 _weapon.IsPerformingSpecial);
-            _isAimingBomb = _bombArbiter.IsAiming;
 
-            // 4. 屏幕中心射线瞄准（手雷瞄准时额外保留地面落点）
+            // 4. 屏幕中心射线瞄准（地面落点仍供小地图朝向与风暴大招落点使用）
             UpdateAimPoint();
 
             // 4.1 枪口与身体姿态跟随视角俯仰：抬头时枪口指天，胸腔只分担一小部分，身体保持直立
@@ -243,8 +271,10 @@ namespace P1.Player
             }
 
             // 5. 形态仲裁：最后一次按下的键决定形态，射击与潜行可随时互切
-            bool wantsBombIntent = executeBombThrow || _isAimingBomb;
-            bool swimAvailable = _motor.IsInOwnInk || _motor.IsSwimming || _motor.IsTouchingOwnInkWall;
+            bool wantsBombIntent = executeBombThrow;
+            // 对齐 Inkwave：乌贼形态不再要求脚下有己方墨 —— 无墨地面也可进入（干地慢速蹦行）；
+            // 潜墨加成（高速/回墨/回血/隐匿）由 Motor 内部按脚下墨色单独判定
+            bool swimAvailable = true;
             _swimInput.Update(
                 swimHeld,
                 fireHeld,
@@ -264,46 +294,48 @@ namespace P1.Player
             bool isFiringOrActing = false;
             if (specialReadyPressed)
             {
-                _isAimingBomb = false;
                 _weapon.TryActivateSpecial();
                 isFiringOrActing = true;
             }
             else if (executeBombThrow)
             {
-                // inkwave 弹道模型：以相机俯仰解算的初速真实抛出，远近由俯仰物理决定
-                _weapon.TryThrowSubBombBallistic(ComputeBombThrowVelocity());
+                // inkwave 弹道模型：以相机俯仰解算的初速真实抛出，准星方向即投掷方向
+                bool thrown = _weapon.TryThrowSubBombBallistic(ComputeBombThrowVelocity());
+                if (!thrown)
+                {
+                    // 冷却中按下立刻给显性反馈（触屏手雷键闪红 / 桌面冷却条保持显示），不再静默
+                    LastSubBombDenyReason = !_health.IsAlive
+                        ? SubBombDenyReason.Dead
+                        : _weapon.IsPerformingSpecial
+                            ? SubBombDenyReason.SpecialActive
+                            : SubBombDenyReason.Cooldown;
+                    if (LastSubBombDenyReason == SubBombDenyReason.Cooldown)
+                    {
+                        SubBombDenyStamp++;
+                    }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log($"[Bomb] 投掷被拒: reason={LastSubBombDenyReason} touch={touchBombThrow} cooldownRemaining={_weapon.BombCooldownRemaining:0.00}");
+#endif
+                }
                 isFiringOrActing = true;
             }
-            else if (fireAllowed && !_isAimingBomb)
+            else if (fireAllowed)
             {
                 // 3D 瞄准点：弹道反解会从枪口解到准星命中的墙面/敌人/地面
                 _weapon.TryFireMainWeapon(_aimDirection, _aimPoint);
                 isFiringOrActing = true;
             }
 
-            // 7. 副武器 64 点弹道仿真预览与预测落点环（与实飞同常数，所见即所得）
-            if (_isAimingBomb && _subTrajectory != null)
+            // 7. 手雷已改为一键直投：不再显示抛物线预览 / 落点圈 / 副武器相机瞄准。
+            //    SubWeaponThrowTrajectory 组件保留在物体上以兼容旧调用方，但确保任何时候都不残留显示。
+            if (_subTrajectory != null && _subTrajectory.IsShowing)
             {
-                Vector3 startPos = _weapon.GetSubBombMuzzlePosition();
-                float bombCost = _weapon.Config != null ? _weapon.Config.bombInkCost : 70f;
-                bool enoughInk = _motor.CurrentInk >= bombCost;
-                _subTrajectory.UpdateTrajectorySim(
-                    startPos, ComputeBombThrowVelocity(), _weapon.Config, enoughInk, _health.Team);
-                if (TopDownCameraFollow.Instance != null)
-                {
-                    TopDownCameraFollow.Instance.SetSubAimActive(true);
-                }
+                _subTrajectory.Hide();
             }
-            else
+            if (TopDownCameraFollow.Instance != null && TopDownCameraFollow.Instance.IsSubAimActive)
             {
-                if (_subTrajectory != null && _subTrajectory.IsShowing)
-                {
-                    _subTrajectory.Hide();
-                }
-                if (TopDownCameraFollow.Instance != null && TopDownCameraFollow.Instance.IsSubAimActive)
-                {
-                    TopDownCameraFollow.Instance.SetSubAimActive(false);
-                }
+                TopDownCameraFollow.Instance.SetSubAimActive(false);
             }
 
             _motor.SetFrameIntent(
@@ -635,7 +667,7 @@ namespace P1.Player
             return true;
         }
 
-        /// <summary>把 3D 瞄准点投影到脚下地面；无地面时退回玩家前方，供手雷/风暴/小地图使用。</summary>
+        /// <summary>把 3D 瞄准点投影到脚下地面；无地面时退回玩家前方，供风暴/小地图使用。</summary>
         private Vector3 ProjectGroundPoint(Vector3 aimPoint, Vector3 flatDirection)
         {
             if (Physics.Raycast(
@@ -770,27 +802,10 @@ namespace P1.Player
 
         private bool ReadBombPressed()
         {
-            // 仅桌面端按下沿；触屏「松手投掷」由 TouchBombTriggered 承载，在副武器仲裁处单独消费
+            // 仅桌面端按下沿；触屏「按下即投」由 TouchBombTriggered 承载，在副武器仲裁处单独消费
             if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame) return true;
             if (Mouse.current != null && Mouse.current.middleButton.wasPressedThisFrame) return true;
             if (Gamepad.current != null && Gamepad.current.rightShoulder.wasPressedThisFrame) return true;
-            return false;
-        }
-
-        private bool ReadBombHeld()
-        {
-            if (TouchBombHeld) return true;
-            if (Keyboard.current != null && Keyboard.current.eKey.isPressed) return true;
-            if (Mouse.current != null && Mouse.current.middleButton.isPressed) return true;
-            if (Gamepad.current != null && Gamepad.current.rightShoulder.isPressed) return true;
-            return false;
-        }
-
-        private bool ReadBombReleased()
-        {
-            if (Keyboard.current != null && Keyboard.current.eKey.wasReleasedThisFrame) return true;
-            if (Mouse.current != null && Mouse.current.middleButton.wasReleasedThisFrame) return true;
-            if (Gamepad.current != null && Gamepad.current.rightShoulder.wasReleasedThisFrame) return true;
             return false;
         }
 

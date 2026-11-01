@@ -55,22 +55,26 @@ namespace P1.Environment
         public Vector3 sunEuler = new Vector3(52f, -38f, 0f);
         public Color ambientSky = new Color(0.36f, 0.50f, 0.76f, 1f);
         public Color ambientEquator = new Color(0.56f, 0.54f, 0.50f, 1f);
-        public Color ambientGround = new Color(0.18f, 0.17f, 0.17f, 1f);
-        [Range(0f, 2f)] public float ambientIntensity = 0.75f;
+        public Color ambientGround = new Color(0.28f, 0.22f, 0.18f, 1f);
+        [Range(0f, 2f)] public float ambientIntensity = 0.88f;
         [Range(0f, 1f)] public float reflectionIntensity = 0.35f;
         [Range(0f, 1f)] public float shadowStrength = 0.88f;
 
         [Header("三渲二光照")]
         [Range(0.2f, 0.8f)] public float shadeThreshold = 0.50f;
-        [Range(0.005f, 0.2f)] public float shadeSoftness = 0.03f;
-        public Color shadowTint = new Color(0.40f, 0.45f, 0.62f, 1f);
-        [Range(0f, 1f)] public float shadowFloor = 0.42f;
+        [Tooltip("三阶色阶：暗→中→亮的柔和过渡带宽度。0.03 接近硬切换（旧剪纸感），0.10 左右为软卡通观感")]
+        [Range(0.005f, 0.2f)] public float shadeSoftness = 0.10f;
+        [Tooltip("阴影染色：冷色阴影的基础色。偏灰蓝则画面柔和，偏纯蓝则阴影冷艳")]
+        public Color shadowTint = new Color(0.48f, 0.50f, 0.64f, 1f);
+        [Tooltip("暗部直射光最低比例：0.5 以上可保证背光面不死黑")]
+        [Range(0f, 1f)] public float shadowFloor = 0.50f;
         public Color rimColor = new Color(0.75f, 0.86f, 1f, 1f);
         [Range(0f, 1f)] public float rimStrength = 0.18f;
         [Range(0.5f, 8f)] public float rimPower = 3f;
         [Range(0f, 2f)] public float specStrength = 0.5f;
         [Range(0.5f, 0.999f)] public float specThreshold = 0.95f;
-        [Range(0.001f, 0.1f)] public float specSoftness = 0.02f;
+        [Tooltip("卡通高光边缘宽度：与 shadeSoftness 同步放宽可让亮面高光柔和化")]
+        [Range(0.001f, 0.1f)] public float specSoftness = 0.04f;
 
         [Header("墨水三渲二")]
         [Range(0.2f, 0.8f)] public float inkShadeThreshold = 0.48f;
@@ -99,21 +103,27 @@ namespace P1.Environment
 
         [Header("后处理")]
         public ArenaTonemapMode tonemapMode = ArenaTonemapMode.Neutral;
-        [Range(0f, 2f)] public float bloomIntensity = 0.35f;
+        [Range(0f, 2f)] public float bloomIntensity = 0.45f;
+        // 0.98 低于「角色受光面 + 枪口/命中加法闪光」的亮度（约 1.0），会把每次射击/命中
+        // 放大成角色身上一团白光；1.05 是之前的稳定值，只让真正的自发光进入 Bloom。
         [Range(0.5f, 2f)] public float bloomThreshold = 1.05f;
         [Range(-100f, 100f)] public float colorSaturation = 18f;
         [Range(-100f, 100f)] public float colorContrast = 10f;
         [Range(0f, 1f)] public float vignetteIntensity = 0.12f;
         [Range(-2f, 2f)] public float postExposure = 0.08f;
-        [Range(0f, 1f)] public float ssaoIntensity = 0.28f;
+        [Range(0f, 1f)] public float ssaoIntensity = 0.9f;
 
         [Header("卡通描边（PC 全屏描边）")]
+        [Tooltip("全屏描边总开关。关闭后回到无描边『干净软 3D』风")]
         public bool sceneOutlineEnabled = true;
-        public Color outlineColor = new Color(0.09f, 0.10f, 0.13f, 1f);
-        [Range(0.5f, 4f)] public float outlineThickness = 1.6f;
+        [Tooltip("描边颜色：近纯黑的色值会产生『剪纸感』。深炭紫与暗部暖冷呼应，观感更柔和")]
+        public Color outlineColor = new Color(0.14f, 0.12f, 0.18f, 1f);
+        [Tooltip("描边粗细（像素）：1.6 是旧剪纸感，0.8~1.2 是软卡通观感")]
+        [Range(0.5f, 4f)] public float outlineThickness = 1.0f;
         [Range(0.001f, 0.2f)] public float outlineDepthThreshold = 0.02f;
         [Range(0.02f, 1f)] public float outlineNormalThreshold = 0.35f;
-        public float outlineFadeStart = 25f;
+        [Tooltip("描边从该距离开始变细：拉近可减少远处『满屏黑框』")]
+        public float outlineFadeStart = 18f;
         public float outlineFadeEnd = 65f;
 
         [Header("掩体边界线（P17-A）")]
@@ -128,7 +138,7 @@ namespace P1.Environment
 
         [Header("INKWAVE 质感（P18 画风重做）")]
         [Tooltip("解析环境镜面总强度：湿墨照出天空与周围物体的核心开关，0 = 回到旧扁平观感")]
-        [Range(0f, 3f)] public float envSpecStrength = 1f;
+        [Range(0f, 3f)] public float envSpecStrength = 1.2f;
         [Tooltip("环境太阳盘锐度：湿面窄亮（~900），干面由着色器自动拉宽")]
         [Range(64f, 4096f)] public float envSunDiscPower = 900f;
         [Tooltip("墨面颗粒法线平铺密度（周期/米）")]
@@ -158,5 +168,29 @@ namespace P1.Environment
         [Tooltip("1 = 完整道具；0.5 = 只保留主要掩体与出生区道具（移动端可降）")]
         [Range(0f, 1f)] public float decorationDensity = 1f;
         public bool buildBackdrop = true;
+
+        [Header("画质增强（P29 渲染基础设施）")]
+        [Tooltip("是否启用主相机 URP 后处理")]
+        public bool postProcessingEnabled = true;
+        [Tooltip("环境 Cubemap 探针反射强度")]
+        [Range(0f, 2f)] public float inkProbeStrength = 1f;
+        [Tooltip("墨水清漆层反射强度")]
+        [Range(0f, 3f)] public float inkCoatStrength = 1.2f;
+        [Tooltip("墨水清漆层粗糙度")]
+        [Range(0.01f, 0.4f)] public float inkCoatRoughness = 0.06f;
+        [Tooltip("墨水边缘光边缘强度")]
+        [Range(0f, 2f)] public float inkEdgeRimStrength = 0.55f;
+        [Tooltip("墨水边缘平滑过度强度")]
+        [Range(0f, 1f)] public float inkEdgeSmoothStrength = 0.7f;
+        [Tooltip("墨水顶面微细节强度")]
+        [Range(0f, 2f)] public float inkTopDetailStrength = 1f;
+        [Tooltip("立面墨水下淌动画速度")]
+        [Range(0f, 4f)] public float wallDripSpeed = 1.3f;
+        [Tooltip("水面环境反射强度")]
+        [Range(0f, 2f)] public float waterReflectionStrength = 0.8f;
+        [Tooltip("发光材质泛光强度")]
+        [Range(0f, 8f)] public float emissiveBloomStrength = 2f;
+        [Tooltip("天空盒太阳直射亮度倍率")]
+        [Range(0.5f, 8f)] public float skySunIntensity = 2.2f;
     }
 }

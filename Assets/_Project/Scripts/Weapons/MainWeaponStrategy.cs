@@ -179,6 +179,9 @@ namespace P1.Weapons
 
         public virtual bool IsRolling => false;
 
+        /// <summary>滚筒挥击前摇中（抡起阶段）；前摇走完释放墨滴的同一帧回到 false。表现层轮询下降沿即可与墨滴同步做砸地动画。</summary>
+        public virtual bool IsFlicking => false;
+
         /// <summary>双枪战术翻滚中（期间无法正常开火，位移并沿途滴墨）。</summary>
         public virtual bool IsRollingDodge => false;
 

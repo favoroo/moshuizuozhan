@@ -443,3 +443,39 @@ TPS 相机已经没有"挡屏幕下缘"的顾虑（俯角 +6°、吊臂 4.5m）�
 | Bot 禁爬墙 | `Scripts/Editor/ProjectScaffolder.cs:1123` |
 | 涂墨覆盖率审计规则 | `Scripts/Ink/PaintCoverageAudit.cs:7-20` |
 | 死参数 | `Scripts/Core/GameConfigSO.cs:18`、`Scripts/Ink/InkGridConfigSO.cs:83` |
+
+---
+
+## 7. 实施记录（2026-10-31）：几何重排已落地
+
+> 本轮按 INKWAVE 的车道/高度语法重排场地，保持 40×56 尺寸与 180° 点对称，已重跑 P7-B 并保存主场景。
+> 详细验收数据见 `Docs/OptimizationPlan.md` 的 **P16-E [x]** 条目。
+
+### 已解决
+
+| 原问题 | 处理 |
+|---|---|
+| P1-1 0.2 / 0.3 / 0.65 / 0.95m 死缝 | X 轴槽位重排：中央台 5.0｜内侧车道 2.0｜中场集装箱 2.2｜外侧车道 2.0｜侧翼台 4.5｜贴台集装箱 2.2｜外走廊 2.10；相邻掩体要么 ≥2m 成道，要么重叠 0.05m 贴死 |
+| P1-2 中路两段 8.2m 裸道 | 新增 `Cover_MidLane_Far/Near`（1.2m 可跳，1.8×1.2m，z≈±16.5 / ±9.0 左右交错），裸道切成 ≤4.4m 的 S 形推进线；不挡 4.4m 坡道口 |
+| P1-3 外走廊 1.4m | 侧翼集装箱归位到 \|x\|=16.75，与侧翼台重叠 0.05m，外走廊 **2.10m** |
+| P2-1 侧翼台 0.9m 可原地跳上 | 抬到 **1.5m**（> 跳跃 1.35m），4 条坡道加长到 6.8m / 12.5°，坡道成为唯一常规入口；台外侧 3.5m 凹槽保留为"涂墙→攀爬"的玩家捷径 |
+| P2-2 SpawnGate 只有 1 块/队 | `SpawnGate` + `SpawnGate_Wing`：每队 2 块 3m 挡墙（x=±5），中央 7m 出口 + 两侧台阶 = **3 出口** |
+| 1.4m 木箱差 5cm 跳不上 | 延长区 `Crate_Extension*` 降到 **1.2m** |
+| P0-2 从出生甲板翻北墙 | 北墙 **3.0m**（甲板 1.2m + 跳跃顶点 2.55m < 3.0），`BoundaryWallHeight` 统一常量 |
+
+### 仍保留 / 后续
+
+- **P1-4 南墙 0.55m + 隐形挡墙**：本轮并发协作方明确保留矮墙方案（港湾视野 / 相机下缘），未强行统一为 3.0m；
+  南侧"站上矮墙、在墨网格外射击"的风险仍由 `OutOfBoundsGuard` 兜底（建议后续把越界阈值从 `BoundaryZ+0.3` 收紧到内表面）。
+- **P0-3 / P2-3 计分口径（2026-10-31 16:30 补记：已修）**：`ArenaDecorationBuilder` 实体道具 Collider 已统一注册进
+  `blockedColliders`（当前场景 60 个），木箱/花坛顶面与集装箱顶面统一“不计分”；`PaintCoverageAudit` 增加同口径 warning。
+- **P16-D 窄缝自动剔除**：`InkGrid.SealNarrowSlits` 已在 `BakeBlockedColliders` 末尾调用；本轮几何已无 <0.9m 死缝，作为兜底保留。
+- **P16-A / P16-B（2026-10-31 16:30 补记）**：`SpawnZone` 敌方出生圈（6m/8m·s⁻¹ 径向推出 + Bot 目标过滤）与
+  `OutOfBoundsGuard`（Playing 每 0.25s 回收，不判死）已落地；PlayMode 集成用例通过，详见 `Docs/OptimizationPlan.md` P16 段。
+
+### 实测数据
+
+- `PaintableCount = 143242 / 160000`（400×400，约 **89.5%** 可涂；旧版约 91.7%）。
+- NavGrid **80×112**（0.5m 格）；双方出生点 → 中央台 / 东侧翼台 / 西侧翼台 / 贴墙外走廊 A* 全部可达。
+- `ArenaOcclusionPlayTests` 与场地冒烟用例通过；`ArenaGeometry_*` 新增车道宽度、中路可跳、侧翼高度、出生门数量断言。
+- 视觉留底：`Logs/p7b_overview.png`、`p7b_spawn_teamA.png`、`p7b_midfield.png`、`p7b_north_vista.png`。

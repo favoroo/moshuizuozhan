@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using P1.Core;
 using P1.Weapons;
 using TMPro;
@@ -9,18 +10,31 @@ using UnityEngine.UI;
 namespace P1.UI.WeaponSelect
 {
     /// <summary>
-    /// 单张武器卡片视图（P14 几何大胆风 Geometric Bold · P14-I 移动端重排）：
+    /// 单张武器卡片视图（P14 几何大胆风 Geometric Bold · P19 波次3b t-1 新野兽派）：
     /// - 卡片尺寸/字号全部来自 <see cref="MenuLayoutMath.Drawer"/>，移动端是一套显式更大的数值
-    ///   （桌面 592×164，移动端 759×260），不再只把字号 ×1.28 而盒子不动；
-    /// - 图标从「直愣愣的黑方块」改成**正圆色盘**：队伍色填充 + 4px 墨边 + 白色武器剪影，
-    ///   选中时圆盘描边翻纸白，和墨底卡片形成硬切对比；
+    ///   （桌面 592×164，移动端 759×236），不再只把字号 ×1.28 而盒子不动；
+    /// - 卡片身份层级 = **纸白底 + 3px 墨框 + 面板硬影 (4,-5) + 顶部 5px 武器功能色带**；
+    ///   选中态色带加高到 8px、墨框加到 4px，并播一记 select snap（0ms 压印 + 0.1s Cubic-Out 回弹）；
+    /// - 图标从「直愣愣的黑方块」改成**正圆色盘**：队伍色填充 + 墨边 + 白色武器剪影，
+    ///   选中时圆盘描边换成该武器的身份色，和纸白卡面形成硬切对比；
     /// - 右侧 7 段直角属性条：移动端 28px 方块（桌面 18px），段内填充队伍色；
     /// - 快捷键方块 [1]~[7] 只在桌面显示（手机没有数字键，占地方且误导）；
     /// - 图标为空时隐藏 Image，绝不出现白块。
+    ///
+    /// 注意：卡片挂在 ScrollRect 里，硬影会被视口 RectMask2D 裁掉超出部分，
+    /// 因此卡片间距必须 ≥10px（桌面 10 / 移动端 16），底部内边距 ≥5px。
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     public class WeaponCardView : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
     {
+        /// <summary>卡片顶部身份色带高度：常态 5px / 选中 8px（Docs/UI-GeometricBold.md「卡片身份色带」）。</summary>
+        public const float AccentBandHeight = 5f;
+        public const float AccentBandHeightSelected = 8f;
+
+        /// <summary>卡片墨框宽度：常态 3px / 选中 4px。</summary>
+        public const float CardBorderWidth = 3f;
+        public const float CardBorderWidthSelected = 4f;
+
         private int _index;
         private WeaponKind _kind;
         private WeaponConfigSO _config;
@@ -32,8 +46,13 @@ namespace P1.UI.WeaponSelect
 
         private RectTransform _rectTransform;
         private UIInkShapeGraphic _bgGraphic;
+        private UIInkShapeGraphic _accentBand;
+        private RectTransform _accentBandRect;
         private UISpringMotion _motion;
         private Button _button;
+        private CanvasGroup _canvasGroup;
+        private Coroutine _snapRoutine;
+        private bool _pointerInside;
 
         private Image _iconImage;
         private UIInkShapeGraphic _iconPlate;
@@ -97,6 +116,29 @@ namespace P1.UI.WeaponSelect
             }
         }
 
+        // ==================== 武器身份色（P19 波次3b） ====================
+        // 7 把武器各有一条稳定的功能色带，是「卡片身份色」而不是同屏功能强调色：
+        // 颜色全部取自 Docs/UI-GeometricBold.md 的色板（主行动黄 / 队伍橙蓝 / 语义绿红 / 墨黑），
+        // 另外给泼桶一个队伍蓝的深调（同一色族的明度变化），避免新增第二种黄。
+        // 这张表是 WeaponCardView 的稳定映射常量表：WeaponConfigSO 目前没有颜色字段，
+        // 以后若 config 加了颜色字段（例如 weaponAccentColor），在这里优先读 config 再回退本表即可。
+
+        /// <summary>该武器的卡片身份色（顶部色带 / 选中态圆盘描边）。</summary>
+        public static Color GetWeaponAccentColor(WeaponKind kind)
+        {
+            switch (kind)
+            {
+                case WeaponKind.Shooter: return ComicStyle.Yellow;                 // #FFD400 主行动黄
+                case WeaponKind.Roller: return ComicStyle.FromHex(0xFF7314);       // 队伍橙
+                case WeaponKind.Charger: return ComicStyle.FromHex(0x296BFF);      // 队伍蓝
+                case WeaponKind.Dualies: return ComicStyle.Green;                  // #1FC94F 语义绿
+                case WeaponKind.Slosher: return ComicStyle.FromHex(0x1B3FA8);      // 队伍蓝深调（液体）
+                case WeaponKind.Blaster: return ComicStyle.Red;                    // #FF2E2E 危险红
+                case WeaponKind.Splatling: return ComicStyle.Ink;                  // #141414 墨黑
+                default: return ComicStyle.Ink;
+            }
+        }
+
         public void SetTeam(Team team)
         {
             _team = team;
@@ -115,19 +157,21 @@ namespace P1.UI.WeaponSelect
             if (selected)
             {
                 RefreshSelectedVisuals();
+                RefreshAccentBand();
                 if (_comicBadge != null)
                 {
                     if (animate) _comicBadge.Play();
                     else _comicBadge.ShowImmediate();
                 }
-                if (animate && _motion != null)
+                if (animate)
                 {
-                    _motion.Punch(0.04f);
+                    PlaySelectSnap();
                 }
             }
             else
             {
                 RefreshUnselectedVisuals();
+                RefreshAccentBand();
                 if (_comicBadge != null)
                 {
                     _comicBadge.HideImmediate();
@@ -135,6 +179,53 @@ namespace P1.UI.WeaponSelect
             }
 
             RefreshStatSegments();
+        }
+
+        /// <summary>
+        /// 抽屉打开时逐张 pop-in：0.22s Back-Out + alpha，错峰由调用方按 0.05s/张 传入。
+        /// 带延迟的卡片先把 CanvasGroup 压到 0，避免「先整张显示、轮到自己再消失」。
+        /// </summary>
+        public void PlayEntrance(float delay = 0f)
+        {
+            if (_canvasGroup != null && delay > 0.001f)
+            {
+                _canvasGroup.alpha = 0f;
+            }
+            if (_motion != null)
+            {
+                _motion.PlayIn(delay);
+            }
+        }
+
+        /// <summary>
+        /// 选中一记 select snap：0ms 硬切压印到 0.97，再用主题的回弹曲线（0.1s Cubic-Out）
+        /// 收回 1.0。这里复用 UISpringMotion 的按压状态机，不再另起一套缩放驱动（会互相打架）。
+        /// </summary>
+        public void PlaySelectSnap()
+        {
+            if (_motion == null) return;
+            if (_snapRoutine != null)
+            {
+                StopCoroutine(_snapRoutine);
+            }
+            _snapRoutine = StartCoroutine(SelectSnapRoutine());
+        }
+
+        private IEnumerator SelectSnapRoutine()
+        {
+            _motion.SetPressed(true);
+            yield return null; // 压印至少保留一帧，0ms 硬切才看得见
+            _motion.SetPressed(false);
+
+            float wait = UIThemeSO.Resolve(_theme).pressReboundDuration + 0.02f;
+            yield return new WaitForSecondsRealtime(wait);
+
+            // 指针还停在卡上时回到 hover 态（1.05），别让选中把悬停反馈吃掉。
+            if (_pointerInside && _motion != null)
+            {
+                _motion.SetHovered(true);
+            }
+            _snapRoutine = null;
         }
 
         private void BuildUIHierarchy()
@@ -157,7 +248,7 @@ namespace P1.UI.WeaponSelect
             _rectTransform = GetComponent<RectTransform>();
             _rectTransform.sizeDelta = new Vector2(_mobile ? 759f : 580f, m.CardHeight);
 
-            // 1. 直角卡片背景（白底墨边；选中态由 Refresh*Visuals 硬切）
+            // 1. 直角卡片背景：纸白底 + 3px 墨框 + 面板硬影 (4,-5)（t-1 卡片身份层级）
             _bgGraphic = gameObject.GetComponent<UIInkShapeGraphic>();
             if (_bgGraphic == null)
             {
@@ -165,14 +256,22 @@ namespace P1.UI.WeaponSelect
             }
             _bgGraphic.Shape = UIInkShape.SharpRect;
             _bgGraphic.CornerRadius = ComicStyle.CornerSharp;
-            _bgGraphic.BorderWidth = ComicStyle.Border;
+            _bgGraphic.BorderWidth = CardBorderWidth;
             _bgGraphic.BorderColor = ComicStyle.Ink;
             _bgGraphic.color = ComicStyle.Paper;
-            _bgGraphic.HardShadow = false;
             _bgGraphic.Halftone = false;
             _bgGraphic.GlossAlpha = 0f;
             _bgGraphic.DrawGloss = false;
             _bgGraphic.raycastTarget = true;
+            _theme.ApplyHardShadow(_bgGraphic, UIHardShadowLevel.Panel);
+
+            // 入场 alpha 由 UISpringMotion 驱动（缺 CanvasGroup 它会自己补），这里提前拿引用，
+            // 好让带错峰延迟的卡片先透明，再按 0.05s/张 依次进场。
+            _canvasGroup = gameObject.GetComponent<CanvasGroup>();
+            if (_canvasGroup == null)
+            {
+                _canvasGroup = gameObject.AddComponent<CanvasGroup>();
+            }
 
             // 2. 动效控制器
             _motion = gameObject.GetComponent<UISpringMotion>();
@@ -192,6 +291,28 @@ namespace P1.UI.WeaponSelect
             _button.transition = Selectable.Transition.None;
             _button.onClick.RemoveAllListeners();
             _button.onClick.AddListener(() => _onSelect?.Invoke(_index));
+
+            // 3.5 顶部武器身份色带（5px 常态 / 8px 选中，画在 3px 墨框内侧，绝不盖住边框）
+            var bandGo = new GameObject("AccentBand", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            bandGo.transform.SetParent(transform, false);
+            bandGo.transform.SetAsFirstSibling();
+            _accentBandRect = bandGo.GetComponent<RectTransform>();
+            _accentBandRect.anchorMin = new Vector2(0f, 1f);
+            _accentBandRect.anchorMax = new Vector2(1f, 1f);
+            _accentBandRect.pivot = new Vector2(0.5f, 1f);
+            _accentBandRect.sizeDelta = new Vector2(-CardBorderWidth * 2f, AccentBandHeight);
+            _accentBandRect.anchoredPosition = new Vector2(0f, -CardBorderWidth);
+
+            _accentBand = bandGo.GetComponent<UIInkShapeGraphic>();
+            _accentBand.Shape = UIInkShape.SharpRect;
+            _accentBand.CornerRadius = ComicStyle.CornerSharp;
+            _accentBand.BorderWidth = 0f;
+            _accentBand.color = GetWeaponAccentColor(_kind);
+            _accentBand.HardShadow = false;
+            _accentBand.Halftone = false;
+            _accentBand.GlossAlpha = 0f;
+            _accentBand.DrawGloss = false;
+            _accentBand.raycastTarget = false;
 
             // 4. 圆形武器色盘（队伍色 + 4px 墨边）。
             float iconCenterX = leftPad + iconDiameter * 0.5f;
@@ -214,7 +335,7 @@ namespace P1.UI.WeaponSelect
                 plateRect.pivot = new Vector2(0.5f, 0.5f);
                 plateRect.anchoredPosition = new Vector2(
                     iconCenterX,
-                    -(10f + m.IndexSize.y + 8f + iconDiameter * 0.5f));
+                    -(14f + m.IndexSize.y + 8f + iconDiameter * 0.5f));
             }
             plateRect.sizeDelta = new Vector2(iconDiameter, iconDiameter);
 
@@ -248,7 +369,7 @@ namespace P1.UI.WeaponSelect
                 badgeRect.anchorMin = new Vector2(0f, 1f);
                 badgeRect.anchorMax = new Vector2(0f, 1f);
                 badgeRect.pivot = new Vector2(0.5f, 0.5f);
-                badgeRect.anchoredPosition = new Vector2(iconCenterX, -(10f + m.IndexSize.y * 0.5f));
+                badgeRect.anchoredPosition = new Vector2(iconCenterX, -(14f + m.IndexSize.y * 0.5f));
                 badgeRect.sizeDelta = m.IndexSize;
 
                 _hotkeyBadgeBg = badgeGo.GetComponent<UIInkShapeGraphic>();
@@ -284,7 +405,8 @@ namespace P1.UI.WeaponSelect
             infoRect.anchorMin = new Vector2(0f, 0f);
             infoRect.anchorMax = new Vector2(1f, 1f);
             infoRect.offsetMin = new Vector2(infoLeft, bottomPad);
-            infoRect.offsetMax = new Vector2(-equippedReserve, -(_mobile ? 12f : 10f));
+            // 顶部让出「墨框 3 + 身份色带 5」再留 5~10px 呼吸，标题不会被色带压住。
+            infoRect.offsetMax = new Vector2(-equippedReserve, -(CardBorderWidth + AccentBandHeight + (_mobile ? 10f : 5f)));
 
             // 6.1 标题行（中文名 + 右侧定位标签）
             var titleRow = new GameObject("TitleRow", typeof(RectTransform));
@@ -443,9 +565,9 @@ namespace P1.UI.WeaponSelect
             _equippedBadgeBg.BorderWidth = ComicStyle.BorderThin;
             _equippedBadgeBg.BorderColor = ComicStyle.Ink;
             _equippedBadgeBg.color = ComicStyle.Yellow;
-            _equippedBadgeBg.HardShadow = false;
             _equippedBadgeBg.Halftone = false;
             _equippedBadgeBg.raycastTarget = false;
+            _theme.ApplyHardShadow(_equippedBadgeBg, UIHardShadowLevel.Tag);
 
             _comicBadge = _equippedBadge.GetComponent<ComicBadge>();
 
@@ -577,42 +699,55 @@ namespace P1.UI.WeaponSelect
             {
                 if (_statSegments[b] == null) continue;
                 bool filled = b < _weaponRating;
-                _statSegments[b].color = filled ? teamColor : (_isSelected ? ComicStyle.FromHex(0x353535) : ComicStyle.PaperAlt);
+                // 纸白卡面上空槽统一 PaperAlt（选中不再翻深灰，选中只靠色带/墨框表达）
+                _statSegments[b].color = filled ? teamColor : ComicStyle.PaperAlt;
                 _statSegments[b].Refresh();
             }
         }
 
+        private void RefreshAccentBand()
+        {
+            if (_accentBand == null || _accentBandRect == null) return;
+
+            float border = _isSelected ? CardBorderWidthSelected : CardBorderWidth;
+            float height = _isSelected ? AccentBandHeightSelected : AccentBandHeight;
+            _accentBandRect.sizeDelta = new Vector2(-border * 2f, height);
+            _accentBandRect.anchoredPosition = new Vector2(0f, -border);
+            _accentBand.color = GetWeaponAccentColor(_kind);
+            _accentBand.Refresh();
+        }
+
         private void RefreshSelectedVisuals()
         {
-            Color teamColor = _theme.GetTeamColor(_team);
+            Color accent = GetWeaponAccentColor(_kind);
 
             if (_bgGraphic != null)
             {
-                // 选中态：墨底黑块 + 队伍色粗边硬切
-                _bgGraphic.color = ComicStyle.Ink;
-                _bgGraphic.BorderWidth = ComicStyle.BorderHeavy;
-                _bgGraphic.BorderColor = teamColor;
-                _bgGraphic.HardShadow = false;
+                // 选中态：仍是纸白卡面（信息层保持可读），墨框加粗到 4px + 色带加高到 8px
+                _bgGraphic.color = ComicStyle.Paper;
+                _bgGraphic.BorderWidth = CardBorderWidthSelected;
+                _bgGraphic.BorderColor = ComicStyle.Ink;
                 _bgGraphic.Halftone = false;
+                _theme.ApplyHardShadow(_bgGraphic, UIHardShadowLevel.Panel);
                 _bgGraphic.Refresh();
             }
 
-            // 墨底上给色盘换纸白描边，避免圆盘和底色糊在一起
+            // 选中时圆盘描边换成武器身份色（纸白卡面上墨边不再有对比），身份色再次落点
             if (_iconPlate != null)
             {
                 _iconPlate.BorderWidth = ComicStyle.Border;
-                _iconPlate.BorderColor = ComicStyle.Paper;
+                _iconPlate.BorderColor = accent;
                 _iconPlate.Refresh();
             }
 
             if (_hotkeyBadgeBg != null)
             {
-                _hotkeyBadgeBg.color = teamColor;
+                _hotkeyBadgeBg.color = accent;
                 _hotkeyBadgeBg.Refresh();
             }
             if (_indexBadgeText != null)
             {
-                _indexBadgeText.color = ComicStyle.Ink;
+                _indexBadgeText.color = Color.white;
             }
 
             if (_rectTransform != null)
@@ -620,11 +755,11 @@ namespace P1.UI.WeaponSelect
                 _rectTransform.localRotation = Quaternion.identity;
             }
 
-            if (_titleText != null) _titleText.color = ComicStyle.Paper;
-            if (_enTitleText != null) _enTitleText.color = ComicStyle.WithAlpha(ComicStyle.Paper, 0.75f);
-            if (_roleTagText != null) _roleTagText.color = ComicStyle.Yellow;
-            if (_statsText != null) _statsText.color = ComicStyle.Paper;
-            if (_specialText != null) _specialText.color = ComicStyle.WithAlpha(ComicStyle.Paper, 0.85f);
+            if (_titleText != null) _titleText.color = ComicStyle.Ink;
+            if (_enTitleText != null) _enTitleText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.65f);
+            if (_roleTagText != null) _roleTagText.color = ComicStyle.Ink;
+            if (_statsText != null) _statsText.color = ComicStyle.Ink;
+            if (_specialText != null) _specialText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.75f);
         }
 
         private void RefreshUnselectedVisuals()
@@ -632,10 +767,10 @@ namespace P1.UI.WeaponSelect
             if (_bgGraphic != null)
             {
                 _bgGraphic.color = ComicStyle.Paper;
-                _bgGraphic.BorderWidth = ComicStyle.Border;
+                _bgGraphic.BorderWidth = CardBorderWidth;
                 _bgGraphic.BorderColor = ComicStyle.Ink;
-                _bgGraphic.HardShadow = false;
                 _bgGraphic.Halftone = false;
+                _theme.ApplyHardShadow(_bgGraphic, UIHardShadowLevel.Panel);
                 _bgGraphic.Refresh();
             }
 
@@ -670,6 +805,7 @@ namespace P1.UI.WeaponSelect
 
         public void OnPointerEnter(PointerEventData eventData)
         {
+            _pointerInside = true;
             if (_motion != null)
             {
                 _motion.SetHovered(true);
@@ -678,6 +814,7 @@ namespace P1.UI.WeaponSelect
 
         public void OnPointerExit(PointerEventData eventData)
         {
+            _pointerInside = false;
             if (_motion != null)
             {
                 _motion.SetHovered(false);

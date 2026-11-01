@@ -4,7 +4,8 @@
 
 Unity 第三人称 3D「涂地对战」游戏（玩法参考 Splatoon 涂地模式）：用墨水涂满地面，结算时覆盖率高的一方获胜。
 单机 4v4（1 名本地玩家 + 7 名 Bot），不做联网；美术为**程序化几何体 + 程序化 UI + 本地合成音频**，不依赖第三方美术资源。
-当前版本 `v0.1.0`：核心对局闭环、7 类主武器 + 2 大招 + 副武器、4v4 Bot、40×40m 对称竞技场、Inkwave 风 HUD、桌面/Android 出包均已落地。
+功能现状（不写版本号，唯一来源见硬性规则 9 的 `GameVersion.cs`）：核心对局闭环、7 类主武器 + 2 大招（按涂地面积充能）+ 副武器、4v4 Bot、40×56m 集装箱码头竞技场（第三人称视角）、
+几何大胆风 HUD、移动端触屏与布局自定义、战前选枪/暂停设置、游戏内检查更新、桌面/Android 双端出包均已落地。
 
 **技术栈**：Unity `6000.6.7f1` / URP 17 / 新版 Input System；Linear 色彩空间，1 unit = 1 米；目标桌面（macOS / Windows）+ Android（横屏 / minSdk 26 / ARM64）。
 
@@ -14,8 +15,9 @@ Unity 第三人称 3D「涂地对战」游戏（玩法参考 Splatoon 涂地模�
 |---|---|
 | `Docs/GamePlan.md` | 设计定位、核心循环、技术决策（为什么这样做） |
 | `Docs/OptimizationPlan.md` | **多 Agent 任务看板**：领任务、标 `[-]`、完工打 `[x]`，含依赖与领域锁 |
-| `Docs/P6B-QA-Report.md` / `Docs/ProfilerReport_P6C.md` | 测试与性能验收留底 |
-| `Docs/UI-GeometricBold.md` | **UI 几何大胆风规范**（唯一风格规范）：token、字号阶梯、动效上限、组件 API、禁止项、自检工具 |
+| `Docs/P6B-QA-Report.md` / `Docs/P8-Acceptance.md` / `Docs/ProfilerReport_P6C.md` | 测试 / 体验 / 性能验收留底 |
+| `Docs/ArenaDesignReview.md` | 40×56 竞技场地标评审（对标 INKWAVE，v0.1.5 快照，纯设计不改码） |
+| `Docs/UI-GeometricBold.md` | **UI 几何大胆风规范**（唯一风格规范）：token、字号阶梯、动效上限、组件 API、禁止项、自检工具；旧 `UI-ComicStyle.md` 已废弃仅历史对照 |
 
 > 详细操作手册（Unity CLI 全量命令、菜单/批处理、测试与环境坑、素材落地、并行冲突细则）
 > 见技能 **`p1-dev-workflow`**；生成素材见 **`media-gen`**；发版见 **`p1-release`**。
@@ -25,24 +27,25 @@ Unity 第三人称 3D「涂地对战」游戏（玩法参考 Splatoon 涂地模�
 ```
 Assets/_Project/
   Scripts/
-    Core/        比赛流程 MatchManager、配置 SO、AudioManager、VfxPool、Hitstop、性能探针、运行时资源库
-    Ink/         CPU 墨格 InkGrid + GPU 墨迹图集 InkSplatAtlas；墙面涂墨 InkWall*
-    Player/      人/乌贼双形态机动、生命、相机、地面准星、输入仲裁、程序化角色、机动音频
-    Weapons/     7 武器策略（Strategy）+ 弹丸/光束/滚筒/炸弹/风暴云对象池；WeaponController 为对外门面
+    Core/        比赛流程 MatchManager、配置 SO、AudioManager、VfxPool、Hitstop、性能探针、运行时资源库、画质环境全局推送（RenderEnvGlobals）
+    Ink/         CPU 墨格 InkGrid + GPU 墨迹图集 InkSplatAtlas；墙面涂墨 InkWall*；覆盖率审计 PaintCoverageAudit
+    Player/      人/乌贼双形态机动、生命、第三人称相机、地面准星、输入仲裁、程序化角色与步态动画（EggGaitSolver）、机动音频
+    Weapons/     7 武器策略（Strategy）+ 弹道与手感配置（InkBallistics、WeaponFeelProfile）+ 弹丸/光束/滚筒/炸弹/风暴云对象池；WeaponController 为对外门面
     AI/          Bot 状态机、NavGrid 寻路、类人瞄准弹簧、战术决策
-    Environment/ 竞技场几何生成、第三人称遮挡 Dither 淡出（OcclusionFader / TopDownOcclusionManager）
-    UI/          HUD 视图：计时器、比分、底部横向墨水/大招条、小地图、击杀卡、战况条、触屏
+    Environment/ 竞技场几何生成、布局单一数据源 ArenaLayoutV2（40×56）、场地风格 ArenaStyleSO、第三人称遮挡 Dither 淡出（OcclusionFader / TopDownOcclusionManager）
+    UI/          HUD 视图：计时器、比分、墨水/大招条、小地图、击杀卡、战况条、墨渍特效（镜片 LensInk / 转场 ScreenInkTransition / 踩墨警告 InkEdgeWarning）、移动端触屏与布局自定义、检查更新弹窗
     UI/Core/     UI 基元：直角色块、硬切动效、主题 SO、纯色精灵（UIFlatSprite）
     UI/WeaponSelect/ 战前 7 武器选择/配装抽屉（运行时装配）
     UI/Menus/    暂停、设置、无障碍震屏（运行时装配）
     Editor/      场景生成、素材导入/体检、UI/构建/性能菜单（仅编辑器）
-  Shaders/       InkGround / InkWall / InkSplat / ObstacleDitherLit
-  Materials/  Prefabs/  Scenes/(PhaseA_Playbox 主场景, UIDemo)  ScriptableObjects/(调参入口)
-  Settings/(URP)  Art/(Fonts, Sprites/Icons, Textures)  Audio/(Music, SFX, Voice)
+  Shaders/       InkGround / InkWall（含 InkWetShading、InkSurfaceOverlay hlsl）、ObstacleDitherLit / PropLit / CharacterToon* / SkyGradient / SpawnPad / Water / DecalUnlit / ToonOutline
+  Materials/  Prefabs/  Resources/(特效 Shader 兜底 + P1RuntimeAssets)  ScriptableObjects/(调参入口，含 Weapons/、ArenaStyle、CharacterAnimConfig)
+  Scenes/(PhaseA_Playbox 主场景, UIDemo, ComicGallery)  Settings/(URP)
+  Art/(Fonts, Sprites/Icons, Textures/Arena|Ink|Surfaces, Meshes/Arena)  Audio/(Music, SFX, Voice)
   Tests/(EditMode, PlayMode)
 Docs/            设计、优化看板、验收报告
 MediaRaw/        素材原稿区（Assets 之外，Unity 不扫描）
-tools/           bake_sfx.py / bake_bgm.py / bake_icons.py / bake_fonts.py（本地零配额烘焙）
+tools/           bake_sfx.py / bake_bgm.py / bake_icons.py / bake_fonts.py / bake_arena_textures.py（本地零配额烘焙）、run_tests.sh
 .agents/skills/  p1-dev-workflow | media-gen | p1-release
 inkwave-aah-research/  竞品（INKWAVE）逆向资料，只读参考
 ```
@@ -56,17 +59,21 @@ inkwave-aah-research/  竞品（INKWAVE）逆向资料，只读参考
 |---|---|---|
 | 涂地规则/覆盖率/网格 | `Ink/InkGridConfigSO`、`Ink/InkSurfaceController` | 每帧最多上传一次纹理 |
 | 油漆观感/湿润/凹凸 | `Shaders/InkGround.shader`、`InkWall.shader` | 材质在 `Materials/`，不手改 `.mat` YAML |
-| 整体三渲二/描边/光照 | `Shaders/ToonLighting.hlsl`、`ToonOutline.shader`、`Editor/ToonStyleInstaller.cs` | 一键 `P1/画风/1`，回退用 `P1/画风/2` |
+| 整体三渲二/描边/光照/质感 | `Shaders/ToonLighting.hlsl`、`ToonOutline.shader`、`Editor/ToonStyleInstaller.cs`、`Environment/ArenaStyleSO` | 画风 `P1/画风/1`（回退旧档同此菜单）；P18 质感增强 `P1/画风/4`；全屏描边开关 `P1/画风/2` |
 | 武器数值/新武器 | `Weapons/WeaponConfigSO` + `*WeaponStrategy` + `WeaponStrategyFactory` | 外部只经 `WeaponController` 公共 API |
+| 大招充能节奏 | `Weapons/WeaponConfigSO.specialPointsPerSquareMeter`（按武器可调） | 按涂地**面积**计价，与墨格分辨率无关；`AddSpecialPoints` 旧签名保留 |
 | 移动/潜墨/踩墨/生命 | `Player/InkCharacterMotor`、`PlayerConfigSO`、`CombatantHealth` | 60 HP 踩墨保护底线不可破 |
+| 角色步态/跳跃/待机动画 | `Player/EggGaitSolver` + `Player/CharacterAnimConfigSO`（菜单 `P1/角色动画/0` 生成配置） | 调参只动 `CharacterAnimConfig.asset` 的 Gait/Air/Lean/Idle 四组；`Sample/SampleAir` 旧签名保留 |
 | 比赛流程/时长/结算 | `Core/MatchManager`、`GameConfigSO` | 阶段事件 `PhaseChanged` 被 UI/音频订阅 |
 | Bot 行为 | `AI/BotController`、`BotConfigSO`、`NavGrid`、`BotTactics` | 寻路按墨水加权，撤退不得朝敌 |
 | HUD/UI 样式 | `UI/HudController` + 对应 View；`UIThemeSO`、`HudGaugeStyleSO`、`UI/Core/ComicStyle` | 先读 `Docs/UI-GeometricBold.md`；运行时建 Graphic 必须补 `CanvasRenderer`，已有 Image 的物体不能 `AddComponent<UIInkShapeGraphic>`（用 `CreateChildBackground`） |
 | 战前选枪/配装 | `UI/WeaponSelect/WeaponSelectBootstrap`、`WeaponSelectView` | 选择存 PlayerPrefs；独立包依赖 `P1RuntimeAssets` |
 | 暂停/设置/震屏 | `UI/Menus/PauseMenuOverlay`、`Core/GameSettingsService` | 暂停用 `Time.timeScale=0`，与 Hitstop 协调 |
+| 移动端触屏/布局自定义 | `UI/MobileTouchUI`、`UI/MobileLayoutCustomizer`（Presets/Storage 走 PlayerPrefs） | 预览用菜单 `P1/移动端/…`；改前读 `Docs/UI-GeometricBold.md` 触控章节 |
+| 游戏内检查更新/版本 | `UI/UpdateManager`、`UI/UpdateDialog`、`Core/GameVersion` | Android 更新安装清单校验走菜单 `P1/构建/12` |
 | 音效/循环音 | `Core/AudioManager`、`Weapons/WeaponAudioDriver`、`Player/MovementAudioDriver` | 新增音效后必须重建运行时资源库 |
 | 图标/音效/主题打包 | `Resources/P1RuntimeAssets.asset` + 菜单 `P1/构建/11` | 生成资产，不手改 `.asset` |
-| 地图/掩体/遮挡 | `Environment/ArenaGeometryBuilder`（菜单 `P1/关卡与地图/…`） | 重建会重写场景，先确认无人在 Play |
+| 地图/掩体/遮挡/场地坐标 | `Environment/ArenaLayoutV2`（40×56 单一数据源）、`ArenaGeometryBuilder`（菜单 `P1/关卡与地图/…`） | 改布局坐标只改 `ArenaLayoutV2`；重建会重写场景，先确认无人在 Play |
 | 场景装配 | `Editor/ProjectScaffolder`（菜单 `P1/构建/…`） | **禁止手改 `.unity`** |
 | 图标/字体/音效/BGM | `MediaRaw/` 原稿 + `tools/bake_*.py`，落地 `Art|Audio` | 落地后必须 Refresh + 体检 |
 | UI 图标运行时查找 | `UI/Core/UIIconLibrary` + `P1RuntimeAssets.uiIcons` | 取不到必须隐藏 Image；新增图标后跑菜单 `P1/构建/11` |
@@ -118,7 +125,9 @@ U="$HOME/.unity/bin/unity"
   `./tools/run_tests.sh fast`（改 UI 首选，EditMode + PlayMode UI 子集）、`ui`、`play`、`edit`、`all`。
   底层接口仍是 `"$U" command test run --mode …`；**PlayMode 会把任何运行时 log error 判为失败**
   （抓 `ParticleSystem`、UI、池等隐性问题最有效）。
-  基线：EditMode 219 / PlayMode 73 条（P13 快照），新改动不得让既有用例转红。
+  基线：约 EditMode 369 / PlayMode 106 条（2026-10-31 快照，并行提交会小幅浮动，精确数以 `tools/run_tests.sh all` 为准），
+  新改动不得让既有用例转红。已知假阴性：`InkGroundShader_ContainsBothAtlasWritePasses` 在 batchmode 判红
+  （`Material.FindPass` 返回 -1；GUI 编辑器内为绿），判回归前先与干净基线（stash 对照）比。
 - 纯逻辑测试放 `Tests/EditMode`（`XxxTests.cs`）；涉及 MonoBehaviour 生命周期放 `Tests/PlayMode`。
 - **UI 截图**：`screenshot --view game` 只拍相机，不含 ScreenSpaceOverlay 的 uGUI；
   请用 `"$U" command script.eval --code 'UnityEngine.ScreenCapture.CaptureScreenshot("Logs/ui.png");'`。
@@ -127,7 +136,9 @@ U="$HOME/.unity/bin/unity"
   视觉用截图自查。调试面板 `F12` 切换，默认关闭。
 - 性能红线（改动涉及战斗/涂地/UI 时自查）：桌面 60 FPS、Android 30+ FPS；战斗热路径零持续 GC；
   `InkSurfaceController` 纹理上传 < 1.5 ms 无尖刺；DrawCalls < 120（桌面）/ 150（移动）。
-  采样入口：菜单 `P1/性能/1. 执行 120 秒战斗 Profiler 性能仿真采样 (P6-C)`。
+  采样入口：菜单 `P1/性能/1. 执行 120 秒战斗真实 Profiler 采样 (P6-C)`（真实 PlayMode 逐帧实测，需编辑器空闲；
+  旧「仿真采样」及其报告数据已作废）。红线取证必须走 Player 包：`P1/性能/5` 出桌面 Development 包，或向
+  `persistentDataPath` 放 `P1_AutoProfile.request` 触发真机自动采样（见 `P1.Core.AutoProfileRuntimeService`）。
 - 出包：菜单 `P1/构建/10. 一键全平台自动化出包与验收 (P6-C)` → `Builds/StandaloneOSX` / `Builds/Android`；
   正式发版走 `python3 .agents/skills/p1-release/release.py`（版本递增 + 双端 Release）。
 - **新增/替换 SFX、武器图标或 UI 主题后**：先运行 `P1/构建/11. 生成运行时资源库 (P1RuntimeAssets)`，
@@ -143,8 +154,8 @@ U="$HOME/.unity/bin/unity"
 
 生成美术 / 语音 / BGM / 音效前，**先读 `.agents/skills/media-gen/SKILL.md`**。三条底线：
 
-1. **画风档案**：生成美术前先读 `MediaRaw/style/STYLE.md`；它目前是**空白**的 = 禁止生成正式素材
-   （仅允许管线冒烟测试，且必须标注为测试件）。
+1. **画风档案**：生成美术前必须读 `MediaRaw/style/STYLE.md`（2026-10-29 已回填，基准 = INKWAVE 街头潮流风）；
+   按其 `STYLE_PREFIX` 与锚图（`-r`）要求生成，风格冲突的素材不得落地。
 2. **短音效与 BGM 不走网关**：音效用 `python3 tools/bake_sfx.py`，BGM 用 `python3 tools/bake_bgm.py`
    （固定种子、可复现、零配额）；网关音乐通道（`lyria-3.5` 与备用 `lyria-3-pro-preview`）
    2026-10-29 实测均被上游禁用（400 `PROXY_GENERATION_DISABLED`）。
@@ -164,11 +175,3 @@ U="$HOME/.unity/bin/unity"
   `InvalidOperationException`（PlayMode 会判失败并制造大量 GC）。统一用 `Keyboard.current` / `Mouse.current`。
 - 新增/替换 SFX、武器图标或 UI 主题后，记得运行 `P1/构建/11. 生成运行时资源库 (P1RuntimeAssets)`。
 - `MediaRaw/` 是原稿区，**不要把整个目录拷进 `Assets/`**。
-
-## 交付流程
-
-1. **先说计划**：改哪些文件、为什么、验收标准。
-2. 实现（遵守硬性规则与多 Agent 规范）。
-3. 编译校验 + 测试；涉及素材再加「导入 + 体检」；涉及性能再加 Profiler 采样。
-4. 更新 `Docs/OptimizationPlan.md`（或 `Docs/GamePlan.md`）的任务看板勾选与认领状态。
-5. **总结**：改了什么、如何验证、已知问题/未做项。

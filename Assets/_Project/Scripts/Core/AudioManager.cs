@@ -711,6 +711,15 @@ namespace P1.Core
         /// <summary>按武器分类播放专属开火音，无专属音时优雅回落至 shotClips。</summary>
         public void PlayWeaponShot(WeaponKind kind)
         {
+            PlayWeaponShot(kind, 1f);
+        }
+
+        /// <summary>
+        /// P28：蓄力刻度参与开火音（蓄力狙满蓄更沉、更重；其余武器 strength=1 时与旧行为一致）。
+        /// </summary>
+        public void PlayWeaponShot(WeaponKind kind, float strength01)
+        {
+            float strength = Mathf.Clamp01(strength01);
             switch (kind)
             {
                 case WeaponKind.Roller:
@@ -722,7 +731,13 @@ namespace P1.Core
 
                 case WeaponKind.Charger:
                     if (chargerShotClip != null)
-                        PlayOne(chargerShotClip, 0.55f, 0.97f, 1.03f);
+                    {
+                        PlayOne(
+                            chargerShotClip,
+                            Mathf.Lerp(0.42f, 0.58f, strength),
+                            Mathf.Lerp(1.06f, 0.94f, strength),
+                            Mathf.Lerp(1.08f, 0.96f, strength));
+                    }
                     else
                         PlayShot();
                     break;

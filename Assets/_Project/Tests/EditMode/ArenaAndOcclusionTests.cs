@@ -357,9 +357,137 @@ namespace P1.Tests.EditMode
             Assert.IsNotNull(wall, "南向边界围墙必须支持涂墨");
             Assert.IsFalse(wall.CanClimb, "南向边界围墙仍严禁攀爬");
 
+            // EditMode 下新建对象的 Collider.bounds 可能还停在默认 1×1×1，先同步再初始化墨面
+            Physics.SyncTransforms();
             Assert.IsTrue(wall.InitializeIfNeeded(true));
             Assert.AreEqual(0.55f, wall.WorldBounds.size.y, 0.01f,
                 "南墙墨面只应覆盖 0.55m 可见矮墙；按 3m 碰撞体建面会让墨飘在空中");
+        }
+
+        [Test]
+        public void ArenaGeometry_FlankPlatforms_RaisedAboveJumpHeight()
+        {
+            var west = _testArena.transform.Find("HighGround_West")?.gameObject;
+            var east = _testArena.transform.Find("HighGround_East")?.gameObject;
+            Assert.IsNotNull(west, "西侧翼高台必须存在");
+            Assert.IsNotNull(east, "东侧翼高台必须存在");
+
+            Assert.AreEqual(ArenaLayoutV2.FlankPlatformHeight, west.transform.localScale.y, 0.01f);
+            Assert.AreEqual(west.transform.localScale.y, east.transform.localScale.y, 0.01f);
+            Assert.Greater(west.transform.localScale.y, 1.35f,
+                "侧翼台必须高于跳跃 1.35m，坡道才是唯一常规入口");
+
+            // 6.8m 长、12.5° 的坡道顶端必须与台面等高
+            var ramp = _testArena.transform.Find("Ramp_West_South_Inkable")?.gameObject;
+            Assert.IsNotNull(ramp, "侧翼坡道必须存在");
+            Assert.AreEqual(6.8f, ramp.transform.localScale.z, 0.01f, "侧翼坡道长度必须加长到 6.8m");
+            float rampTopY = ramp.transform.position.y
+                + ramp.transform.localScale.z * 0.5f * Mathf.Sin(12.5f * Mathf.Deg2Rad)
+                + ramp.transform.localScale.y * 0.5f * Mathf.Cos(12.5f * Mathf.Deg2Rad);
+            Assert.AreEqual(ArenaLayoutV2.FlankPlatformHeight, rampTopY, 0.03f,
+                "坡道顶端必须与台面等高，否则 Bot 上下台会卡在接缝");
+        }
+
+        [Test]
+        public void ArenaGeometry_MidLaneCovers_StaggeredJumpableAndSymmetric()
+        {
+            string[] names =
+            {
+                "Cover_MidLane_Far_A", "Cover_MidLane_Far_B",
+                "Cover_MidLane_Near_A", "Cover_MidLane_Near_B",
+            };
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                var cover = _testArena.transform.Find(names[i])?.gameObject;
+                Assert.IsNotNull(cover, $"中路错位掩体 {names[i]} 必须存在");
+                Assert.LessOrEqual(cover.transform.localScale.y, 1.35f,
+                    "中路错位掩体必须可跳（≤跳跃高度 1.35m），不能变成硬阻挡把推进线堵死");
+                Assert.GreaterOrEqual(cover.transform.localScale.y, 0.9f,
+                    "中路错位掩体不能低到失去掩体意义");
+                Assert.IsNotNull(cover.GetComponent<OcclusionFader>(), $"{names[i]} 必须挂遮挡淡化");
+                Assert.IsNotNull(cover.GetComponent<InkWallSurface>(), $"{names[i]} 必须可涂墨");
+            }
+
+            var farA = _testArena.transform.Find("Cover_MidLane_Far_A");
+            var farB = _testArena.transform.Find("Cover_MidLane_Far_B");
+            Assert.AreEqual(-farA.position.x, farB.position.x, 0.01f, "中路掩体必须 180° 点对称");
+            Assert.AreEqual(-farA.position.z, farB.position.z, 0.01f, "中路掩体必须 180° 点对称");
+        }
+
+        [Test]
+        public void ArenaGeometry_LaneWidths_AtLeastTwoMeters()
+        {
+            Physics.SyncTransforms();
+
+            var center = _testArena.transform.Find("HighGround_Center");
+            var midSE = _testArena.transform.Find("Container_Mid_SE_Slate");
+            var midSW = _testArena.transform.Find("Container_Mid_SW_Mustard");
+            var flankWest = _testArena.transform.Find("HighGround_West");
+            var flankEast = _testArena.transform.Find("HighGround_East");
+            var flankContainerW = _testArena.transform.Find("Container_Flank_West_01_Teal");
+            var boundaryWest = _testArena.transform.Find("Boundary_West");
+            Assert.IsNotNull(center);
+            Assert.IsNotNull(midSE);
+            Assert.IsNotNull(midSW);
+            Assert.IsNotNull(flankWest);
+            Assert.IsNotNull(flankEast);
+            Assert.IsNotNull(flankContainerW);
+            Assert.IsNotNull(boundaryWest);
+
+            float innerLane = midSE.GetComponent<Collider>().bounds.min.x - center.GetComponent<Collider>().bounds.max.x;
+            Assert.GreaterOrEqual(innerLane, 1.95f, "中央台 ↔ 中场集装箱的内侧车道必须 ≥2m");
+
+            float midLane = Mathf.Abs(flankWest.GetComponent<Collider>().bounds.max.x
+                                      - midSW.GetComponent<Collider>().bounds.min.x);
+            Assert.GreaterOrEqual(midLane, 1.95f, "中场集装箱 ↔ 侧翼台的外侧车道必须 ≥2m");
+
+            float outerCorridor = Mathf.Abs(flankContainerW.GetComponent<Collider>().bounds.min.x
+                                            - boundaryWest.GetComponent<Collider>().bounds.max.x);
+            Assert.GreaterOrEqual(outerCorridor, 1.94f, "贴墙外走廊必须 ≥2m（两人可并行、相机不反复收臂）");
+
+            float flankToEast = Mathf.Abs(flankEast.GetComponent<Collider>().bounds.min.x
+                                          - midSE.GetComponent<Collider>().bounds.max.x);
+            Assert.GreaterOrEqual(flankToEast, 1.95f, "东侧对应车道必须同样 ≥2m");
+
+            // 侧翼集装箱必须贴死侧翼台外沿（重叠或贴合 ≤0.06m），不能再留 0.15~0.65m 死缝
+            float flankSeam = Mathf.Abs(flankWest.GetComponent<Collider>().bounds.min.x
+                                        - flankContainerW.GetComponent<Collider>().bounds.max.x);
+            Assert.LessOrEqual(flankSeam, 0.06f, "侧翼集装箱与侧翼台之间必须贴死，不能留死缝");
+        }
+
+        [Test]
+        public void ArenaGeometry_SpawnGates_TwoPerTeam_LeaveSevenMeterExit()
+        {
+            int teamAGates = 0;
+            int teamBGates = 0;
+            float teamACenter = 0f;
+            float teamBCenter = 0f;
+
+            var all = _testArena.GetComponentsInChildren<Transform>(false);
+            for (int i = 0; i < all.Length; i++)
+            {
+                Transform t = all[i];
+                if (!t.name.StartsWith("SpawnGate", System.StringComparison.Ordinal))
+                    continue;
+
+                float z = t.position.z;
+                if (z < -20f)
+                {
+                    teamAGates++;
+                    teamACenter += t.position.x;
+                }
+                else if (z > 20f)
+                {
+                    teamBGates++;
+                    teamBCenter += t.position.x;
+                }
+            }
+
+            Assert.AreEqual(2, teamAGates, "Team A 出生门必须有 2 块挡墙（x=±5）");
+            Assert.AreEqual(2, teamBGates, "Team B 出生门必须有 2 块挡墙（x=±5）");
+            Assert.AreEqual(0f, teamACenter, 0.01f, "Team A 两块门挡墙必须左右对称");
+            Assert.AreEqual(0f, teamBCenter, 0.01f, "Team B 两块门挡墙必须左右对称");
         }
     }
 }

@@ -123,6 +123,36 @@ namespace P1.Tests
         // ------------------------------------------------------------------ Swell Roller 滚筒
 
         [Test]
+        public void Roller_IsFlickingTracksWindupWindow()
+        {
+            // P27：表现层轮询 IsFlicking 的下降沿与墨滴释放同步砸地——前摇期必须为 true，释放同帧回 false
+            WeaponConfigSO config = CreateConfig(WeaponKind.Roller);
+            config.flickWindup = 0.22f;
+            var host = new FakeHost { Config = config, CurrentInk = 1000f };
+            var strategy = new RollerWeaponStrategy(config);
+            WeaponAim aim = ForwardAim(8f);
+
+            Assert.IsFalse(strategy.IsFlicking, "未开火时不应处于抡起阶段");
+
+            strategy.OnTriggerHeld(aim, 0.016f, host);   // 按下：扣墨进入前摇（抡起）
+            host.TriggerHeldLastFrame = true;
+            Assert.IsTrue(strategy.IsFlicking, "前摇期应处于抡起阶段");
+
+            strategy.Tick(0.10f, true, aim, host);
+            Assert.IsTrue(strategy.IsFlicking, "前摇未走完仍应处于抡起阶段");
+
+            strategy.Tick(0.15f, true, aim, host);       // 前摇累计 0.25s > 0.22s：释放
+            Assert.AreEqual(9, host.Shots.Count, "前摇走完应释放 9 滴墨");
+            Assert.IsFalse(strategy.IsFlicking, "释放同帧应退出抡起阶段（表现层据下降沿砸地）");
+
+            strategy.Reset();
+            Assert.IsFalse(strategy.IsFlicking, "Reset 后应退出抡起阶段");
+
+            var shooter = new ShooterWeaponStrategy(CreateConfig(WeaponKind.Shooter));
+            Assert.IsFalse(shooter.IsFlicking, "非滚筒武器不应进入抡起阶段");
+        }
+
+        [Test]
         public void Roller_FlickLaunchesNineDroplets_InFan_WithNearAndFarDamage()
         {
             WeaponConfigSO config = CreateConfig(WeaponKind.Roller);

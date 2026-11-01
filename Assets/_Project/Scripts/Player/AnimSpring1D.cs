@@ -41,5 +41,25 @@ namespace P1.Player
         {
             Velocity += velocityImpulse;
         }
+
+        /// <summary>清零当前值与速度（换枪/复活/传送时使用）。</summary>
+        public void Reset()
+        {
+            Value = 0f;
+            Velocity = 0f;
+        }
+
+        /// <summary>
+        /// 求「注入后峰值 ≈ peakOffset」所需的速度冲量。
+        /// 临界阻尼（ζ≥0.99）峰值 = v/(e·ω)；ζ=0.8 时约 v/(2.36·ω)，用 2.4 近似。
+        /// </summary>
+        public static float ImpulseForPeak(float peakOffset, float omega, float dampingRatio)
+        {
+            if (omega <= 0.0001f)
+                return 0f;
+
+            float factor = dampingRatio >= 0.99f ? 2.718f : 2.4f;
+            return peakOffset * omega * factor;
+        }
     }
 }

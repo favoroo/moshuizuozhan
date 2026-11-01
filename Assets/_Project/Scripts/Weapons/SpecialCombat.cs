@@ -106,6 +106,20 @@ namespace P1.Weapons
                 if (damage <= 0f)
                     continue;
 
+                // P20：圈内目标处于无敌（出生保护/对方正在放大招）时伤害完整豁免——
+                // 脚下闪白色小环提示「免疫」，否则玩家会以为判定漏了人。
+                // 注意不能用 TakeDamage 返回值判断：它返回的是 killed（是否击杀），非致命伤也是 false。
+                if (victim.IsInvulnerable)
+                {
+                    if (VfxPool.Instance != null)
+                    {
+                        Vector3 at = victim.transform.position;
+                        VfxPool.Instance.SpawnShockwaveRing(
+                            new Vector3(at.x, at.y + 0.05f, at.z), Color.white, 0.2f, 1.4f, 0.45f);
+                    }
+                    continue;
+                }
+
                 victim.TakeDamage(damage, team, center, attacker);
                 hits++;
             }

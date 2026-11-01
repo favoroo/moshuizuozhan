@@ -205,10 +205,10 @@ namespace P1.Tests
             Assert.IsNotNull(view, "场景中应已自动就绪 WeaponSelectView.Instance");
 
             var toggle = view.transform.Find("SafeAreaContainer/DrawerToggleButton");
-            Assert.IsNotNull(toggle, "抽屉收起时应有左下角「武器整备」整备卡");
+            Assert.IsNotNull(toggle, "抽屉收起时应有嵌入主卡的「武器整备」整备卡");
             var toggleRect = (RectTransform)toggle;
-            Assert.AreEqual(Vector2.zero, toggleRect.anchorMin, "整备卡应锚定左下角");
-            Assert.AreEqual(Vector2.zero, toggleRect.anchorMax, "整备卡应锚定左下角");
+            Assert.AreEqual(new Vector2(0f, 1f), toggleRect.anchorMin, "整备卡应左上锚定以嵌入主卡");
+            Assert.AreEqual(new Vector2(0f, 1f), toggleRect.anchorMax, "整备卡应左上锚定以嵌入主卡");
             Assert.AreEqual(MenuLayoutMath.LoadoutCard(view.IsMobileLayout).Size.y, toggleRect.sizeDelta.y, 0.5f,
                 "整备卡高度应与版面表一致");
             Assert.AreEqual(view.DrawerWidth, MenuLayoutMath.Drawer(view.IsMobileLayout).Width, 0.5f,
@@ -259,15 +259,32 @@ namespace P1.Tests
             Assert.IsNotNull(safe, "首页内容必须放进 SafeArea 容器（刘海/圆角不吃字）");
 
             var start = safe.Find("StartButton");
-            Assert.IsNotNull(start, "开始按钮应在安全区内，锚定右下角拇指区");
+            Assert.IsNotNull(start, "开始按钮应在安全区内");
             var startRect = (RectTransform)start;
-            Assert.AreEqual(new Vector2(1f, 0f), startRect.anchorMin, "开始按钮应锚定右下角");
-            Assert.AreEqual(new Vector2(1f, 0f), startRect.anchorMax, "开始按钮应锚定右下角");
+            // 波次3a：首页改 t-1「左侧 Hero 大卡 + 底部 CTA」，开始按钮锚定 Hero 卡左下（原为屏幕右下拇指区）。
+            Assert.AreEqual(new Vector2(0f, 1f), startRect.anchorMin, "开始按钮应锚定左下（Hero 卡内）");
+            Assert.AreEqual(new Vector2(0f, 1f), startRect.anchorMax, "开始按钮应锚定左下（Hero 卡内）");
 
             var home = MenuLayoutMath.Home(false);
-            Assert.AreEqual(home.CtaSize.x, startRect.sizeDelta.x, 0.5f, "开始按钮宽度应来自版面表");
             Assert.AreEqual(home.CtaSize.y, startRect.sizeDelta.y, 0.5f, "开始按钮高度应来自版面表");
             Assert.GreaterOrEqual(startRect.sizeDelta.y, 140f, "开赛按钮必须是超大触控目标");
+
+            // Hero 大卡与 2×2 卡阵必须存在（t-1 深色舞台版式）
+            var hero = safe.Find("HomeHeroCard");
+            Assert.IsNotNull(hero, "首页必须有左侧 Hero 大卡");
+            Assert.IsNotNull(safe.Find("HomeTile_RECORD"), "首页必须有战绩卡");
+            Assert.IsNotNull(safe.Find("HomeTile_AUDIO"), "首页必须有音效卡");
+            Assert.IsNotNull(safe.Find("HomeTile_UPDATE"), "首页必须有检查更新卡");
+
+            // CTA 宽度取版面表设计值，但在非 16:9 的 Game View 里会被 Hero 卡内宽夹住——
+            // 用实际 Hero 卡宽反推期望值，断言不受测试分辨率影响。
+            var heroRect = (RectTransform)hero;
+            float expectedCtaWidth = Mathf.Min(home.CtaSize.x, heroRect.sizeDelta.x - home.HeroPadding.x * 2f);
+            Assert.AreEqual(expectedCtaWidth, startRect.sizeDelta.x, 0.5f, "开始按钮宽度应来自版面表（Hero 卡内宽内）");
+            Assert.LessOrEqual(startRect.sizeDelta.x, heroRect.sizeDelta.x, "CTA 不得超出 Hero 卡");
+
+            ScreenCapture.CaptureScreenshot(System.IO.Path.GetFullPath("Logs/menu_redesign_screenshot.png"));
+            yield return new WaitForSeconds(0.5f);
         }
 
         [UnityTest]

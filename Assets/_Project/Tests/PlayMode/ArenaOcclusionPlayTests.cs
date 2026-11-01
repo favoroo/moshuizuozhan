@@ -36,12 +36,12 @@ namespace P1.Tests
             // 固定镜头朝向为世界 +Z（yaw=0），避免出生朝向影响探针方向
             cameraFollow.AddLookInput(-cameraFollow.YawDegrees, 0f);
 
-            // Container_Mid_SW_Mustard 位于 (-9.2, 0.9, -5.5)，尺寸 2.2×1.8×4.2（北面 z≈-3.4）。
+            // Container_Mid_SW_Mustard 位于 (-8.1, 0.9, -5.5)，尺寸 2.2×1.8×4.2（北面 z≈-3.4）。
             // 把玩家放到其北侧 0.75m 并背对镜头：镜头从玩家背后（南侧）看过来会撞上集装箱顶沿。
             var cc = player.GetComponent<CharacterController>();
             if (cc != null) cc.enabled = false;
             player.transform.SetPositionAndRotation(
-                new Vector3(-9.2f, 0.05f, -2.65f), Quaternion.identity);
+                new Vector3(-8.1f, 0.05f, -2.65f), Quaternion.identity);
             if (cc != null) cc.enabled = true;
             Physics.SyncTransforms();
 

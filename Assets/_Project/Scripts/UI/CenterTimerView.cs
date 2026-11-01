@@ -78,8 +78,9 @@ namespace P1.UI
 
         private void ApplyLayoutMetrics()
         {
-            float timerFontSize = UITypography.FontSnapped(60f);
-            Vector2 blobSize = _isMobileLayout ? new Vector2(240f, 100f) : new Vector2(250f, 104f);
+            // 计时器档 72~76（桌面 76，移动端 ×1.28）；黑块 260×112，移动端再放大一档
+            float timerFontSize = UITypography.FontSnapped(76f);
+            Vector2 blobSize = _isMobileLayout ? new Vector2(290f, 124f) : new Vector2(260f, 112f);
 
             if (timerBlobRoot != null)
             {
@@ -87,15 +88,15 @@ namespace P1.UI
             }
             if (timerText != null)
             {
-                timerText.fontSize = _lastRemainingSeconds > 0f ? timerFontSize : UITypography.FontSnapped(48f);
+                timerText.fontSize = _lastRemainingSeconds > 0f ? timerFontSize : UITypography.FontSnapped(56f);
             }
             if (percentTextA != null)
             {
-                percentTextA.fontSize = UITypography.FontSnapped(ComicStyle.FontH3);
+                percentTextA.fontSize = UITypography.FontSnapped(ComicStyle.FontH2);
             }
             if (percentTextB != null)
             {
-                percentTextB.fontSize = UITypography.FontSnapped(ComicStyle.FontH3);
+                percentTextB.fontSize = UITypography.FontSnapped(ComicStyle.FontH2);
             }
         }
 
@@ -149,7 +150,7 @@ namespace P1.UI
         /// </summary>
         public void SetTime(float remainingSeconds, bool isPlayingOrFinished = true)
         {
-            float timerFontSize = UITypography.FontSnapped(60f);
+            float timerFontSize = UITypography.FontSnapped(76f);
 
             if (!isPlayingOrFinished)
             {
@@ -159,7 +160,7 @@ namespace P1.UI
                     _lastMinutes = -1;
                     _lastSeconds = -1;
                     timerText.text = "READY";
-                    timerText.fontSize = UITypography.FontSnapped(48f);
+                    timerText.fontSize = UITypography.FontSnapped(56f);
                 }
                 ResetBlobColorToNormal();
                 return;
@@ -323,14 +324,14 @@ namespace P1.UI
             RectTransform rootRect = GetComponent<RectTransform>();
             if (rootRect == null) rootRect = gameObject.AddComponent<RectTransform>();
 
-            float timerFontSize = UITypography.FontSnapped(60f);
-            Vector2 blobSize = _isMobileLayout ? new Vector2(240f, 100f) : new Vector2(250f, 104f);
+            float timerFontSize = UITypography.FontSnapped(76f);
+            Vector2 blobSize = _isMobileLayout ? new Vector2(290f, 124f) : new Vector2(260f, 112f);
 
             rootRect.anchorMin = new Vector2(0.5f, 1f);
             rootRect.anchorMax = new Vector2(0.5f, 1f);
             rootRect.pivot = new Vector2(0.5f, 1f);
             rootRect.anchoredPosition = new Vector2(0f, -6f);
-            rootRect.sizeDelta = new Vector2(300f, 140f);
+            rootRect.sizeDelta = new Vector2(580f, 260f);
 
             // 1. 顶部比分条 ScoreBar（直角纯黑底座 + 队伍色纯色块）
             if (scoreBarRoot == null)
@@ -344,7 +345,7 @@ namespace P1.UI
                 // 顶部比分条必须整体落在屏幕内：锚点在父级顶边，中心下移 18px 才不会被裁掉
                 // 顶部比分条必须整体落在屏幕内，且数字直接放进队伍色块里（白字，避免飘在天空上看不清）。
                 scoreBarRoot.anchoredPosition = new Vector2(0f, -10f);
-                scoreBarRoot.sizeDelta = new Vector2(420f, 44f);
+                scoreBarRoot.sizeDelta = new Vector2(520f, 56f);
 
                 // 黑边底座直角块
                 var bgBarGo = new GameObject("BarBackground", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
@@ -359,11 +360,10 @@ namespace P1.UI
                 bgBarGraphic.CornerRadius = ComicStyle.CornerSharp;
                 bgBarGraphic.BorderWidth = ComicStyle.Border;
                 bgBarGraphic.BorderColor = ComicStyle.Ink;
-                bgBarGraphic.HardShadow = false;
-                bgBarGraphic.ShadowOffset = Vector2.zero;
-                bgBarGraphic.ShadowColor = ComicStyle.Ink;
                 bgBarGraphic.color = ComicStyle.Ink;
                 bgBarGraphic.Halftone = false;
+                // 面板档硬影 (4,-5)
+                resolvedTheme.ApplyHardShadow(bgBarGraphic, UIHardShadowLevel.Panel);
 
                 // Team A 填充条（左）
                 var barAGo = new GameObject("FillBarA", typeof(RectTransform), typeof(Image));
@@ -399,7 +399,7 @@ namespace P1.UI
 
                 percentTextA = textAGo.GetComponent<TextMeshProUGUI>();
                 percentTextA.font = resolvedTheme.ResolveFont(true, "0.0%");
-                percentTextA.fontSize = UITypography.FontSnapped(ComicStyle.FontH3);
+                percentTextA.fontSize = UITypography.FontSnapped(ComicStyle.FontH2);
                 percentTextA.fontStyle = FontStyles.Bold;
                 percentTextA.alignment = TextAlignmentOptions.Center;
                 // 黑字压在队伍色块上：白字压橙对比度只有 2.7，黑字橙 7.7 / 蓝 4.6 都过 AA。
@@ -418,7 +418,7 @@ namespace P1.UI
 
                 percentTextB = textBGo.GetComponent<TextMeshProUGUI>();
                 percentTextB.font = resolvedTheme.ResolveFont(true, "0.0%");
-                percentTextB.fontSize = UITypography.FontSnapped(ComicStyle.FontH3);
+                percentTextB.fontSize = UITypography.FontSnapped(ComicStyle.FontH2);
                 percentTextB.fontStyle = FontStyles.Bold;
                 percentTextB.alignment = TextAlignmentOptions.Center;
                 percentTextB.color = ComicStyle.Ink;
@@ -434,7 +434,7 @@ namespace P1.UI
                 timerBlobRoot.anchorMin = new Vector2(0.5f, 1f);
                 timerBlobRoot.anchorMax = new Vector2(0.5f, 1f);
                 timerBlobRoot.pivot = new Vector2(0.5f, 1f);
-                timerBlobRoot.anchoredPosition = new Vector2(0f, -66f);
+                timerBlobRoot.anchoredPosition = new Vector2(0f, -70f);
                 timerBlobRoot.sizeDelta = blobSize;
 
                 timerBlobMotion = blobRootGo.GetComponent<UISpringMotion>();
@@ -454,15 +454,14 @@ namespace P1.UI
                 timerBlobGraphic.SpeechTail = false;
                 timerBlobGraphic.BorderWidth = ComicStyle.Border;
                 timerBlobGraphic.BorderColor = ComicStyle.Ink;
-                timerBlobGraphic.HardShadow = false;
-                timerBlobGraphic.ShadowOffset = Vector2.zero;
-                timerBlobGraphic.ShadowColor = ComicStyle.Ink;
                 timerBlobGraphic.Halftone = false;
                 timerBlobGraphic.HalftoneAlpha = 0f;
                 timerBlobGraphic.GlossAlpha = 0f;
                 timerBlobGraphic.DrawGloss = false;
                 timerBlobGraphic.InnerRimAlpha = 0f;
                 timerBlobGraphic.color = ComicStyle.Ink;
+                // HUD 视觉锚点：Hero 档硬影 (6,-7)
+                resolvedTheme.ApplyHardShadow(timerBlobGraphic, UIHardShadowLevel.Hero);
 
                 // 超大倒计时数字（白字）
                 var txtGo = new GameObject("TimerText", typeof(RectTransform), typeof(TextMeshProUGUI));
@@ -491,8 +490,9 @@ namespace P1.UI
                 finalMinuteBannerRoot.anchorMin = new Vector2(0.5f, 1f);
                 finalMinuteBannerRoot.anchorMax = new Vector2(0.5f, 1f);
                 finalMinuteBannerRoot.pivot = new Vector2(0.5f, 1f);
-                finalMinuteBannerRoot.anchoredPosition = new Vector2(0f, -148f);
-                finalMinuteBannerRoot.sizeDelta = new Vector2(340f, 52f);
+                // 计时黑块（-70 起、112 高）之下留 8px 间距，Hero 硬影不会压到横幅
+                finalMinuteBannerRoot.anchoredPosition = new Vector2(0f, -190f);
+                finalMinuteBannerRoot.sizeDelta = new Vector2(380f, 60f);
 
                 bannerMotion = bannerGo.GetComponent<UISpringMotion>();
                 bannerMotion.SetTheme(resolvedTheme);
@@ -508,8 +508,8 @@ namespace P1.UI
                 bannerBgGraphic.Shape = UIInkShape.SharpRect;
                 bannerBgGraphic.ApplyComic(ComicStyle.Red, dots: false, border: ComicStyle.Border);
                 bannerBgGraphic.CornerRadius = ComicStyle.CornerSharp;
-                bannerBgGraphic.HardShadow = false;
-                bannerBgGraphic.ShadowOffset = Vector2.zero;
+                // 横幅是浮起的信息卡：面板档硬影 (4,-5)
+                resolvedTheme.ApplyHardShadow(bannerBgGraphic, UIHardShadowLevel.Panel);
 
                 var bannerTxtGo = new GameObject("BannerText", typeof(RectTransform), typeof(TextMeshProUGUI));
                 bannerTxtGo.transform.SetParent(finalMinuteBannerRoot, false);
@@ -520,7 +520,7 @@ namespace P1.UI
 
                 bannerText = bannerTxtGo.GetComponent<TextMeshProUGUI>();
                 bannerText.font = resolvedTheme.ResolveFont(true, "【 1:00 FINAL MINUTE! 】");
-                bannerText.fontSize = UITypography.FontSnapped(24f);
+                bannerText.fontSize = UITypography.FontSnapped(28f);
                 bannerText.fontStyle = FontStyles.Bold;
                 bannerText.alignment = TextAlignmentOptions.Center;
                 bannerText.color = ComicStyle.Paper;

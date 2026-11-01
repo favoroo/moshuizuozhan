@@ -1,6 +1,7 @@
 using P1.Core;
 using P1.Weapons;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 
 namespace P1.Player
 {
@@ -38,12 +39,16 @@ namespace P1.Player
         private bool _hasSnapped;
         private Vector3 _aimGroundPoint;
 
-        // 开火镜头冲击（P16）：只做「沿视轴后拉 + Roll + FOV」三种不改瞄准方向的偏移。
+        // 开火镜头冲击（P16/P28）：只做「沿视轴后拉 + Roll + FOV」三种不改瞄准方向的偏移。
         // 相机朝向决定屏幕中心射线，任何 pitch/yaw 改动都会让准星漂移，所以这里绝不旋转照射轴。
-        private float _shotKickDistance;
-        private float _shotKickRoll;
-        private float _shotKickFov;
-        private float _shotKickRecover = 0.12f;
+        // P28：指数漏积分改为 AnimSpring1D 弹簧；后拉量由「热积累」驱动——
+        // 单发重武器读作一次冲量，连发武器读作持续后拉，松手回弹。
+        private AnimSpring1D _shotDistanceSpring = new AnimSpring1D(0f);
+        private AnimSpring1D _shotRollSpring = new AnimSpring1D(0f);
+        private AnimSpring1D _shotFovSpring = new AnimSpring1D(0f);
+        private float _shotKickHeat;
+        private float _shotKickDecayRate = 8.5f;
+        private float _shotKickSpringOmega = 30f;
 
         private readonly RaycastHit[] _castHits = new RaycastHit[8];
 
@@ -160,9 +165,8 @@ namespace P1.Player
         }
 
         /// <summary>
-        /// 开火镜头冲击（P16）：沿视轴后拉 <paramref name="distanceMeters"/>、绕视轴 Roll
-        /// <paramref name="rollDegrees"/>、FOV 短暂拉宽 <paramref name="fovDegrees"/>，再指数回弹。
-        /// 三种偏移都不改变相机前向，因此准星与弹道解算完全不受影响。
+        /// 开火镜头冲击（P16 旧签名，保留给击杀 FOV 冲击等调用方）：
+        /// 沿视轴后拉 + 绕视轴 Roll + FOV 拉宽，弹簧回弹。三种偏移都不改变相机前向。
         /// </summary>
         public void AddShotPunch(
             float distanceMeters,
@@ -170,35 +174,79 @@ namespace P1.Player
             float fovDegrees,
             float recoverSeconds = 0.12f)
         {
+            float decayRate = 1f / Mathf.Clamp(recoverSeconds, 0.04f, 0.4f);
+            AddShotPunchScaling(distanceMeters, rollDegrees, fovDegrees, decayRate, _shotKickSpringOmega);
+        }
+
+        /// <summary>
+        /// P28 武器专用入口：按武器类别指定热积累衰减率与弹簧角频率。
+        /// 后拉量走热积累（连发持续后拉、重武器单发冲一下），Roll/FOV 走速度冲量。
+        /// 全部乘 <see cref="GameSettingsService.ShakeScale"/>，无障碍 0% 震屏时开火冲击完全消失。
+        /// </summary>
+        public void AddShotPunchScaling(
+            float distanceMeters,
+            float rollDegrees,
+            float fovDegrees,
+            float decayRatePerSecond,
+            float springOmega)
+        {
             if (distanceMeters <= 0f && rollDegrees <= 0f && fovDegrees <= 0f)
                 return;
 
-            // 上限防止高射速武器把冲击累积成永久位移
-            _shotKickDistance = Mathf.Min(0.22f, _shotKickDistance + Mathf.Max(0f, distanceMeters));
-            _shotKickRoll = Mathf.Clamp(_shotKickRoll + rollDegrees, -2.5f, 2.5f);
-            _shotKickFov = Mathf.Clamp(_shotKickFov + Mathf.Max(0f, fovDegrees), 0f, 4f);
-            _shotKickRecover = Mathf.Clamp(recoverSeconds, 0.04f, 0.4f);
+            float shakeScale = Mathf.Clamp01(GameSettingsService.ShakeScale);
+            if (shakeScale <= 0f)
+                return;
+
+            distanceMeters = Mathf.Max(0f, distanceMeters) * shakeScale;
+            rollDegrees *= shakeScale;
+            fovDegrees = Mathf.Max(0f, fovDegrees) * shakeScale;
+
+            _shotKickDecayRate = Mathf.Clamp(decayRatePerSecond, 2f, 20f);
+            _shotKickSpringOmega = Mathf.Clamp(springOmega, 8f, 60f);
+
+            // 热积累上限防止高射速武器把后拉累积成永久位移
+            _shotKickHeat = Mathf.Min(0.22f, _shotKickHeat + distanceMeters);
+
+            float impulseOmega = _shotKickSpringOmega * 1.15f;
+            if (Mathf.Abs(rollDegrees) > 0.0001f)
+            {
+                _shotRollSpring.Kick(AnimSpring1D.ImpulseForPeak(
+                    rollDegrees, impulseOmega, WeaponFeelMath.CameraKickDampingRatio));
+            }
+            if (fovDegrees > 0.0001f)
+            {
+                _shotFovSpring.Kick(AnimSpring1D.ImpulseForPeak(
+                    fovDegrees, impulseOmega, WeaponFeelMath.CameraKickDampingRatio));
+            }
         }
 
         /// <summary>当前开火后拉量（米），调试/测试可读。</summary>
-        public float ShotKickDistance => _shotKickDistance;
+        public float ShotKickDistance => _shotDistanceSpring.Value;
+
+        /// <summary>当前开火 Roll 量（度），调试/测试可读。</summary>
+        public float ShotKickRoll => _shotRollSpring.Value;
 
         /// <summary>当前开火 FOV 冲击量（度），调试/测试可读。</summary>
-        public float ShotKickFov => _shotKickFov;
+        public float ShotKickFov => _shotFovSpring.Value;
 
-        private void DecayShotKick(float unscaledDt)
+        private void StepShotKick(float unscaledDt)
         {
             if (unscaledDt <= 0f)
                 return;
 
-            float k = 1f - Mathf.Exp(-unscaledDt / Mathf.Max(0.02f, _shotKickRecover));
-            _shotKickDistance = Mathf.Lerp(_shotKickDistance, 0f, k);
-            _shotKickRoll = Mathf.Lerp(_shotKickRoll, 0f, k);
-            _shotKickFov = Mathf.Lerp(_shotKickFov, 0f, k);
+            // 热积累衰减：停止开火后视轴缓慢回弹；连续开火时形成稳定的持续后拉
+            _shotKickHeat *= Mathf.Exp(-_shotKickDecayRate * unscaledDt);
+            if (_shotKickHeat < 0.0002f) _shotKickHeat = 0f;
 
-            if (_shotKickDistance < 0.0002f) _shotKickDistance = 0f;
-            if (Mathf.Abs(_shotKickRoll) < 0.002f) _shotKickRoll = 0f;
-            if (_shotKickFov < 0.002f) _shotKickFov = 0f;
+            float omega = _shotKickSpringOmega;
+            _shotDistanceSpring.Step(_shotKickHeat, omega, WeaponFeelMath.CameraKickDampingRatio, unscaledDt);
+            _shotRollSpring.Step(0f, omega * 1.15f, WeaponFeelMath.CameraKickDampingRatio, unscaledDt);
+            _shotFovSpring.Step(0f, omega * 1.15f, WeaponFeelMath.CameraKickDampingRatio, unscaledDt);
+
+            // 安全钳制：与旧上限一致，避免极端配置把镜头拉飞
+            _shotDistanceSpring.Value = Mathf.Clamp(_shotDistanceSpring.Value, 0f, 0.22f);
+            _shotRollSpring.Value = Mathf.Clamp(_shotRollSpring.Value, -2.5f, 2.5f);
+            _shotFovSpring.Value = Mathf.Clamp(_shotFovSpring.Value, 0f, 4f);
         }
 
         /// <summary>
@@ -230,9 +278,10 @@ namespace P1.Player
                 return;
 
             ResolveActorRefs();
-            _shotKickDistance = 0f;
-            _shotKickRoll = 0f;
-            _shotKickFov = 0f;
+            _shotDistanceSpring.Reset();
+            _shotRollSpring.Reset();
+            _shotFovSpring.Reset();
+            _shotKickHeat = 0f;
             _yaw = Mathf.Repeat(target.eulerAngles.y + 180f, 360f) - 180f;
             _pitch = gameConfig != null
                 ? ThirdPersonCameraMath.ClampPitch(gameConfig.tpsPitchDefault, gameConfig.tpsPitchMin, gameConfig.tpsPitchMax)
@@ -276,7 +325,7 @@ namespace P1.Player
             float dt = Mathf.Max(0f, Time.deltaTime);
 
             // 开火冲击始终按真实时间回弹：Hitstop 定格期间也要把镜头拉回来，否则会「卡住」
-            DecayShotKick(Time.unscaledDeltaTime);
+            StepShotKick(Time.unscaledDeltaTime);
 
             // ---- 枢轴跟随：水平/垂直统一平滑 + 少量速度前馈，减少高速移动时的落后感
             Vector3 targetPosition = target.position;
@@ -359,13 +408,14 @@ namespace P1.Player
             ApplyShake(ref position);
 
             // 沿视轴后拉：相机原点在中心射线上滑动，射线本身不变 → 弹道落点严格不变
-            position -= forward * _shotKickDistance;
+            position -= forward * _shotDistanceSpring.Value;
 
             transform.position = position;
-            transform.rotation = lookRotation * Quaternion.Euler(0f, 0f, _shakeRoll + _shotKickRoll);
+            transform.rotation = lookRotation * Quaternion.Euler(0f, 0f, _shakeRoll + _shotRollSpring.Value);
 
-            // ---- FOV：蓄力狙变焦 + 手雷瞄准微收 + 开火冲击 + 速度感拉伸
-            float targetFov = GetBaseFov() + _shotKickFov;
+            // ---- FOV：蓄力狙变焦 + 手雷瞄准微收 + 速度感拉伸
+            // P28：开火 FOV 冲击不再进入 targetFov（否则会被 60°/s 平滑吃掉），改在最终值上叠加
+            float targetFov = GetBaseFov();
             if (charge01 > 0f)
                 targetFov -= charge01 * (gameConfig != null ? gameConfig.tpsChargerZoomFov : 14f);
             if (_isSubAimActive)
@@ -386,7 +436,7 @@ namespace P1.Player
                 _smoothedFov = targetFov;
 
             if (_cam != null)
-                _cam.fieldOfView = _smoothedFov;
+                _cam.fieldOfView = Mathf.Clamp(_smoothedFov + _shotFovSpring.Value, 25f, 90f);
         }
 
         private void ApplyCameraSettings()
@@ -399,6 +449,25 @@ namespace P1.Player
             _cam.nearClipPlane = 0.1f;
             _cam.farClipPlane = 160f;
             _smoothedFov = _cam.fieldOfView;
+
+            var data = _cam.GetUniversalAdditionalCameraData();
+            if (data != null)
+            {
+                // ArenaStyleSO 的画质总开关；样式资产尚未加载时默认开启（旧观感回退只改 SO）。
+                var style = RenderEnvGlobals.CurrentStyle;
+                data.renderPostProcessing = style == null || style.postProcessingEnabled;
+                data.renderShadows = true;
+                if (Application.isMobilePlatform)
+                {
+                    data.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
+                    data.antialiasingQuality = AntialiasingQuality.Low;
+                }
+                else
+                {
+                    data.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
+                    data.antialiasingQuality = AntialiasingQuality.High;
+                }
+            }
         }
 
         private void ResolveActorRefs()

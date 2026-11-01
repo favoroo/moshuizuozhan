@@ -1,12 +1,34 @@
 // ==============================================================================================
-// ArenaGroundTextureBaker.cs — P7-B 程序化地面反照率/AO/标线贴图 + 墙面横幅图集烘焙器
+// ArenaGroundTextureBaker.cs — P30 场地视觉精修轮：程序化地面反照率/法线/RMO + 横幅图集确定性烘焙器
 //
-// UV 分区顺序与 ArenaDecorationBuilder 约定一致：
-//   索引 0 = (0.0, 0.0) 左下 (Bottom-Left)  -> 中性奶油底 + 深色 "P1 // TURF" + 波浪/集装箱条纹
-//   索引 1 = (0.5, 0.0) 右下 (Bottom-Right) -> 黄黑警示斜纹 + "CARGO" 货运字标
-//   索引 2 = (0.0, 0.5) 左上 (Top-Left)     -> Team A 橙底白箭头 + "A" + 队色条
-//   索引 3 = (0.5, 0.5) 右上 (Top-Right)    -> Team B 蓝底白箭头 + "B" + 队色条
-// （注：Unity 纹理原点在左下角 (0, 0)，U 轴向右，V 轴向上）。
+// 1. 横幅图集 (ArenaBannerAtlas, 1024×1024 RGBA) 2×2 分区索引对照表（与 ArenaDecorationBuilder 严格一致）：
+//    -------------------------------------------------------------------------------------------
+//    索引 0 | (u: 0.0~0.5, v: 0.0~0.5) 左下 (Bottom-Left)
+//           | 语义：中性货运码头标语 Neutral Turf ("P1 // TURF")
+//           | 设计：几何斜切拼色（上半暗板岩深色 + 下半暖奶油白），15° 斜切带 6px hazardYellow 饰条，
+//           |       45° 几何高光切带，大写粗体 "P1 // TURF" + "DOCK 01 // CRANE ZONE" + "BERTH 04"。
+//    -------------------------------------------------------------------------------------------
+//    索引 1 | (u: 0.5~1.0, v: 0.0~0.5) 右下 (Bottom-Right)
+//           | 语义：黄黑警示货运图集 Hazard Cargo ("CARGO // 01")
+//           | 设计：全幅 45° 黄黑工业斜纹底，中央 45° 切角重型标牌（亮黄双重描边 + 4 拐角钢铆钉），
+//           |       超大号亮黄 "CARGO" + "HEAVY LOAD // KEEP CLEAR" + "TERMINAL PORT" 工业字标。
+//    -------------------------------------------------------------------------------------------
+//    索引 2 | (u: 0.0~0.5, v: 0.5~1.0) 左上 (Top-Left)
+//           | 语义：Team A 出生区专属横幅 Team A ("TEAM A // SPLAT")
+//           | 设计：Team A 浓郁橙底（微底渐变压暗），45° 白色几何竞速斜条纹，顶部双重白几何尖角箭头，
+//           |       超大号白色粗体 "A"（带 45° 几何墨滴缺口切角）+ "TEAM ALPHA" + "P1 // DIVISION 01"。
+//    -------------------------------------------------------------------------------------------
+//    索引 3 | (u: 0.5~1.0, v: 0.5~1.0) 右上 (Top-Right)
+//           | 语义：Team B 出生区专属横幅 Team B ("TEAM B // WAVE")
+//           | 设计：Team B 浓郁钴蓝底，45° 白色几何竞速斜条纹，顶部双重白几何尖角箭头，
+//           |       超大号白色粗体 "B"（带 45° 几何墨滴缺口切角）+ "TEAM BRAVO" + "P1 // DIVISION 02"。
+//    -------------------------------------------------------------------------------------------
+//
+// 2. 地面全套三张贴图（覆盖 40×56m，世界范围 X∈[-20,20], Z∈[-28,28]，分辨率 2048×2048）：
+//    - ArenaGround_Albedo.png: 浅灰两级分缝混凝土大板（4m 主缝 + 2m 次缝 + 吊装孔）、板面明度微差（±4%）、
+//      黄色标线网（虚线车道、坡道口黄黑斜纹带、斑马线过渡区、集装箱角标框）、低饱和区域涂装、做旧点缀（≤15% 面积）。
+//    - ArenaGround_N.png: 对应混凝土板缝凹槽与微粒法线（标线不进法线，分缝进法线）。
+//    - ArenaGround_RMO.png: R=Metallic(0), G=AO(板缝自遮蔽+污渍吸收+环境投影), B=Detail(0.5), A=Smoothness。
 // ==============================================================================================
 
 using System;
@@ -22,18 +44,17 @@ using Debug = UnityEngine.Debug;
 namespace P1.Editor
 {
     /// <summary>
-    /// P7-B 竞技场地表反照率与横幅贴图确定性烘焙器：
-    /// 1. 生成 2048×2048 地面贴图（世界范围 X∈[-20,20], Z∈[-28,28]）：
-    ///    混凝土预制板接缝与明度差、低频微斑驳、软边污渍、场地标线（LaneDash/Chevron/HazardBand/Ring/StencilText/SafetyLine）、
-    ///    以及基于场景 Collider 投影的环境软 AO（跳过高台/斜坡/出生台顶面，避免把阴影烘在高台上）。
-    /// 2. 生成 1024×1024 横幅图集（2×2 512×512 分区）：
-    ///    支持 Team A、Team B、中性码头标语、警示货运图集。
-    /// 3. 全过程固定随机种子 20261029，支持单次 < 5 秒高效烘焙与 style 为空时的安全默认色回退。
+    /// P30 竞技场地表全套贴图与横幅贴图确定性烘焙器：
+    /// 1. 2048×2048 地面反照率、法线与 RMO 贴图（对齐 INKWAVE 街头潮流与码头工业美学）。
+    /// 2. 1024×1024 横幅图集（2×2 512×512 分区，几何大胆风重构）。
+    /// 3. 固定随机种子 20261029，全过程确定性数学计算，单次烘焙预算 ≤ 8 秒。
     /// </summary>
     public static class ArenaGroundTextureBaker
     {
         public const string GroundTexturePath = "Assets/_Project/Art/Textures/Arena/ArenaGround_Albedo.png";
         public const string BannerAtlasPath = "Assets/_Project/Art/Textures/Arena/ArenaBannerAtlas.png";
+        public const string GroundNormalPath = "Assets/_Project/Art/Textures/Arena/ArenaGround_N.png";
+        public const string GroundRmoPath = "Assets/_Project/Art/Textures/Arena/ArenaGround_RMO.png";
 
         public const int GroundResolution = 2048;
         public const int BannerResolution = 1024;
@@ -161,11 +182,16 @@ namespace P1.Editor
             Set('8', 0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E);
             Set('9', 0x0E, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x0E);
 
-            // 标点与空白
+            // 标点与符号
             Set(' ', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
             Set('/', 0x01, 0x02, 0x04, 0x04, 0x08, 0x10, 0x10);
             Set('-', 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00);
             Set('.', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04);
+            Set(':', 0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00);
+            Set('>', 0x10, 0x08, 0x04, 0x02, 0x04, 0x08, 0x10);
+            Set('<', 0x01, 0x02, 0x04, 0x08, 0x04, 0x02, 0x01);
+            Set('#', 0x0A, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x0A);
+            Set('+', 0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00);
 
             return f;
         }
@@ -212,12 +238,14 @@ namespace P1.Editor
             sw.Stop();
             Debug.Log($"[ArenaGroundTextureBaker] 烘焙全部完成！总耗时: {sw.ElapsedMilliseconds} ms, AO 覆盖碰撞体数量: {aoCollidersCount}。\n" +
                       $" - 地面反照率贴图: {GroundTexturePath} ({GroundResolution}x{GroundResolution} RGB)\n" +
+                      $" - 地面法线贴图: {GroundNormalPath} ({GroundResolution}x{GroundResolution} RGB)\n" +
+                      $" - 地面 RMO 贴图: {GroundRmoPath} ({GroundResolution}x{GroundResolution} RGBA)\n" +
                       $" - 横幅图集: {BannerAtlasPath} ({BannerResolution}x{BannerResolution} RGBA)");
         }
 
         #endregion
 
-        #region 地面贴图烘焙 (2048×2048, RGB)
+        #region 地面贴图烘焙 (2048×2048, Albedo / Normal / RMO)
 
         public static int BakeGroundTexture(ArenaStyleSO style)
         {
@@ -228,10 +256,15 @@ namespace P1.Editor
         {
             var sw = Stopwatch.StartNew();
 
-            // 1. 预分配像素颜色缓存（RGB 浮点）
+            // 1. 预分配像素颜色缓存与辅助特征场
             var ground = new Color[GroundResolution * GroundResolution];
+            var seamMask = new float[GroundResolution * GroundResolution];
+            var normalSlopeX = new float[GroundResolution * GroundResolution];
+            var normalSlopeZ = new float[GroundResolution * GroundResolution];
+            var markingMask = new float[GroundResolution * GroundResolution];
+            var stainMask = new float[GroundResolution * GroundResolution];
 
-            // 2. 预生成 0.5m 尺度低频微斑驳网格（82×114 个点覆盖 40×56m，双线性插值避免每像素频繁算哈希）
+            // 2. 预生成 0.5m 尺度低频微斑驳网格（82×114 个点覆盖 40×56m，双线性插值）
             const int mottleGridW = 82;
             const int mottleGridH = 114;
             var mottleGrid = new float[mottleGridW, mottleGridH];
@@ -240,22 +273,37 @@ namespace P1.Editor
             {
                 for (int gx = 0; gx < mottleGridW; gx++)
                 {
-                    // ±3% 斑驳扰动
-                    mottleGrid[gx, gz] = ((float)mottleRng.NextDouble() * 2f - 1f) * 0.03f;
+                    // ±2.5% 斑驳扰动
+                    mottleGrid[gx, gz] = ((float)mottleRng.NextDouble() * 2f - 1f) * 0.025f;
                 }
             }
 
-            // 3. 第一阶段：基底混凝土板块（2m×2m 预制板 + 确定性哈希 ±4% 明度差 + 3cm 板缝 + 0.5m 微斑驳）
+            // 3. 第一阶段：混凝土两级大板（4m 主缝 + 2m 次缝 + 板面 ±4% 明度微差 + 板角吊装孔 + 0.5m 斑驳）
             float stepX = WorldSizeX / GroundResolution; // ~0.01953m
             float stepZ = WorldSizeZ / GroundResolution; // ~0.02734m
-            float seamHalfWidth = 0.015f; // 3cm 宽缝的一半
-            float seamEdgeSoftness = 0.015f; // 抗锯齿软边宽度
+
+            // 缝隙几何参数（4m 主缝略宽且深，2m 次缝略细）
+            const float seamMainHalfWidth = 0.018f; // 3.6cm 宽
+            const float seamMainSoftness = 0.015f;
+            const float seamSubHalfWidth = 0.010f;  // 2.0cm 宽
+            const float seamSubSoftness = 0.012f;
+
+            Color primarySeamColor = Color.Lerp(palette.groundSeam, palette.concreteDark, 0.45f);
+            Color secondarySeamColor = palette.groundSeam;
 
             for (int y = 0; y < GroundResolution; y++)
             {
                 float worldZ = WorldMinZ + (y + 0.5f) * stepZ;
-                int slabZ = Mathf.FloorToInt((worldZ - WorldMinZ) * 0.5f);
-                float distSeamZ = Mathf.Abs(worldZ - Mathf.Round(worldZ * 0.5f) * 2f);
+                int slab4Z = Mathf.FloorToInt((worldZ - WorldMinZ) * 0.25f);
+                int slab2Z = Mathf.FloorToInt((worldZ - WorldMinZ) * 0.5f);
+
+                float nearest4Z = Mathf.Round(worldZ * 0.25f) * 4f;
+                float distSeam4Z = Mathf.Abs(worldZ - nearest4Z);
+                float signZ4 = (worldZ >= nearest4Z) ? 1.0f : -1.0f;
+
+                float nearest2Z = Mathf.Round(worldZ * 0.5f) * 2f;
+                float distSeam2Z = Mathf.Abs(worldZ - nearest2Z);
+                float signZ2 = (worldZ >= nearest2Z) ? 1.0f : -1.0f;
 
                 // 斑驳 Z 轴采样
                 float cellZ = (worldZ - WorldMinZ) * 2f;
@@ -268,24 +316,77 @@ namespace P1.Editor
                 for (int x = 0; x < GroundResolution; x++)
                 {
                     float worldX = WorldMinX + (x + 0.5f) * stepX;
-                    int slabX = Mathf.FloorToInt((worldX - WorldMinX) * 0.5f);
+                    int slab4X = Mathf.FloorToInt((worldX - WorldMinX) * 0.25f);
+                    int slab2X = Mathf.FloorToInt((worldX - WorldMinX) * 0.5f);
 
-                    // 板块确定性明度差 ±4%
-                    float slabBrightnessDelta = Hash2DToRange(slabX, slabZ, FixedSeed, -0.04f, 0.04f);
-                    Color pixelColor = palette.groundBase * (1.0f + slabBrightnessDelta);
+                    float nearest4X = Mathf.Round(worldX * 0.25f) * 4f;
+                    float distSeam4X = Mathf.Abs(worldX - nearest4X);
+                    float signX4 = (worldX >= nearest4X) ? 1.0f : -1.0f;
 
-                    // 板块接缝 3cm（smoothstep 软边抗锯齿）
-                    float distSeamX = Mathf.Abs(worldX - Mathf.Round(worldX * 0.5f) * 2f);
-                    float distSeam = Mathf.Min(distSeamX, distSeamZ);
-                    float seamAlpha = 1.0f - SmoothStep01(seamHalfWidth - seamEdgeSoftness * 0.5f,
-                                                          seamHalfWidth + seamEdgeSoftness * 0.5f,
-                                                          distSeam);
-                    if (seamAlpha > 0.001f)
+                    float nearest2X = Mathf.Round(worldX * 0.5f) * 2f;
+                    float distSeam2X = Mathf.Abs(worldX - nearest2X);
+                    float signX2 = (worldX >= nearest2X) ? 1.0f : -1.0f;
+
+                    // 板面双层确定性哈希明度微差 (±4%)
+                    float slab4BrightnessDelta = Hash2DToRange(slab4X, slab4Z, FixedSeed, -0.024f, 0.024f);
+                    float slab2BrightnessDelta = Hash2DToRange(slab2X, slab2Z, FixedSeed ^ 0x1234, -0.016f, 0.016f);
+                    float totalSlabDelta = slab4BrightnessDelta + slab2BrightnessDelta;
+                    Color pixelColor = palette.groundBase * (1.0f + totalSlabDelta);
+
+                    // 主缝 (4m 模数)
+                    float distSeam4 = Mathf.Min(distSeam4X, distSeam4Z);
+                    float seamAlpha4 = 1.0f - SmoothStep01(seamMainHalfWidth - seamMainSoftness * 0.5f,
+                                                          seamMainHalfWidth + seamMainSoftness * 0.5f,
+                                                          distSeam4);
+
+                    // 次缝 (2m 模数)
+                    float distSeam2 = Mathf.Min(distSeam2X, distSeam2Z);
+                    float seamAlpha2 = 1.0f - SmoothStep01(seamSubHalfWidth - seamSubSoftness * 0.5f,
+                                                          seamSubHalfWidth + seamSubSoftness * 0.5f,
+                                                          distSeam2);
+
+                    // 分缝合成（主缝优先）
+                    float totalSeamAlpha = Mathf.Max(seamAlpha4, seamAlpha2 * 0.70f);
+                    if (totalSeamAlpha > 0.001f)
                     {
-                        pixelColor = Color.Lerp(pixelColor, palette.groundSeam, seamAlpha);
+                        Color sc = (seamAlpha4 >= seamAlpha2) ? primarySeamColor : secondarySeamColor;
+                        pixelColor = Color.Lerp(pixelColor, sc, totalSeamAlpha);
                     }
 
-                    // 0.5m 尺度低频微斑驳
+                    // 记录分缝遮罩与法线坡度（用于法线与 RMO 贴图，标线不扰动法线）
+                    int pIndex = rowOffset + x;
+                    seamMask[pIndex] = totalSeamAlpha;
+
+                    float slopeX = 0f;
+                    float slopeZ = 0f;
+                    if (distSeam4 < seamMainHalfWidth + seamMainSoftness)
+                    {
+                        float t4 = Mathf.Clamp01(distSeam4 / (seamMainHalfWidth + seamMainSoftness));
+                        float dGroove = 6.0f * t4 * (1.0f - t4) * 0.45f;
+                        if (distSeam4X <= distSeam4Z) slopeX = signX4 * dGroove;
+                        else slopeZ = signZ4 * dGroove;
+                    }
+                    else if (distSeam2 < seamSubHalfWidth + seamSubSoftness)
+                    {
+                        float t2 = Mathf.Clamp01(distSeam2 / (seamSubHalfWidth + seamSubSoftness));
+                        float dGroove = 6.0f * t2 * (1.0f - t2) * 0.28f;
+                        if (distSeam2X <= distSeam2Z) slopeX = signX2 * dGroove;
+                        else slopeZ = signZ2 * dGroove;
+                    }
+                    normalSlopeX[pIndex] = slopeX;
+                    normalSlopeZ[pIndex] = slopeZ;
+
+                    // 板块角隅吊装孔 (Anchor Recesses)
+                    float cornerDistX = Mathf.Abs(distSeam2X - 0.16f);
+                    float cornerDistZ = Mathf.Abs(distSeam2Z - 0.16f);
+                    float anchorDist = Mathf.Sqrt(cornerDistX * cornerDistX + cornerDistZ * cornerDistZ);
+                    if (anchorDist < 0.035f)
+                    {
+                        float anchorHoleAlpha = 1.0f - SmoothStep01(0.015f, 0.035f, anchorDist);
+                        pixelColor = Color.Lerp(pixelColor, palette.concreteDark * 0.6f, anchorHoleAlpha * 0.35f);
+                    }
+
+                    // 0.5m 尺度双线性微斑驳
                     float cellX = (worldX - WorldMinX) * 2f;
                     int gx0 = Mathf.Clamp(Mathf.FloorToInt(cellX), 0, mottleGridW - 2);
                     float tx = cellX - gx0;
@@ -298,77 +399,607 @@ namespace P1.Editor
                     float mottle = (m00 * (1f - sx) + m10 * sx) * (1f - sz) + (m01 * (1f - sx) + m11 * sx) * sz;
                     pixelColor *= (1.0f + mottle);
 
-                    ground[rowOffset + x] = pixelColor;
+                    // 像素级高频细微沙粒噪点 (±1.5%)
+                    float grain = Hash2DToRange(x, y, FixedSeed ^ 0x9876, -0.015f, 0.015f);
+                    pixelColor *= (1.0f + grain);
+
+                    ground[pIndex] = pixelColor;
                 }
             }
 
-            // 4. 第二阶段：大尺度软边深色污渍（固定种子，10 个半径 1.5-4m 的深色椭圆，alpha 0.04-0.08，不抢墨水）
-            ApplyDirtStains(ground, palette);
+            // 4. 第二阶段：做旧点缀（集装箱脚印污渍、轮胎转弯擦痕弧线、油渍流痕、修补补丁，≤15% 面积）
+            ApplyWeatheringAndStains(ground, stainMask, palette);
 
-            // 5. 第三阶段：标线绘制（遍历 ArenaLayoutV2.GroundMarkings，1.5px 软边抗锯齿）
-            ApplyGroundMarkings(ground, palette);
+            // 5. 第三阶段：黄色标线网与区域涂装（ArenaLayoutV2 标线 + 坡道黄黑斜纹 + 斑马线 + 集装箱角标 + 投影 AO 框）
+            ApplyIndustrialMarkings(ground, markingMask, palette);
 
             // 6. 第四阶段：场景环境 AO（基于 Arena_40x56 / Arena_40x40 下所有 Collider 投影软阴影，避开高台顶面）
-            int aoColliderCount = ApplyEnvironmentAO(ground);
+            var aoMap = new float[GroundResolution * GroundResolution];
+            for (int i = 0; i < aoMap.Length; i++) aoMap[i] = 1.0f;
+            int aoColliderCount = ApplyEnvironmentAO(ground, aoMap);
 
-            // 7. 转为 Color32 数组并写入 PNG
-            var outputColors = new Color32[GroundResolution * GroundResolution];
+            // 7. 生成并落盘全套贴图：
+            // 7.1 ArenaGround_Albedo.png
+            SaveTextureRGB(GroundTexturePath, ground, GroundResolution);
+
+            // 7.2 ArenaGround_N.png (OpenGL Y+，板缝坡度进入法线，标线不进法线)
+            SaveNormalMap(GroundNormalPath, normalSlopeX, normalSlopeZ, GroundResolution);
+
+            // 7.3 ArenaGround_RMO.png (R=Metallic, G=AO, B=Detail, A=Smoothness)
+            SaveRmoMap(GroundRmoPath, seamMask, stainMask, markingMask, aoMap, GroundResolution);
+
+            sw.Stop();
+            Debug.Log($"[ArenaGroundTextureBaker] 地面贴图全套生成完成: {GroundTexturePath}，耗时: {sw.ElapsedMilliseconds} ms，AO 碰撞体: {aoColliderCount}");
+            return aoColliderCount;
+        }
+
+        private static void SaveTextureRGB(string path, Color[] colors, int res)
+        {
+            var outputColors = new Color32[res * res];
             for (int i = 0; i < outputColors.Length; i++)
             {
-                Color c = ground[i];
+                Color c = colors[i];
                 byte r = (byte)Mathf.Clamp(Mathf.RoundToInt(c.r * 255f), 0, 255);
                 byte g = (byte)Mathf.Clamp(Mathf.RoundToInt(c.g * 255f), 0, 255);
                 byte b = (byte)Mathf.Clamp(Mathf.RoundToInt(c.b * 255f), 0, 255);
                 outputColors[i] = new Color32(r, g, b, 255);
             }
 
-            var groundTex = new Texture2D(GroundResolution, GroundResolution, TextureFormat.RGB24, false);
-            groundTex.SetPixels32(outputColors);
-            groundTex.Apply(false);
+            var tex = new Texture2D(res, res, TextureFormat.RGB24, false);
+            tex.SetPixels32(outputColors);
+            tex.Apply(false);
 
-            byte[] pngBytes = groundTex.EncodeToPNG();
-            UnityEngine.Object.DestroyImmediate(groundTex);
+            byte[] pngBytes = tex.EncodeToPNG();
+            UnityEngine.Object.DestroyImmediate(tex);
 
-            string directory = Path.GetDirectoryName(GroundTexturePath);
+            WriteFileAndImport(path, pngBytes);
+        }
+
+        private static void SaveNormalMap(string path, float[] slopeX, float[] slopeZ, int res)
+        {
+            var outputColors = new Color32[res * res];
+            for (int i = 0; i < outputColors.Length; i++)
+            {
+                // OpenGL Y+ 格式切线空间法线: R = X+, G = Y+(Up/Z), B = Z+(Out/Y)
+                float sx = -slopeX[i];
+                float sz = -slopeZ[i];
+                float lenSq = sx * sx + sz * sz;
+                float sy = (lenSq < 1.0f) ? Mathf.Sqrt(1.0f - lenSq) : 0.0f;
+
+                byte r = (byte)Mathf.Clamp(Mathf.RoundToInt((sx * 0.5f + 0.5f) * 255f), 0, 255);
+                byte g = (byte)Mathf.Clamp(Mathf.RoundToInt((sz * 0.5f + 0.5f) * 255f), 0, 255);
+                byte b = (byte)Mathf.Clamp(Mathf.RoundToInt((sy * 0.5f + 0.5f) * 255f), 0, 255);
+                outputColors[i] = new Color32(r, g, b, 255);
+            }
+
+            var tex = new Texture2D(res, res, TextureFormat.RGB24, false);
+            tex.SetPixels32(outputColors);
+            tex.Apply(false);
+
+            byte[] pngBytes = tex.EncodeToPNG();
+            UnityEngine.Object.DestroyImmediate(tex);
+
+            WriteFileAndImport(path, pngBytes);
+        }
+
+        private static void SaveRmoMap(string path, float[] seams, float[] stains, float[] markings, float[] ao, int res)
+        {
+            var outputColors = new Color32[res * res];
+            for (int i = 0; i < outputColors.Length; i++)
+            {
+                // R = Metallic (混凝土基底为 0)
+                byte r = 0;
+
+                // G = AO (板缝自遮罩 0.45 + 污渍吸收 + 场景软阴影)
+                float seamAo = 1.0f - seams[i] * 0.50f;
+                float stainAo = 1.0f - stains[i] * 0.15f;
+                float finalAo = Mathf.Clamp01(seamAo * stainAo * ao[i]);
+                byte g = (byte)Mathf.Clamp(Mathf.RoundToInt(finalAo * 255f), 0, 255);
+
+                // B = Detail (基线 0.5)
+                byte b = 128;
+
+                // A = Smoothness (混凝土基底 0.50，板缝粗糙 0.35，污渍较粗糙 0.38，标线涂料略平滑 0.65)
+                float smooth = 0.50f - seams[i] * 0.15f - stains[i] * 0.12f + markings[i] * 0.15f;
+                byte a = (byte)Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp(smooth, 0.30f, 0.75f) * 255f), 0, 255);
+
+                outputColors[i] = new Color32(r, g, b, a);
+            }
+
+            var tex = new Texture2D(res, res, TextureFormat.RGBA32, false);
+            tex.SetPixels32(outputColors);
+            tex.Apply(false);
+
+            byte[] pngBytes = tex.EncodeToPNG();
+            UnityEngine.Object.DestroyImmediate(tex);
+
+            WriteFileAndImport(path, pngBytes);
+        }
+
+        private static void WriteFileAndImport(string path, byte[] bytes)
+        {
+            string directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
                 Directory.CreateDirectory(directory);
             }
-            File.WriteAllBytes(GroundTexturePath, pngBytes);
-            AssetDatabase.ImportAsset(GroundTexturePath, ImportAssetOptions.ForceUpdate);
-
-            sw.Stop();
-            Debug.Log($"[ArenaGroundTextureBaker] 地面反照率贴图已生成: {GroundTexturePath}，耗时: {sw.ElapsedMilliseconds} ms，AO 碰撞体: {aoColliderCount}");
-            return aoColliderCount;
+            File.WriteAllBytes(path, bytes);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
         }
 
         #endregion
 
-        #region 污渍与标线绘制
+        #region 做旧与污渍处理 (≤15% 面积，低对比)
 
-        private static void ApplyDirtStains(Color[] ground, Palette palette)
+        private static void ApplyWeatheringAndStains(Color[] ground, float[] stainMask, Palette palette)
         {
             var rng = new System.Random(FixedSeed);
-            int count = 10;
-            Color stainBase = palette.concreteDark * 0.7f;
+            Color stainBase = palette.concreteDark * 0.65f;
+            Color oilBase = palette.hazardDark * 0.85f;
 
-            for (int i = 0; i < count; i++)
+            // 1. 集装箱 4 拐角定位地脚印污渍（深灰矩形晕，alpha 0.08~0.12）
+            ApplyContainerFootprintStains(ground, stainMask, stainBase);
+
+            // 2. 叉车/跨运车转弯轮胎擦痕弧线（双轨弧线，暗炭微弱印痕，alpha 0.04~0.06）
+            ApplyTireTrackArcs(ground, stainMask, palette.hazardDark);
+
+            // 3. 局域油渍与锈水流痕（8-10 个精细小范围污斑，alpha 0.05~0.09）
+            ApplyOilAndRustSpots(ground, stainMask, rng, stainBase, oilBase);
+
+            // 4. 混凝土修补补丁（3 块矩形浅色/深色预制补丁 + 沥青黑缝）
+            ApplyConcretePatches(ground, stainMask, palette);
+        }
+
+        private static void ApplyContainerFootprintStains(Color[] ground, float[] stainMask, Color stainColor)
+        {
+            // 场地既有集装箱位置（来自 ArenaLayoutV2 与 ArenaGeometryBuilder 规范）：
+            // 中场集装箱: (|x|=8.1, |z|=5.5), 尺寸 2.2×4.2
+            // 侧翼集装箱: (|x|=16.75, z=-3.2 / 4.5), 尺寸 2.2×4.6 / 3.8
+            // 延长区箱群: (|x|=16.75, |z|=16.5 / 21.2), 尺寸 2.4×4.6
+            var containers = new (Vector2 center, Vector2 size)[]
             {
-                float cx = (float)(rng.NextDouble() * 32.0 - 16.0); // X ∈ [-16, 16]
-                float cz = (float)(rng.NextDouble() * 44.0 - 22.0); // Z ∈ [-22, 22]
-                float rx = (float)(1.5 + rng.NextDouble() * 2.5);   // 1.5 ~ 4.0m
-                float rz = (float)(1.5 + rng.NextDouble() * 2.5);
-                float angle = (float)(rng.NextDouble() * Mathf.PI);
-                float alpha = (float)(0.04 + rng.NextDouble() * 0.04); // 0.04 ~ 0.08
+                (new Vector2(-8.1f, -5.5f), new Vector2(2.2f, 4.2f)),
+                (new Vector2(8.1f, 5.5f), new Vector2(2.2f, 4.2f)),
+                (new Vector2(8.1f, -5.5f), new Vector2(2.2f, 4.2f)),
+                (new Vector2(-8.1f, 5.5f), new Vector2(2.2f, 4.2f)),
+                (new Vector2(-16.75f, -3.2f), new Vector2(2.2f, 4.6f)),
+                (new Vector2(-16.75f, 4.5f), new Vector2(2.2f, 3.8f)),
+                (new Vector2(16.75f, 3.2f), new Vector2(2.2f, 4.6f)),
+                (new Vector2(16.75f, -4.5f), new Vector2(2.2f, 3.8f)),
+                (new Vector2(-16.75f, -16.5f), new Vector2(2.4f, 4.6f)),
+                (new Vector2(16.75f, 16.5f), new Vector2(2.4f, 4.6f)),
+                (new Vector2(-16.75f, -21.2f), new Vector2(2.4f, 4.6f)),
+                (new Vector2(16.75f, 21.2f), new Vector2(2.4f, 4.6f)),
+            };
 
-                float cos = Mathf.Cos(angle);
-                float sin = Mathf.Sin(angle);
+            foreach (var c in containers)
+            {
+                float hx = c.size.x * 0.5f;
+                float hz = c.size.y * 0.5f;
+                Vector2[] corners =
+                {
+                    new Vector2(c.center.x - hx, c.center.y - hz),
+                    new Vector2(c.center.x + hx, c.center.y - hz),
+                    new Vector2(c.center.x - hx, c.center.y + hz),
+                    new Vector2(c.center.x + hx, c.center.y + hz)
+                };
 
-                float maxR = Mathf.Max(rx, rz);
-                int minPx = Mathf.Clamp(Mathf.FloorToInt((cx - maxR - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
-                int maxPx = Mathf.Clamp(Mathf.CeilToInt((cx + maxR - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
-                int minPy = Mathf.Clamp(Mathf.FloorToInt((cz - maxR - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
-                int maxPy = Mathf.Clamp(Mathf.CeilToInt((cz + maxR - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+                foreach (var corner in corners)
+                {
+                    DrawSoftSpot(ground, stainMask, corner.x, corner.y, 0.45f, 0.45f, stainColor, 0.09f);
+                }
+            }
+        }
+
+        private static void ApplyTireTrackArcs(Color[] ground, float[] stainMask, Color darkColor)
+        {
+            // 在主车道 (x=±6.2) 与侧翼走廊 (x=±10.4, ±16.75) 之间的转弯过渡区绘制 4 道双轨轮胎转弯擦痕弧线
+            var arcs = new (Vector2 center, float radius, float angleStart, float angleEnd)[]
+            {
+                (new Vector2(3.2f, -11.0f), 5.5f, 10f, 80f),
+                (new Vector2(-3.2f, -11.0f), 5.5f, 100f, 170f),
+                (new Vector2(3.2f, 11.0f), 5.5f, 190f, 260f),
+                (new Vector2(-3.2f, 11.0f), 5.5f, 280f, 350f),
+                (new Vector2(13.5f, 0f), 4.2f, 75f, 145f),
+                (new Vector2(-13.5f, 0f), 4.2f, 255f, 325f)
+            };
+
+            foreach (var arc in arcs)
+            {
+                DrawDualTireArc(ground, stainMask, arc.center, arc.radius, arc.angleStart, arc.angleEnd, darkColor, 0.055f);
+            }
+        }
+
+        private static void DrawDualTireArc(
+            Color[] ground,
+            float[] stainMask,
+            Vector2 center,
+            float radius,
+            float a0Deg,
+            float a1Deg,
+            Color color,
+            float alpha)
+        {
+            float rInner = radius - 0.22f;
+            float rOuter = radius + 0.22f;
+            float margin = 0.5f;
+
+            float minX = center.x - (radius + margin);
+            float maxX = center.x + (radius + margin);
+            float minZ = center.y - (radius + margin);
+            float maxZ = center.y + (radius + margin);
+
+            int minPx = Mathf.Clamp(Mathf.FloorToInt((minX - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+            int maxPx = Mathf.Clamp(Mathf.CeilToInt((maxX - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+            int minPy = Mathf.Clamp(Mathf.FloorToInt((minZ - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+            int maxPy = Mathf.Clamp(Mathf.CeilToInt((maxZ - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+
+            float rad0 = a0Deg * Mathf.Deg2Rad;
+            float rad1 = a1Deg * Mathf.Deg2Rad;
+            if (rad1 < rad0) { float t = rad0; rad0 = rad1; rad1 = t; }
+
+            const float trackWidth = 0.12f;
+
+            for (int py = minPy; py <= maxPy; py++)
+            {
+                float wz = WorldMinZ + (py + 0.5f) / GroundResolution * WorldSizeZ;
+                int row = py * GroundResolution;
+
+                for (int px = minPx; px <= maxPx; px++)
+                {
+                    float wx = WorldMinX + (px + 0.5f) / GroundResolution * WorldSizeX;
+                    float dx = wx - center.x;
+                    float dz = wz - center.y;
+                    float dist = Mathf.Sqrt(dx * dx + dz * dz);
+
+                    float ang = Mathf.Atan2(dz, dx);
+                    if (ang < 0f) ang += Mathf.PI * 2f;
+                    if (ang < rad0 || ang > rad1) continue;
+
+                    // 双轨：内胎与外胎
+                    float dInner = Mathf.Abs(dist - rInner);
+                    float dOuter = Mathf.Abs(dist - rOuter);
+                    float dMin = Mathf.Min(dInner, dOuter);
+
+                    if (dMin < trackWidth * 0.5f)
+                    {
+                        float t = 1.0f - (dMin / (trackWidth * 0.5f));
+                        float a = t * t * alpha;
+                        int idx = row + px;
+                        ground[idx] = Color.Lerp(ground[idx], color, a);
+                        stainMask[idx] = Mathf.Max(stainMask[idx], a * 1.5f);
+                    }
+                }
+            }
+        }
+
+        private static void ApplyOilAndRustSpots(Color[] ground, float[] stainMask, System.Random rng, Color stainColor, Color oilColor)
+        {
+            // 8 个小范围流痕与油迹
+            for (int i = 0; i < 8; i++)
+            {
+                float cx = (float)(rng.NextDouble() * 28.0 - 14.0);
+                float cz = (float)(rng.NextDouble() * 38.0 - 19.0);
+                float rx = (float)(0.6 + rng.NextDouble() * 1.2);
+                float rz = (float)(0.6 + rng.NextDouble() * 1.2);
+                float a = (float)(0.04 + rng.NextDouble() * 0.035);
+                Color c = (i % 2 == 0) ? oilColor : stainColor;
+                DrawSoftSpot(ground, stainMask, cx, cz, rx, rz, c, a);
+            }
+        }
+
+        private static void ApplyConcretePatches(Color[] ground, float[] stainMask, Palette palette)
+        {
+            // 3 处地表沥青与浅色修补补丁（体现码头维护感）
+            var patches = new (Vector2 pos, Vector2 size, float delta)[]
+            {
+                (new Vector2(3.5f, -12.5f), new Vector2(1.6f, 2.2f), -0.05f),
+                (new Vector2(-4.2f, 13.0f), new Vector2(2.0f, 1.4f), 0.04f),
+                (new Vector2(14.0f, -1.2f), new Vector2(1.5f, 2.5f), -0.04f)
+            };
+
+            foreach (var patch in patches)
+            {
+                float hx = patch.size.x * 0.5f;
+                float hz = patch.size.y * 0.5f;
+                int minPx = Mathf.Clamp(Mathf.FloorToInt((patch.pos.x - hx - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+                int maxPx = Mathf.Clamp(Mathf.CeilToInt((patch.pos.x + hx - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+                int minPy = Mathf.Clamp(Mathf.FloorToInt((patch.pos.y - hz - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+                int maxPy = Mathf.Clamp(Mathf.CeilToInt((patch.pos.y + hz - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+
+                for (int py = minPy; py <= maxPy; py++)
+                {
+                    float wz = WorldMinZ + (py + 0.5f) / GroundResolution * WorldSizeZ;
+                    int row = py * GroundResolution;
+                    for (int px = minPx; px <= maxPx; px++)
+                    {
+                        float wx = WorldMinX + (px + 0.5f) / GroundResolution * WorldSizeX;
+                        float dx = Mathf.Abs(wx - patch.pos.x);
+                        float dz = Mathf.Abs(wz - patch.pos.y);
+
+                        if (dx <= hx && dz <= hz)
+                        {
+                            int idx = row + px;
+                            // 边缘 3cm 黑色沥青灌缝
+                            float edgeDist = Mathf.Min(hx - dx, hz - dz);
+                            if (edgeDist < 0.035f)
+                            {
+                                ground[idx] = Color.Lerp(ground[idx], palette.hazardDark, 0.45f);
+                            }
+                            else
+                            {
+                                ground[idx] *= (1.0f + patch.delta);
+                            }
+                            stainMask[idx] = Mathf.Max(stainMask[idx], 0.08f);
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void DrawSoftSpot(
+            Color[] ground,
+            float[] stainMask,
+            float cx,
+            float cz,
+            float rx,
+            float rz,
+            Color color,
+            float alpha)
+        {
+            float maxR = Mathf.Max(rx, rz);
+            int minPx = Mathf.Clamp(Mathf.FloorToInt((cx - maxR - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+            int maxPx = Mathf.Clamp(Mathf.CeilToInt((cx + maxR - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+            int minPy = Mathf.Clamp(Mathf.FloorToInt((cz - maxR - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+            int maxPy = Mathf.Clamp(Mathf.CeilToInt((cz + maxR - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+
+            for (int py = minPy; py <= maxPy; py++)
+            {
+                float wz = WorldMinZ + (py + 0.5f) / GroundResolution * WorldSizeZ;
+                int row = py * GroundResolution;
+
+                for (int px = minPx; px <= maxPx; px++)
+                {
+                    float wx = WorldMinX + (px + 0.5f) / GroundResolution * WorldSizeX;
+                    float dx = wx - cx;
+                    float dz = wz - cz;
+                    float normDist = (dx * dx) / (rx * rx) + (dz * dz) / (rz * rz);
+                    if (normDist < 1.0f)
+                    {
+                        float t = 1.0f - Mathf.Sqrt(normDist);
+                        float falloff = t * t * (3f - 2f * t);
+                        float blend = falloff * alpha;
+                        int idx = row + px;
+                        ground[idx] = Color.Lerp(ground[idx], color, blend);
+                        stainMask[idx] = Mathf.Max(stainMask[idx], blend * 2.0f);
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region 黄色标线网与工业地表绘制
+
+        private static void ApplyIndustrialMarkings(Color[] ground, float[] markingMask, Palette palette)
+        {
+            float pxWorld = (WorldSizeX / GroundResolution + WorldSizeZ / GroundResolution) * 0.5f;
+            float edgeSoftness = 1.5f * pxWorld;
+
+            // 1. 绘制 ArenaLayoutV2 定义的标准标线 (LaneDash / Chevron / HazardBand / Ring / StencilText / SafetyLine)
+            var markings = ArenaLayoutV2.GroundMarkings;
+            if (markings != null)
+            {
+                foreach (var marking in markings)
+                {
+                    switch (marking.Kind)
+                    {
+                        case ArenaLayoutV2.GroundMarkingKind.LaneDash:
+                            DrawLaneDash(ground, markingMask, marking, palette, edgeSoftness);
+                            break;
+                        case ArenaLayoutV2.GroundMarkingKind.Chevron:
+                            DrawChevron(ground, markingMask, marking, palette, edgeSoftness);
+                            break;
+                        case ArenaLayoutV2.GroundMarkingKind.HazardBand:
+                            DrawHazardBand(ground, markingMask, marking, palette, edgeSoftness);
+                            break;
+                        case ArenaLayoutV2.GroundMarkingKind.Ring:
+                            DrawRing(ground, markingMask, marking, palette, edgeSoftness);
+                            break;
+                        case ArenaLayoutV2.GroundMarkingKind.StencilText:
+                            DrawStencilText(ground, markingMask, marking, palette, edgeSoftness, pxWorld);
+                            break;
+                        case ArenaLayoutV2.GroundMarkingKind.SafetyLine:
+                            DrawSafetyLine(ground, markingMask, marking, palette, edgeSoftness);
+                            break;
+                    }
+                }
+            }
+
+            // 2. 坡道口与门框周边黄黑警示带强化 (中央四向 + 侧翼四向坡底口)
+            ApplyRampEntranceHazardBands(ground, markingMask, palette, edgeSoftness);
+
+            // 3. 出生过渡区斑马线 (Spawn Gate 过渡 + 侧梯下落步道)
+            ApplyZebraCrossings(ground, markingMask, palette, edgeSoftness);
+
+            // 4. 集装箱位浅色 L 形角标框与库位文字 (Bay Numbers)
+            ApplyContainerCornerBrackets(ground, markingMask, palette, edgeSoftness, pxWorld);
+
+            // 5. 中央高台投影区工业底座基座边框线
+            ApplyCentralPlatformBaseBorder(ground, markingMask, palette, edgeSoftness);
+        }
+
+        private static void ApplyRampEntranceHazardBands(Color[] ground, float[] markingMask, Palette palette, float edge)
+        {
+            // 在主要坡道底部平地交界处增加明显的黄黑斜纹警示带
+            var bands = new (Vector2 center, Vector2 size, float yaw)[]
+            {
+                (new Vector2(0f, -9.9f), new Vector2(4.4f, 0.6f), 0f),   // 中央南坡底
+                (new Vector2(0f, 9.9f), new Vector2(4.4f, 0.6f), 0f),    // 中央北坡底
+                (new Vector2(-9.9f, 0f), new Vector2(0.6f, 4.4f), 0f),   // 中央西坡底
+                (new Vector2(9.9f, 0f), new Vector2(0.6f, 4.4f), 0f),    // 中央东坡底
+                (new Vector2(-13.45f, -11.25f), new Vector2(3.6f, 0.55f), 0f), // 侧翼西南坡底
+                (new Vector2(-13.45f, 11.25f), new Vector2(3.6f, 0.55f), 0f),  // 侧翼西北坡底
+                (new Vector2(13.45f, -11.25f), new Vector2(3.6f, 0.55f), 0f),  // 侧翼东南坡底
+                (new Vector2(13.45f, 11.25f), new Vector2(3.6f, 0.55f), 0f),   // 侧翼东北坡底
+            };
+
+            foreach (var b in bands)
+            {
+                var m = new ArenaLayoutV2.GroundMarking(ArenaLayoutV2.GroundMarkingKind.HazardBand, b.center, b.size, b.yaw, Team.Neutral);
+                DrawHazardBand(ground, markingMask, m, palette, edge);
+            }
+        }
+
+        private static void ApplyZebraCrossings(Color[] ground, float[] markingMask, Palette palette, float edge)
+        {
+            // 契约与参考图：出生台阶过渡区与 SpawnGate 出口斑马线
+            // 采用略微降饱和的奶油白 (Color.Lerp(white, groundBase, 0.22f))，保证不抢墨色
+            Color zebraColor = Color.Lerp(Color.white, palette.groundBase, 0.22f);
+
+            // 1. 出生大门前方横向斑马线 (z = ±20.8f, 宽 7.2m, 高 1.2m)
+            DrawZebraCrossingBand(ground, markingMask, new Vector2(0f, -20.8f), new Vector2(7.2f, 1.2f), 0.55f, 0.35f, true, zebraColor, edge);
+            DrawZebraCrossingBand(ground, markingMask, new Vector2(0f, 20.8f), new Vector2(7.2f, 1.2f), 0.55f, 0.35f, true, zebraColor, edge);
+
+            // 2. 出生侧梯着陆口过渡斑马线 (|x| ≈ 12.0m, |z| ≈ 25.2m)
+            DrawZebraCrossingBand(ground, markingMask, new Vector2(-12.4f, -25.2f), new Vector2(2.4f, 3.2f), 0.50f, 0.30f, false, zebraColor, edge);
+            DrawZebraCrossingBand(ground, markingMask, new Vector2(12.4f, -25.2f), new Vector2(2.4f, 3.2f), 0.50f, 0.30f, false, zebraColor, edge);
+            DrawZebraCrossingBand(ground, markingMask, new Vector2(-12.4f, 25.2f), new Vector2(2.4f, 3.2f), 0.50f, 0.30f, false, zebraColor, edge);
+            DrawZebraCrossingBand(ground, markingMask, new Vector2(12.4f, 25.2f), new Vector2(2.4f, 3.2f), 0.50f, 0.30f, false, zebraColor, edge);
+        }
+
+        private static void DrawZebraCrossingBand(
+            Color[] ground,
+            float[] markingMask,
+            Vector2 center,
+            Vector2 size,
+            float barWidth,
+            float barGap,
+            bool isHorizontal,
+            Color color,
+            float edge)
+        {
+            float halfX = size.x * 0.5f;
+            float halfZ = size.y * 0.5f;
+            float bound = Mathf.Max(halfX, halfZ) + edge;
+
+            int minPx = Mathf.Clamp(Mathf.FloorToInt((center.x - bound - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+            int maxPx = Mathf.Clamp(Mathf.CeilToInt((center.x + bound - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+            int minPy = Mathf.Clamp(Mathf.FloorToInt((center.y - bound - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+            int maxPy = Mathf.Clamp(Mathf.CeilToInt((center.y + bound - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+
+            float period = barWidth + barGap;
+
+            for (int py = minPy; py <= maxPy; py++)
+            {
+                float wz = WorldMinZ + (py + 0.5f) / GroundResolution * WorldSizeZ;
+                int row = py * GroundResolution;
+
+                for (int px = minPx; px <= maxPx; px++)
+                {
+                    float wx = WorldMinX + (px + 0.5f) / GroundResolution * WorldSizeX;
+                    float dx = wx - center.x;
+                    float dz = wz - center.y;
+
+                    if (Mathf.Abs(dx) > halfX || Mathf.Abs(dz) > halfZ) continue;
+
+                    float distBorder = Mathf.Min(halfX - Mathf.Abs(dx), halfZ - Mathf.Abs(dz));
+                    float tBorder = Mathf.Clamp01((distBorder + edge * 0.5f) / edge);
+
+                    float coord = isHorizontal ? (wx + halfX) : (wz + halfZ);
+                    float phase = Mathf.Repeat(coord, period);
+                    float distBar = (barWidth * 0.5f) - Mathf.Abs(phase - barWidth * 0.5f);
+                    float tBar = Mathf.Clamp01((distBar + edge * 0.5f) / edge);
+
+                    float alpha = tBorder * tBar * 0.85f;
+                    if (alpha > 0.001f)
+                    {
+                        int idx = row + px;
+                        ground[idx] = Color.Lerp(ground[idx], color, alpha);
+                        markingMask[idx] = Mathf.Max(markingMask[idx], alpha);
+                    }
+                }
+            }
+        }
+
+        private static void ApplyContainerCornerBrackets(
+            Color[] ground,
+            float[] markingMask,
+            Palette palette,
+            float edge,
+            float pxWorld)
+        {
+            // 码头集装箱车位 L 形角标 (L-Brackets)
+            // 采用淡黄色 (hazardYellow 浅化 35%)，臂长 0.55m，线宽 0.08m
+            Color bracketColor = Color.Lerp(palette.hazardYellow, palette.concreteLight, 0.35f);
+
+            var bays = new (Vector2 center, Vector2 size, string name)[]
+            {
+                (new Vector2(-8.1f, -5.5f), new Vector2(2.2f, 4.2f), "BAY 01"),
+                (new Vector2(8.1f, 5.5f), new Vector2(2.2f, 4.2f), "BAY 02"),
+                (new Vector2(8.1f, -5.5f), new Vector2(2.2f, 4.2f), "BAY 03"),
+                (new Vector2(-8.1f, 5.5f), new Vector2(2.2f, 4.2f), "BAY 04"),
+                (new Vector2(-16.75f, -3.2f), new Vector2(2.2f, 4.6f), "BAY 05"),
+                (new Vector2(-16.75f, 4.5f), new Vector2(2.2f, 3.8f), "BAY 06"),
+                (new Vector2(16.75f, 3.2f), new Vector2(2.2f, 4.6f), "BAY 07"),
+                (new Vector2(16.75f, -4.5f), new Vector2(2.2f, 3.8f), "BAY 08"),
+            };
+
+            foreach (var bay in bays)
+            {
+                DrawSingleContainerBrackets(ground, markingMask, bay.center, bay.size, bracketColor, edge);
+
+                // 在箱位旁地面印淡字模编号
+                var textM = new ArenaLayoutV2.GroundMarking(
+                    ArenaLayoutV2.GroundMarkingKind.StencilText,
+                    bay.center + new Vector2(0f, bay.size.y * 0.5f + 0.45f),
+                    new Vector2(1.8f, 0.45f),
+                    0f,
+                    Team.Neutral,
+                    bay.name);
+                DrawStencilText(ground, markingMask, textM, palette, edge, pxWorld);
+            }
+        }
+
+        private static void DrawSingleContainerBrackets(
+            Color[] ground,
+            float[] markingMask,
+            Vector2 center,
+            Vector2 size,
+            Color color,
+            float edge)
+        {
+            float hx = size.x * 0.5f + 0.12f;
+            float hz = size.y * 0.5f + 0.12f;
+            const float armLen = 0.55f;
+            const float stroke = 0.08f;
+
+            Vector2[] corners =
+            {
+                new Vector2(center.x - hx, center.y - hz),
+                new Vector2(center.x + hx, center.y - hz),
+                new Vector2(center.x - hx, center.y + hz),
+                new Vector2(center.x + hx, center.y + hz)
+            };
+
+            float[] signX = { 1f, -1f, 1f, -1f };
+            float[] signZ = { 1f, 1f, -1f, -1f };
+
+            for (int i = 0; i < 4; i++)
+            {
+                Vector2 c = corners[i];
+                float sx = signX[i];
+                float sz = signZ[i];
+
+                float minX = Mathf.Min(c.x, c.x + sx * armLen) - stroke;
+                float maxX = Mathf.Max(c.x, c.x + sx * armLen) + stroke;
+                float minZ = Mathf.Min(c.y, c.y + sz * armLen) - stroke;
+                float maxZ = Mathf.Max(c.y, c.y + sz * armLen) + stroke;
+
+                int minPx = Mathf.Clamp(Mathf.FloorToInt((minX - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+                int maxPx = Mathf.Clamp(Mathf.CeilToInt((maxX - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+                int minPy = Mathf.Clamp(Mathf.FloorToInt((minZ - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+                int maxPy = Mathf.Clamp(Mathf.CeilToInt((maxZ - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
 
                 for (int py = minPy; py <= maxPy; py++)
                 {
@@ -378,63 +1009,74 @@ namespace P1.Editor
                     for (int px = minPx; px <= maxPx; px++)
                     {
                         float wx = WorldMinX + (px + 0.5f) / GroundResolution * WorldSizeX;
+                        float lx = (wx - c.x) * sx;
+                        float lz = (wz - c.y) * sz;
 
-                        float dx = wx - cx;
-                        float dz = wz - cz;
-                        float lx = dx * cos + dz * sin;
-                        float lz = -dx * sin + dz * cos;
+                        bool onHoriz = (lx >= -0.02f && lx <= armLen && Mathf.Abs(lz) <= stroke * 0.5f);
+                        bool onVert = (lz >= -0.02f && lz <= armLen && Mathf.Abs(lx) <= stroke * 0.5f);
 
-                        float normDist = (lx * lx) / (rx * rx) + (lz * lz) / (rz * rz);
-                        if (normDist < 1.0f)
+                        if (onHoriz || onVert)
                         {
-                            float t = 1.0f - Mathf.Sqrt(normDist);
-                            float falloff = t * t * (3f - 2f * t); // smoothstep
-                            float blend = falloff * alpha;
-                            ground[row + px] = Color.Lerp(ground[row + px], stainBase, blend);
+                            int idx = row + px;
+                            ground[idx] = Color.Lerp(ground[idx], color, 0.85f);
+                            markingMask[idx] = Mathf.Max(markingMask[idx], 0.85f);
                         }
                     }
                 }
             }
         }
 
-        private static void ApplyGroundMarkings(Color[] ground, Palette palette)
+        private static void ApplyCentralPlatformBaseBorder(
+            Color[] ground,
+            float[] markingMask,
+            Palette palette,
+            float edge)
         {
-            var markings = ArenaLayoutV2.GroundMarkings;
-            if (markings == null || markings.Count == 0) return;
+            // 中央争夺高台基础底框线（外围 0.35m 基座边缘轮廓，微深炭色）
+            const float halfSize = 5.0f;
+            float minX = -halfSize - 0.25f;
+            float maxX = halfSize + 0.25f;
+            float minZ = -halfSize - 0.25f;
+            float maxZ = halfSize + 0.25f;
 
-            // 1.5 像素对应的世界尺寸 (~0.035m)
-            float pxWorld = (WorldSizeX / GroundResolution + WorldSizeZ / GroundResolution) * 0.5f;
-            float edgeSoftness = 1.5f * pxWorld;
+            int minPx = Mathf.Clamp(Mathf.FloorToInt((minX - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+            int maxPx = Mathf.Clamp(Mathf.CeilToInt((maxX - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
+            int minPy = Mathf.Clamp(Mathf.FloorToInt((minZ - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+            int maxPy = Mathf.Clamp(Mathf.CeilToInt((maxZ - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
 
-            foreach (var marking in markings)
+            Color borderColor = Color.Lerp(palette.concreteDark, palette.hazardDark, 0.40f);
+
+            for (int py = minPy; py <= maxPy; py++)
             {
-                switch (marking.Kind)
+                float wz = WorldMinZ + (py + 0.5f) / GroundResolution * WorldSizeZ;
+                int row = py * GroundResolution;
+
+                for (int px = minPx; px <= maxPx; px++)
                 {
-                    case ArenaLayoutV2.GroundMarkingKind.LaneDash:
-                        DrawLaneDash(ground, marking, palette, edgeSoftness);
-                        break;
-                    case ArenaLayoutV2.GroundMarkingKind.Chevron:
-                        DrawChevron(ground, marking, palette, edgeSoftness);
-                        break;
-                    case ArenaLayoutV2.GroundMarkingKind.HazardBand:
-                        DrawHazardBand(ground, marking, palette, edgeSoftness);
-                        break;
-                    case ArenaLayoutV2.GroundMarkingKind.Ring:
-                        DrawRing(ground, marking, palette, edgeSoftness);
-                        break;
-                    case ArenaLayoutV2.GroundMarkingKind.StencilText:
-                        DrawStencilText(ground, marking, palette, edgeSoftness, pxWorld);
-                        break;
-                    case ArenaLayoutV2.GroundMarkingKind.SafetyLine:
-                        DrawSafetyLine(ground, marking, palette, edgeSoftness);
-                        break;
+                    float wx = WorldMinX + (px + 0.5f) / GroundResolution * WorldSizeX;
+                    float dx = Mathf.Abs(wx);
+                    float dz = Mathf.Abs(wz);
+
+                    if (dx <= halfSize + 0.25f && dz <= halfSize + 0.25f)
+                    {
+                        float dist = Mathf.Max(dx - halfSize, dz - halfSize);
+                        if (dist >= 0f && dist <= 0.22f)
+                        {
+                            int idx = row + px;
+                            ground[idx] = Color.Lerp(ground[idx], borderColor, 0.30f);
+                        }
+                    }
                 }
             }
         }
 
-        private static void DrawLaneDash(Color[] ground, ArenaLayoutV2.GroundMarking m, Palette palette, float edge)
+        private static void DrawLaneDash(
+            Color[] ground,
+            float[] markingMask,
+            ArenaLayoutV2.GroundMarking m,
+            Palette palette,
+            float edge)
         {
-            // 沿较长轴画 2m 实 / 1.5m 空虚线，线宽取短边；颜色 groundMarking
             bool isLongZ = m.SizeXZ.y >= m.SizeXZ.x;
             float length = isLongZ ? m.SizeXZ.y : m.SizeXZ.x;
             float width = isLongZ ? m.SizeXZ.x : m.SizeXZ.y;
@@ -451,6 +1093,8 @@ namespace P1.Editor
             int maxPx = Mathf.Clamp(Mathf.CeilToInt((m.CenterXZ.x + bound - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
             int minPy = Mathf.Clamp(Mathf.FloorToInt((m.CenterXZ.y - bound - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
             int maxPy = Mathf.Clamp(Mathf.CeilToInt((m.CenterXZ.y + bound - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+
+            Color markingColor = Color.Lerp(palette.groundMarking, palette.hazardYellow, 0.25f);
 
             for (int py = minPy; py <= maxPy; py++)
             {
@@ -474,7 +1118,7 @@ namespace P1.Editor
                     // 虚线周期 3.5m（2.0m 实 / 1.5m 空）
                     float pos = along + length * 0.5f;
                     float cycle = Mathf.Repeat(pos, 3.5f);
-                    float distDash = 1.0f - Mathf.Abs(cycle - 1.0f); // cycle ∈ [0, 2] 为实线，中点 1.0，半宽 1.0
+                    float distDash = 1.0f - Mathf.Abs(cycle - 1.0f);
 
                     float dist = Mathf.Min(distAcross, Mathf.Min(distEnd, distDash));
                     float t = Mathf.Clamp01((dist + edge * 0.5f) / edge);
@@ -482,22 +1126,34 @@ namespace P1.Editor
 
                     if (alpha > 0.001f)
                     {
-                        ground[row + px] = Color.Lerp(ground[row + px], palette.groundMarking, alpha);
+                        int idx = row + px;
+                        ground[idx] = Color.Lerp(ground[idx], markingColor, alpha);
+                        markingMask[idx] = Mathf.Max(markingMask[idx], alpha);
                     }
                 }
             }
         }
 
-        private static void DrawChevron(Color[] ground, ArenaLayoutV2.GroundMarking m, Palette palette, float edge)
+        private static void DrawChevron(
+            Color[] ground,
+            float[] markingMask,
+            ArenaLayoutV2.GroundMarking m,
+            Palette palette,
+            float edge)
         {
-            // 在矩形内画 2-3 道嵌套 V 形箭头，默认指向 +Z，再按 Yaw 旋转
-            // TeamA/TeamB 用风格队色与白色混合，Neutral 用 groundMarkingAccent
             Color chevronColor;
             switch (m.Team)
             {
-                case Team.TeamA: chevronColor = Color.Lerp(palette.teamAPad, Color.white, 0.40f); break;
-                case Team.TeamB: chevronColor = Color.Lerp(palette.teamBPad, Color.white, 0.40f); break;
-                default: chevronColor = palette.groundMarkingAccent; break;
+                case Team.TeamA:
+                    // 降饱和混合，确保不抢前置涂地墨水
+                    chevronColor = Color.Lerp(palette.teamAPad, palette.groundBase, 0.45f);
+                    break;
+                case Team.TeamB:
+                    chevronColor = Color.Lerp(palette.teamBPad, palette.groundBase, 0.45f);
+                    break;
+                default:
+                    chevronColor = Color.Lerp(palette.groundMarkingAccent, palette.hazardYellow, 0.30f);
+                    break;
             }
 
             float rad = -m.Yaw * Mathf.Deg2Rad;
@@ -552,15 +1208,21 @@ namespace P1.Editor
                     float alpha = t * t * (3f - 2f * t);
                     if (alpha > 0.001f)
                     {
-                        ground[row + px] = Color.Lerp(ground[row + px], chevronColor, alpha);
+                        int idx = row + px;
+                        ground[idx] = Color.Lerp(ground[idx], chevronColor, alpha);
+                        markingMask[idx] = Mathf.Max(markingMask[idx], alpha);
                     }
                 }
             }
         }
 
-        private static void DrawHazardBand(Color[] ground, ArenaLayoutV2.GroundMarking m, Palette palette, float edge)
+        private static void DrawHazardBand(
+            Color[] ground,
+            float[] markingMask,
+            ArenaLayoutV2.GroundMarking m,
+            Palette palette,
+            float edge)
         {
-            // 矩形内 45° 黄黑条纹，黄 hazardYellow，黑 hazardDark
             float rad = -m.Yaw * Mathf.Deg2Rad;
             float cos = Mathf.Cos(rad);
             float sin = Mathf.Sin(rad);
@@ -599,14 +1261,20 @@ namespace P1.Editor
                     float stripeAlpha = SmoothStep01(0.5f - 0.05f, 0.5f + 0.05f, phase);
 
                     Color stripeColor = Color.Lerp(palette.hazardYellow, palette.hazardDark, stripeAlpha);
-                    ground[row + px] = Color.Lerp(ground[row + px], stripeColor, rectAlpha);
+                    int idx = row + px;
+                    ground[idx] = Color.Lerp(ground[idx], stripeColor, rectAlpha);
+                    markingMask[idx] = Mathf.Max(markingMask[idx], rectAlpha);
                 }
             }
         }
 
-        private static void DrawRing(Color[] ground, ArenaLayoutV2.GroundMarking m, Palette palette, float edge)
+        private static void DrawRing(
+            Color[] ground,
+            float[] markingMask,
+            ArenaLayoutV2.GroundMarking m,
+            Palette palette,
+            float edge)
         {
-            // 圆环：半径 size.x，线宽 size.y
             float radius = m.SizeXZ.x;
             float lineWidth = m.SizeXZ.y;
             float bound = radius + lineWidth * 0.5f + edge;
@@ -615,6 +1283,8 @@ namespace P1.Editor
             int maxPx = Mathf.Clamp(Mathf.CeilToInt((m.CenterXZ.x + bound - WorldMinX) / WorldSizeX * GroundResolution), 0, GroundResolution - 1);
             int minPy = Mathf.Clamp(Mathf.FloorToInt((m.CenterXZ.y - bound - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
             int maxPy = Mathf.Clamp(Mathf.CeilToInt((m.CenterXZ.y + bound - WorldMinZ) / WorldSizeZ * GroundResolution), 0, GroundResolution - 1);
+
+            Color ringColor = Color.Lerp(palette.groundMarking, palette.hazardYellow, 0.20f);
 
             for (int py = minPy; py <= maxPy; py++)
             {
@@ -629,20 +1299,35 @@ namespace P1.Editor
                     float r = Mathf.Sqrt(dx * dx + dz * dz);
 
                     float distRing = lineWidth * 0.5f - Mathf.Abs(r - radius);
+
+                    // 在 0°, 90°, 180°, 270° 增加 4 个放射状定位刻度标
+                    float ang = Mathf.Atan2(dz, dx) * Mathf.Rad2Deg;
+                    float angMod = Mathf.Repeat(ang + 45f, 90f) - 45f;
+                    if (Mathf.Abs(angMod) < 2.5f && Mathf.Abs(r - radius) < lineWidth * 1.4f)
+                    {
+                        distRing = Mathf.Max(distRing, 0.05f);
+                    }
+
                     float t = Mathf.Clamp01((distRing + edge * 0.5f) / edge);
                     float alpha = t * t * (3f - 2f * t);
 
                     if (alpha > 0.001f)
                     {
-                        ground[row + px] = Color.Lerp(ground[row + px], palette.groundMarking, alpha);
+                        int idx = row + px;
+                        ground[idx] = Color.Lerp(ground[idx], ringColor, alpha);
+                        markingMask[idx] = Mathf.Max(markingMask[idx], alpha);
                     }
                 }
             }
         }
 
-        private static void DrawSafetyLine(Color[] ground, ArenaLayoutV2.GroundMarking m, Palette palette, float edge)
+        private static void DrawSafetyLine(
+            Color[] ground,
+            float[] markingMask,
+            ArenaLayoutV2.GroundMarking m,
+            Palette palette,
+            float edge)
         {
-            // 实线，hazardYellow，透明度 0.75
             float rad = -m.Yaw * Mathf.Deg2Rad;
             float cos = Mathf.Cos(rad);
             float sin = Mathf.Sin(rad);
@@ -671,11 +1356,13 @@ namespace P1.Editor
 
                     float dist = Mathf.Min(halfX - Mathf.Abs(lx), halfZ - Mathf.Abs(lz));
                     float t = Mathf.Clamp01((dist + edge * 0.5f) / edge);
-                    float alpha = t * t * (3f - 2f * t) * 0.75f;
+                    float alpha = t * t * (3f - 2f * t) * 0.85f;
 
                     if (alpha > 0.001f)
                     {
-                        ground[row + px] = Color.Lerp(ground[row + px], palette.hazardYellow, alpha);
+                        int idx = row + px;
+                        ground[idx] = Color.Lerp(ground[idx], palette.hazardYellow, alpha);
+                        markingMask[idx] = Mathf.Max(markingMask[idx], alpha);
                     }
                 }
             }
@@ -683,6 +1370,7 @@ namespace P1.Editor
 
         private static void DrawStencilText(
             Color[] ground,
+            float[] markingMask,
             ArenaLayoutV2.GroundMarking m,
             Palette palette,
             float edge,
@@ -705,8 +1393,8 @@ namespace P1.Editor
             Color textColor;
             switch (m.Team)
             {
-                case Team.TeamA: textColor = palette.teamAPad; break;
-                case Team.TeamB: textColor = palette.teamBPad; break;
+                case Team.TeamA: textColor = Color.Lerp(palette.teamAPad, palette.groundBase, 0.40f); break;
+                case Team.TeamB: textColor = Color.Lerp(palette.teamBPad, palette.groundBase, 0.40f); break;
                 default: textColor = palette.groundMarking; break;
             }
 
@@ -738,12 +1426,10 @@ namespace P1.Editor
                     if (Mathf.Abs(lx) > textW * 0.5f + pxWorld || Mathf.Abs(lz) > textH * 0.5f + pxWorld)
                         continue;
 
-                    // 2×2 超采样进行软边抗锯齿
                     float hits = 0f;
                     for (int sy = -1; sy <= 1; sy += 2)
                     {
                         float slz = lz + sy * sub;
-                        // top row (0) at +lz
                         float v = (textH * 0.5f - slz) / scale;
                         int row = Mathf.FloorToInt(v);
                         if (row < 0 || row > 6) continue;
@@ -751,7 +1437,6 @@ namespace P1.Editor
                         for (int sx = -1; sx <= 1; sx += 2)
                         {
                             float slx = lx + sx * sub;
-                            // col (0) at -lx
                             float u = (slx + textW * 0.5f) / scale;
                             if (u < 0f || u >= gridW) continue;
 
@@ -770,7 +1455,9 @@ namespace P1.Editor
 
                     if (hits > 0.001f)
                     {
-                        ground[rowOffset + px] = Color.Lerp(ground[rowOffset + px], textColor, hits);
+                        int idx = rowOffset + px;
+                        ground[idx] = Color.Lerp(ground[idx], textColor, hits);
+                        markingMask[idx] = Mathf.Max(markingMask[idx], hits);
                     }
                 }
             }
@@ -836,7 +1523,7 @@ namespace P1.Editor
             }
         }
 
-        private static int ApplyEnvironmentAO(Color[] ground)
+        private static int ApplyEnvironmentAO(Color[] ground, float[] aoMap)
         {
             var arenaRoot = GameObject.Find("Arena_40x56");
             if (arenaRoot == null)
@@ -873,7 +1560,6 @@ namespace P1.Editor
                 }
             }
 
-            // 预构建顶面快速遮罩
             var excludedMask = new bool[GroundResolution * GroundResolution];
             foreach (var top in topSurfaces)
             {
@@ -898,7 +1584,7 @@ namespace P1.Editor
                 }
             }
 
-            // 2. 收集投射阴影的 Collider（跳过 isTrigger、跳过 bounds.max.y > 4 的高空装饰，跳过主地面自身）
+            // 2. 收集投射阴影的 Collider
             var casters = new List<ShadowCaster>(allColliders.Length);
             foreach (var col in allColliders)
             {
@@ -920,9 +1606,6 @@ namespace P1.Editor
             }
 
             // 3. 计算软阴影：外围 0.7m 软阴影（最大压暗 22%），内部轻压暗 10%
-            var aoMap = new float[GroundResolution * GroundResolution];
-            for (int i = 0; i < aoMap.Length; i++) aoMap[i] = 1.0f;
-
             float shadowRadius = 0.7f;
             foreach (var caster in casters)
             {
@@ -953,13 +1636,13 @@ namespace P1.Editor
                             float factor = 1.0f;
                             if (isInside)
                             {
-                                factor = 0.90f; // 矩形内部轻压暗 10%
+                                factor = 0.90f;
                             }
                             else if (dist < shadowRadius)
                             {
                                 float t = 1.0f - dist / shadowRadius;
                                 float smooth = t * t * (3f - 2f * t);
-                                factor = 1.0f - 0.22f * smooth; // 矩形外 0.7m 最大压暗 22%
+                                factor = 1.0f - 0.22f * smooth;
                             }
 
                             if (factor < aoMap[idx])
@@ -982,7 +1665,7 @@ namespace P1.Editor
 
         #endregion
 
-        #region 横幅图集烘焙 (1024×1024, RGBA)
+        #region 横幅图集烘焙 (1024×1024, RGBA, 几何大胆风)
 
         public static void BakeBannerAtlas(ArenaStyleSO style)
         {
@@ -996,16 +1679,16 @@ namespace P1.Editor
             // 1024×1024，RGBA32，四块 512×512
             var pixels = new Color32[BannerResolution * BannerResolution];
 
-            // 索引 0: (0, 0) 左下 -> 中性奶油底 + 深色 "P1 // TURF" + 波浪/集装箱条纹
+            // 索引 0: (0, 0) 左下 -> 中性货运标语 Neutral Turf ("P1 // TURF")
             BakeQuadrantNeutralTurf(pixels, 0, 0, palette);
 
-            // 索引 1: (0.5, 0) 右下 -> 黄黑警示斜纹 + "CARGO"
+            // 索引 1: (0.5, 0) 右下 -> 工业警示货运图集 Hazard Cargo ("CARGO // 01")
             BakeQuadrantHazardCargo(pixels, 512, 0, palette);
 
-            // 索引 2: (0, 0.5) 左上 -> Team A 橙底白箭头 + "A" + 队色条
+            // 索引 2: (0, 0.5) 左上 -> Team A 专属横幅 ("TEAM A // SPLAT")
             BakeQuadrantTeamA(pixels, 0, 512, palette);
 
-            // 索引 3: (0.5, 0.5) 右上 -> Team B 蓝底白箭头 + "B" + 队色条
+            // 索引 3: (0.5, 0.5) 右上 -> Team B 专属横幅 ("TEAM B // WAVE")
             BakeQuadrantTeamB(pixels, 512, 512, palette);
 
             var bannerTex = new Texture2D(BannerResolution, BannerResolution, TextureFormat.RGBA32, false);
@@ -1015,125 +1698,65 @@ namespace P1.Editor
             byte[] pngBytes = bannerTex.EncodeToPNG();
             UnityEngine.Object.DestroyImmediate(bannerTex);
 
-            string directory = Path.GetDirectoryName(BannerAtlasPath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-            File.WriteAllBytes(BannerAtlasPath, pngBytes);
-            AssetDatabase.ImportAsset(BannerAtlasPath, ImportAssetOptions.ForceUpdate);
+            WriteFileAndImport(BannerAtlasPath, pngBytes);
 
             sw.Stop();
             Debug.Log($"[ArenaGroundTextureBaker] 横幅图集已生成: {BannerAtlasPath}，耗时: {sw.ElapsedMilliseconds} ms");
         }
 
-        private static void BakeQuadrantTeamA(Color32[] pixels, int startX, int startY, Palette palette)
-        {
-            // 左上：Team A 橙底白箭头 + "A" + 队色条
-            Color32 teamAColor = (Color32)palette.teamAPad;
-            Color32 white = new Color32(255, 255, 255, 255);
-
-            for (int qy = 0; qy < 512; qy++)
-            {
-                for (int qx = 0; qx < 512; qx++)
-                {
-                    float frameAlpha = CalcBannerFrameAlpha(qx, qy);
-                    if (frameAlpha <= 0f) continue;
-
-                    Color32 bg = teamAColor;
-
-                    // 队色条：上下白色竞速饰条
-                    if ((qy >= 435 && qy <= 465) || (qy >= 45 && qy <= 75))
-                    {
-                        bg = white;
-                    }
-                    else if ((qy >= 425 && qy <= 430) || (qy >= 80 && qy <= 85))
-                    {
-                        bg = new Color32(210, 80, 10, 255);
-                    }
-
-                    int idx = (startY + qy) * BannerResolution + (startX + qx);
-                    bg.a = (byte)Mathf.RoundToInt(255 * frameAlpha);
-                    pixels[idx] = bg;
-                }
-            }
-
-            // 白箭头（向上 V 形指示标）
-            DrawBannerChevron(pixels, startX, startY, 256f, 395f, 210f, 65f, 24f, white);
-
-            // 大号字母 "A"（5×7 放大 28 倍，高 196px，居中）
-            DrawBannerText(pixels, startX, startY, "A", 256f, 225f, 28f, white);
-        }
-
-        private static void BakeQuadrantTeamB(Color32[] pixels, int startX, int startY, Palette palette)
-        {
-            // 右上：Team B 蓝底白箭头 + "B" + 队色条
-            Color32 teamBColor = (Color32)palette.teamBPad;
-            Color32 white = new Color32(255, 255, 255, 255);
-
-            for (int qy = 0; qy < 512; qy++)
-            {
-                for (int qx = 0; qx < 512; qx++)
-                {
-                    float frameAlpha = CalcBannerFrameAlpha(qx, qy);
-                    if (frameAlpha <= 0f) continue;
-
-                    Color32 bg = teamBColor;
-
-                    // 队色条：上下白色竞速饰条
-                    if ((qy >= 435 && qy <= 465) || (qy >= 45 && qy <= 75))
-                    {
-                        bg = white;
-                    }
-                    else if ((qy >= 425 && qy <= 430) || (qy >= 80 && qy <= 85))
-                    {
-                        bg = new Color32(20, 50, 180, 255);
-                    }
-
-                    int idx = (startY + qy) * BannerResolution + (startX + qx);
-                    bg.a = (byte)Mathf.RoundToInt(255 * frameAlpha);
-                    pixels[idx] = bg;
-                }
-            }
-
-            // 白箭头
-            DrawBannerChevron(pixels, startX, startY, 256f, 395f, 210f, 65f, 24f, white);
-
-            // 大号字母 "B"
-            DrawBannerText(pixels, startX, startY, "B", 256f, 225f, 28f, white);
-        }
-
         private static void BakeQuadrantNeutralTurf(Color32[] pixels, int startX, int startY, Palette palette)
         {
-            // 左下：中性奶油底 + 深色 "P1 // TURF" + 波浪/集装箱条纹
+            // 索引 0 (左下): 几何斜切拼色（上半暗板岩 + 下半暖奶油白），15° 斜切带 6px hazardYellow 饰条，
+            // 45° 几何高光切带，大写粗体 "P1 // TURF" + "DOCK 01 // CRANE ZONE" + "BERTH 04"。
             Color creamBase = new Color(0.92f, 0.90f, 0.83f, 1f);
-            Color containerSlate = palette.containerSlate;
-            Color concreteDark = palette.concreteDark;
+            Color darkSlate = Color.Lerp(palette.containerSlate, palette.hazardDark, 0.40f);
+            Color yellow = palette.hazardYellow;
+            Color textDark = new Color(0.12f, 0.13f, 0.15f, 1f);
+            Color white = Color.white;
 
             for (int qy = 0; qy < 512; qy++)
             {
                 for (int qx = 0; qx < 512; qx++)
                 {
-                    float frameAlpha = CalcBannerFrameAlpha(qx, qy);
+                    float frameAlpha = CalcBannerChamferFrameAlpha(qx, qy);
                     if (frameAlpha <= 0f) continue;
 
-                    Color c = creamBase;
+                    // 15° 斜切拼色分界线：y = 280 + (qx - 256) * tan(15°)
+                    float splitY = 280f + (qx - 256f) * 0.26795f;
+                    float dSplit = qy - splitY;
 
-                    // 顶部深色条带
-                    if (qy >= 420 && qy <= 465)
+                    Color c;
+                    if (dSplit > 4f)
                     {
-                        c = containerSlate;
+                        c = darkSlate;
                     }
-                    // 集装箱/波浪竖向瓦楞条纹（下半部区域）
-                    else if (qy >= 45 && qy <= 210)
+                    else if (dSplit >= -4f)
                     {
-                        float wave = Mathf.Sin(qx * (Mathf.PI * 2f / 24f));
-                        c = Color.Lerp(creamBase, palette.concreteMid, 0.22f + 0.16f * wave);
+                        // 8px 鲜明 hazardYellow 斜切分割饰条
+                        c = yellow;
                     }
-                    // 标语装饰横线
-                    else if ((qy >= 250 && qy <= 254) || (qy >= 366 && qy <= 370))
+                    else
                     {
-                        c = concreteDark * 0.85f;
+                        c = creamBase;
+
+                        // 下半区工业横条纹装饰 (y=60~130)
+                        if (qy >= 60 && qy <= 125)
+                        {
+                            float wave = Mathf.Sin(qx * (Mathf.PI * 2f / 20f));
+                            c = Color.Lerp(creamBase, palette.concreteMid, 0.18f + 0.12f * wave);
+                        }
+                        // 细横标线
+                        else if ((qy >= 160 && qy <= 164) || (qy >= 238 && qy <= 242))
+                        {
+                            c = Color.Lerp(creamBase, palette.concreteDark, 0.25f);
+                        }
+                    }
+
+                    // 45° 斜切几何高光切带 (qx + qy ∈ [480, 520])
+                    float diagCoord = (qx + qy);
+                    if (diagCoord >= 490f && diagCoord <= 530f)
+                    {
+                        c = Color.Lerp(c, white, 0.14f);
                     }
 
                     int idx = (startY + qy) * BannerResolution + (startX + qx);
@@ -1143,55 +1766,59 @@ namespace P1.Editor
                 }
             }
 
-            // 顶部小号标识
-            DrawBannerText(pixels, startX, startY, "CONTAINER TERMINAL", 256f, 442f, 3.5f, new Color32(240, 240, 240, 255));
+            // 顶部暗底小字样
+            DrawBannerText(pixels, startX, startY, "DOCK 01 // CRANE ZONE", 256f, 435f, 3.5f, new Color32(245, 245, 245, 255));
+            DrawBannerText(pixels, startX, startY, "CONTAINER TERMINAL", 256f, 395f, 3.0f, (Color32)yellow);
 
-            // 主标题深色 "P1 // TURF"
-            Color32 textDark = new Color32(32, 34, 38, 255);
-            DrawBannerText(pixels, startX, startY, "P1 // TURF", 256f, 310f, 7.0f, textDark);
+            // 主标题深色粗体 "P1 // TURF"
+            DrawBannerText(pixels, startX, startY, "P1 // TURF", 256f, 200f, 7.5f, (Color32)textDark);
+
+            // 底部码头编号标语
+            DrawBannerText(pixels, startX, startY, ">>> BERTH 04 // 40X56M", 256f, 85f, 3.2f, new Color32(70, 72, 78, 255));
         }
 
         private static void BakeQuadrantHazardCargo(Color32[] pixels, int startX, int startY, Palette palette)
         {
-            // 右下：黄黑警示斜纹 + "CARGO"
+            // 索引 1 (右下): 全幅 45° 黄黑工业斜纹底，中央 45° 切角重型标牌（亮黄双重描边 + 4 拐角钢铆钉），
+            // 超大号亮黄 "CARGO" + "HEAVY LOAD // KEEP CLEAR" + "TERMINAL PORT" 工业字标。
             Color yellow = palette.hazardYellow;
             Color dark = palette.hazardDark;
+            Color plateBg = new Color(0.10f, 0.10f, 0.12f, 1f);
 
             for (int qy = 0; qy < 512; qy++)
             {
                 for (int qx = 0; qx < 512; qx++)
                 {
-                    float frameAlpha = CalcBannerFrameAlpha(qx, qy);
+                    float frameAlpha = CalcBannerChamferFrameAlpha(qx, qy);
                     if (frameAlpha <= 0f) continue;
 
-                    // 45° 黄黑条纹底纹
+                    // 45° 黄黑条纹底纹 (周期 36px)
                     float coord = (qx + qy) * 0.70710678f;
-                    float phase = Mathf.Repeat(coord, 40f) / 40f;
+                    float phase = Mathf.Repeat(coord, 36f) / 36f;
                     float stripe = SmoothStep01(0.5f - 0.04f, 0.5f + 0.04f, phase);
                     Color c = Color.Lerp(yellow, dark, stripe);
 
-                    // 中央深色货运牌照框 (380×160)
-                    float pdx = Mathf.Max(0f, Mathf.Abs(qx - 256f) - (190f - 12f));
-                    float pdy = Mathf.Max(0f, Mathf.Abs(qy - 256f) - (80f - 12f));
-                    float pdist = Mathf.Sqrt(pdx * pdx + pdy * pdy) - 12f;
-
-                    if (pdist <= 0f)
+                    // 中央 45° 切角重型装甲牌照框 (410×220，切角 20px)
+                    float distPlate = CalcChamferBoxDist(qx - 256f, qy - 256f, 205f, 110f, 20f);
+                    if (distPlate <= 0f)
                     {
-                        // 4px 亮黄色边框
-                        if (pdist >= -4f)
+                        // 外圈 6px 亮黄边框，内圈暗板岩底
+                        if (distPlate >= -6f)
                         {
                             c = yellow;
                         }
+                        else if (distPlate >= -8f)
+                        {
+                            c = dark;
+                        }
                         else
                         {
-                            c = new Color(0.12f, 0.12f, 0.14f, 1f);
+                            c = plateBg;
                         }
                     }
-                    else if (pdist < 1.0f)
+                    else if (distPlate < 1.0f)
                     {
-                        // 牌照外沿 1px 抗锯齿
-                        float aa = 1.0f - pdist;
-                        c = Color.Lerp(c, yellow, aa);
+                        c = Color.Lerp(c, yellow, 1.0f - distPlate);
                     }
 
                     int idx = (startY + qy) * BannerResolution + (startX + qx);
@@ -1201,18 +1828,193 @@ namespace P1.Editor
                 }
             }
 
-            // 货运主标 "CARGO"（亮黄色 5×7 放大 12 倍，居中）
-            Color32 textYellow = (Color32)palette.hazardYellow;
-            DrawBannerText(pixels, startX, startY, "CARGO", 256f, 256f, 12.0f, textYellow);
+            // 4 拐角铆钉 (Plate Rivets)
+            Color32 rivetColor = (Color32)palette.hazardYellow;
+            DrawBannerCircle(pixels, startX, startY, 256f - 180f, 256f - 85f, 4.5f, rivetColor);
+            DrawBannerCircle(pixels, startX, startY, 256f + 180f, 256f - 85f, 4.5f, rivetColor);
+            DrawBannerCircle(pixels, startX, startY, 256f - 180f, 256f + 85f, 4.5f, rivetColor);
+            DrawBannerCircle(pixels, startX, startY, 256f + 180f, 256f + 85f, 4.5f, rivetColor);
+
+            // 标牌顶部次级字标
+            DrawBannerText(pixels, startX, startY, "TERMINAL PORT // 01", 256f, 325f, 3.2f, new Color32(230, 230, 230, 255));
+
+            // 主标 "CARGO"（亮黄色 5×7 放大 13 倍，居中）
+            DrawBannerText(pixels, startX, startY, "CARGO", 256f, 260f, 13.0f, (Color32)yellow);
+
+            // 标牌底部重型警示标语
+            DrawBannerText(pixels, startX, startY, "HEAVY LOAD // KEEP CLEAR", 256f, 195f, 3.2f, (Color32)yellow);
         }
 
-        private static float CalcBannerFrameAlpha(float qx, float qy)
+        private static void BakeQuadrantTeamA(Color32[] pixels, int startX, int startY, Palette palette)
         {
-            // 边缘留出 16px 透明衬垫，圆角半径 14px，边缘做 1px 抗锯齿
-            float dx = Mathf.Max(0f, Mathf.Abs(qx - 255.5f) - (240f - 14f));
-            float dy = Mathf.Max(0f, Mathf.Abs(qy - 255.5f) - (240f - 14f));
-            float dist = Mathf.Sqrt(dx * dx + dy * dy) - 14f;
+            // 索引 2 (左上): Team A 浓郁橙底（微底渐变压暗），45° 白色几何竞速斜条纹，顶部双重白几何尖角箭头，
+            // 超大号白色粗体 "A"（带 45° 几何墨滴缺口切角）+ "TEAM ALPHA" + "P1 // DIVISION 01"。
+            Color teamAColor = palette.teamAPad;
+            Color teamADark = Color.Lerp(teamAColor, palette.hazardDark, 0.28f);
+            Color32 white = new Color32(255, 255, 255, 255);
+            Color32 orangeAccent = (Color32)Color.Lerp(teamAColor, Color.white, 0.35f);
+
+            for (int qy = 0; qy < 512; qy++)
+            {
+                float vGrad = qy / 512f;
+                Color bgGrad = Color.Lerp(teamADark, teamAColor, vGrad * 0.8f + 0.2f);
+
+                for (int qx = 0; qx < 512; qx++)
+                {
+                    float frameAlpha = CalcBannerChamferFrameAlpha(qx, qy);
+                    if (frameAlpha <= 0f) continue;
+
+                    Color c = bgGrad;
+
+                    // 左侧三道 45° 竞速白条纹 (qx - qy ∈ [ -260, -140 ])
+                    float speedCoord = qx - qy;
+                    if ((speedCoord >= -250f && speedCoord <= -236f) ||
+                        (speedCoord >= -210f && speedCoord <= -185f) ||
+                        (speedCoord >= -165f && speedCoord <= -155f))
+                    {
+                        c = Color.white;
+                    }
+
+                    // 上下白色竞速封边条 (y=440~468 与 y=44~72)
+                    if ((qy >= 445 && qy <= 468) || (qy >= 44 && qy <= 67))
+                    {
+                        c = Color.white;
+                    }
+                    else if ((qy >= 436 && qy <= 441) || (qy >= 71 && qy <= 76))
+                    {
+                        c = teamADark;
+                    }
+
+                    int idx = (startY + qy) * BannerResolution + (startX + qx);
+                    Color32 c32 = (Color32)c;
+                    c32.a = (byte)Mathf.RoundToInt(255 * frameAlpha);
+                    pixels[idx] = c32;
+                }
+            }
+
+            // 双重向上几何白箭头（双重尖角 Chevrons）
+            DrawBannerChevron(pixels, startX, startY, 256f, 415f, 220f, 65f, 20f, white);
+            DrawBannerChevron(pixels, startX, startY, 256f, 385f, 170f, 50f, 15f, white);
+
+            // 顶部战队字样
+            DrawBannerText(pixels, startX, startY, "TEAM ALPHA", 256f, 456f, 3.2f, (Color32)teamADark);
+
+            // 核心粗体字母 "A" (5×7 放大 26 倍)
+            DrawBannerText(pixels, startX, startY, "A", 256f, 235f, 26f, white);
+
+            // 底部战区字样
+            DrawBannerText(pixels, startX, startY, "P1 // DIVISION 01", 256f, 115f, 3.5f, orangeAccent);
+            DrawBannerText(pixels, startX, startY, "READY // INK UP", 256f, 55f, 3.2f, (Color32)teamADark);
+        }
+
+        private static void BakeQuadrantTeamB(Color32[] pixels, int startX, int startY, Palette palette)
+        {
+            // 索引 3 (右上): Team B 浓郁钴蓝底，45° 白色几何竞速斜条纹，顶部双重白几何尖角箭头，
+            // 超大号白色粗体 "B"（带 45° 几何墨滴缺口切角）+ "TEAM BRAVO" + "P1 // DIVISION 02"。
+            Color teamBColor = palette.teamBPad;
+            Color teamBDark = Color.Lerp(teamBColor, palette.hazardDark, 0.32f);
+            Color32 white = new Color32(255, 255, 255, 255);
+            Color32 blueAccent = (Color32)Color.Lerp(teamBColor, Color.white, 0.40f);
+
+            for (int qy = 0; qy < 512; qy++)
+            {
+                float vGrad = qy / 512f;
+                Color bgGrad = Color.Lerp(teamBDark, teamBColor, vGrad * 0.8f + 0.2f);
+
+                for (int qx = 0; qx < 512; qx++)
+                {
+                    float frameAlpha = CalcBannerChamferFrameAlpha(qx, qy);
+                    if (frameAlpha <= 0f) continue;
+
+                    Color c = bgGrad;
+
+                    // 右侧三道 45° 竞速白条纹 (qx + qy ∈ [ 680, 800 ])
+                    float speedCoord = qx + qy;
+                    if ((speedCoord >= 700f && speedCoord <= 714f) ||
+                        (speedCoord >= 735f && speedCoord <= 760f) ||
+                        (speedCoord >= 780f && speedCoord <= 790f))
+                    {
+                        c = Color.white;
+                    }
+
+                    // 上下白色竞速封边条 (y=440~468 与 y=44~72)
+                    if ((qy >= 445 && qy <= 468) || (qy >= 44 && qy <= 67))
+                    {
+                        c = Color.white;
+                    }
+                    else if ((qy >= 436 && qy <= 441) || (qy >= 71 && qy <= 76))
+                    {
+                        c = teamBDark;
+                    }
+
+                    int idx = (startY + qy) * BannerResolution + (startX + qx);
+                    Color32 c32 = (Color32)c;
+                    c32.a = (byte)Mathf.RoundToInt(255 * frameAlpha);
+                    pixels[idx] = c32;
+                }
+            }
+
+            // 双重向上几何白箭头
+            DrawBannerChevron(pixels, startX, startY, 256f, 415f, 220f, 65f, 20f, white);
+            DrawBannerChevron(pixels, startX, startY, 256f, 385f, 170f, 50f, 15f, white);
+
+            // 顶部战队字样
+            DrawBannerText(pixels, startX, startY, "TEAM BRAVO", 256f, 456f, 3.2f, (Color32)teamBDark);
+
+            // 核心粗体字母 "B" (5×7 放大 26 倍)
+            DrawBannerText(pixels, startX, startY, "B", 256f, 235f, 26f, white);
+
+            // 底部战区字样
+            DrawBannerText(pixels, startX, startY, "P1 // DIVISION 02", 256f, 115f, 3.5f, blueAccent);
+            DrawBannerText(pixels, startX, startY, "READY // INK UP", 256f, 55f, 3.2f, (Color32)teamBDark);
+        }
+
+        private static float CalcBannerChamferFrameAlpha(float qx, float qy)
+        {
+            // 边缘留出 16px 透明衬垫，45° 几何切角 22px，边缘做 1px 抗锯齿
+            float dist = CalcChamferBoxDist(qx - 255.5f, qy - 255.5f, 239.5f, 239.5f, 22f);
             return Mathf.Clamp01(0.5f - dist);
+        }
+
+        private static float CalcChamferBoxDist(float dx, float dy, float hx, float hy, float chamfer)
+        {
+            float ax = Mathf.Abs(dx);
+            float ay = Mathf.Abs(dy);
+
+            float dBox = Mathf.Max(ax - hx, ay - hy);
+            float dChamfer = (ax + ay - (hx + hy - chamfer)) * 0.70710678f;
+            return Mathf.Max(dBox, dChamfer);
+        }
+
+        private static void DrawBannerCircle(
+            Color32[] pixels,
+            int startX,
+            int startY,
+            float cx,
+            float cy,
+            float radius,
+            Color32 color)
+        {
+            int minQx = Mathf.Clamp(Mathf.FloorToInt(cx - radius - 1f), 0, 511);
+            int maxQx = Mathf.Clamp(Mathf.CeilToInt(cx + radius + 1f), 0, 511);
+            int minQy = Mathf.Clamp(Mathf.FloorToInt(cy - radius - 1f), 0, 511);
+            int maxQy = Mathf.Clamp(Mathf.CeilToInt(cy + radius + 1f), 0, 511);
+
+            for (int qy = minQy; qy <= maxQy; qy++)
+            {
+                for (int qx = minQx; qx <= maxQx; qx++)
+                {
+                    float dx = qx - cx;
+                    float dy = qy - cy;
+                    float dist = Mathf.Sqrt(dx * dx + dy * dy);
+                    float alpha = Mathf.Clamp01(radius + 0.5f - dist);
+                    if (alpha > 0.001f)
+                    {
+                        int idx = (startY + qy) * BannerResolution + (startX + qx);
+                        BlendPixel(pixels, idx, color, alpha);
+                    }
+                }
+            }
         }
 
         private static void DrawBannerChevron(

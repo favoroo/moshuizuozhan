@@ -163,9 +163,11 @@ namespace P1.Weapons
             node.gameObject.SetActive(true);
             node.position = shot.Origin;
 
+            // 队色必须传原始 sRGB：材质色 / MaterialPropertyBlock 由 Unity 自动做 sRGB→Linear，
+            // 再手动 .linear 会二次转换，橙色会被压成深红（v0.1.7 实测）。
             Color teamColor = InkSurfaceController.Instance != null
-                ? InkSurfaceController.Instance.GetTeamColorLinear(team)
-                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f).linear : new Color(0.15f, 0.42f, 1f).linear);
+                ? InkSurfaceController.Instance.GetTeamColor(team)
+                : (team == Team.TeamA ? new Color(1f, 0.44f, 0.06f) : new Color(0.15f, 0.42f, 1f));
 
             var mr = node.GetComponent<MeshRenderer>();
             _propBlock.SetColor(BaseColorProp, teamColor);

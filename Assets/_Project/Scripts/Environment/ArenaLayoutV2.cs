@@ -18,10 +18,62 @@ namespace P1.Environment
 
         public const float BoundaryX = 20.5f;
         public const float BoundaryZ = 28.5f;
+
+        /// <summary>四周边界墙高度（基准 2.4m / 加高 3.0m）。</summary>
+        public const float BoundaryWallHeight = 3.0f;
+        /// <summary>北侧边界墙高度：防止站在出生甲板顶（1.2m）上的角色跳出场地（顶面 - 甲板顶 ≥ jumpHeight + 0.3）。南侧保持矮墙不变。</summary>
+        public const float NorthBoundaryWallHeight = 3.0f;
+
+        // ---- 车道槽位（X 轴，西半区；东侧镜像）----
+        // 5.0 中央台边 | 5.0-7.0 内侧车道 | 7.0-9.2 中场集装箱 | 9.2-11.2 外侧车道
+        // | 11.2-15.7 侧翼高台 | 15.7-17.9 贴台集装箱 | 17.9-20.0 贴墙外走廊
+        /// <summary>中场集装箱中心 |x|：内边 |x|=7.0 贴住掩体墙，外边 |x|=9.2 让出 2.0m 外侧车道。</summary>
+        public const float ContainerMidX = 8.1f;
+
+        /// <summary>掩体墙中心 |x| 与宽度：跨在中央台边（|x|=5）与中场集装箱内边（|x|=7）之间，两端贴死。</summary>
+        public const float CoverWallX = 6.0f;
+        public const float CoverWallWidth = 2.0f;
+
+        /// <summary>侧翼高台中心 |x| 与台面高度：1.5m 高于跳跃 1.35m，坡道成为唯一常规入口。</summary>
+        public const float FlankPlatformX = 13.45f;
+        public const float FlankPlatformHeight = 1.5f;
+
+        /// <summary>侧翼集装箱中心 |x|：与侧翼台外沿（|x|=15.7）重叠 0.05m 消除死缝，贴墙外走廊 2.10m。</summary>
+        public const float ContainerFlankX = 16.75f;
+
+        /// <summary>延长区集装箱中心 |x|：与贴墙外走廊对齐（走廊 2.05m）。</summary>
+        public const float ExtensionContainerX = 16.75f;
+
+        // ---- 中路错位低掩体（1.2m 可跳；避开中央坡道底端 4.4m 坡道口，左右交错形成 S 形推进线）----
+        public static readonly Vector3 MidCoverNearPos = new Vector3(3.4f, 0.6f, 9.0f);
+        public static readonly Vector3 MidCoverNearSize = new Vector3(1.8f, 1.2f, 1.2f);
+        public static readonly Vector3 MidCoverFarPos = new Vector3(-2.6f, 0.6f, 16.5f);
+        public static readonly Vector3 MidCoverFarSize = new Vector3(1.8f, 1.2f, 1.2f);
+
+        /// <summary>出生线中心 |z|：站在出生甲板顶面上（不再落在地面出生盘）。</summary>
         public const float SpawnZ = 23.5f;
         public const float SpawnGateZ = 21.4f;
-        public const float SpawnTerraceZ = 26.2f;
-        public const float SpawnAnchorZ = 21.0f;
+
+        // ---- 出生甲板（对齐 INKWAVE：抬高台面 + 两侧上下通道）----
+        /// <summary>出生甲板中心 |z|：台面从后墙一直伸到 z=±22.0（正好顶住 SpawnGate 背面）。</summary>
+        public const float SpawnTerraceZ = 25.2f;
+        /// <summary>甲板台面高度（m）。</summary>
+        public const float SpawnDeckTopY = 1.2f;
+        public const float SpawnDeckWidth = 14f;
+        public const float SpawnDeckDepth = 6.4f;
+        /// <summary>甲板顶面中性钢灰出生盘：盘面深度必须容得下 SpawnPad.shader 的 r=3.15m 外圈。</summary>
+        public const float SpawnPadWidth = 8f;
+        public const float SpawnPadDepth = 6.3f;
+        public const float SpawnPadThickness = 0.06f;
+        /// <summary>出生点 Y：台面 + 盘厚 + 6cm 落位余量（与原地面出生点 y=0.22 的抬升习惯一致）。</summary>
+        public const float SpawnPointY = SpawnDeckTopY + SpawnPadThickness + 0.06f;
+
+        /// <summary>两侧台阶：沿 X 投影 5m、沿 Z 宽 4m、5 级（0.24m/级 ≤ CC stepOffset 0.30）。</summary>
+        public const float SpawnStairRun = 5f;
+        public const float SpawnStairWidth = 4f;
+        public const int SpawnStairSteps = 5;
+        /// <summary>单个出生锚点（旧接口）与出生线同 Z：都落在台面上。</summary>
+        public const float SpawnAnchorZ = SpawnZ;
 
         public static Vector2 MapSize => new Vector2(MapSizeX, MapSizeZ);
 
@@ -171,7 +223,9 @@ namespace P1.Environment
             // 场内仍能看到旗面，但不会被当成"打不中的场内物件"。
             AddSymmetric(ArenaPropKind.FlagPole, new Vector3(-4.8f, 0f, -29.6f), 0f, 1.0f, 0);
             AddSymmetric(ArenaPropKind.FlagPole, new Vector3(4.8f, 0f, -29.6f), 0f, 1.0f, 0);
-            AddSymmetric(ArenaPropKind.Kiosk, new Vector3(-7.4f, 0f, -26.0f), 0f, 1.0f, 0);
+            // 售卖亭从 z=-26（原出生台后角）挪到出生甲板西前角外侧：
+            // 原位置正好压在甲板西侧台阶的落点区，且一半埋进抬高的台面里。
+            AddSymmetric(ArenaPropKind.Kiosk, new Vector3(-8.5f, 0f, -21.0f), 0f, 1.0f, 0);
 
             // 边界墙顶的设备与管线（高于 1.8m，不参与地面战斗）。
             // 管线必须沿墙走向贴墙铺设：PipeRun 沿局部 +Z 生长，所以贴西/东墙要 yaw=0。

@@ -354,7 +354,7 @@ namespace P1.UI
             overlayImg.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.70f);
             overlayImg.raycastTarget = true;
 
-            // 2. 居中主面板 (840 × 640，直角黑白面板 + 6px 墨边，无阴影无网点)
+            // 2. 居中主面板 (840 × 640，纸白直角面板 + 6px 墨边 + 弹窗硬影 8,-9)
             var panelGo = new GameObject("MainPanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(UISpringMotion));
             panelGo.transform.SetParent(_dialogRoot.transform, false);
             var panelRt = panelGo.GetComponent<RectTransform>();
@@ -370,11 +370,11 @@ namespace P1.UI
             panelShape.BorderWidth = ComicStyle.BorderHeavy;
             panelShape.BorderColor = ComicStyle.Ink;
             panelShape.color = ComicStyle.Paper;
-            panelShape.HardShadow = false;
             panelShape.Halftone = false;
             panelShape.GlossAlpha = 0f;
             panelShape.DrawGloss = false;
             panelShape.raycastTarget = true;
+            Theme.ApplyHardShadow(panelShape, UIHardShadowLevel.Dialog); // t-1 弹窗硬影 (8,-9)
 
             var panelMotion = panelGo.GetComponent<UISpringMotion>();
             panelMotion.SetTheme(Theme);
@@ -646,6 +646,7 @@ namespace P1.UI
 
             var jelly = go.GetComponent<UIJellyButton>();
             jelly.Configure(Theme, btn, shape);
+            jelly.EnableThemeHardShadow(); // t-1 按钮硬影 + 0ms 压印 + 0.1s Cubic-Out 回弹
 
             var textGo = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             textGo.transform.SetParent(go.transform, false);

@@ -85,5 +85,43 @@ namespace P1.Tests.EditMode
             Assert.IsNull(blocker.GetComponent<Renderer>(), "Blocker 不应有任何可视表面");
             Assert.IsNull(blocker.GetComponent<InkWallSurface>(), "Blocker 不产生可视表面，不应装配墨面");
         }
+
+        [Test]
+        public void SolidDecorProps_WhenBlocked_ExcludedFromScoringAndEmitsAuditWarning()
+        {
+            var propGo = new GameObject("PropCollider_CrateCluster_00");
+            var surfaceGo = new GameObject("~TestSurface");
+            try
+            {
+                propGo.transform.SetParent(_arena.transform);
+                var col = propGo.AddComponent<BoxCollider>();
+                col.size = new Vector3(2f, 1.5f, 2f);
+
+                var mr = propGo.AddComponent<MeshRenderer>();
+                Shader propShader = Shader.Find("P1/PropLit");
+                if (propShader != null)
+                {
+                    mr.sharedMaterial = new Material(propShader);
+                }
+
+                _blockedColliders.Add(col);
+
+                var surface = surfaceGo.AddComponent<InkSurfaceController>();
+                surface.Configure(null, _inkableRenderers, _blockedColliders);
+
+                var violations = new List<string>();
+                var warnings = new List<string>();
+                PaintCoverageAudit.Run(new List<Transform> { _arena.transform }, surface, violations, warnings);
+
+                Assert.AreEqual(0, violations.Count, "注册进 blockedColliders 的实体道具顶面不应产生违规");
+                Assert.IsTrue(warnings.Exists(w => w.Contains("PropCollider_CrateCluster_00") && w.Contains("blockedColliders")),
+                    "实体道具顶面注册进 blockedColliders 时应产生明确 warning，提示顶面不计分");
+            }
+            finally
+            {
+                if (propGo != null) Object.DestroyImmediate(propGo);
+                if (surfaceGo != null) Object.DestroyImmediate(surfaceGo);
+            }
+        }
     }
 }

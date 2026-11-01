@@ -7,6 +7,8 @@ namespace P1.Player
 {
     /// <summary>
     /// 玩家与 Bot 共用的角色移动、墨水储罐、脚下墨色检测与潜行（乌贼）形态控制器。
+    /// 乌贼形态随时可进（对齐 Inkwave）：没涂墨的地面保持「干地乌贼」慢速蹦行（squidDryMoveSpeed），
+    /// 但潜墨加成（高速 / 回墨 / 回血 / 隐匿）仍只在脚下己方墨水（或己方墨墙）中生效。
     /// 含俯视角潜墨隐匿（Stealth）：己方墨水中静止/极慢潜行时对敌方完全隐形（模型隐藏，
     /// 己方半透明可见），高速潜墨在水面产生细微涟漪。
     /// </summary>
@@ -32,6 +34,12 @@ namespace P1.Player
         private bool _wantsJump;
         private bool _isFiringOrThrowing;
         private bool _isLockedBySpecial;
+
+        // P29 移动手感：水平速度向量（S 曲线加减速 + 转向限速的积分状态）与跳跃宽容计时
+        private Vector3 _planarVelocity;
+        private bool _prevWantsJump;
+        private float _jumpBufferTimer;
+        private float _coyoteTimer;
 
         // 敌墨「受击槽」：踩敌墨时锁定 1，离开敌墨后按速率快速恢复（惩罚状态的可读化退出）
         private float _enemyInkGrip01;
@@ -74,10 +82,26 @@ namespace P1.Player
         public Team FootInkTeam { get; private set; }
         public CharacterVisualController VisualController => visualController;
         public bool IsSwimming { get; private set; }
+
+        /// <summary>
+        /// 乌贼形态本体：按住潜行键且未开火 / 未锁大招即成立，与脚下墨色无关（对齐 Inkwave
+        /// actor.js：form = 'squid' 不看地面）。无墨地面为「干地乌贼」（squidDryMoveSpeed 慢速蹦行）；
+        /// 潜墨加成状态（高速 / 回墨 / 回血 / 隐匿）仍由 <see cref="IsSwimming"/> 单独判定。
+        /// </summary>
+        public bool IsInSquidForm { get; private set; }
         public bool IsGrounded => _cc != null && _cc.isGrounded;
         public bool IsInEnemyInk => FootInkTeam == Team.GetOpponent();
         public bool IsInOwnInk => FootInkTeam == Team;
         public float CurrentMoveSpeed { get; private set; }
+
+        /// <summary>
+        /// 当前水平速度向量（P29 惯性状态，m/s）：由 S 曲线加减速/转向限速积分得到，
+        /// 供相机速度感、调试与测试读取（与 EffectiveMoveSpeed 的"目标速度上限"语义区分）。
+        /// </summary>
+        public Vector3 PlanarVelocity => _planarVelocity;
+
+        /// <summary>当前垂直速度 (m/s)：向上为正，供调试/测试读取。</summary>
+        public float VerticalVelocity => _verticalVelocity;
 
         /// <summary>
         /// 实际生效的平面移速 (m/s)：超速惯性滑行（swim-exit glide）期间高于
@@ -117,6 +141,18 @@ namespace P1.Player
             _cc = GetComponent<CharacterController>();
             _health = GetComponent<CombatantHealth>();
             _currentInk = MaxInk;
+
+            // P29 贴地：运行时收紧 skinWidth（场景里烘焙的 0.08 相对 1.12m 身高明显偏大，
+            // 接触解算残留间隙会读作"整体悬浮"）。不修改场景 YAML，运行时写入即可。
+            // P30：控制器静止时根节点高度恰好等于 skinWidth（实测 0.02 → 悬空 1.6cm），
+            // 因此收紧到 0.006；视觉层再按同量下移（由 CharacterVisualController 处理，
+            // 因为 WeaponController 的大招升空会直接写 visualRoot.localPosition，不能放在这一层）。
+            if (_cc != null)
+            {
+                _cc.skinWidth = config != null
+                    ? Mathf.Clamp(config.controllerSkinWidth, 0.004f, 0.04f)
+                    : 0.006f;
+            }
 
             _enemyInkRecoveryRatePerSec = config != null ? config.enemyInkRecoveryRatePerSec : 2.0f;
 
@@ -162,6 +198,7 @@ namespace P1.Player
         {
             _currentInk = MaxInk;
             IsSwimming = false;
+            IsInSquidForm = false;
             IsWallClimbing = false;
             _wallSurface = null;
             _wallInkTeam = Team.Neutral;
@@ -169,7 +206,11 @@ namespace P1.Player
             _wallClimbCooldown = 0f;
             _wantsToSwim = false;
             _wantsJump = false;
+            _prevWantsJump = false;
+            _jumpBufferTimer = 0f;
+            _coyoteTimer = 0f;
             _verticalVelocity = -2.0f;
+            _planarVelocity = Vector3.zero;
             _isFiringOrThrowing = false;
             _isLockedBySpecial = false;
 
@@ -243,6 +284,67 @@ namespace P1.Player
             _currentInk = MaxInk;
         }
 
+        /// <summary>
+        /// 瞬移至指定位置（越界回收与防坠落使用）。
+        /// 临时禁用 CharacterController 以确保位置立即生效，并可选择重置垂直与水平滑行动量。
+        /// </summary>
+        public void TeleportTo(Vector3 targetPosition, bool clearVelocity = true)
+        {
+            TeleportTo(targetPosition, transform.rotation, clearVelocity);
+        }
+
+        /// <summary>
+        /// 瞬移至指定位置与朝向。
+        /// </summary>
+        public void TeleportTo(Vector3 targetPosition, Quaternion targetRotation, bool clearVelocity = true)
+        {
+            if (_cc != null && _cc.enabled)
+            {
+                _cc.enabled = false;
+                transform.SetPositionAndRotation(targetPosition, targetRotation);
+                _cc.enabled = true;
+            }
+            else
+            {
+                transform.SetPositionAndRotation(targetPosition, targetRotation);
+            }
+
+            if (clearVelocity)
+            {
+                _verticalVelocity = -2.0f;
+                _glideSpeed = 0f;
+                EffectiveMoveSpeed = 0f;
+                _planarVelocity = Vector3.zero;
+                _wantsJump = false;
+                _prevWantsJump = false;
+                _jumpBufferTimer = 0f;
+                _coyoteTimer = 0f;
+            }
+
+            IsWallClimbing = false;
+            _wallSurface = null;
+            _wallClimbCooldown = 0f;
+        }
+
+        /// <summary>
+        /// 施加外部位移推力（P16-A 出生禁入圈径向外推使用）。
+        /// 走 CharacterController.Move 碰撞检测路径，仅在水平面生效；不瞬移、不清速度、不致死。
+        /// </summary>
+        public void ApplyExternalPush(Vector3 delta)
+        {
+            delta.y = 0f;
+            if (delta.sqrMagnitude < 0.000001f) return;
+
+            if (_cc != null && _cc.enabled)
+            {
+                _cc.Move(delta);
+            }
+            else
+            {
+                transform.position += delta;
+            }
+        }
+
         private void Update()
         {
             if (_health != null && !_health.IsAlive)
@@ -267,8 +369,13 @@ namespace P1.Player
             // 2. 墙面探测：身前是否有可潜行攀爬的立面，以及该处墨水归属
             UpdateWallContact();
 
-            // 3. 潜行（乌贼）形态仲裁：地面己方墨水 与 己方墨墙 都可以进入潜行
+            // 3. 形态仲裁：乌贼形态随时可进（对齐 Inkwave，无墨地面为干地乌贼慢速蹦行）；
+            //    潜墨（IsSwimming）仍要求脚下是己方墨水，己方墨墙可攀爬潜行
             bool wantsSwimForm = _wantsToSwim && !_isFiringOrThrowing && !_isLockedBySpecial;
+            if (wantsSwimForm != IsInSquidForm)
+            {
+                IsInSquidForm = wantsSwimForm;
+            }
             bool wallClimbPossible = wantsSwimForm && AllowWallClimb && _wallClimbCooldown <= 0f &&
                                      _wallSurface != null && _wallInkTeam == Team;
 
@@ -370,6 +477,27 @@ namespace P1.Player
                     _swimRippleTimer = 0f;
                 }
             }
+            else if (IsInSquidForm)
+            {
+                // 干地乌贼（INKWAVE squidDrySpeed 2.9，actor.js L389）：无墨/敌墨地面也能保持乌贼形态，
+                // 但没有潜墨加成 —— 不加速、不回血、不隐匿；回墨只有人形被动速率的一半（actor.js L317）。
+                float squidDrySpd = config != null ? config.squidDryMoveSpeed : 2.9f;
+                // 空中保留动量（actor.js L376：air target = max(squidDrySpeed, 当前速度)），
+                // 跳跃/滑行弧线不因形态切换被压回干地速度
+                float dryTarget = isGrounded ? squidDrySpd : Mathf.Max(squidDrySpd, _planarVelocity.magnitude);
+                CurrentMoveSpeed = IsInEnemyInk ? Mathf.Min(dryTarget, enemySpd) : dryTarget;
+
+                if (IsInEnemyInk)
+                {
+                    // 踩敌墨的减速与 DOT 不分形态（INKWAVE onEnemy 对乌贼同样生效，敌墨中不可能 submerged）
+                    ApplyEnemyInkPenalty(dt);
+                }
+                else
+                {
+                    float dryRefill = (config != null ? config.passiveInkRefillRate : 4f) * 0.5f;
+                    _currentInk = Mathf.Min(MaxInk, _currentInk + dryRefill * dt);
+                }
+            }
             else
             {
                 // 人形状态
@@ -384,16 +512,7 @@ namespace P1.Player
                 {
                     // 踩敌墨：移速骤降 1.9 m/s + DOT 20 点/秒；60 HP 保护底线保证单靠踩墨绝不致死
                     CurrentMoveSpeed = enemySpd;
-                    float burnRate = config != null ? config.enemyInkDamagePerSec : 20f;
-                    float minFloor = config != null ? config.enemyInkMinHealthFloor : 60f;
-                    _health.ApplyEnemyInkBurn(burnRate * dt, minFloor);
-
-                    _enemyInkSplatCooldown -= dt;
-                    if (_enemyInkSplatCooldown <= 0f && _moveInputWorld.sqrMagnitude > 0.05f && VfxPool.Instance != null && InkSurfaceController.Instance != null)
-                    {
-                        _enemyInkSplatCooldown = 0.22f;
-                        VfxPool.Instance.SpawnInkSplat(transform.position, InkSurfaceController.Instance.GetTeamColor(FootInkTeam), 0.35f, 4);
-                    }
+                    ApplyEnemyInkPenalty(dt);
                 }
                 else if (_isFiringOrThrowing)
                 {
@@ -425,6 +544,10 @@ namespace P1.Player
             {
                 if (IsWallClimbing)
                 {
+                    // 攀墙位移由 MoveAlongWall 接管，清空水平动量避免脱离墙面时继承旧速度
+                    _planarVelocity = Vector3.zero;
+                    _jumpBufferTimer = 0f;
+                    _prevWantsJump = _wantsJump;
                     MoveAlongWall(dt);
                 }
                 else
@@ -432,45 +555,90 @@ namespace P1.Player
                     float gravity = config != null ? config.gravity : 24.0f;
                     float jumpHeight = config != null ? config.jumpHeight : 1.35f;
 
+                    // ---- P29 跳跃宽容三件套：跳跃缓冲 + 土狼时间 + 下落加重/顶点滞空 ----
+                    float jumpBufferTime = config != null ? config.jumpBufferTime : 0.12f;
+                    float coyoteTime = config != null ? config.coyoteTime : 0.12f;
+                    float groundSnap = config != null ? config.groundSnapSpeed : 6f;
+                    float fallGravityMul = config != null ? config.fallGravityMultiplier : 1.2f;
+                    float apexGravityMul = config != null ? config.apexGravityMultiplier : 0.85f;
+                    float apexBand = config != null ? config.apexVelocityBand : 1.6f;
+
+                    // 跳跃缓冲：只在按下沿记入，0.12s 内落地即触发（落地前一帧按跳不丢输入）
+                    if (_wantsJump && !_prevWantsJump)
+                    {
+                        _jumpBufferTimer = Mathf.Max(0f, jumpBufferTime);
+                    }
+                    _prevWantsJump = _wantsJump;
+                    if (_jumpBufferTimer > 0f)
+                    {
+                        _jumpBufferTimer = Mathf.Max(0f, _jumpBufferTimer - dt);
+                    }
+
                     if (isGrounded)
                     {
+                        _coyoteTimer = coyoteTime;
                         if (_verticalVelocity < 0f)
                         {
-                            _verticalVelocity = -2.5f; // 轻微向下吸附，平滑贴合地面与斜坡
-                        }
-
-                        if (_wantsJump)
-                        {
-                            // 触发跳跃：v0 = sqrt(2 * g * h)
-                            _verticalVelocity = Mathf.Sqrt(2f * gravity * jumpHeight);
-                            _wantsJump = false;
-
-                            if (VfxPool.Instance != null && InkSurfaceController.Instance != null)
-                            {
-                                Color c = InkSurfaceController.Instance.GetTeamColor(Team);
-                                VfxPool.Instance.SpawnInkSplat(transform.position, c, 0.45f, 6);
-                            }
+                            // P29 贴地吸附加强：旧 -2.5 在下 0.24m 台阶/潜墨下 12.8° 坡时约 40% 时间腾空
+                            _verticalVelocity = -Mathf.Max(2.5f, groundSnap);
                         }
                     }
                     else
                     {
-                        _verticalVelocity -= gravity * dt;
+                        // 土狼时间：走出边缘后 0.12s 内仍可起跳
+                        if (_coyoteTimer > 0f)
+                        {
+                            _coyoteTimer = Mathf.Max(0f, _coyoteTimer - dt);
+                        }
+
+                        // 重力曲线：下落更沉（×1.2）、顶点微滞空（×0.85），参考 Inkwave config.js
+                        float g = gravity;
+                        if (_verticalVelocity < 0f) g *= Mathf.Max(1f, fallGravityMul);
+                        if (Mathf.Abs(_verticalVelocity) < apexBand) g *= Mathf.Clamp(apexGravityMul, 0.5f, 1f);
+                        _verticalVelocity -= g * dt;
                         if (_verticalVelocity < -28f)
                         {
                             _verticalVelocity = -28f;
                         }
                     }
 
+                    bool canJump = isGrounded || _coyoteTimer > 0f;
+                    if (canJump && _jumpBufferTimer > 0f)
+                    {
+                        // 触发跳跃：v0 = sqrt(2 * g * h)
+                        _verticalVelocity = Mathf.Sqrt(2f * gravity * jumpHeight);
+                        _jumpBufferTimer = 0f;
+                        _coyoteTimer = 0f;
+                        _wantsJump = false;
+                        _prevWantsJump = false;
+
+                        if (VfxPool.Instance != null && InkSurfaceController.Instance != null)
+                        {
+                            Color c = InkSurfaceController.Instance.GetTeamColor(Team);
+                            VfxPool.Instance.SpawnInkSplat(transform.position, c, 0.45f, 6);
+                        }
+                        if (AudioManager.Instance != null)
+                        {
+                            AudioManager.Instance.PlayJump();
+                        }
+                    }
+
+                    // ---- P29 水平速度：S 曲线加减速 + 转向限速（不再一帧满速/一帧急停） ----
                     float airControl = isGrounded ? 1.0f : (config != null ? config.airControl : 0.95f);
-                    // 位移用 EffectiveMoveSpeed（含超速滑行惯性），而非直接贴目标值的 CurrentMoveSpeed
-                    Vector3 horizontalVel = _moveInputWorld * (EffectiveMoveSpeed * airControl);
-                    Vector3 step = horizontalVel * dt + Vector3.up * (_verticalVelocity * dt);
+                    // 目标速度用 EffectiveMoveSpeed（含超速滑行惯性），而非直接贴目标值的 CurrentMoveSpeed
+                    Vector3 desiredVel = _moveInputWorld * (EffectiveMoveSpeed * airControl);
+                    _planarVelocity = ComputePlanarVelocity(_planarVelocity, desiredVel, isGrounded, config, dt);
+
+                    Vector3 step = _planarVelocity * dt + Vector3.up * (_verticalVelocity * dt);
                     _cc.Move(step);
                 }
             }
             else
             {
                 _wantsJump = false;
+                _prevWantsJump = false;
+                _jumpBufferTimer = 0f;
+                _planarVelocity = Vector3.zero;
             }
 
             Vector3 desiredForward;
@@ -479,8 +647,9 @@ namespace P1.Player
                 // 面朝墙面，视觉上像贴在墙上
                 desiredForward = -_wallNormal;
             }
-            else if (IsSwimming && _moveInputWorld.sqrMagnitude > 0.01f)
+            else if (IsInSquidForm && _moveInputWorld.sqrMagnitude > 0.01f)
             {
+                // 乌贼形态面向移动方向（INKWAVE squidFaceOmega 语义），干地与潜墨一致
                 desiredForward = _moveInputWorld.normalized;
             }
             else
@@ -519,6 +688,84 @@ namespace P1.Player
 
             // 7. 潜墨隐匿（Stealth）：己方墨水中静止/极慢移动时对敌方隐形，己方半透明
             UpdateStealthState();
+        }
+
+        /// <summary>
+        /// 踩敌墨惩罚（人形与干地乌贼共用）：DOT 掉血 + 移动时脚下溅墨反馈。
+        /// 只含伤害与表现，不含移速（减速由各形态分支自行钳制）。
+        /// </summary>
+        private void ApplyEnemyInkPenalty(float dt)
+        {
+            float burnRate = config != null ? config.enemyInkDamagePerSec : 20f;
+            float minFloor = config != null ? config.enemyInkMinHealthFloor : 60f;
+            _health.ApplyEnemyInkBurn(burnRate * dt, minFloor);
+
+            _enemyInkSplatCooldown -= dt;
+            if (_enemyInkSplatCooldown <= 0f && _moveInputWorld.sqrMagnitude > 0.05f && VfxPool.Instance != null && InkSurfaceController.Instance != null)
+            {
+                _enemyInkSplatCooldown = 0.22f;
+                VfxPool.Instance.SpawnInkSplat(transform.position, InkSurfaceController.Instance.GetTeamColor(FootInkTeam), 0.35f, 4);
+            }
+        }
+
+        /// <summary>
+        /// 水平速度积分（P29，参考 Inkwave actor.js 的速度大小/方向分离模型）：
+        /// - 目标速度为 0 → 按刹车减速度滑停（低速段保留制动力，避免硬停）；
+        /// - 输入反向 → 按 reverseDecel 踩地急刹再反向；
+        /// - 速度方向以 turnRate 朝输入方向旋转（转弯画弧不掉速）；
+        /// - 加速/减速用统一 MoveTowards 积分，起步与停步都有过渡，不再一帧满速/一帧静止。
+        /// 纯函数、零分配；无配置时回退到默认手感参数。
+        /// </summary>
+        private static Vector3 ComputePlanarVelocity(
+            Vector3 current, Vector3 desired, bool grounded, PlayerConfigSO cfg, float dt)
+        {
+            float runAccel = cfg != null ? cfg.runAccel : 60f;
+            float runDecel = cfg != null ? cfg.runDecel : 48f;
+            float reverseDecel = cfg != null ? cfg.reverseDecel : 70f;
+            float airAccel = cfg != null ? cfg.airAccel : 20f;
+            float airDecel = cfg != null ? cfg.airDecel : 6f;
+            float turnRateDeg = cfg != null ? cfg.turnRateDegPerSec : 860f;
+
+            float curSpeed = current.magnitude;
+            float targetSpeed = desired.magnitude;
+
+            float accel;
+            if (targetSpeed < 0.05f)
+            {
+                // 无输入：刹车滑停（空中阻力更小，保留跳跃惯性）
+                accel = grounded ? runDecel : airDecel;
+            }
+            else if (curSpeed > 0.05f && Vector3.Dot(current, desired) < 0f)
+            {
+                // 反向输入：先踩地制动（穿过零速后再反向加速）
+                accel = grounded ? reverseDecel : airAccel;
+            }
+            else if (targetSpeed < curSpeed)
+            {
+                // 目标减速（松开部分摇杆 / 出水 / 踩敌墨）：按刹车减速度收
+                accel = grounded ? runDecel : airDecel;
+            }
+            else
+            {
+                accel = grounded ? runAccel : airAccel;
+            }
+
+            Vector3 newVel = Vector3.MoveTowards(current, desired, Mathf.Max(0.1f, accel) * dt);
+
+            // 转向限速：低速起步（<0.3m/s）允许全向，速度起来后方向变化受 turnRate 约束（画弧）
+            if (curSpeed > 0.3f && newVel.sqrMagnitude > 0.0001f)
+            {
+                Vector3 oldDir = current / curSpeed;
+                Vector3 newDir = newVel.normalized;
+                float maxTurnDeg = Mathf.Max(0.1f, turnRateDeg) * dt;
+                if (Vector3.Angle(oldDir, newDir) > maxTurnDeg)
+                {
+                    Vector3 cappedDir = Vector3.RotateTowards(oldDir, newDir, maxTurnDeg * Mathf.Deg2Rad, 0f);
+                    newVel = cappedDir * newVel.magnitude;
+                }
+            }
+
+            return newVel;
         }
 
         /// <summary>
@@ -675,6 +922,11 @@ namespace P1.Player
                     {
                         targetScale = new Vector3(0.85f, 0.16f, 0.95f);
                     }
+                    else if (IsInSquidForm)
+                    {
+                        // 干地乌贼：趴地但不下沉（脚下没有墨面可以潜入）
+                        targetScale = new Vector3(0.85f, 0.45f, 0.95f);
+                    }
                     else
                     {
                         targetScale = Vector3.one;
@@ -684,9 +936,9 @@ namespace P1.Player
                 }
             }
 
-            if (visualController == null && weaponVisual != null && weaponVisual.activeSelf == IsSwimming)
+            if (visualController == null && weaponVisual != null && weaponVisual.activeSelf == IsInSquidForm)
             {
-                weaponVisual.SetActive(!IsSwimming);
+                weaponVisual.SetActive(!IsInSquidForm);
             }
         }
 

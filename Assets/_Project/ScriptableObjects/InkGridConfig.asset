@@ -18,6 +18,7 @@ MonoBehaviour:
   inkAtlasResolutionDesktop: 4096
   inkAtlasResolutionMobile: 1024
   inkDryingSeconds: 6
+  inkSheenSeconds: 22
   splatGrowSeconds: 0.12
   atlasWetClockPeriod: 32
   atlasGrowShrinkMeters: 0.4

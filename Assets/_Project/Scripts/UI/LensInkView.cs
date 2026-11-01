@@ -25,9 +25,16 @@ namespace P1.UI
         public const int MaxDrops = 96;
         private const string ShaderName = "P1/UI/LensInk";
 
+        // 旧通道名（保留向后兼容）：shader 端通道 0/1 分别绑定 fieldA/_LensColA（队 A 色）与
+        // fieldB/_LensColB（队 B 色），与本地玩家是谁无关——选通道即选「渲染哪一队的颜色」。
         public const int ChannelEnemy = 0;
         public const int ChannelOwn = 1;
         public const int ChannelWater = 2;
+
+        /// <summary>渲染队 A 颜色的墨滴通道（shader fieldA → _LensColA）。</summary>
+        public const int ChannelTeamA = ChannelEnemy;
+        /// <summary>渲染队 B 颜色的墨滴通道（shader fieldB → _LensColB）。</summary>
+        public const int ChannelTeamB = ChannelOwn;
 
         private static readonly int DropsProp = Shader.PropertyToID("_LensDrops");
         private static readonly int DropParamsProp = Shader.PropertyToID("_LensDropParams");
@@ -176,12 +183,19 @@ namespace P1.UI
 
         private void HandleLocalPlayerKilled(CombatantHealth victim, Team killerTeam)
         {
-            // 本地玩家阵亡时，受击方向与屏幕四周飞溅大墨斑
+            // 本地玩家阵亡时，屏幕中央与四周飞溅大墨斑；颜色跟击杀者队色走（按队色场选通道，
+            // 不再固定走旧「敌方」通道——那会把队 A 色泼到队 A 玩家脸上，看起来像血红液体）。
             float aspect = Screen.height > 0 ? (float)Screen.width / Screen.height : LensInkMath.DefaultAspect;
-            int enemyCh = ChannelEnemy;
-            Splat(enemyCh, 0.5f, 0.5f, 0.16f, aspect, 8, 8, 2.8f);
-            Splat(enemyCh, 0.28f, 0.42f, 0.11f, aspect, 6, 6, 2.4f);
-            Splat(enemyCh, 0.72f, 0.46f, 0.11f, aspect, 6, 6, 2.4f);
+            int killerCh = ChannelOfTeam(killerTeam);
+            Splat(killerCh, 0.5f, 0.5f, 0.16f, aspect, 8, 8, 2.8f);
+            Splat(killerCh, 0.28f, 0.42f, 0.11f, aspect, 6, 6, 2.4f);
+            Splat(killerCh, 0.72f, 0.46f, 0.11f, aspect, 6, 6, 2.4f);
+        }
+
+        /// <summary>按队伍选墨滴通道：队 A 墨滴走 fieldA（_LensColA），队 B 走 fieldB（_LensColB）；中性回落队 A。</summary>
+        private static int ChannelOfTeam(Team team)
+        {
+            return team == Team.TeamB ? ChannelTeamB : ChannelTeamA;
         }
 
         public void EnsureBuilt()
@@ -576,12 +590,8 @@ namespace P1.UI
             float aspect = cam.aspect > 0.01f ? cam.aspect : LensInkMath.DefaultAspect;
             float size = Mathf.Clamp(0.045f + 0.04f * power, 0.04f, 0.14f);
 
-            int channel = (team == (int)Team.TeamA) ? ChannelEnemy : ChannelOwn;
-            PlayerController localPlayer = PlayerController.LocalPlayer;
-            if (localPlayer != null && localPlayer.Health != null)
-            {
-                channel = (team == (int)localPlayer.Health.Team) ? ChannelOwn : ChannelEnemy;
-            }
+            // 泼溅颜色 = 该队墨水本身的颜色（通道按队色场选择，不再依赖本地玩家推算敌我）
+            int channel = ChannelOfTeam((Team)team);
 
             Splat(channel, Mathf.Clamp01(viewPos.x), Mathf.Clamp01(viewPos.y), size, aspect);
         }
@@ -610,12 +620,14 @@ namespace P1.UI
             }
 
             int n = k > 0.7f ? 2 : 1;
+            // 受击飞溅跟攻击者队色走（无攻击者时回落受击者的敌方队伍，如踩墨灼烧）
+            int splashCh = ChannelOfTeam(attacker != null ? attacker.Team : victim.Team.GetOpponent());
             for (int i = 0; i < n; i++)
             {
                 float aa = ang + (i != 0 ? UnityEngine.Random.Range(-0.7f, 0.7f) : UnityEngine.Random.Range(-0.18f, 0.18f));
                 float size = (0.045f + 0.05f * k) * (i != 0 ? 0.6f : 1f) * UnityEngine.Random.Range(0.85f, 1.15f);
                 Vector2 edge = LensInkMath.EdgePoint(aa, size * UnityEngine.Random.Range(0.2f, 0.9f), aspect);
-                Splat(ChannelEnemy, edge.x, edge.y, size, aspect, 6, 5, 1.5f + k * 0.9f);
+                Splat(splashCh, edge.x, edge.y, size, aspect, 6, 5, 1.5f + k * 0.9f);
             }
         }
 

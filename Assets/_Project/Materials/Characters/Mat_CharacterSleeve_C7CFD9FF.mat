@@ -22,21 +22,30 @@ Material:
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
-    m_TexEnvs: []
+    m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: 590f5f12480344f6a8e46fdfd3b71611, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailNormalMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
     - _Blend: 0
     - _Cull: 2
+    - _DetailNormalStrength: 0.3
     - _DstBlend: 0
     - _EmissionStrength: 0
     - _Metallic: 0
     - _RimPower: 3
-    - _RimStrength: 0.3
+    - _RimStrength: 0.15
     - _ShadeSoftness: 0.08
     - _ShadeThreshold: 0.5
     - _ShadowFloor: 0.55
-    - _Smoothness: 0.5
-    - _SpecSoftness: 0.02
+    - _Smoothness: 0.35
+    - _SpecSoftness: 0.04
     - _SpecThreshold: 0.95
     - _SrcBlend: 1
     - _Surface: 0
@@ -45,7 +54,7 @@ Material:
     - _BaseColor: {r: 0.78, g: 0.81, b: 0.85, a: 1}
     - _Color: {r: 0.78, g: 0.81, b: 0.85, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _RimColor: {r: 1, g: 1, b: 1, a: 1}
-    - _ShadowTint: {r: 0.13286833, g: 0.17064494, b: 0.34239164, a: 1}
+    - _RimColor: {r: 0.5225216, g: 0.71056664, b: 1, a: 1}
+    - _ShadowTint: {r: 0.19599415, g: 0.21404114, b: 0.3672465, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

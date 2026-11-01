@@ -1,24 +1,36 @@
 #!/usr/bin/env python3
-"""把 Inkwave 调研库的 SVG 图标烘焙成 Unity 可用的「纯白 + 透明」UI 精灵。
+"""把 Inkwave 调研库的 SVG 图标烘焙成 Unity 可用的「粗黑描边 + 纯白主体 + 透明」UI 精灵。
 
 为什么需要这个脚本：
 - 调研库的 SVG 是**彩色**的（深色描边 + 橙色主体 + 浅色填充），而 P1 的图标必须是
-  **纯白主体 + alpha**，队伍颜色由 Unity 的 `Image.color` 运行时染色（一套图标服务两队）。
+  **白主体 + alpha**，队伍颜色由 Unity 的 `Image.color` 运行时染色（一套图标服务两队）。
 - 调研库有 27 个 SVG 带**重复属性**（`stroke-width` 写了两次），标准 XML 解析器直接报
   `Attribute stroke-width redefined`，必须先做去重消毒。
 - 直接把彩色图平铺成白色剪影会丢掉内部结构（描边与填充融成一团），
-  这里用「亮度 → 压缩 alpha」的 duotone 映射：描边接近全不透明、浅色填充半透明，
-  既保持纯白可染色，又保住眼睛/齿轮孔/闪电等内部细节。
+  这里用「亮度 → alpha」的二值映射（`--cut dark`，默认）：深色描边/暗部挖成透明，
+  中亮主体与高光填成实心白，边缘保留抗锯齿过渡 —— 齿轮的孔、瞳孔、枪身分件都还在。
 
-依赖：`brew install librsvg`（提供 rsvg-convert）；Python 侧只用 stdlib + Pillow。
+**128px 粗描边（2026-10-31 重做）**：512px 源缩到 20~48px 显示会糊成一团（细节线只剩
+亚像素宽度，Unity 双线性再把它们磨平）。现在按 HUD/选枪界面真实显示尺寸（28~85px）
+出片，并在剪影外围补一圈**实心墨黑描边**（默认 128px 下 6px）：
+- 描边直接用 `#15121C`（STYLE.md 的 UI 墨色）烘进 RGB：染色是 `Image.color` 乘法，
+  墨色 × 任何队伍色仍然是深墨色，所以描边在任何队伍色下都保持可见。
+- 描边只加在**外轮廓**外侧；图标内部的孔洞/瞳孔/分件仍然是 alpha 镂空，
+  这样白主体、墨描边、镂空细节三层在浅底/深底/队伍色底上都能读出来。
+- 白主体仍是纯白 RGB —— 队伍染色语义与旧版完全一致。
+
+依赖：`brew install librsvg`（提供 rsvg-convert）+ `numpy` + `Pillow`。
+（numpy 在 `bake_arena_textures.py` / `bake_prop_surfaces.py` 里早已是项目依赖。）
 
 用法：
-    python3 tools/bake_icons.py                  # 全量 66 个 → Assets/_Project/Art/Sprites/Icons/
+    python3 tools/bake_icons.py                  # 全量 66 个 @128 → Assets/_Project/Art/Sprites/Icons/
     python3 tools/bake_icons.py --list           # 看图标清单与目标路径
     python3 tools/bake_icons.py --only weapon    # 只处理某一类（类名或文件名关键字）
-    python3 tools/bake_icons.py --size 256       # 换输出边长
+    python3 tools/bake_icons.py --size 256       # 换输出边长（描边按 --size/128 等比缩放）
+    python3 tools/bake_icons.py --outline 0      # 关掉描边，回到旧的纯白剪影
+    python3 tools/bake_icons.py --size 512       # 需要高分辨率源稿时（描边自动变 24px）
     python3 tools/bake_icons.py --out-dir /tmp/x # 换输出根目录（调试用，不碰 Assets）
-    python3 tools/bake_icons.py --preview /tmp/contact_sheet.png   # 另出深底缩略图自查
+    python3 tools/bake_icons.py --preview /tmp/contact_sheet.png   # 另出缩略图自查
 
 产物是确定性的（同一输入 → 同一字节），可以随时重烘，不进 generation 台账。
 """
@@ -33,7 +45,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PIL import Image
+import numpy as np
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT / "inkwave-aah-research" / "assets" / "icons"
@@ -69,9 +82,28 @@ NAME_ALIASES = {
     "SQUID": "squid",
 }
 
-# 图标按 512 输出：UI 里最大用到 128px 时有 4x 余量，也匹配
-# MediaImportPostprocessor 给 Art/Sprites 设的 maxTextureSize=512。
-DEFAULT_SIZE = 512
+# 128 是「显示尺寸的 1.5~4 倍」：HUD/选枪界面真实图标显示 28~85px，
+# 128 留了余量，同时比 512 少 16 倍像素、缩小采样时不再糊。
+# 想重新出 512 源稿：--size 512 --outline 24。
+DEFAULT_SIZE = 128
+
+# 描边宽度（按 128px 输出计），随 --size 等比缩放。
+DEFAULT_OUTLINE = 6.0
+
+# 描边之外再留的透明边距，防止描边贴着图片边缘被裁。
+DEFAULT_PAD = 3.0
+
+# STYLE.md 的 UI 墨色；也是 Inkwave 图标的原描边色差一档。
+INK_RGB = (0x15, 0x12, 0x1C)
+
+# 内部按超采样合成，再 LANCZOS 缩到目标尺寸 —— 描边和 alpha 边缘都拿到干净 AA。
+# 上限 1024：128px 出片内部跑 512（4x），256/512px 出片自动降到 2x/1x，不至于慢成几分钟。
+MAX_WORK_SIZE = 1024
+SUPERSAMPLE = 4
+
+
+def work_size(size: int) -> int:
+    return min(size * SUPERSAMPLE, MAX_WORK_SIZE)
 
 
 def classify(path: Path) -> tuple[str, str] | None:
@@ -204,22 +236,163 @@ def to_white(im: Image.Image, cut: str = "dark",
     return white
 
 
-def pad_square(im: Image.Image, size: int) -> Image.Image:
-    """居中放进 size×size 的透明画布（120×80 的横幅图标要和方形图标同尺寸）。"""
-    canvas = Image.new("RGBA", (size, size), (255, 255, 255, 0))
-    x = (size - im.width) // 2
-    y = (size - im.height) // 2
-    canvas.alpha_composite(im, (x, y))
-    return canvas
+def fill_holes(mask: Image.Image) -> Image.Image:
+    """L 模式 0/255 蒙版 → 填掉所有内部孔洞的实心剪影（只认「与画面四边连通」为外部）。"""
+    w, h = mask.size
+    # 反转后背景=255；从四角洪水填充标记外圈，剩下的 255 就是内部孔洞
+    inv = mask.point(lambda v: 255 - v)
+    for xy in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)):
+        if inv.getpixel(xy) == 255:
+            ImageDraw.floodfill(inv, xy, 128)
+    exterior = inv.point(lambda v: 255 if v == 128 else 0)
+    return exterior.point(lambda v: 255 - v)
+
+
+def distance_to_solid(mask: Image.Image) -> np.ndarray:
+    """每个像素到最近「实心像素」的距离（3-4 chamfer 近似欧氏，误差 <2%）。
+
+    为什么不用 PIL 的 MaxFilter：方形核在 45° 斜边上会把描边撑粗约 40%，
+    三角/星形图标的描边会显得忽粗忽细。
+    """
+    solid = np.asarray(mask, dtype=bool)
+    h, w = solid.shape
+    inf = np.float32(1e6)
+    d = np.where(solid, np.float32(0.0), inf).astype(np.float32)
+
+    a, b = np.float32(3.0), np.float32(4.0)
+    idx = np.arange(w, dtype=np.float32)
+
+    def row_pass(rows, cols_from_right: bool):
+        prev = None
+        for i in rows:
+            row = d[i]
+            if cols_from_right:
+                row = np.minimum(row, np.minimum.accumulate((row + a * idx)[::-1])[::-1] - a * idx)
+            else:
+                row = np.minimum(row, np.minimum.accumulate(row - a * idx) + a * idx)
+            if prev is not None:
+                shift_l = np.full(w, inf, np.float32)
+                shift_r = np.full(w, inf, np.float32)
+                shift_l[1:] = prev[:-1] + b
+                shift_r[:-1] = prev[1:] + b
+                row = np.minimum(row, np.minimum(prev + a, np.minimum(shift_l, shift_r)))
+                if cols_from_right:
+                    row = np.minimum(row, np.minimum.accumulate((row + a * idx)[::-1])[::-1] - a * idx)
+                else:
+                    row = np.minimum(row, np.minimum.accumulate(row - a * idx) + a * idx)
+            d[i] = row
+            prev = row
+
+    for _ in range(2):
+        row_pass(range(h), cols_from_right=False)
+        row_pass(range(h - 1, -1, -1), cols_from_right=True)
+
+    return d / a
+
+
+def bake_icon(svg: Path, size: int, workdir: Path, cut: str = "dark",
+              outline: float = DEFAULT_OUTLINE, pad: float = DEFAULT_PAD) -> Image.Image:
+    """单个图标 → size×size RGBA（白主体 + 外轮廓墨描边 + 镂空细节）。"""
+    hi = work_size(size)
+    unit = hi / DEFAULT_SIZE          # 描边/边距都按 128px 标称值定义，内部等比换算
+    outline_px = outline * unit
+    pad_px = pad * unit
+
+    # 内容占位扣掉描边与边距，保证描边永远在画布内
+    inner = hi - 2 * int(round(outline_px + pad_px))
+    if inner < 8:
+        raise ValueError(f"描边/边距太大：size={size} outline={outline} pad={pad}")
+
+    raw = render(svg, inner, workdir)
+    canvas = Image.new("RGBA", (hi, hi), (255, 255, 255, 0))
+    canvas.alpha_composite(raw, ((hi - raw.width) // 2, (hi - raw.height) // 2))
+
+    body = to_white(canvas, cut)
+    body_a = np.asarray(body.getchannel("A"), dtype=np.float32) / 255.0
+
+    if outline_px < 1.0:
+        ring_a = np.zeros_like(body_a)
+    else:
+        # 剪影取「白主体」而不是完整原作：原作自带一圈深色描边（已被挖空），
+        # 若按完整轮廓加环，主体与环之间会留一条缝，形成双线。
+        solid = fill_holes(body.getchannel("A").point(lambda v: 255 if v >= 96 else 0))
+        dist = distance_to_solid(solid)
+        ring_a = np.clip((outline_px + 0.5) - dist, 0.0, 1.0)
+        ring_a[np.asarray(solid, dtype=bool)] = 0.0
+
+    # 白主体画在墨环之上：out = body over ring
+    out_a = body_a + ring_a * (1.0 - body_a)
+    ink = np.array(INK_RGB, dtype=np.float32) / 255.0
+    # 预乘 alpha 后再缩小：透明区域的 RGB 不会污染边缘（否则深色描边会脏边）
+    pre_rgb = np.ones((hi, hi, 3), np.float32) * body_a[..., None] \
+        + ink[None, None, :] * (ring_a * (1.0 - body_a))[..., None]
+    if (hi, hi) != (size, size):
+        pre_rgb = _resize_float(pre_rgb, size)
+        out_a = _resize_float(out_a, size)
+
+    out_a = np.clip(out_a, 0.0, 1.0)
+    safe = np.maximum(out_a, 1e-6)[..., None]
+    rgb = np.clip(pre_rgb / safe, 0.0, 1.0)
+    rgb[out_a <= 1e-3] = 1.0   # 全透明像素先留白
+
+    rgba = np.dstack([rgb, out_a])
+    im = Image.fromarray((rgba * 255.0 + 0.5).astype(np.uint8))
+    return _bleed_rgb(im)
+
+
+def _bleed_rgb(im: Image.Image, passes: int = 4) -> Image.Image:
+    """把不透明像素的 RGB 往透明区域外扩几圈（color bleed）。
+
+    描边是深墨色、外侧全透明：双线性采样 / BC7-ETC2 压缩会让透明像素的 RGB 渗进
+    描边边缘，白 RGB 会在深色描边外冒一圈白雾。把 RGB 外扩成「最近的不透明颜色」
+    后，任何采样都只会取到墨色，边缘保持干净。
+    （Unity 的 Alpha Is Transparency 也会做一次 dilation，这里是双保险。）
+    """
+    arr = np.asarray(im).astype(np.float32) / 255.0
+    rgb, a = arr[..., :3].copy(), arr[..., 3].copy()
+    known = a > 1e-3
+    for _ in range(passes):
+        if known.all():
+            break
+        acc = np.zeros_like(rgb)
+        cnt = np.zeros(a.shape, np.float32)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                src_rgb = np.roll(np.roll(rgb, dy, axis=0), dx, axis=1)
+                src_known = np.roll(np.roll(known, dy, axis=0), dx, axis=1)
+                acc += src_rgb * src_known[..., None]
+                cnt += src_known
+        newly = (~known) & (cnt > 0)
+        rgb[newly] = acc[newly] / cnt[newly][..., None]
+        known = known | newly
+
+    out = np.dstack([rgb, a])
+    return Image.fromarray((np.clip(out, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8))
+
+
+def _resize_float(arr: np.ndarray, size: int) -> np.ndarray:
+    """float32 单通道/多通道数组 LANCZOS 缩放到 size×size（逐通道走 Pillow F 模式）。"""
+    if arr.ndim == 2:
+        return np.asarray(Image.fromarray(arr.astype(np.float32)).resize((size, size), Image.LANCZOS))
+    chans = [
+        np.asarray(Image.fromarray(arr[..., c].astype(np.float32)).resize((size, size), Image.LANCZOS))
+        for c in range(arr.shape[2])
+    ]
+    return np.dstack(chans)
 
 
 def contact_sheet(rows: list[tuple[str, Image.Image]], out: Path, cell: int = 96) -> None:
-    """深底缩略图：纯白图标在白底看图器里完全看不见，必须垫深色才看得出来。"""
+    """缩略图拼版：中灰底，白主体与墨描边都能看清（纯白/纯黑底必有一层看不见）。"""
     cols = 11
     pad = 8
     label_h = 14
-    sheet = Image.new("RGBA", (cols * (cell + pad) + pad, ((len(rows) + cols - 1) // cols) * (cell + pad + label_h) + pad),
-                      (28, 28, 34, 255))
+    sheet = Image.new(
+        "RGBA",
+        (cols * (cell + pad) + pad, ((len(rows) + cols - 1) // cols) * (cell + pad + label_h) + pad),
+        (150, 150, 158, 255),
+    )
     for i, (name, im) in enumerate(rows):
         col, row = i % cols, i // cols
         thumb = im.copy()
@@ -231,12 +404,16 @@ def contact_sheet(rows: list[tuple[str, Image.Image]], out: Path, cell: int = 96
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="SVG 图标 → Unity 纯白透明精灵")
+    ap = argparse.ArgumentParser(description="SVG 图标 → Unity 白主体+墨描边透明精灵")
     ap.add_argument("--size", type=int, default=DEFAULT_SIZE, help=f"输出边长（默认 {DEFAULT_SIZE}）")
+    ap.add_argument("--outline", type=float, default=DEFAULT_OUTLINE,
+                    help=f"外轮廓墨色描边宽度（按 {DEFAULT_SIZE}px 计，随 --size 缩放；0 = 关闭）")
+    ap.add_argument("--pad", type=float, default=DEFAULT_PAD,
+                    help=f"描边外的透明边距（按 {DEFAULT_SIZE}px 计，默认 {DEFAULT_PAD}）")
     ap.add_argument("--out-dir", type=Path, default=DEFAULT_OUT, help="输出根目录")
     ap.add_argument("--only", help="只处理匹配关键字（分类目录名或文件名）")
     ap.add_argument("--list", action="store_true", help="只列清单不烘焙")
-    ap.add_argument("--preview", type=Path, help="另出深底缩略图到该路径")
+    ap.add_argument("--preview", type=Path, help="另出缩略图到该路径")
     ap.add_argument("--cut", choices=("dark", "light"), default="dark",
                     help="挖空哪一层：dark=挖深色描边/暗部（默认，实心主体+镂空细节）；light=挖亮色留白")
     args = ap.parse_args()
@@ -282,18 +459,17 @@ def main() -> int:
             dst_dir.mkdir(parents=True, exist_ok=True)
             dst = dst_dir / f"{stem}.png"
 
-            raw = render(svg, args.size, workdir)
-            white = pad_square(to_white(raw, args.cut), args.size)
-            white.save(dst, optimize=True)
+            icon = bake_icon(svg, args.size, workdir, args.cut, args.outline, args.pad)
+            icon.save(dst, optimize=True)
 
             by_folder[folder] = by_folder.get(folder, 0) + 1
-            preview_rows.append((f"{folder}/{stem}", white))
+            preview_rows.append((f"{folder}/{stem}", icon))
 
     for folder in CATEGORIES:
         if folder in by_folder:
             print(f"  {folder:9s} {by_folder[folder]:2d} 个 → {args.out_dir / folder}")
     total = sum(by_folder.values())
-    print(f"DONE: {total} 个图标 @{args.size}px → {args.out_dir}")
+    print(f"DONE: {total} 个图标 @{args.size}px outline={args.outline} → {args.out_dir}")
 
     if args.preview:
         args.preview.parent.mkdir(parents=True, exist_ok=True)

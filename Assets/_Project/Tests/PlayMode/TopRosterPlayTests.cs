@@ -52,6 +52,22 @@ namespace P1.Tests
                 Assert.AreEqual(Team.TeamB, roster.TeamBSlots[i].SlotTeam);
             }
 
+            // 纵向：根高 = 槽高（槽顶与根顶对齐），根顶下移 12px 安全内边距 + 28px YOU 角标，
+            // 84 槽 + 色签硬影 3px + 12 顶部内边距全部落在屏内（旧版槽顶在 -14、YOU 顶到 +14 被裁）
+            var rootRt = (RectTransform)roster.transform;
+            Assert.AreEqual(-40f, rootRt.anchoredPosition.y, 0.01f,
+                "桌面根节点应下移 12(安全内边距) + 28(YOU 角标)");
+            Assert.AreEqual(72f, rootRt.sizeDelta.y, 0.01f, "桌面根高应等于槽高 72");
+            Assert.AreEqual(rootRt.sizeDelta.y,
+                ((RectTransform)roster.TeamASlots[0].transform).sizeDelta.y, 0.01f,
+                "槽顶必须与根顶对齐（同一套纵向推导）");
+
+            roster.SetMobileLayout(true);
+            Assert.AreEqual(-40f, rootRt.anchoredPosition.y, 0.01f,
+                "移动端同样保留 12(安全内边距) + 28(YOU 角标)");
+            Assert.AreEqual(84f, rootRt.sizeDelta.y, 0.01f, "移动端根高应等于槽高 84");
+            Assert.AreEqual(84f, ((RectTransform)roster.TeamASlots[0].transform).sizeDelta.y, 0.01f);
+
             Object.Destroy(canvasGo);
             yield return null;
         }

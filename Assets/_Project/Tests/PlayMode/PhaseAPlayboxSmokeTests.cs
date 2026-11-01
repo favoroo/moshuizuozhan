@@ -190,27 +190,28 @@ namespace P1.Tests
         }
 
         [UnityTest]
-        public IEnumerator Player_ThrowBomb_ConsumesInkAndLeavesBobmInFlight()
+        public IEnumerator Player_ThrowBomb_IndependentOfInk_LeavesBombInFlight()
         {
             yield return LoadPlaybox();
 
             var player = PlayerController.LocalPlayer;
-            player.enabled = false;
+            player.enabled = false; // 关闭输入驱动，避免真实输入干扰
             yield return null;
 
             var motor = player.Motor;
-            motor.RefillInkFull();
+            // 手雷与墨水脱钩（设计变更）：清空墨水也必须能投，投掷不扣墨，只受冷却限制
+            motor.TryConsumeInk(motor.CurrentInk);
             float inkBefore = motor.CurrentInk;
 
             bool thrown = player.Weapon.TryThrowSubBomb(player.transform.position + Vector3.forward * 5f);
-            Assert.IsTrue(thrown, "墨水充足时应能投掷手雷");
-            Assert.AreEqual(inkBefore - 70f, motor.CurrentInk, 0.5f, "P3-B：手雷应消耗 70 点墨水（70%）");
+            Assert.IsTrue(thrown, "手雷已与墨水脱钩：空墨也应能投掷");
+            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.5f, "投掷手雷不得消耗墨水");
 
             yield return new WaitForSeconds(0.4f);
         }
 
         [UnityTest]
-        public IEnumerator Player_TouchBombHoldRelease_ThrowsViaArbiter()
+        public IEnumerator Player_TouchBombPress_ThrowsImmediately_NoAiming()
         {
             yield return LoadPlaybox();
 
@@ -228,21 +229,20 @@ namespace P1.Tests
             var player = PlayerController.LocalPlayer;
             player.Health.IsInvulnerable = true; // 避免测试期间被 Bot 击杀打断
             var motor = player.Motor;
-            motor.RefillInkFull();
+            // 手雷与墨水脱钩（设计变更）：空墨也必须能按下即投
+            motor.TryConsumeInk(motor.CurrentInk);
             float inkBefore = motor.CurrentInk;
+            int bombsBefore = InkBombPool.Instance.ActiveBombCount;
 
-            // 1. 长按（TouchBombHeld）→ 进入瞄准态，期间不得扣墨投掷（旧「按下即投」bug 回归）
-            player.TouchBombHeld = true;
-            yield return null;
-            yield return null;
-            Assert.IsTrue(player.IsAimingBomb, "长按副武器键应进入瞄准态");
-            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.01f, "按住瞄准期间不得扣墨投掷");
-
-            // 2. 触屏松手注入（TouchBombTriggered，pointer-up 语义）→ 投掷一次并扣 70 墨
+            // 触屏 pointer-down 注入 → 同一帧立即投掷，不进入瞄准态
             player.TouchBombTriggered = true;
             yield return null;
-            Assert.IsFalse(player.IsAimingBomb, "松手后应退出瞄准态");
-            Assert.AreEqual(inkBefore - 70f, motor.CurrentInk, 0.5f, "松手投掷应恰好消耗 70 点墨水（只投一颗）");
+            yield return null;
+
+            Assert.AreEqual(bombsBefore + 1, InkBombPool.Instance.ActiveBombCount,
+                "按下即投：注入投掷事件后必须立刻投出一颗");
+            Assert.IsFalse(player.IsAimingBomb, "新版手雷不再有瞄准态");
+            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.01f, "按下即投不扣墨（手雷与墨水脱钩）");
 
             player.TouchBombHeld = false;
         }
@@ -257,7 +257,8 @@ namespace P1.Tests
             yield return null;
 
             var motor = player.Motor;
-            motor.RefillInkFull();
+            // 手雷与墨水脱钩（设计变更）：空墨也必须能弹道投掷且不扣墨
+            motor.TryConsumeInk(motor.CurrentInk);
             float inkBefore = motor.CurrentInk;
             float coverageBefore = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
 
@@ -276,8 +277,8 @@ namespace P1.Tests
             Assert.Greater(hitPoint.z, muzzle.z + 3f, "平抛落点应在出手点前方数米，而不是贴脚");
 
             bool thrown = player.Weapon.TryThrowSubBombBallistic(velocity);
-            Assert.IsTrue(thrown, "墨水充足时应能弹道投掷");
-            Assert.AreEqual(inkBefore - 70f, motor.CurrentInk, 0.5f, "弹道投掷应恰好消耗 70 点墨水");
+            Assert.IsTrue(thrown, "手雷已与墨水脱钩：空墨也应能弹道投掷");
+            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.5f, "弹道投掷不得消耗墨水");
 
             // 飞行（约 0.6s）+ 引信 0.95s + 余量 → 爆炸涂地
             yield return new WaitForSeconds(2.6f);
@@ -297,7 +298,7 @@ namespace P1.Tests
             var weapon = player.Weapon;
             Assert.IsFalse(weapon.IsSpecialReady, "开局大招不应就绪");
 
-            weapon.AddSpecialPoints(500);
+            weapon.AddSpecialPointsRaw(500);
             Assert.IsTrue(weapon.IsSpecialReady, "充能后大招应就绪");
 
             float coverageBefore = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);

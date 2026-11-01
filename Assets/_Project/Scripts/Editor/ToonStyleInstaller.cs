@@ -18,9 +18,15 @@ namespace P1.Editor
         private const string StylePath = "Assets/_Project/ScriptableObjects/ArenaStyle.asset";
         private const string MatFolder = "Assets/_Project/Materials";
         private const string RendererPath = "Assets/Settings/PC_Renderer.asset";
+        private const string MobileRendererPath = "Assets/Settings/Mobile_Renderer.asset";
+        private const string PcRpAssetPath = "Assets/Settings/PC_RPAsset.asset";
+        private const string MobileRpAssetPath = "Assets/Settings/Mobile_RPAsset.asset";
         private const string OutlineMaterialPath = "Assets/_Project/Materials/Mat_ToonOutline.mat";
+        private const string MobileOutlineMaterialPath = "Assets/_Project/Materials/Mat_ToonOutlineMobile.mat";
         private const string OutlineFeatureName = "P1 Toon Outline";
+        private const string MobileOutlineFeatureName = "P1 Toon Outline Mobile";
         private const string BackupPath = "Logs/PC_Renderer.backup.asset";
+        private const string MobileBackupPath = "Logs/Mobile_Renderer.backup.asset";
 
         private static readonly int ShadeThresholdId = Shader.PropertyToID("_ShadeThreshold");
         private static readonly int ShadeSoftnessId = Shader.PropertyToID("_ShadeSoftness");
@@ -187,6 +193,87 @@ namespace P1.Editor
                       "场景表面获得法线/粗糙度/接触遮蔽。回退纯旧档请运行 P1/画风/1。");
         }
 
+        [MenuItem("P1/画风/5. 应用软化卡通参数（三阶光影+减淡描边+环境光增强）", false, 14)]
+        public static void ApplySoftCartoonStyle()
+        {
+            var style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(StylePath);
+            if (style == null)
+            {
+                Debug.LogError("[P31] 找不到 " + StylePath + "，请先运行 P1/构建/1 生成配置。");
+                return;
+            }
+
+            WriteStylePresetSoftCartoon(style);
+            ApplyEnvironmentMaterials(style);
+            ApplyCharacterMaterials(style);
+            ApplyAlbedoDetailMaps(style);
+            ApplyPostProcessStyle(style);
+
+            Material outlineMat = EnsureOutlineMaterial(style);
+            if (outlineMat != null)
+            {
+                InstallOutlineFeature(outlineMat, style.sceneOutlineEnabled, style.ssaoIntensity);
+            }
+
+            InstallMobileOutlineFeature(style);
+
+            InstallScreenFxFeature();
+
+            ArenaAtmosphereBuilder.Apply(style);
+
+            var scene = EditorSceneManager.GetActiveScene();
+            if (scene.IsValid() && !string.IsNullOrEmpty(scene.path))
+            {
+                EditorSceneManager.MarkSceneDirty(scene);
+                EditorSceneManager.SaveScene(scene);
+            }
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log("[P31] 软化卡通参数已应用：三阶柔和光影 + 减淡描边 + 环境光增强。");
+        }
+
+        /// <summary>
+        /// P31 软化卡通预设：完整继承 P18 质感档（材质/湿墨/后处理），仅软化观感三要素——
+        /// 1) Toon 色阶从硬切换改为柔和三阶；2) 全屏描边减淡（色值与粗细）；3) 环境光增强。
+        /// 硬基础（涂装色/布局/反射体系）全部保留，回退旧档运行 P1/画风/4。
+        /// </summary>
+        private static void WriteStylePresetSoftCartoon(ArenaStyleSO style)
+        {
+            // 1) 继承 P18 完整质感档
+            WriteStylePresetV2(style);
+
+            // 2) 软化三渲二：更宽过渡带 + 阴影染色提亮 + 暗部不再死黑。
+            //    三阶切换由 ToonLighting.hlsl 的 P1ToonTriBand 内部完成，此处只调数值。
+            style.shadeSoftness = 0.10f;
+            style.specSoftness = 0.04f;
+            style.shadowTint = new Color(0.48f, 0.50f, 0.64f, 1f);
+            style.shadowFloor = 0.50f;
+
+            // 3) 描边减淡：近纯黑 → 深炭紫，1.6px 粗线 → 1.0px 细线，远处更早变细。
+            //    P17-A 掩体边界线同色系同步减淡，避免"描边淡了但掩体一圈还糊着黑框"。
+            style.outlineColor = new Color(0.14f, 0.12f, 0.18f, 1f);
+            style.outlineThickness = 1.0f;
+            style.outlineFadeStart = 18f;
+            style.coverEdgeLineColor = new Color(0.14f, 0.12f, 0.18f, 1f);
+
+            // 4) 环境光增强：暖地面反弹 + 强度提升，背光面呈"冷阴影 + 暖底"立体关系。
+            style.ambientIntensity = 0.88f;
+            style.ambientGround = new Color(0.28f, 0.22f, 0.18f, 1f);
+
+            // 5) 后处理精调：饱和度回落保护队伍墨色、对比与暗角微增收拢视线。
+            //    bloom 阈值必须保持 1.05 以上：角色受光面与受击白闪的 HDR 亮度实测约 0.9~1.06，
+            //    阈值低于它会把每次受击/枪口闪光放大成角色身上的大团白光（2026-11-01 白光问题实测）。
+            //    若出生台/警示灯需要更亮起辉，请提高这些材质自身的 emissive 强度，不要降全局阈值。
+            style.colorSaturation = 10f;
+            style.colorContrast = 12f;
+            style.vignetteIntensity = 0.18f;
+            style.bloomThreshold = 1.05f;
+            style.bloomIntensity = 0.45f;
+
+            EditorUtility.SetDirty(style);
+        }
+
         /// <summary>
         /// P18 画质增强预设：**完整继承旧扁平哑光档的全部配色与光照基调**（用户明确要求保留明亮基调，
         /// 只解决"哑光塑料感"），在此之上仅追加质感参数——湿墨环境反射、墨面颗粒、咖啡环、
@@ -198,7 +285,7 @@ namespace P1.Editor
             WriteStylePreset(style);
 
             // 2) P18 质感参数（不动基调，只加质感）
-            style.envSpecStrength = 1.0f;
+            style.envSpecStrength = 1.2f;
             style.envSunDiscPower = 900f;
             style.inkGrainScale = 1.6f;
             style.inkGrainStrength = 0.35f;
@@ -279,22 +366,9 @@ namespace P1.Editor
                     texelScale: 0.5f, smoothnessScale: 1.25f, style);
             }
 
-            // P18：出生台队色同样转线性——ProjectScaffolder 写的是原始 sRGB 值，
-            // 在线性管线里会被当成线性色输出成浅鲑鱼色（与地面墨同款色偏）。
-            FixSpawnPadTeamColor("Mat_SpawnPad_TeamA", style.teamAPad);
-            FixSpawnPadTeamColor("Mat_SpawnPad_TeamB", style.teamBPad);
-        }
-
-        private static void FixSpawnPadTeamColor(string materialName, Color teamColor)
-        {
-            var mat = LoadMaterial(materialName);
-            if (mat == null) return;
-            int baseColorId = Shader.PropertyToID("_BaseColor");
-            if (mat.HasProperty(baseColorId))
-            {
-                mat.SetColor(baseColorId, Linear(teamColor));
-                EditorUtility.SetDirty(mat);
-            }
+            // P18 后续修正：出生盘保持中性钢灰，不再回灌队色（队别信息由地面导向标/A-B 标记承担）。
+            // 统一走 ProjectScaffolder 的材质写入逻辑，避免两处调色规则再次分叉。
+            ProjectScaffolder.RefreshSpawnPadMaterials(style);
         }
 
         private static void ApplySurfacePbr(
@@ -380,13 +454,14 @@ namespace P1.Editor
             style.cloudStrength = 0.28f;
 
             style.tonemapMode = ArenaTonemapMode.Neutral;
-            style.bloomIntensity = 0.35f;
+            style.bloomIntensity = 0.45f;
+            // 与 ArenaStyleSO 默认值保持一致：0.98 会把枪口/命中加法闪光放大成角色白光
             style.bloomThreshold = 1.05f;
             style.colorSaturation = 18f;
             style.colorContrast = 10f;
             style.vignetteIntensity = 0.12f;
             style.postExposure = 0.08f;
-            style.ssaoIntensity = 0.28f;
+            style.ssaoIntensity = 0.9f;
 
             style.sceneOutlineEnabled = true;
             style.outlineColor = new Color(0.09f, 0.10f, 0.13f, 1f);
@@ -402,6 +477,19 @@ namespace P1.Editor
             style.coverEdgeLineWidth = 0.05f;
             style.coverEdgeLineStrength = 0.85f;
             style.coverTopLift = 0.06f;
+
+            // P29 渲染基础设施新字段默认值
+            style.postProcessingEnabled = true;
+            style.inkProbeStrength = 1f;
+            style.inkCoatStrength = 1.2f;
+            style.inkCoatRoughness = 0.06f;
+            style.inkEdgeRimStrength = 0.55f;
+            style.inkEdgeSmoothStrength = 0.7f;
+            style.inkTopDetailStrength = 1f;
+            style.wallDripSpeed = 1.3f;
+            style.waterReflectionStrength = 0.8f;
+            style.emissiveBloomStrength = 2f;
+            style.skySunIntensity = 2.2f;
 
             EditorUtility.SetDirty(style);
         }
@@ -498,7 +586,29 @@ namespace P1.Editor
             foreach (string guid in guids)
             {
                 var mat = AssetDatabase.LoadAssetAtPath<Material>(AssetDatabase.GUIDToAssetPath(guid));
-                if (mat == null || !mat.HasProperty(ShadowTintId)) continue;
+                if (mat == null) continue;
+
+                // 墨罐玻璃（URP Lit，不带 ShadowTint）：压哑并关掉镜面高光/环境反射。
+                // smoothness 0.95 的紧凑高光在阳光下会被 Bloom 放大成后背墨罐上的一团白闪。
+                if (mat.name.StartsWith("Mat_TankGlass"))
+                {
+                    if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.20f);
+                    if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0f);
+                    if (mat.HasProperty("_SpecularHighlights")) mat.SetFloat("_SpecularHighlights", 0f);
+                    if (mat.HasProperty("_EnvironmentReflections")) mat.SetFloat("_EnvironmentReflections", 0f);
+                    mat.EnableKeyword("_SPECULARHIGHLIGHTS_OFF");
+                    mat.EnableKeyword("_ENVIRONMENTREFLECTIONS_OFF");
+                    EditorUtility.SetDirty(mat);
+                    continue;
+                }
+
+                if (!mat.HasProperty(ShadowTintId)) continue;
+
+                // 墨罐液面与角色共用 Mat_TeamLiquid：压哑高光，避免液面上的镜面高光偶尔闪白
+                if (mat.name.StartsWith("Mat_TeamLiquid") && mat.HasProperty("_Smoothness"))
+                {
+                    mat.SetFloat("_Smoothness", 0.50f);
+                }
 
                 mat.SetColor(ShadowTintId, Linear(style.shadowTint));
                 if (mat.HasProperty(ShadeThresholdId)) mat.SetFloat(ShadeThresholdId, style.shadeThreshold);
@@ -509,6 +619,47 @@ namespace P1.Editor
                 if (mat.HasProperty(RimPowerId)) mat.SetFloat(RimPowerId, style.rimPower);
                 EditorUtility.SetDirty(mat);
             }
+        }
+
+        /// <summary>
+        /// P31 把程序化烘焙的织物 albedo 指到角色与布料道具材质的可选 _BaseMap 槽。
+        /// 贴图为 ±3.5% 低对比肌理（tools/bake_prop_surfaces.py 生成），只加"生活痕迹"不抢角色色。
+        /// 找不到贴图时静默跳过（先跑 baker），不影响其余画风参数落地。
+        /// </summary>
+        private static void ApplyAlbedoDetailMaps(ArenaStyleSO style)
+        {
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/_Project/Art/Textures/Surfaces/Surfaces_Cloth_Albedo.png");
+            if (tex == null)
+            {
+                Debug.LogWarning("[P31] 找不到 Surfaces_Cloth_Albedo.png，跳过 albedo 细节层" +
+                                 "（请先运行 python3 tools/bake_prop_surfaces.py）。");
+                return;
+            }
+
+            int characterCount = 0;
+            foreach (string guid in AssetDatabase.FindAssets("t:Material", new[] { "Assets/_Project/Materials/Characters" }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (mat == null) continue;
+                string shaderName = mat.shader != null ? mat.shader.name : "";
+                if (shaderName != "P1/CharacterToon" && shaderName != "P1/CharacterToonOutlined") continue;
+                mat.SetTexture("_BaseMap", tex);
+                mat.SetFloat("_DetailNormalStrength", 0.3f);
+                EditorUtility.SetDirty(mat);
+                characterCount++;
+            }
+
+            var clothProp = LoadMaterial("Mat_Prop_Cloth");
+            if (clothProp != null && clothProp.HasProperty("_BaseMap"))
+            {
+                clothProp.SetTexture("_BaseMap", tex);
+                EditorUtility.SetDirty(clothProp);
+            }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log($"[P31] albedo 细节层已应用：{characterCount} 个角色材质 + Mat_Prop_Cloth。");
         }
 
         private static void ApplyToonProperties(Material mat, ArenaStyleSO style, float rimScale)
@@ -528,20 +679,123 @@ namespace P1.Editor
         private static void ApplyPostProcessStyle(ArenaStyleSO style)
         {
             var data = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(RendererPath);
-            if (data == null) return;
-
-            Object[] assets = AssetDatabase.LoadAllAssetsAtPath(RendererPath);
-            foreach (Object asset in assets)
+            if (data != null)
             {
-                if (asset == null || !asset.name.StartsWith("ScreenSpaceAmbientOcclusion")) continue;
-                var so = new SerializedObject(asset);
-                SerializedProperty intensity = so.FindProperty("m_Settings.Intensity");
-                if (intensity != null)
+                Object[] assets = AssetDatabase.LoadAllAssetsAtPath(RendererPath);
+                foreach (Object asset in assets)
                 {
-                    intensity.floatValue = style.ssaoIntensity;
-                    so.ApplyModifiedPropertiesWithoutUndo();
-                    EditorUtility.SetDirty(asset);
+                    if (asset == null || !asset.name.StartsWith("ScreenSpaceAmbientOcclusion")) continue;
+                    var so = new SerializedObject(asset);
+                    bool modified = false;
+
+                    SerializedProperty intensity = so.FindProperty("m_Settings.Intensity");
+                    if (intensity != null)
+                    {
+                        intensity.floatValue = style.ssaoIntensity;
+                        modified = true;
+                    }
+
+                    SerializedProperty radius = so.FindProperty("m_Settings.Radius");
+                    if (radius != null)
+                    {
+                        radius.floatValue = 0.55f;
+                        modified = true;
+                    }
+
+                    SerializedProperty directLighting = so.FindProperty("m_Settings.DirectLightingStrength");
+                    if (directLighting != null)
+                    {
+                        // P31：0.35 → 0.30，SSAO 阴影少压亮面，配合三阶柔和光影更通透。
+                        directLighting.floatValue = 0.30f;
+                        modified = true;
+                    }
+
+                    // P31：NormalSamples Medium(1) → High(2)。枚举定义见
+                    // ScreenSpaceAmbientOcclusion.cs NormalQuality { Low, Medium, High }。
+                    // BlurQuality 保持 0 = Bilateral（BlurQualityOptions 枚举 0 即最高档，勿改 1）。
+                    SerializedProperty normalSamples = so.FindProperty("m_Settings.NormalSamples");
+                    if (normalSamples != null)
+                    {
+                        normalSamples.intValue = 2;
+                        modified = true;
+                    }
+
+                    if (modified)
+                    {
+                        so.ApplyModifiedPropertiesWithoutUndo();
+                        EditorUtility.SetDirty(asset);
+                    }
                 }
+            }
+
+            var rpAsset = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(PcRpAssetPath);
+            if (rpAsset != null)
+            {
+                var rpSo = new SerializedObject(rpAsset);
+                bool rpModified = false;
+
+                SerializedProperty colorGrading = rpSo.FindProperty("m_ColorGradingMode");
+                if (colorGrading != null)
+                {
+                    colorGrading.intValue = 1; // HighDynamicRange (HDR)
+                    rpModified = true;
+                }
+                else
+                {
+                    Debug.LogWarning("[ToonStyleInstaller] 在 PC_RPAsset.asset 中未找到 m_ColorGradingMode 属性。");
+                }
+
+                // P31 桌面阴影质量：2048→4096、距离 40→48、级联 2→3。
+                // 40×56m 场地中景阴影边缘更干净，三级级联减少远处阴影模糊。
+                SerializedProperty mainShadowRes = rpSo.FindProperty("m_MainLightShadowmapResolution");
+                if (mainShadowRes != null)
+                {
+                    mainShadowRes.intValue = 4096;
+                    rpModified = true;
+                }
+
+                SerializedProperty shadowDistance = rpSo.FindProperty("m_ShadowDistance");
+                if (shadowDistance != null)
+                {
+                    shadowDistance.floatValue = 48f;
+                    rpModified = true;
+                }
+
+                SerializedProperty cascadeCount = rpSo.FindProperty("m_ShadowCascadeCount");
+                if (cascadeCount != null)
+                {
+                    cascadeCount.intValue = 3;
+                    rpModified = true;
+                }
+
+                if (rpModified)
+                {
+                    rpSo.ApplyModifiedPropertiesWithoutUndo();
+                    EditorUtility.SetDirty(rpAsset);
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"[ToonStyleInstaller] 找不到 {PcRpAssetPath}。");
+            }
+
+            // P31 移动端：开启低质量软阴影（SoftShadowsSupported 是总开关，
+            // 移动端画质档 SoftShadowQuality 已是 Low）。描边 Feature 由 InstallMobileOutlineFeature 安装。
+            var mobileRp = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(MobileRpAssetPath);
+            if (mobileRp != null)
+            {
+                var mSo = new SerializedObject(mobileRp);
+                SerializedProperty softShadows = mSo.FindProperty("m_SoftShadowsSupported");
+                if (softShadows != null)
+                {
+                    softShadows.intValue = 1;
+                    mSo.ApplyModifiedPropertiesWithoutUndo();
+                    EditorUtility.SetDirty(mobileRp);
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"[ToonStyleInstaller] 找不到 {MobileRpAssetPath}。");
             }
         }
 
@@ -587,17 +841,134 @@ namespace P1.Editor
                 return;
             }
 
-            if (File.Exists(RendererPath))
+            InstallOutlineFeatureOn(data, RendererPath, BackupPath, OutlineFeatureName,
+                outlineMat, enabled, useNormals: true);
+        }
+
+        /// <summary>
+        /// P31 移动端 mini 描边：与 PC 同一 ToonOutline shader，但——
+        /// 1) 强度降到 65%（色值直接乘系数，全 edge 处也不会糊成黑块）；
+        /// 2) 只保留深度边缘（_NormalThreshold = 2 超出法线差上限 1，法线项恒 0），
+        ///    每像素省 4 次法线纹理采样；
+        /// 3) 线宽 0.7px、距离淡化更早开始（14m），控制移动端像素与带宽开销。
+        /// 与 PC 描边相互独立：单独材质 + 单独 RendererFeature，互不影响。
+        /// </summary>
+        private static void InstallMobileOutlineFeature(ArenaStyleSO style)
+        {
+            var data = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(MobileRendererPath);
+            if (data == null)
             {
-                Directory.CreateDirectory("Logs");
-                File.Copy(RendererPath, BackupPath, true);
+                Debug.LogWarning($"[P31] 找不到 {MobileRendererPath}，跳过移动端描边安装。");
+                return;
             }
 
-            FullScreenPassRendererFeature feature = FindOutlineFeature(data);
+            Material mobileMat = EnsureMobileOutlineMaterial(style);
+            if (mobileMat == null) return;
+
+            InstallOutlineFeatureOn(data, MobileRendererPath, MobileBackupPath, MobileOutlineFeatureName,
+                mobileMat, enabled: style.sceneOutlineEnabled, useNormals: false);
+        }
+
+        private static Material EnsureMobileOutlineMaterial(ArenaStyleSO style)
+        {
+            var shader = AssetDatabase.LoadAssetAtPath<Shader>(
+                "Assets/_Project/Shaders/ToonOutline.shader");
+            if (shader == null) shader = Shader.Find("P1/ToonOutline");
+            if (shader == null)
+            {
+                Debug.LogError("[P31] P1/ToonOutline Shader 未编译成功，跳过移动端描边材质。");
+                return null;
+            }
+
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(MobileOutlineMaterialPath);
+            if (mat == null)
+            {
+                mat = new Material(shader) { name = "Mat_ToonOutlineMobile" };
+                AssetDatabase.CreateAsset(mat, MobileOutlineMaterialPath);
+            }
+            else if (mat.shader != shader)
+            {
+                mat.shader = shader;
+            }
+
+            Color dim = Linear(style.outlineColor) * 0.65f;
+            mat.SetColor("_OutlineColor", dim);
+            mat.SetFloat("_OutlineThickness", 0.7f);
+            mat.SetFloat("_DepthThreshold", style.outlineDepthThreshold);
+            mat.SetFloat("_NormalThreshold", 2.0f); // > normalDiff 上限 1.0，禁用 normal 边缘项
+            mat.SetFloat("_FadeStart", 14f);
+            mat.SetFloat("_FadeEnd", 45f);
+            mat.SetFloat("_SkyCutoff", 0.97f);
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        /// <summary>把 ToonOutline FullScreenPass 幂等挂到指定 RendererData（PC/移动共用）。</summary>
+        private static void InstallOutlineFeatureOn(
+            UniversalRendererData data, string rendererPath, string backupPath, string featureName,
+            Material outlineMat, bool enabled, bool useNormals)
+        {
+            ScriptableRenderPassInput requirements = useNormals
+                ? ScriptableRenderPassInput.Depth | ScriptableRenderPassInput.Normal
+                : ScriptableRenderPassInput.Depth;
+            InstallFullScreenFeature(data, rendererPath, backupPath, featureName, outlineMat, enabled, requirements);
+        }
+
+        /// <summary>
+        /// P31 ScreenFx（受击色差 kick）只挂 PC_Renderer：全屏颜色拷贝，不需要深度/法线输入。
+        /// 材质资产在 Resources/ 下，运行时 ScreenFxController 加载同一资产写参数。
+        /// </summary>
+        private static void InstallScreenFxFeature()
+        {
+            var data = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(RendererPath);
+            if (data == null)
+            {
+                Debug.LogWarning("[P31] 找不到 PC_Renderer，跳过 ScreenFx 安装。");
+                return;
+            }
+
+            var shader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/_Project/Resources/ScreenFx.shader");
+            if (shader == null) shader = Shader.Find("P1/ScreenFx");
+            if (shader == null)
+            {
+                Debug.LogWarning("[P31] P1/ScreenFx Shader 未编译，跳过 ScreenFx 安装。");
+                return;
+            }
+
+            const string matPath = "Assets/_Project/Resources/Mat_ScreenFx.mat";
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+            if (mat == null)
+            {
+                mat = new Material(shader) { name = "Mat_ScreenFx" };
+                AssetDatabase.CreateAsset(mat, matPath);
+            }
+            else if (mat.shader != shader)
+            {
+                mat.shader = shader;
+            }
+            mat.SetFloat("_ChromaAmount", 0f);
+            EditorUtility.SetDirty(mat);
+
+            InstallFullScreenFeature(data, RendererPath, BackupPath, "P1 ScreenFx",
+                mat, enabled: true, requirements: ScriptableRenderPassInput.None);
+        }
+
+        /// <summary>通用 FullScreenPass 安装：按 featureName 幂等创建/更新，requirements 显式传入。</summary>
+        private static void InstallFullScreenFeature(
+            UniversalRendererData data, string rendererPath, string backupPath, string featureName,
+            Material passMaterial, bool enabled, ScriptableRenderPassInput requirements)
+        {
+            if (File.Exists(rendererPath))
+            {
+                Directory.CreateDirectory("Logs");
+                File.Copy(rendererPath, backupPath, true);
+            }
+
+            FullScreenPassRendererFeature feature = FindOutlineFeature(data, featureName);
             if (feature == null)
             {
                 feature = ScriptableObject.CreateInstance<FullScreenPassRendererFeature>();
-                feature.name = OutlineFeatureName;
+                feature.name = featureName;
                 AssetDatabase.AddObjectToAsset(feature, data);
 
                 var dataSo = new SerializedObject(data);
@@ -605,7 +976,7 @@ namespace P1.Editor
                 SerializedProperty featureMap = dataSo.FindProperty("m_RendererFeatureMap");
                 if (features == null)
                 {
-                    Debug.LogError("[P10-A] PC_Renderer 序列化结构异常，未安装描边。");
+                    Debug.LogError($"[ToonStyleInstaller] {rendererPath} 序列化结构异常，未安装 {featureName}。");
                     return;
                 }
 
@@ -621,10 +992,10 @@ namespace P1.Editor
                 dataSo.ApplyModifiedPropertiesWithoutUndo();
             }
 
-            feature.passMaterial = outlineMat;
+            feature.passMaterial = passMaterial;
             feature.passIndex = 0;
             feature.injectionPoint = FullScreenPassRendererFeature.InjectionPoint.BeforeRenderingTransparents;
-            feature.requirements = ScriptableRenderPassInput.Depth | ScriptableRenderPassInput.Normal;
+            feature.requirements = requirements;
             feature.fetchColorBuffer = true;
             feature.bindDepthStencilAttachment = false;
 
@@ -636,10 +1007,15 @@ namespace P1.Editor
 
         private static FullScreenPassRendererFeature FindOutlineFeature(UniversalRendererData data)
         {
+            return FindOutlineFeature(data, OutlineFeatureName);
+        }
+
+        private static FullScreenPassRendererFeature FindOutlineFeature(UniversalRendererData data, string featureName)
+        {
             foreach (ScriptableRendererFeature feature in data.rendererFeatures)
             {
                 if (feature is FullScreenPassRendererFeature fullScreen &&
-                    feature.name == OutlineFeatureName)
+                    feature.name == featureName)
                 {
                     return fullScreen;
                 }

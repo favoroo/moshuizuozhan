@@ -89,5 +89,21 @@ namespace P1.Core
         public float shakeFrequency = 38f;
         [Tooltip("爆炸/大招震屏的距离衰减半径（米）：半径内按距离平方衰减，半径外不震")]
         public float shakeExplosionRadius = 14f;
+
+        [Header("越界回收与防坠落 (P16-B)")]
+        [Tooltip("越界检测轮询周期（秒）")]
+        public float outOfBoundsCheckIntervalSeconds = 0.25f;
+        [Tooltip("X 方向允许超出边界的缓冲距离（米）")]
+        public float outOfBoundsMarginX = 0.3f;
+        [Tooltip("Z 方向允许超出边界的缓冲距离（米）")]
+        public float outOfBoundsMarginZ = 0.3f;
+        [Tooltip("最低允许高度（米），低于此高度立即判定越界回收")]
+        public float outOfBoundsMinY = -1f;
+
+        [Header("出生禁入圈 (P16-A)")]
+        [Tooltip("出生禁入圈半径（米）")]
+        public float spawnZoneRadius = 6f;
+        [Tooltip("敌方进入出生禁入圈时的径向推出速度 (m/s)")]
+        public float spawnZonePushSpeed = 8f;
     }
 }

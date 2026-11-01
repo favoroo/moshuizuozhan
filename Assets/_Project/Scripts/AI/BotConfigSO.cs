@@ -31,6 +31,8 @@ namespace P1.AI
         public float paintAheadCheckInterval = 0.3f;
         [Tooltip("移动朝向的最大转速（度/秒）：路点切换/横向换向时不再瞬时抽搐")]
         public float moveHeadingTurnRateDegrees = 630f;
+        [Tooltip("挑选涂地目标时避开敌方出生禁入圈的额外缓冲距离（米），避免贴边抖动")]
+        public float spawnZoneAvoidBufferMeters = 2f;
 
         [Header("卡死检测")]
         public float stuckCheckInterval = 1.0f;

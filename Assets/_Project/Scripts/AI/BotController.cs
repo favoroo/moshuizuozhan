@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using P1.Core;
+using P1.Environment;
 using P1.Ink;
 using P1.Player;
 using P1.Weapons;
@@ -470,7 +471,8 @@ namespace P1.AI
             _firingLatch = wantFire;
 
             Vector3 smoothedMove = SmoothMove(move, dt);
-            _motor.SetFrameIntent(smoothedMove, aimDir, wantsSwim, false, wantFire);
+            // P20：与玩家一致，大招（Slam 升空）期间锁移动——否则圈留在起跳点、身体飘走，圈与伤害错位
+            _motor.SetFrameIntent(smoothedMove, aimDir, wantsSwim, _weapon.IsPerformingSpecial, wantFire);
 
             if (wantFire)
             {
@@ -632,7 +634,7 @@ namespace P1.AI
             Vector3 aimDir = AimDirection();
 
             Vector3 move = SmoothMove(steer, dt);
-            _motor.SetFrameIntent(move, aimDir, inOwnInk, false, canPaintEscape);
+            _motor.SetFrameIntent(move, aimDir, inOwnInk, _weapon.IsPerformingSpecial, canPaintEscape);
             if (canPaintEscape)
             {
                 _weapon.TryFireMainWeapon(aimDir);
@@ -866,7 +868,7 @@ namespace P1.AI
             }
 
             Vector3 move = SmoothMove(steer, dt);
-            _motor.SetFrameIntent(move, aimDir, wantsSwim, false, wantFire);
+            _motor.SetFrameIntent(move, aimDir, wantsSwim, _weapon.IsPerformingSpecial, wantFire);
             if (wantFire)
             {
                 _weapon.TryFireMainWeapon(aimDir);
@@ -928,6 +930,10 @@ namespace P1.AI
 
                 Vector3 target = p;
                 if (nav != null && !nav.TryGetNearestWalkable(target, out target)) continue;
+
+                // P16-A: 过滤掉敌方出生禁入圈内 + 额外缓冲的候选目标，避免压家贴边抖动
+                float avoidBuffer = config != null ? config.spawnZoneAvoidBufferMeters : 2f;
+                if (SpawnZone.IsInEnemySpawnZone(target, myTeam, avoidBuffer)) continue;
 
                 float dist = FlatDistance(target);
                 if (dist < 4f || dist > 28f) continue;

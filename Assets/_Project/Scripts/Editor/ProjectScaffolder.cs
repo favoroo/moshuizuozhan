@@ -97,8 +97,7 @@ namespace P1.Editor
             CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Emissive.mat", Color.white, 0.2f, 0f, arenaStyle.lampGlass, 1.6f, 2f);
             CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Cloth.mat", Color.white, 0.1f, 0f, Color.black, 0f, 0f);
             CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Foliage.mat", Color.white, 0.08f, 0f, Color.black, 0f, 2f);
-            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_SpawnPad_TeamA.mat", arenaStyle.teamAPad);
-            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_SpawnPad_TeamB.mat", arenaStyle.teamBPad);
+            RefreshSpawnPadMaterials(arenaStyle);
             CreateOrUpdateWaterMaterial(arenaStyle);
             CreateOrUpdateSkyboxMaterial(arenaStyle);
             CreateOrUpdateBannerMaterial();
@@ -244,7 +243,8 @@ namespace P1.Editor
             {
                 var go = new GameObject($"{team}_Spawn_{i:00}");
                 go.transform.SetParent(group.transform, false);
-                go.transform.position = new Vector3(offsets[i], 0.22f, z);
+                // 出生点站在 1.2m 高的出生甲板顶面（对齐 INKWAVE 出生甲板），不再落在地面出生盘。
+                go.transform.position = new Vector3(offsets[i], ArenaLayoutV2.SpawnPointY, z);
                 go.transform.rotation = Quaternion.Euler(0f, facing, 0f);
                 result[i] = go.transform;
             }
@@ -293,21 +293,21 @@ namespace P1.Editor
             ArenaGeometryBuilder.BuildArenaGeometry(
                 arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
 
-            // 2. 重新绑定涂地 / 导航 / 遮挡
-            var inkSurface = Object.FindAnyObjectByType<InkSurfaceController>();
-            if (inkSurface != null)
-            {
-                inkSurface.Configure(inkCfg, inkableRenderers, blockedColliders);
-            }
-
             var navigator = Object.FindAnyObjectByType<ArenaNavigator>();
             if (navigator != null)
             {
                 navigator.Configure(inkCfg != null ? inkCfg.mapSize : ArenaLayoutV2.MapSize, 0.5f, ~0);
             }
 
-            // 3. 烘焙贴图 + 生成装饰/远景 + 应用氛围（内部会重载材质并绑定贴图）
-            BakeArenaVisuals(arenaMats, arenaStyle);
+            // 3. 烘焙贴图 + 生成装饰/远景 + 应用氛围（内部生成实体道具并将 Collider 注册进 blockedColliders）
+            BakeArenaVisuals(arenaMats, arenaStyle, blockedColliders);
+
+            // 2. 重新绑定涂地（在装饰生成后执行，确保掩体与实体道具均纳入 blockedColliders 统一口径）
+            var inkSurface = Object.FindAnyObjectByType<InkSurfaceController>();
+            if (inkSurface != null)
+            {
+                inkSurface.Configure(inkCfg, inkableRenderers, blockedColliders);
+            }
 
             var occMgr = Object.FindAnyObjectByType<TopDownOcclusionManager>();
             if (occMgr != null)
@@ -368,7 +368,7 @@ namespace P1.Editor
         /// P7-B 视觉总装：烘焙地面/横幅贴图 -> 绑定材质 -> 生成装饰与远景 -> 应用日光/雾/天空/后处理。
         /// 在场景里已有 Arena 之后调用（AO 需要场景碰撞体）。
         /// </summary>
-        private static void BakeArenaVisuals(ArenaMaterialSet mats, ArenaStyleSO style)
+        private static void BakeArenaVisuals(ArenaMaterialSet mats, ArenaStyleSO style, List<Collider> blockedColliders = null)
         {
             // 场景打开/资产刷新后，外部传入的 SO 引用可能变成 Unity 的「假 null」，这里重新解析一次。
             if (style == null)
@@ -391,7 +391,7 @@ namespace P1.Editor
             DestroyImmediateByName("Arena_Decor");
             DestroyImmediateByName("_ArenaBackdrop");
 
-            ArenaDecorationBuilder.Build(null, style, fresh);
+            ArenaDecorationBuilder.Build(null, style, fresh, blockedColliders);
             ArenaDecorationBuilder.BuildBackdrop(null, style, fresh);
             ArenaAtmosphereBuilder.Apply(style);
         }
@@ -425,7 +425,7 @@ namespace P1.Editor
         }
 
         /// <summary>
-        /// 把 _Spawns 下的出生线与 8 个角色迁移到 40×56 的新出生区（z=±23.5）。
+        /// 把 _Spawns 下的出生线与 8 个角色迁移到 40×56 的出生甲板顶面（z=±23.5, y=1.32）。
         /// </summary>
         private static void UpdateSpawnTransformsAndActors()
         {
@@ -454,7 +454,7 @@ namespace P1.Editor
             for (int i = 0; i < group.childCount && i < offsets.Length; i++)
             {
                 Transform t = group.GetChild(i);
-                t.position = new Vector3(offsets[i], 0.22f, z);
+                t.position = new Vector3(offsets[i], ArenaLayoutV2.SpawnPointY, z);
                 t.rotation = Quaternion.Euler(0f, facing, 0f);
             }
         }
@@ -844,15 +844,16 @@ namespace P1.Editor
             var teamBMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamB_Body.mat");
             var visorMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_VisorDark.mat");
 
-            // 创建展示临时容器
+            // 创建展示临时容器（抬高到空中开阔处，杜绝场景地面/掩体与展示相机产生遮挡切穿与 Dither 闪烁）
             var showcaseGo = new GameObject("__Showcase_P5A__");
+            showcaseGo.transform.position = new Vector3(0f, 35f, 0f);
             try
             {
                 // 1. 创建单人角色用于前视与后视特写
                 var heroGo = new GameObject("ShowcaseHero");
                 heroGo.transform.SetParent(showcaseGo.transform, false);
-                heroGo.transform.position = new Vector3(0f, 0f, 0f);
-                heroGo.transform.rotation = Quaternion.Euler(0f, 180f, 0f); // 面向南方 (+Z 向后，面向 -Z 摄像机)
+                heroGo.transform.localPosition = Vector3.zero;
+                heroGo.transform.localRotation = Quaternion.Euler(0f, 180f, 0f); // 面向南方 (+Z 向后，面向 -Z 摄像机)
 
                 var heroCtrl = CharacterVisualAssembler.Assemble(heroGo.transform, Team.TeamA, teamAMat, visorMat, null);
                 heroCtrl.EquipWeaponKind(WeaponKind.Shooter);
@@ -868,23 +869,23 @@ namespace P1.Editor
                 System.IO.Directory.CreateDirectory("Logs");
 
                 // Shot 1: 正面特写（蛋形身体连墨焰约 1.32m，相机拉到 2.45m 留出边距）
-                cam.transform.position = new Vector3(0.45f, 0.70f, -2.45f);
-                cam.transform.rotation = Quaternion.Euler(3f, -11f, 0f);
+                cam.transform.localPosition = new Vector3(0.45f, 0.70f, -2.45f);
+                cam.transform.localRotation = Quaternion.Euler(3f, -11f, 0f);
                 RenderCameraToPng(cam, "Logs/p5a_character_kid_front.png", 1600, 900);
 
                 // Shot 2: 后背背包与墨焰特写
-                heroGo.transform.rotation = Quaternion.Euler(0f, 25f, 0f);
-                cam.transform.position = new Vector3(-0.45f, 0.75f, -2.45f);
-                cam.transform.rotation = Quaternion.Euler(5f, 11f, 0f);
+                heroGo.transform.localRotation = Quaternion.Euler(0f, 25f, 0f);
+                cam.transform.localPosition = new Vector3(-0.45f, 0.75f, -2.45f);
+                cam.transform.localRotation = Quaternion.Euler(5f, 11f, 0f);
                 RenderCameraToPng(cam, "Logs/p5a_character_kid_back.png", 1600, 900);
 
                 // Shot 3: 乌贼形态特写
-                heroGo.transform.rotation = Quaternion.Euler(0f, 145f, 0f);
+                heroGo.transform.localRotation = Quaternion.Euler(0f, 145f, 0f);
                 heroCtrl.KidRoot.SetActive(false);
                 heroCtrl.SquidRoot.SetActive(true);
                 heroCtrl.SquidRoot.transform.localScale = Vector3.one;
-                cam.transform.position = new Vector3(0f, 0.55f, -1.0f);
-                cam.transform.rotation = Quaternion.Euler(30f, 0f, 0f);
+                cam.transform.localPosition = new Vector3(0f, 0.55f, -1.0f);
+                cam.transform.localRotation = Quaternion.Euler(30f, 0f, 0f);
                 RenderCameraToPng(cam, "Logs/p5a_squid_form.png", 1600, 900);
 
                 // Shot 4: 7 种武器全家福队列 (Arsenal Showcase)
@@ -905,16 +906,16 @@ namespace P1.Editor
                     float x = (i - 3) * 0.95f;
                     var cGo = new GameObject("Char_" + allKinds[i]);
                     cGo.transform.SetParent(showcaseGo.transform, false);
-                    cGo.transform.position = new Vector3(x, 0f, 0f);
-                    cGo.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+                    cGo.transform.localPosition = new Vector3(x, 0f, 0f);
+                    cGo.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
 
                     var ctrl = CharacterVisualAssembler.Assemble(cGo.transform, i % 2 == 0 ? Team.TeamA : Team.TeamB, i % 2 == 0 ? teamAMat : teamBMat, visorMat, null);
                     ctrl.EquipWeaponKind(allKinds[i]);
                 }
 
                 cam.fieldOfView = 52f;
-                cam.transform.position = new Vector3(0f, 0.95f, -5.0f);
-                cam.transform.rotation = Quaternion.Euler(6f, 0f, 0f);
+                cam.transform.localPosition = new Vector3(0f, 0.95f, -5.0f);
+                cam.transform.localRotation = Quaternion.Euler(6f, 0f, 0f);
                 RenderCameraToPng(cam, "Logs/p5a_weapons_arsenal.png", 1920, 1080);
 
                 Debug.Log("[ProjectScaffolder] 已成功生成角色与武器多形态高清展示图：Logs/p5a_*.png");
@@ -942,39 +943,46 @@ namespace P1.Editor
             var visorMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_VisorDark.mat");
 
             var showcaseGo = new GameObject("__GaitSheet_P8D__");
+            showcaseGo.transform.position = new Vector3(0f, 35f, 0f);
             try
             {
                 var heroGo = new GameObject("GaitHero");
                 heroGo.transform.SetParent(showcaseGo.transform, false);
-                heroGo.transform.position = Vector3.zero;
+                heroGo.transform.localPosition = Vector3.zero;
                 heroGo.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
 
                 var ctrl = CharacterVisualAssembler.Assemble(heroGo.transform, Team.TeamA, teamAMat, visorMat, null);
                 ctrl.EquipWeaponKind(WeaponKind.Shooter);
 
                 Transform bodySquash = ctrl.BodySquashTransform;
-                Transform chest = ctrl.KidRoot.transform.Find("Chest");
+                Transform hips = ctrl.KidRoot.transform.Find("Hips");
+                Transform spine = hips != null ? hips.Find("BodySquash/Spine") : null;
+                Transform chest = spine != null ? spine.Find("Chest") : null;
                 Transform leftArm = chest != null ? chest.Find("LeftArm") : null;
                 Transform rightArm = chest != null ? chest.Find("RightArm") : null;
-                // P22-A：双腿 FK 链（旧场景可能没有，逐节点判空）
-                Transform hips = chest != null ? chest.Find("Hips") : null;
+                Transform leftElbow = leftArm != null ? leftArm.Find("Elbow") : null;
+                Transform rightElbow = rightArm != null ? rightArm.Find("Elbow") : null;
                 Transform leftLeg = hips != null ? hips.Find("LeftLeg") : null;
                 Transform rightLeg = hips != null ? hips.Find("RightLeg") : null;
                 Transform leftKnee = leftLeg != null ? leftLeg.Find("Knee") : null;
                 Transform rightKnee = rightLeg != null ? rightLeg.Find("Knee") : null;
                 Transform leftAnkle = leftKnee != null ? leftKnee.Find("Ankle") : null;
                 Transform rightAnkle = rightKnee != null ? rightKnee.Find("Ankle") : null;
-                if (bodySquash == null || chest == null)
+                if (bodySquash == null || hips == null || chest == null)
                 {
-                    Debug.LogError("[ProjectScaffolder] 蛋形骨架节点缺失，无法生成步态序列图");
+                    Debug.LogError("[ProjectScaffolder] 骨架节点缺失，无法生成步态序列图");
                     return;
                 }
 
                 Vector3 squashBasePos = bodySquash.localPosition;
                 Vector3 squashBaseScale = bodySquash.localScale;
+                Quaternion hipsBaseRot = hips.localRotation;
+                Quaternion spineBaseRot = spine != null ? spine.localRotation : Quaternion.identity;
                 Quaternion chestBaseRot = chest.localRotation;
                 Quaternion leftBaseRot = leftArm != null ? leftArm.localRotation : Quaternion.identity;
                 Quaternion rightBaseRot = rightArm != null ? rightArm.localRotation : Quaternion.identity;
+                Quaternion leftElbowBaseRot = leftElbow != null ? leftElbow.localRotation : Quaternion.identity;
+                Quaternion rightElbowBaseRot = rightElbow != null ? rightElbow.localRotation : Quaternion.identity;
                 Quaternion leftLegBaseRot = leftLeg != null ? leftLeg.localRotation : Quaternion.identity;
                 Quaternion rightLegBaseRot = rightLeg != null ? rightLeg.localRotation : Quaternion.identity;
                 Quaternion leftKneeBaseRot = leftKnee != null ? leftKnee.localRotation : Quaternion.identity;
@@ -988,36 +996,42 @@ namespace P1.Editor
                 cam.clearFlags = CameraClearFlags.Color;
                 cam.backgroundColor = new Color(0.12f, 0.14f, 0.18f, 1f);
                 cam.fieldOfView = 34f;
-                cam.transform.position = new Vector3(0.45f, 0.70f, -2.45f);
+                cam.transform.localPosition = new Vector3(0.45f, 0.70f, -2.45f);
                 cam.transform.rotation = Quaternion.Euler(3f, -11f, 0f);
 
                 System.IO.Directory.CreateDirectory("Logs");
 
-                const float speed01 = 0.5f;   // 对应约 5.9 m/s 的正常跑速
-                const float leanPitch = 6f;
+                Vector3 hipsBasePos = hips.localPosition;
+
+                const float speed01 = 1f;   // 6 m/s 满速跑
                 for (int frame = 0; frame < 6; frame++)
                 {
                     float phase = frame * Mathf.PI * 0.25f;   // 0° / 45° / 90° / 135° / 180° / 225°
-                    EggGaitPose pose = EggGaitSolver.Sample(speed01, phase);
+                    KidGaitPose pose = KidGaitSolver.SampleGait(speed01, phase);
 
                     bodySquash.localPosition = squashBasePos + Vector3.up * pose.BobY;
                     bodySquash.localScale = Vector3.Scale(squashBaseScale, new Vector3(pose.SquashXZ, pose.SquashY, pose.SquashXZ));
-                    chest.localRotation = chestBaseRot * Quaternion.Euler(leanPitch, 0f, pose.RockDeg);
+                    hips.localPosition = hipsBasePos + Vector3.up * pose.HipDropY;
+                    hips.localRotation = hipsBaseRot * Quaternion.Euler(pose.HipPitchDeg, 0f, pose.RockDeg * 0.35f);
+                    if (spine != null) spine.localRotation = spineBaseRot * Quaternion.Euler(pose.SpinePitchDeg, 0f, pose.RockDeg * 0.30f);
+                    chest.localRotation = chestBaseRot * Quaternion.Euler(pose.ChestPitchDeg, 0f, pose.RockDeg * 0.25f);
                     if (leftArm != null) leftArm.localRotation = leftBaseRot * Quaternion.Euler(pose.ArmSwingDeg, 0f, 0f);
                     if (rightArm != null) rightArm.localRotation = rightBaseRot * Quaternion.Euler(-pose.ArmSwingDeg, 0f, 0f);
-                    // P22-A：腿部与控制器 UpdateBodyPose 相同的符号约定（X 正 = 后摆/屈膝/脚尖下垂；
-                    // 左腿与左臂反相），膝弯峰值落在双腿穿过躯干下方的收步相位
-                    if (leftLeg != null) leftLeg.localRotation = leftLegBaseRot * Quaternion.Euler(-pose.LegSwingDeg, 0f, 0f);
-                    if (rightLeg != null) rightLeg.localRotation = rightLegBaseRot * Quaternion.Euler(pose.LegSwingDeg, 0f, 0f);
-                    if (leftKnee != null) leftKnee.localRotation = leftKneeBaseRot * Quaternion.Euler(pose.KneeBendDeg, 0f, 0f);
-                    if (rightKnee != null) rightKnee.localRotation = rightKneeBaseRot * Quaternion.Euler(pose.KneeBendDeg, 0f, 0f);
-                    if (leftAnkle != null) leftAnkle.localRotation = leftAnkleBaseRot * Quaternion.Euler(pose.FootPitchDeg, 0f, 0f);
-                    if (rightAnkle != null) rightAnkle.localRotation = rightAnkleBaseRot * Quaternion.Euler(pose.FootPitchDeg, 0f, 0f);
+                    if (leftElbow != null) leftElbow.localRotation = leftElbowBaseRot * Quaternion.Euler(-pose.LeftElbowBendDeg, 0f, 0f);
+                    if (rightElbow != null) rightElbow.localRotation = rightElbowBaseRot * Quaternion.Euler(-pose.RightElbowBendDeg, 0f, 0f);
+
+                    if (leftLeg != null) leftLeg.localRotation = leftLegBaseRot * Quaternion.Euler(-pose.LeftThighDeg, 0f, 0f);
+                    if (rightLeg != null) rightLeg.localRotation = rightLegBaseRot * Quaternion.Euler(pose.RightThighDeg, 0f, 0f);
+                    if (leftKnee != null) leftKnee.localRotation = leftKneeBaseRot * Quaternion.Euler(pose.LeftKneeDeg, 0f, 0f);
+                    if (rightKnee != null) rightKnee.localRotation = rightKneeBaseRot * Quaternion.Euler(pose.RightKneeDeg, 0f, 0f);
+                    if (leftAnkle != null) leftAnkle.localRotation = leftAnkleBaseRot * Quaternion.Euler(pose.LeftFootPitchDeg, 0f, 0f);
+                    if (rightAnkle != null) rightAnkle.localRotation = rightAnkleBaseRot * Quaternion.Euler(pose.RightFootPitchDeg, 0f, 0f);
 
                     RenderCameraToPng(cam, $"Logs/p8d_gait_{frame}.png", 900, 900);
                 }
 
-                Debug.Log("[ProjectScaffolder] 已生成蛋仔步态序列图：Logs/p8d_gait_0~5.png");
+                float cadence = KidGaitSolver.CadenceFromSpeed(6f, speed01);
+                Debug.Log($"[ProjectScaffolder] 已生成 squidkid 步态序列图（P33 SampleGait，6m/s 满速，步频 {cadence:F1}Hz）：Logs/p8d_gait_0~5.png");
             }
             finally
             {
@@ -1231,7 +1245,7 @@ namespace P1.Editor
             var specText = CreateUiText(specBg, "SpecialStateText", font, "大招充能 0%", 16, TextAnchor.MiddleCenter, Vector2.zero, new Vector2(260f, 34f), Color.white);
 
             var inkText = CreateUiText(bottomPanel, "InkStateText", font, "墨水 100/100", 16, TextAnchor.MiddleLeft, new Vector2(-150f, 36f), new Vector2(400f, 24f), Color.white);
-            CreateUiText(bottomPanel, "ControlsHintText", font, "操作：[WASD]移动  [鼠标]转视角  [左键]开火  [右键/Shift]己墨潜行回墨·贴着己方墨墙可潜上墙  [空格]跳跃  [E/中键]抛延时手雷  [Q]大招  [Esc]暂停", 14, TextAnchor.MiddleCenter, new Vector2(0f, -38f), new Vector2(740f, 22f), new Color(0.80f, 0.86f, 0.95f, 1f));
+            CreateUiText(bottomPanel, "ControlsHintText", font, "操作：[WASD]移动  [鼠标]转视角  [左键]开火  [右键/Shift]己墨潜行回墨·贴着己方墨墙可潜上墙  [空格]跳跃  [E/中键]手雷(按即投)  [Q]大招  [Esc]暂停", 14, TextAnchor.MiddleCenter, new Vector2(0f, -38f), new Vector2(740f, 22f), new Color(0.80f, 0.86f, 0.95f, 1f));
 
             var hud = canvasGo.AddComponent<HudController>();
             hud.BindReferences(teamAFill, teamBFill, teamAText, teamBText, centerText, inkFill, hpFill, specFill, inkText, specText, rawImg, rawRect, dotRect);
@@ -1616,9 +1630,22 @@ namespace P1.Editor
 
         /// <summary>
         /// P7-B：出生台圆盘材质（P11-C：中性钢灰出生池，与码头风格协调，不带队色；
-        /// 白色圆环 + 警戒黄导向箭头 + 混凝土基台外缘）。teamColor 参数保留兼容旧调用。
+        /// 白色圆环 + 警戒黄导向箭头 + 混凝土基台外缘）。
+        /// P18 之后由本方法统一调色，其它编辑器流程也复用它，避免"画风"流程把队色写回 _BaseColor。
         /// </summary>
-        private static Material CreateOrUpdateSpawnPadMaterial(string path, Color teamColor)
+        public static void RefreshSpawnPadMaterials(ArenaStyleSO style = null)
+        {
+            if (style == null)
+            {
+                style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
+            }
+
+            // A 队箭头朝 +Z（推进方向），B 队箭头朝 -Z（推向场地中央）。
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_SpawnPad_TeamA.mat", style, 1f);
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_SpawnPad_TeamB.mat", style, -1f);
+        }
+
+        private static Material CreateOrUpdateSpawnPadMaterial(string path, ArenaStyleSO style, float forwardSign)
         {
             Shader sh = FindArenaShader("SpawnPad.shader", "P1/SpawnPad", "Universal Render Pipeline/Unlit");
 
@@ -1633,13 +1660,17 @@ namespace P1.Editor
                 mat.shader = sh;
             }
 
-            ArenaStyleSO style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
-            mat.SetColor("_BaseColor", Linear(new Color(0.30f, 0.33f, 0.38f, 1f)));
+            var steelCol = new Color(0.50f, 0.52f, 0.55f, 1f);
+            mat.SetColor("_BaseColor", Linear(steelCol));
             mat.SetColor("_PlatformColor", Linear(style != null ? style.concreteMid : new Color(0.65f, 0.63f, 0.58f, 1f)));
-            mat.SetColor("_RingColor", Linear(new Color(0.92f, 0.93f, 0.95f, 1f)));
+            mat.SetColor("_RingColor", Linear(new Color(0.90f, 0.91f, 0.92f, 1f)));
             mat.SetColor("_ChevronColor", Linear(style != null ? style.hazardYellow : new Color(0.86f, 0.68f, 0.20f, 1f)));
-            mat.SetFloat("_GlowStrength", 0.30f);
-            mat.color = Linear(new Color(0.30f, 0.33f, 0.38f, 1f));
+            mat.SetColor("_ShadowTint", Linear(style != null ? style.shadowTint : new Color(0.40f, 0.45f, 0.62f, 1f)));
+            mat.SetFloat("_ShadowFloor", style != null ? style.shadowFloor : 0.42f);
+            mat.SetFloat("_ShadeSoftness", style != null ? style.shadeSoftness : 0.03f);
+            mat.SetFloat("_GlowStrength", 0.18f);
+            mat.SetFloat("_ForwardSign", forwardSign);
+            mat.color = Linear(steelCol);
             EditorUtility.SetDirty(mat);
             return mat;
         }

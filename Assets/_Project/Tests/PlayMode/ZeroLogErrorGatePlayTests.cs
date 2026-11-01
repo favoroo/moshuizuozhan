@@ -167,7 +167,7 @@ namespace P1.Tests
                 weapon.EquipWeapon(slamConfig);
                 weapon.ResetAllWeaponState();
                 motor.RefillInkFull();
-                weapon.AddSpecialPoints(500);
+                weapon.AddSpecialPointsRaw(500);
                 Assert.IsTrue(weapon.TryActivateSpecial(), "满充能应能释放超级降落");
                 yield return new WaitForSeconds(1.4f);
                 Assert.IsFalse(weapon.IsPerformingSpecial, "砸地结算后应结束大招状态");
@@ -181,7 +181,7 @@ namespace P1.Tests
                 weapon.EquipWeapon(stormConfig);
                 weapon.ResetAllWeaponState();
                 motor.RefillInkFull();
-                weapon.AddSpecialPoints(500);
+                weapon.AddSpecialPointsRaw(500);
                 Assert.IsTrue(weapon.TryActivateSpecial(dummyGround), "风暴云大招应能释放");
 
                 yield return new WaitForSeconds(0.9f);

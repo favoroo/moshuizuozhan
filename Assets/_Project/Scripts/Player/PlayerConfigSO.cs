@@ -13,6 +13,8 @@ namespace P1.Player
         public float enemyInkMoveSpeed = 1.9f;
         [Tooltip("己方墨水中潜行移速（对齐 Inkwave PLAYER.swimSpeed = 11.8）")]
         public float swimMoveSpeed = 11.8f;
+        [Tooltip("无墨/干地乌贼形态移速（对齐 Inkwave PLAYER.squidDrySpeed = 2.9）：没涂墨的地面也能按住潜行键保持乌贼形态，但没有潜墨加成（不加速、不隐匿）")]
+        public float squidDryMoveSpeed = 2.9f;
         public float rotationLerpSpeed = 22f;
 
         [Header("跳跃与重力物理")]
@@ -22,6 +24,39 @@ namespace P1.Player
         public float gravity = 24.0f;
         [Tooltip("空中水平位移控制比例 (0~1)")]
         public float airControl = 0.95f;
+
+        [Header("移动惯性 (P29 S 曲线加减速，参考 Inkwave runAccel 70 / runDecel 58)")]
+        [Tooltip("地面起步加速度 (m/s²)：0→6m/s 约 0.1s，既跟手又有重量")]
+        public float runAccel = 60f;
+        [Tooltip("地面刹车减速度 (m/s²)：松手后约 0.12s / 0.36m 滑停，不再一帧硬停")]
+        public float runDecel = 48f;
+        [Tooltip("反向输入急刹减速度 (m/s²)：反向时先踩地制动再反向（Inkwave reverseDecel 78）")]
+        public float reverseDecel = 70f;
+        [Tooltip("空中加速 (m/s²)：空中保留方向控制但不瞬变")]
+        public float airAccel = 20f;
+        [Tooltip("空中阻力/刹车 (m/s²)，对齐 Inkwave airDecel = 4")]
+        public float airDecel = 6f;
+        [Tooltip("速度方向转向速率 (度/秒)：转弯画弧不掉速（Inkwave turnRate 15 rad/s ≈ 860°/s）")]
+        public float turnRateDegPerSec = 860f;
+
+        [Header("跳跃宽容与重力曲线 (P29，对齐 Inkwave jumpBuffer/coyote/fallGravity)")]
+        [Tooltip("跳跃缓冲时长 (秒)：落地前按下跳跃不丢键，落地立即起跳（Inkwave 0.13）")]
+        public float jumpBufferTime = 0.12f;
+        [Tooltip("土狼时间 (秒)：走出边缘后仍可起跳（Inkwave 0.12）")]
+        public float coyoteTime = 0.12f;
+        [Tooltip("下落重力倍率：下落比上升更沉，落地更干脆（Inkwave fallGravityMul 1.2）")]
+        public float fallGravityMultiplier = 1.2f;
+        [Tooltip("顶点重力倍率：顶点附近轻微滞空，给瞄准/观察时间（Inkwave apexGravityMul 0.82）")]
+        public float apexGravityMultiplier = 0.85f;
+        [Tooltip("顶点判定速度带 (m/s)：|vy| 小于该值视为顶点附近")]
+        public float apexVelocityBand = 1.6f;
+
+        [Header("贴地吸附 (P29)")]
+        [Tooltip("接地时向下吸附速度 (m/s)：旧 -2.5 在下台阶/12.8° 坡时 40% 时间腾空；-6 牢牢贴地")]
+        public float groundSnapSpeed = 6f;
+        [Tooltip("CharacterController.skinWidth（运行时写入）：控制器静止时会以该值悬离地面，0.006 让脚底保持毫米级接触")]
+        [Range(0.004f, 0.04f)]
+        public float controllerSkinWidth = 0.006f;
 
         [Header("墙面潜行攀爬")]
         [Tooltip("贴着己方墨墙潜行上爬的速度 (m/s)")]

@@ -2,6 +2,7 @@ using P1.Core;
 using P1.Ink;
 using P1.Player;
 using P1.Weapons;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -95,6 +96,14 @@ namespace P1.UI
 
         public ScreenInkTransitionView ScreenInkTransition => screenInkTransition;
 
+        [Header("大字播报 Callout（P18）")]
+        [SerializeField] private MatchCalloutView matchCallout;
+
+        [Tooltip("场景里没有该视图时，Awake 自动程序化生成（挂在 SafeArea 根）")]
+        [SerializeField] private bool autoBuildMatchCallout = true;
+
+        public MatchCalloutView MatchCallout => matchCallout;
+
 #if UNITY_EDITOR
         private const string EditorThemePath = "Assets/_Project/ScriptableObjects/UITheme.asset";
         private const string EditorGaugeStylePath = "Assets/_Project/ScriptableObjects/HudGaugeStyle.asset";
@@ -112,13 +121,43 @@ namespace P1.UI
         private int _lastInkStateMode = -1; // 0: normal, 1: swim, 2: enemy
         private int _lastInkVal = -1;
         private int _lastHpVal = -1;
-        private bool _lastCanBomb;
-        private int _lastBombCostVal = -1;
+        private bool _lastBombReady;
+        private int _lastBombCooldownTenths = -1;
 
         private SpecialKind _lastSpecialKind = (SpecialKind)(-1);
         private bool _lastSpecialPerforming;
         private bool _lastSpecialReady;
         private int _lastSpecialChargePct = -1;
+
+        private UIInkShapeGraphic _hpBadgeGraphic;
+        private TMP_Text _hpBadgeText;
+        private TMP_Text _hpText;
+
+        // ── 底部三张状态卡（t-1 收尾波次） ──────────────────────────────────
+        private const string HealthCardName = "HealthCard";
+        private const string KeyHintStripName = "KeyHintStrip";
+
+        /// <summary>墨水卡 / 大招卡（工厂生成；旧场景自带视图时为空）。</summary>
+        private RectTransform _inkCard;
+        private RectTransform _specialCard;
+
+        /// <summary>旧场景没有工厂卡片时的兜底三卡区（只承载生命卡）。</summary>
+        private RectTransform _fallbackCardsRoot;
+
+        private UIInkShapeGraphic _hpCardRail;
+
+        // ── Legacy Text → TMP 升级（P19 波次2a：消灭 Arial/LegacyRuntime 烘焙文字） ──
+        // 场景里烘焙的 Text 用的是 LiberationSans、无 SDF 描边、字号 13~16。
+        // 运行时在原物体下补一个同尺寸 TMP 子物体，拷对齐/颜色/字号后关掉旧组件；
+        // 原字段与对象名保持不变（不改场景、不改公共签名）。
+        private bool _legacyTextUpgraded;
+        private TMP_Text _teamAPercentTmp;
+        private TMP_Text _teamBPercentTmp;
+        private TMP_Text _centerStatusTmp;
+        private TMP_Text _inkStateTmp;
+        private TMP_Text _specialStateTmp;
+
+        private const string LegacyTmpChildName = "TMP";
 
         private void Awake()
         {
@@ -134,6 +173,7 @@ namespace P1.UI
             EnsureKillFlash();
             EnsureLensInk();
             EnsureInkEdgeWarning();
+            EnsureMatchCallout();
         }
 
         /// <summary>运行时 HUD 内容根：SafeArea 容器，桌面/编辑器下等价于全屏。</summary>
@@ -215,6 +255,10 @@ namespace P1.UI
                 Transform oldFrame = FindHudChild("MinimapFrame");
                 if (oldFrame != null)
                 {
+                    // 旧的「实时全图涂地小地图」标题与新 MAP 徽章重复（MinimapView 里还会再兜一次）
+                    Transform oldTitle = oldFrame.Find("MinimapTitle");
+                    if (oldTitle != null) oldTitle.gameObject.SetActive(false);
+
                     minimapView = oldFrame.gameObject.AddComponent<MinimapView>();
                     minimapView.SetTheme(uiTheme);
                     minimapView.EnsureBuilt();
@@ -301,8 +345,13 @@ namespace P1.UI
             if (liquidOrbView == null) liquidOrbView = GetComponentInChildren<LiquidOrbView>(true);
 
             // 场景里已带视图（旧场景/预制体）时不再重复装配；
-            // 这类情况没有仪表条根节点，_gaugeRoot 保持 null，面板布局照常生效。
-            if (inkTankView != null && liquidOrbView != null) return;
+            // 新结构场景会顺带认领三卡区根节点，老结构保持 _gaugeRoot = null、面板布局照常生效。
+            if (inkTankView != null && liquidOrbView != null)
+            {
+                AdoptCardLayoutFromViews();
+                EnsureReadyHintHardShadow();
+                return;
+            }
             if (!autoBuildSpecialGauges) return;
 
 #if UNITY_EDITOR
@@ -325,6 +374,31 @@ namespace P1.UI
             liquidOrbView = cluster.Orb;
             inkTankView = cluster.Tank;
             _gaugeRoot = cluster.Root;
+            _inkCard = cluster.InkCard;
+            _specialCard = cluster.SpecialCard;
+
+            // BuildCluster 的 SetActive(true) 会让 LiquidOrbView 复位 hintPill 硬影，这里补回色签档
+            EnsureReadyHintHardShadow();
+        }
+
+        /// <summary>
+        /// 场景序列化了「新三卡结构」的视图（InkCard / SpecialCard）时，认领卡片与根节点，
+        /// 让 <see cref="ApplyBottomPanelLayout"/> 能继续做桌面/移动两套几何。老结构不认领，零行为变化。
+        /// </summary>
+        private void AdoptCardLayoutFromViews()
+        {
+            if (_gaugeRoot != null) return;
+            if (inkTankView == null || liquidOrbView == null) return;
+
+            Transform inkRoot = inkTankView.transform;
+            Transform specialRoot = liquidOrbView.transform;
+            if (inkRoot.name != "InkCard" || specialRoot.name != "SpecialCard") return;
+            if (inkRoot.parent == null || inkRoot.parent != specialRoot.parent) return;
+            if (!(inkRoot.parent is RectTransform cardsRoot)) return;
+
+            _gaugeRoot = cardsRoot;
+            _inkCard = inkRoot as RectTransform;
+            _specialCard = specialRoot as RectTransform;
         }
 
         /// <summary>P4-C 显式写入主题与仪表样式（场景生成器 / 编辑器工具调用，不重建视图）。</summary>
@@ -354,6 +428,9 @@ namespace P1.UI
                 if (themeAsset != null) liquidOrbView.SetTheme(themeAsset);
                 if (styleAsset != null) liquidOrbView.SetStyle(styleAsset);
             }
+
+            AdoptCardLayoutFromViews();
+            EnsureReadyHintHardShadow();
         }
 
         /// <summary>P4-C 视图引用（供测试与调试面板读取）。</summary>
@@ -369,7 +446,9 @@ namespace P1.UI
             EnsureWeaponReticle();
             ApplyBottomStatusPanel();
             RecolorLegacyHudTexts();
+            UpgradeLegacyHudTexts();
             HideLegacyGauges();
+            HideLegacyMinimapTitle();
             AdaptLayoutForInputMode();
             SubscribePhaseVisibility();
         }
@@ -380,6 +459,7 @@ namespace P1.UI
         private Canvas _hudCanvas;
         private RectTransform _contentRoot;
         private RectTransform _gaugeRoot;
+        private UIInkShapeGraphic _readyHintShadowPill;
         private Vector2Int _lastScreenSize;
         private Rect _lastSafeArea;
         private MatchManager _phaseMatch;
@@ -486,136 +566,496 @@ namespace P1.UI
             }
         }
 
+        // ── Legacy Text → TMP 升级（P19 波次2a） ─────────────────────────────
+        // 场景烘焙的 Text 是 LiberationSans（无 SDF 描边、字号 13~16），与 t-1 的
+        // 「超大粗体 + 硬影」不符。运行时在原物体下补同尺寸 TMP 子物体、拷贝对齐/颜色/字号，
+        // 再关掉旧组件的渲染（不禁用 GameObject），原字段、对象名与场景结构全部保留。
+
         /// <summary>
-        /// 底部信息条（P14-H）：黑底 + 4px 白边的直角面板，从上到下三行——
-        /// 横向墨水条 / 横向大招条（由 <see cref="HudSpecialGaugeFactory"/> 生成）、
-        /// 纯平生命条、键鼠操作提示（移动端隐藏）。
+        /// 把 HUD 上 5 处场景烘焙的 Legacy Text 升级成 TMP：
+        /// 比分/计时走 display 档，状态/键位提示走 body 档；字号按波次2a 的新阶梯写入。
+        /// </summary>
+        private void UpgradeLegacyHudTexts()
+        {
+            if (_legacyTextUpgraded) return;
+            _legacyTextUpgraded = true;
+
+            _teamAPercentTmp = EnsureTmpFromLegacy(teamAPercentText, 44f, displayFont: true);
+            _teamBPercentTmp = EnsureTmpFromLegacy(teamBPercentText, 44f, displayFont: true);
+            _centerStatusTmp = EnsureTmpFromLegacy(centerStatusText, 76f, displayFont: true);
+            _inkStateTmp = EnsureTmpFromLegacy(inkStateText, 18f, displayFont: false);
+            _specialStateTmp = EnsureTmpFromLegacy(specialStateText, 20f, displayFont: false);
+            // 键鼠提示已迁到暂停菜单（HUD 底部不再显示），旧文字节点保持原生状态并整体隐藏
+        }
+
+        /// <summary>
+        /// 幂等升级：在 legacy 物体下补一个铺满其 Rect 的 TMP 子物体，拷对齐/颜色/粗体，
+        /// 字号走 <see cref="UITypography"/>（移动端 ×1.28），最后把旧 Text 组件 enabled = false。
+        /// </summary>
+        private TMP_Text EnsureTmpFromLegacy(Text legacy, float fontSize, bool displayFont)
+        {
+            if (legacy == null) return null;
+
+            Transform tmpTr = legacy.transform.Find(LegacyTmpChildName);
+            TextMeshProUGUI tmp = tmpTr != null ? tmpTr.GetComponent<TextMeshProUGUI>() : null;
+            if (tmp == null)
+            {
+                var go = new GameObject(LegacyTmpChildName,
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+                go.transform.SetParent(legacy.transform, false);
+                var rt = (RectTransform)go.transform;
+                rt.anchorMin = Vector2.zero;
+                rt.anchorMax = Vector2.one;
+                rt.offsetMin = Vector2.zero;
+                rt.offsetMax = Vector2.zero;
+                tmp = go.GetComponent<TextMeshProUGUI>();
+            }
+
+            UIThemeSO themeResolved = UIThemeSO.Resolve(uiTheme);
+            string content = legacy.text;
+
+            // 字体统一走主题解析（CJK 自动切 MiSans），解析失败再落到全局兜底
+            TMP_FontAsset font = themeResolved.ResolveFont(displayFont, content);
+            if (font == null) font = UIThemeSO.ResolveGlobalFont(displayFont, ComicStyle.ContainsCjk(content));
+
+            tmp.raycastTarget = false;
+            if (font != null) tmp.font = font;
+            tmp.fontSize = UITypography.FontSnapped(fontSize);
+            tmp.fontStyle = legacy.fontStyle == FontStyle.Bold ? FontStyles.Bold : FontStyles.Normal;
+            tmp.alignment = ToTmpAlignment(legacy.alignment);
+            tmp.color = legacy.color;
+            tmp.text = content;
+            // HUD 单行读数：不换行、不截断（TMP Truncate 会按行高把整段字符裁掉）
+            tmp.textWrappingMode = TextWrappingModes.NoWrap;
+            tmp.overflowMode = TextOverflowModes.Overflow;
+
+            legacy.enabled = false;
+            return tmp;
+        }
+
+        /// <summary>Legacy TextAnchor → TMP TextAlignmentOptions（同语义对齐）。</summary>
+        private static TextAlignmentOptions ToTmpAlignment(TextAnchor anchor)
+        {
+            switch (anchor)
+            {
+                case TextAnchor.UpperLeft: return TextAlignmentOptions.TopLeft;
+                case TextAnchor.UpperCenter: return TextAlignmentOptions.Top;
+                case TextAnchor.UpperRight: return TextAlignmentOptions.TopRight;
+                case TextAnchor.MiddleLeft: return TextAlignmentOptions.MidlineLeft;
+                case TextAnchor.MiddleCenter: return TextAlignmentOptions.Center;
+                case TextAnchor.MiddleRight: return TextAlignmentOptions.MidlineRight;
+                case TextAnchor.LowerLeft: return TextAlignmentOptions.BottomLeft;
+                case TextAnchor.LowerCenter: return TextAlignmentOptions.Bottom;
+                case TextAnchor.LowerRight: return TextAlignmentOptions.BottomRight;
+                default: return TextAlignmentOptions.Center;
+            }
+        }
+
+        /// <summary>同时写 legacy 与升级后的 TMP（旧字段内容保持可读，行为向后兼容）。</summary>
+        private static void SetLegacyText(Text legacy, TMP_Text tmp, string text)
+        {
+            if (legacy != null) legacy.text = text;
+            if (tmp != null) tmp.text = text;
+        }
+
+        private static void SetLegacyColor(Text legacy, TMP_Text tmp, Color color)
+        {
+            if (legacy != null) legacy.color = color;
+            if (tmp != null) tmp.color = color;
+        }
+
+        /// <summary>旧 MinimapFrame 里烘焙的「实时全图涂地小地图」标题与新 MAP 徽章重复，显式关掉。</summary>
+        private void HideLegacyMinimapTitle()
+        {
+            Transform frame = FindHudChild("MinimapFrame");
+            if (frame == null) return;
+
+            Transform title = frame.Find("MinimapTitle");
+            if (title != null && title.gameObject.activeSelf)
+            {
+                title.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>
+        /// 底部状态区（UI 对标 t-1 新野兽派收尾波次）：旧「一个墨黑大块」整体退场，
+        /// 改成三张并排的独立卡（墨水 / 大招 / 生命，纸白 + 3px 墨框 + 面板硬影 + 5px 身份色带）
+        /// 以及三卡下方一条独立的细墨黑键鼠提示条（移动端隐藏）。
         ///
-        /// 生命条必须在这里改成 1×1 纯白精灵：场景烘焙的是内置九宫格 UISprite，
-        /// 拉到 18px 高会露出圆角与边缘渐变（实机表现为"两头尖尖 + 中间发灰"），
-        /// 几何风要求的是纯色直角块。
+        /// 旧面板节点和旧绑定全部保留（<c>BottomStatusPanel</c> 只当不可见容器、<c>HealthBarFill</c> 迁进血卡），
+        /// 因为硬性规则禁止手改 .unity，且 HudController 的 Bind 路径不能断。
         /// </summary>
         private void ApplyBottomStatusPanel()
         {
             Transform bottomPanel = FindHudChild("BottomStatusPanel");
+
             if (bottomPanel != null)
             {
-                var bg = bottomPanel.GetComponent<UIInkShapeGraphic>();
-                if (bg == null)
-                {
-                    var img = bottomPanel.GetComponent<Image>();
-                    if (img != null)
-                    {
-                        // 只关不掉：Image 关掉后由子物体上的面板 Graphic 接管绘制。
-                        // 不能在同一物体再加 Graphic（[DisallowMultipleComponent] 会返回 null）。
-                        img.enabled = false;
-                        img.raycastTarget = false;
-                    }
+                // 旧黑块：场景节点不删，只关绘制与射线（enabled=false + raycastTarget=false）
+                DisableLegacyGraphics(bottomPanel.gameObject);
+                Transform bubble = bottomPanel.Find("ComicBubble");
+                if (bubble != null) DisableLegacyGraphics(bubble.gameObject);
 
-                    bg = UIInkShapeGraphic.CreateChildBackground(bottomPanel as RectTransform, "ComicBubble");
-                }
-                if (bg != null)
-                {
-                    bg.Shape = UIInkShape.SharpRect;
-                    bg.CornerRadius = ComicStyle.CornerSharp;
-                    bg.SpeechTail = false;
-                    bg.BorderWidth = ComicStyle.Border;
-                    bg.BorderColor = ComicStyle.Paper;
-                    bg.HardShadow = false;
-                    bg.ShadowOffset = Vector2.zero;
-                    bg.ShadowColor = ComicStyle.Ink;
-                    // 棋盘式黑底面板：白字 + 纯色仪表，比大白板更贴场地、不刺眼。
-                    bg.color = ComicStyle.Ink;
-                    bg.Halftone = false;
-                    bg.GlossAlpha = 0f;
-                    bg.DrawGloss = false;
-                    bg.InnerRimAlpha = 0f;
-                }
+                Transform divider = bottomPanel.Find("PanelDivider");
+                if (divider != null) divider.gameObject.SetActive(false);
             }
 
-            Transform hint = FindHudChild("BottomStatusPanel/ControlsHintText");
-            if (hint != null)
-            {
-                var text = hint.GetComponent<Text>();
-                if (text != null)
-                {
-                    text.text = "WASD 移动 · 鼠标 视角 · 左键 开火 · 右键/Shift 潜行 · 空格 跳跃 · E 手雷 · Q 大招 · Esc 暂停";
-                    text.color = ComicStyle.Paper;
-                    text.fontSize = Mathf.RoundToInt(UITypography.FontSnapped(18f));
-                    text.fontStyle = FontStyle.Bold;
-                }
-            }
+            // 键鼠提示条 / 文字已从战斗 HUD 移除（改由暂停菜单「操作说明」卡承载）：
+            // 旧场景节点保留但整体隐藏，避免底部再出现一排小字。
+            HideLegacyKeyHints(bottomPanel);
 
             ApplyBottomPanelLayout(false);
         }
 
+        /// <summary>隐藏旧场景烘焙的底部键鼠提示（细黑条 + 文字），桌面/移动端都不再显示。</summary>
+        private void HideLegacyKeyHints(Transform bottomPanel)
+        {
+            if (bottomPanel != null)
+            {
+                Transform strip = bottomPanel.Find(KeyHintStripName);
+                if (strip != null && strip.gameObject.activeSelf) strip.gameObject.SetActive(false);
+            }
+
+            Transform hint = FindHudChild("BottomStatusPanel/ControlsHintText");
+            if (hint != null && hint.gameObject.activeSelf) hint.gameObject.SetActive(false);
+        }
+
         /// <summary>
-        /// 底部面板几何（桌面 / 移动共用）：面板与仪表条同尺寸同心，行位置按锚点定义——
-        /// 仪表行贴顶、生命条贴底、提示行最下。移动端只是面板变矮、提示行隐藏。
+        /// 底部三卡几何（桌面 / 移动两套）：<see cref="HudSpecialGaugeFactory.ApplyStatusCardsLayout"/>
+        /// 是唯一入口，三卡与旧面板矩形保持同心；键鼠提示条是三卡下方独立细条，移动端隐藏。
         /// </summary>
         private void ApplyBottomPanelLayout(bool mobile)
         {
-            float width = HudSpecialGaugeFactory.StripWidth;
             float height = mobile
                 ? HudSpecialGaugeFactory.StripHeightMobile
                 : HudSpecialGaugeFactory.StripHeightDesktop;
             float bottomY = mobile
                 ? HudSpecialGaugeFactory.StripBottomYMobile
                 : HudSpecialGaugeFactory.StripBottomYDesktop;
-            var size = new Vector2(width, height);
+            var size = new Vector2(HudSpecialGaugeFactory.StripWidth, height);
             var position = new Vector2(0f, bottomY);
 
             Transform bottomPanel = FindHudChild("BottomStatusPanel");
             if (bottomPanel is RectTransform panelRect)
             {
-                // 场景里烘焙的面板是中心轴心；仪表条根节点是底边轴心。
-                // 两者必须统一成「底边锚定」才能用同一个 anchoredPosition 精确重合。
+                // 旧面板只剩「不可见容器」职责：与三卡区同矩形，承载旧提示文字与迁移前的血条节点
                 panelRect.anchorMin = panelRect.anchorMax = new Vector2(0.5f, 0f);
                 panelRect.pivot = new Vector2(0.5f, 0f);
                 panelRect.sizeDelta = size;
                 panelRect.anchoredPosition = position;
             }
 
-            if (_gaugeRoot != null)
+            // 三卡区：正常路径用工厂生成的根节点；旧场景自带视图时用兜底根节点。
+            // 编辑器非 Play 的预览工具（Awake 不执行、没有视图）不建卡，避免只在预览里冒出一张孤零零的血卡。
+            RectTransform cardsRoot = _gaugeRoot;
+            if (cardsRoot == null && (Application.isPlaying || _inkCard != null))
             {
-                _gaugeRoot.sizeDelta = size;
-                _gaugeRoot.anchoredPosition = position;
+                cardsRoot = EnsureFallbackCardsRoot();
+            }
+
+            RectTransform healthCard = cardsRoot != null ? EnsureHealthCard(cardsRoot) : null;
+            if (cardsRoot != null)
+            {
+                HudSpecialGaugeFactory.ApplyStatusCardsLayout(cardsRoot, _inkCard, _specialCard, healthCard, mobile);
             }
 
             if (bottomPanel == null) return;
 
-            Transform hpBg = bottomPanel.Find("HealthBarBg");
-            if (hpBg is RectTransform hpRect)
-            {
-                hpRect.anchorMin = hpRect.anchorMax = new Vector2(0.5f, 0f);
-                hpRect.pivot = new Vector2(0.5f, 0f);
-                hpRect.sizeDelta = new Vector2(width - 48f, 18f);
-                hpRect.anchoredPosition = new Vector2(0f, mobile ? 12f : 38f);
+            // 战术分割线已被三卡之间的留白取代：旧节点存在就隐藏，不再新建
+            Transform divider = bottomPanel.Find("PanelDivider");
+            if (divider != null) divider.gameObject.SetActive(false);
 
-                var trackImage = hpBg.GetComponent<Image>();
+            // 键鼠提示条已从战斗 HUD 移除：旧节点保留但隐藏，底部只留三张状态卡
+            HideLegacyKeyHints(bottomPanel);
+        }
+
+        /// <summary>关掉一块旧图形（不删节点）：停绘制 + 停吃射线。</summary>
+        private static void DisableLegacyGraphics(GameObject go)
+        {
+            if (go == null) return;
+
+            var graphics = go.GetComponents<Graphic>();
+            for (int i = 0; i < graphics.Length; i++)
+            {
+                if (graphics[i] == null) continue;
+                graphics[i].enabled = false;
+                graphics[i].raycastTarget = false;
+            }
+        }
+
+        /// <summary>旧场景自带仪表视图、没有工厂卡片时的兜底三卡区（只承载生命卡）。</summary>
+        private RectTransform EnsureFallbackCardsRoot()
+        {
+            if (_fallbackCardsRoot != null) return _fallbackCardsRoot;
+
+            var go = new GameObject("StatusCardsRoot", typeof(RectTransform));
+            go.transform.SetParent(ContentRoot, false);
+            _fallbackCardsRoot = (RectTransform)go.transform;
+            return _fallbackCardsRoot;
+        }
+
+        /// <summary>
+        /// 生命卡（380×88）：语义绿身份色带（低血量 / 踩敌墨硬切翻红）、墨底 [HP] 徽章、
+        /// 220×24 绿轨道 + 3px 墨框、右侧 display 36 大数字。
+        /// 场景里的 <c>HealthBarBg/HealthBarFill</c> 会被迁进来——序列化绑定保持不变。
+        /// 幂等：重复调用只重刷几何与外观。
+        /// </summary>
+        private RectTransform EnsureHealthCard(RectTransform cardsRoot)
+        {
+            if (cardsRoot == null) return null;
+
+            UIThemeSO themeResolved = UIThemeSO.Resolve(uiTheme);
+
+            RectTransform card = cardsRoot.Find(HealthCardName) as RectTransform;
+            if (card == null)
+            {
+                var cardGo = new GameObject(HealthCardName, typeof(RectTransform));
+                cardGo.transform.SetParent(cardsRoot, false);
+                card = (RectTransform)cardGo.transform;
+            }
+
+            HudSpecialGaugeFactory.CardChrome chrome =
+                HudSpecialGaugeFactory.BuildCardChrome(card, uiTheme, ComicStyle.Green);
+            _hpCardRail = chrome.Rail;
+
+            EnsureHealthBadge(card, themeResolved);
+
+            // 血条：优先迁移场景里的 HealthBarBg（保留 HudController.healthBarFill 的序列化绑定）
+            Transform track = card.Find("HealthBarBg");
+            if (track == null) track = FindHudChild("BottomStatusPanel/HealthBarBg");
+            if (track == null)
+            {
+                var trackGo = new GameObject("HealthBarBg", typeof(RectTransform), typeof(Image));
+                trackGo.transform.SetParent(card, false);
+                track = trackGo.transform;
+            }
+            else if (track.parent != card)
+            {
+                track.SetParent(card, false);
+            }
+
+            if (track is RectTransform trackRect)
+            {
+                float trackLeft = HudSpecialGaugeFactory.CardPadding
+                                  + HudSpecialGaugeFactory.CardBadgeSize
+                                  + HudSpecialGaugeFactory.CardBadgeGap;
+                trackRect.anchorMin = trackRect.anchorMax = new Vector2(0f, 0.5f);
+                trackRect.pivot = new Vector2(0f, 0.5f);
+                trackRect.sizeDelta = new Vector2(HudSpecialGaugeFactory.HealthTrackWidth,
+                    HudSpecialGaugeFactory.TrackHeight);
+                trackRect.anchoredPosition = new Vector2(trackLeft, 0f);
+
+                var trackImage = track.GetComponent<Image>();
                 if (trackImage != null)
                 {
-                    trackImage.color = new Color(ComicStyle.Paper.r, ComicStyle.Paper.g, ComicStyle.Paper.b, 0.16f);
+                    trackImage.enabled = true;
+                    trackImage.raycastTarget = false;
+                    // 纸白 ALT 轨道底（旧版是黑底 16% 白）：场景烘焙的九宫格精灵必须换成 1×1 纯色
+                    trackImage.color = ComicStyle.PaperAlt;
                     UIFlatSprite.MakeFlat(trackImage);
                 }
 
-                Transform hpFill = hpBg.Find("HealthBarFill");
-                var fillImage = hpFill != null ? hpFill.GetComponent<Image>() : null;
-                if (fillImage != null)
+                // 3px 墨框（画在填充之上）
+                Transform frameTr = track.Find("HpFrame");
+                if (frameTr == null)
                 {
-                    // 纯平绿色直角条：无渐变、无圆角、无描边
-                    fillImage.color = ComicStyle.Green;
-                    UIFlatSprite.MakeFlat(fillImage, filled: true);
+                    var frameGo = new GameObject("HpFrame",
+                        typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                    frameGo.transform.SetParent(track, false);
+                    frameTr = frameGo.transform;
+                    var fRect = (RectTransform)frameGo.transform;
+                    fRect.anchorMin = Vector2.zero;
+                    fRect.anchorMax = Vector2.one;
+                    fRect.offsetMin = fRect.offsetMax = Vector2.zero;
+                }
+
+                var frame = frameTr.GetComponent<UIInkShapeGraphic>();
+                if (frame != null)
+                {
+                    frame.raycastTarget = false;
+                    frame.Shape = UIInkShape.SharpRect;
+                    frame.CornerRadius = ComicStyle.CornerSharp;
+                    frame.BorderWidth = ComicStyle.BorderThin;
+                    frame.BorderColor = ComicStyle.Ink;
+                    frame.HardShadow = false;
+                    frame.ShadowOffset = Vector2.zero;
+                    frame.Halftone = false;
+                    frame.GlossAlpha = 0f;
+                    frame.DrawGloss = false;
+                    frame.InnerRimAlpha = 0f;
+                    frame.color = Color.clear;
+                }
+
+                Image fill = healthBarFill;
+                if (fill == null)
+                {
+                    Transform fillTr = track.Find("HealthBarFill");
+                    if (fillTr == null)
+                    {
+                        var fillGo = new GameObject("HealthBarFill", typeof(RectTransform), typeof(Image));
+                        fillGo.transform.SetParent(track, false);
+                        fillTr = fillGo.transform;
+                        var fRect = (RectTransform)fillTr;
+                        fRect.anchorMin = Vector2.zero;
+                        fRect.anchorMax = Vector2.one;
+                        fRect.offsetMin = fRect.offsetMax = Vector2.zero;
+                    }
+                    fill = fillTr.GetComponent<Image>();
+                }
+
+                if (fill != null)
+                {
+                    if (fill.transform.parent != track) fill.transform.SetParent(track, false);
+                    var fillRect = (RectTransform)fill.transform;
+                    fillRect.anchorMin = Vector2.zero;
+                    fillRect.anchorMax = Vector2.one;
+                    fillRect.offsetMin = fillRect.offsetMax = Vector2.zero;
+                    // 填充必须画在轨道底之上、3px 墨框之下
+                    fill.transform.SetSiblingIndex(0);
+
+                    fill.enabled = true;
+                    fill.raycastTarget = false;
+                    fill.color = ComicStyle.Green;
+                    UIFlatSprite.MakeFlat(fill, filled: true);
+                    // 迁移场景血条时重新绑定，Update 的填充路径不能断
+                    if (healthBarFill == null) healthBarFill = fill;
                 }
             }
 
-            Transform hint = FindHudChild("BottomStatusPanel/ControlsHintText");
-            if (hint is RectTransform hintRect)
+            EnsureHealthValue(card, themeResolved);
+            return card;
+        }
+
+        /// <summary>生命卡墨底徽章：4px 语义色边框 + [HP] 字（display 字体）。</summary>
+        private void EnsureHealthBadge(RectTransform card, UIThemeSO themeResolved)
+        {
+            Transform badgeTr = card.Find("HpBadge");
+            if (badgeTr == null) badgeTr = FindHudChild("BottomStatusPanel/HpBadge");
+            if (badgeTr == null)
             {
-                hintRect.anchorMin = hintRect.anchorMax = new Vector2(0.5f, 0f);
-                hintRect.pivot = new Vector2(0.5f, 0f);
-                hintRect.sizeDelta = new Vector2(width - 48f, 22f);
-                hintRect.anchoredPosition = new Vector2(0f, 8f);
+                var badgeGo = new GameObject("HpBadge",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                badgeGo.transform.SetParent(card, false);
+                badgeTr = badgeGo.transform;
+            }
+            else if (badgeTr.parent != card)
+            {
+                badgeTr.SetParent(card, false);
+            }
+
+            if (badgeTr is RectTransform badgeRect)
+            {
+                badgeRect.anchorMin = badgeRect.anchorMax = new Vector2(0f, 0.5f);
+                badgeRect.pivot = new Vector2(0f, 0.5f);
+                badgeRect.sizeDelta = new Vector2(HudSpecialGaugeFactory.CardBadgeSize,
+                    HudSpecialGaugeFactory.CardBadgeSize);
+                badgeRect.anchoredPosition = new Vector2(HudSpecialGaugeFactory.CardPadding, 0f);
+            }
+
+            _hpBadgeGraphic = badgeTr.GetComponent<UIInkShapeGraphic>();
+            if (_hpBadgeGraphic != null)
+            {
+                _hpBadgeGraphic.raycastTarget = false;
+                _hpBadgeGraphic.Shape = UIInkShape.SharpRect;
+                _hpBadgeGraphic.CornerRadius = ComicStyle.CornerSharp;
+                _hpBadgeGraphic.BorderWidth = HudSpecialGaugeFactory.CardBadgeBorderWidth;
+                _hpBadgeGraphic.BorderColor = ComicStyle.Green;
+                _hpBadgeGraphic.HardShadow = false;
+                _hpBadgeGraphic.ShadowOffset = Vector2.zero;
+                _hpBadgeGraphic.Halftone = false;
+                _hpBadgeGraphic.GlossAlpha = 0f;
+                _hpBadgeGraphic.DrawGloss = false;
+                _hpBadgeGraphic.InnerRimAlpha = 0f;
+                _hpBadgeGraphic.color = ComicStyle.Ink;
+            }
+
+            Transform labelTr = badgeTr.Find("Label");
+            bool badgeCreated = false;
+            if (labelTr == null)
+            {
+                var labelGo = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer));
+                labelGo.transform.SetParent(badgeTr, false);
+                labelTr = labelGo.transform;
+                var labelRt = (RectTransform)labelTr;
+                labelRt.anchorMin = Vector2.zero;
+                labelRt.anchorMax = Vector2.one;
+                labelRt.offsetMin = labelRt.offsetMax = Vector2.zero;
+                _hpBadgeText = labelGo.AddComponent<TextMeshProUGUI>();
+                badgeCreated = true;
+            }
+            else
+            {
+                _hpBadgeText = labelTr.GetComponent<TextMeshProUGUI>();
+            }
+
+            if (_hpBadgeText != null)
+            {
+                float badgeFontSize = UITypography.FontSnapped(22f);
+                _hpBadgeText.raycastTarget = false;
+                _hpBadgeText.fontSize = badgeFontSize;
+                _hpBadgeText.fontStyle = FontStyles.Bold;
+                _hpBadgeText.alignment = TextAlignmentOptions.Center;
+                _hpBadgeText.color = ComicStyle.Green;
+                _hpBadgeText.textWrappingMode = TextWrappingModes.NoWrap;
+                _hpBadgeText.overflowMode = TextOverflowModes.Overflow;
+
+                var labelChunky = labelTr.GetComponent<UIChunkyText>();
+                if (labelChunky == null) labelChunky = labelTr.gameObject.AddComponent<UIChunkyText>();
+                // 只在首次创建时写入文案：重复布局（分辨率/移动端切换）不能把「HP」重刷一遍
+                if (badgeCreated)
+                {
+                    _hpBadgeText.text = "HP";
+                    labelChunky.Configure(themeResolved, "HP", badgeFontSize, displayFont: true,
+                        doubleLayered: false, fill: ComicStyle.Green, outlinedText: false);
+                }
+            }
+        }
+
+        /// <summary>生命卡右侧大数字：display 36、墨色（低血量由 Update 硬切翻红）。</summary>
+        private void EnsureHealthValue(RectTransform card, UIThemeSO themeResolved)
+        {
+            Transform valueTr = card.Find("HpText");
+            bool valueCreated = false;
+            if (valueTr == null) valueTr = FindHudChild("BottomStatusPanel/HpText");
+            if (valueTr == null)
+            {
+                var valueGo = new GameObject("HpText", typeof(RectTransform), typeof(CanvasRenderer));
+                valueGo.transform.SetParent(card, false);
+                valueTr = valueGo.transform;
+                _hpText = valueGo.AddComponent<TextMeshProUGUI>();
+                valueCreated = true;
+            }
+            else if (valueTr.parent != card)
+            {
+                valueTr.SetParent(card, false);
+            }
+
+            if (_hpText == null) _hpText = valueTr.GetComponent<TextMeshProUGUI>();
+            if (_hpText == null) return;
+
+            var rect = (RectTransform)valueTr;
+            rect.anchorMin = rect.anchorMax = new Vector2(1f, 0.5f);
+            rect.pivot = new Vector2(1f, 0.5f);
+            rect.sizeDelta = new Vector2(HudSpecialGaugeFactory.HealthReadoutWidth, 48f);
+            rect.anchoredPosition = new Vector2(-HudSpecialGaugeFactory.ReadoutRightPadding, 0f);
+
+            float fontSize = HudSpecialGaugeFactory.ReadoutFontSize();
+            _hpText.raycastTarget = false;
+            _hpText.fontSize = fontSize;
+            _hpText.fontStyle = FontStyles.Bold;
+            _hpText.alignment = TextAlignmentOptions.MidlineRight;
+            _hpText.color = ComicStyle.Ink;
+            _hpText.textWrappingMode = TextWrappingModes.NoWrap;
+            _hpText.overflowMode = TextOverflowModes.Overflow;
+
+            var chunky = valueTr.GetComponent<UIChunkyText>();
+            if (chunky == null) chunky = valueTr.gameObject.AddComponent<UIChunkyText>();
+            // 只在首次创建时写入占位文案：重复布局不能把实时血量刷回 100
+            if (valueCreated)
+            {
+                _hpText.text = "100";
+                chunky.Configure(themeResolved, "100", fontSize, displayFont: true,
+                    doubleLayered: false, fill: ComicStyle.Ink, outlinedText: false);
             }
         }
 
@@ -629,9 +1069,11 @@ namespace P1.UI
             if (topRosterBar != null) topRosterBar.SetMobileLayout(true);
             if (centerTimer != null) centerTimer.SetMobileLayout(true);
 
-            // 1. 隐藏底部硬编码的 PC 键鼠操作提示
+            // 1. 隐藏底部硬编码的 PC 键鼠操作提示（细墨黑条 + 文字一起退场）
             Transform hint = FindHudChild("BottomStatusPanel/ControlsHintText");
             if (hint != null) hint.gameObject.SetActive(false);
+            Transform hintStrip = FindHudChild("BottomStatusPanel/" + KeyHintStripName);
+            if (hintStrip != null) hintStrip.gameObject.SetActive(false);
 
             // 2. 隐藏被 InkTankView / LiquidOrbView 取代的旧仪表
             Transform inkBg = FindHudChild("BottomStatusPanel/InkBarBg");
@@ -641,8 +1083,7 @@ namespace P1.UI
             Transform inkText = FindHudChild("BottomStatusPanel/InkStateText");
             if (inkText != null) inkText.gameObject.SetActive(false);
 
-            // 3. 面板收矮 + 生命条与仪表行贴到新的锚点（横向条不会被手指挡住：
-            //    面板宽 940 居中，左右各留下 490px 给摇杆与操作键）
+            // 3. 三卡收矮、间距 12、底边 y≈46（三卡区宽 1076 居中，左右各留 422px 给摇杆与操作键）
             ApplyBottomPanelLayout(true);
 
             // 4. 移动端隐藏「Q 释放」键盘提示
@@ -814,6 +1255,40 @@ namespace P1.UI
             if (screenInkTransition != null) screenInkTransition.EnsureBuilt();
         }
 
+        private void EnsureMatchCallout()
+        {
+            if (matchCallout == null)
+            {
+                matchCallout = GetComponentInChildren<MatchCalloutView>(true);
+            }
+
+            if (matchCallout == null)
+            {
+                if (!autoBuildMatchCallout) return;
+
+                var calloutGo = new GameObject("MatchCalloutView",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(CanvasGroup), typeof(MatchCalloutView));
+                calloutGo.transform.SetParent(ContentRoot, false);
+                matchCallout = calloutGo.GetComponent<MatchCalloutView>();
+            }
+
+            if (matchCallout != null)
+            {
+                if (uiTheme != null) matchCallout.SetTheme(uiTheme);
+                matchCallout.EnsureBuilt();
+            }
+        }
+
+        public void BindMatchCallout(MatchCalloutView view)
+        {
+            matchCallout = view;
+            if (matchCallout != null)
+            {
+                if (uiTheme != null) matchCallout.SetTheme(uiTheme);
+                matchCallout.EnsureBuilt();
+            }
+        }
+
         public void BindReferences(
             Image aFill,
             Image bFill,
@@ -874,12 +1349,12 @@ namespace P1.UI
             if (teamAPercentText != null && Mathf.Abs(covA - _lastCovA) >= 0.05f)
             {
                 _lastCovA = covA;
-                teamAPercentText.text = $"橙队 {covA:F1}%";
+                SetLegacyText(teamAPercentText, _teamAPercentTmp, $"橙队 {covA:F1}%");
             }
             if (teamBPercentText != null && Mathf.Abs(covB - _lastCovB) >= 0.05f)
             {
                 _lastCovB = covB;
-                teamBPercentText.text = $"{covB:F1}% 蓝队";
+                SetLegacyText(teamBPercentText, _teamBPercentTmp, $"{covB:F1}% 蓝队");
             }
 
             var match = MatchManager.Instance;
@@ -910,10 +1385,10 @@ namespace P1.UI
                         {
                             _lastCenterStatusSecs = secs;
                             _lastCenterStatusPhase = match.CurrentPhase;
-                            centerStatusText.text = $"{secs / 60:00}:{secs % 60:00}";
-                            centerStatusText.color = secs <= (int)Mathf.Max(1f, 30f)
+                            SetLegacyText(centerStatusText, _centerStatusTmp, $"{secs / 60:00}:{secs % 60:00}");
+                            SetLegacyColor(centerStatusText, _centerStatusTmp, secs <= (int)Mathf.Max(1f, 30f)
                                 ? new Color(1f, 0.42f, 0.35f, 1f)
-                                : Color.white;
+                                : Color.white);
                         }
                     }
                     else
@@ -922,8 +1397,8 @@ namespace P1.UI
                         {
                             _lastCenterStatusSecs = -1;
                             _lastCenterStatusPhase = match.CurrentPhase;
-                            centerStatusText.text = "等待开赛";
-                            centerStatusText.color = Color.white;
+                            SetLegacyText(centerStatusText, _centerStatusTmp, "等待开赛");
+                            SetLegacyColor(centerStatusText, _centerStatusTmp, Color.white);
                         }
                     }
                 }
@@ -935,7 +1410,7 @@ namespace P1.UI
                         _lastCenterStatusSecs = totalSecs;
                         int mins = totalSecs / 60;
                         int s = totalSecs % 60;
-                        centerStatusText.text = $"手感试玩场  {mins:00}:{s:00}";
+                        SetLegacyText(centerStatusText, _centerStatusTmp, $"手感试玩场  {mins:00}:{s:00}");
                     }
                 }
             }
@@ -963,7 +1438,29 @@ namespace P1.UI
             if (healthBarFill != null)
             {
                 healthBarFill.fillAmount = health.Health01;
-                healthBarFill.color = motor.IsInEnemyInk ? ComicStyle.Red : ComicStyle.Green;
+                bool isDanger = motor.IsInEnemyInk || health.Health01 < 0.3f;
+                Color hpColor = isDanger ? ComicStyle.Red : ComicStyle.Green;
+                healthBarFill.color = hpColor;
+
+                // 生命卡：身份色带 / 徽章边框 / [HP] 字一起硬切翻红（<30% 或踩敌墨）
+                if (_hpCardRail != null)
+                {
+                    _hpCardRail.color = hpColor;
+                }
+                if (_hpBadgeGraphic != null)
+                {
+                    _hpBadgeGraphic.BorderColor = hpColor;
+                }
+                if (_hpBadgeText != null)
+                {
+                    _hpBadgeText.color = hpColor;
+                }
+                if (_hpText != null)
+                {
+                    _hpText.text = $"{Mathf.CeilToInt(health.CurrentHealth)}";
+                    // 纸白卡片：常态墨色大数字保证对比度；告警时才翻红
+                    _hpText.color = isDanger ? ComicStyle.Red : ComicStyle.Ink;
+                }
             }
 
             if (inkStateText != null && inkStateText.gameObject.activeInHierarchy)
@@ -975,7 +1472,7 @@ namespace P1.UI
                     {
                         _lastAlive = false;
                         _lastRespawnTenths = tenths;
-                        inkStateText.text = $"复活倒计时 {health.RespawnRemaining:F1}s...";
+                        SetLegacyText(inkStateText, _inkStateTmp, $"复活倒计时 {health.RespawnRemaining:F1}s...");
                     }
                 }
                 else
@@ -983,33 +1480,36 @@ namespace P1.UI
                     int mode = motor.IsSwimming ? 1 : (motor.IsInEnemyInk ? 2 : 0);
                     int inkVal = Mathf.RoundToInt(motor.CurrentInk);
                     int hpVal = Mathf.RoundToInt(health.CurrentHealth);
-                    bool canBomb = motor.CurrentInk >= bombCost;
-                    int bombCostVal = Mathf.RoundToInt(bombCost);
+                    bool bombReady = weapon.BombCooldownRemaining <= 0.001f;
+                    int bombCdTenths = Mathf.CeilToInt(weapon.BombCooldownRemaining * 10f);
 
                     if (!_lastAlive || mode != _lastInkStateMode || inkVal != _lastInkVal || hpVal != _lastHpVal ||
-                        (mode == 0 && (canBomb != _lastCanBomb || bombCostVal != _lastBombCostVal)))
+                        (mode == 0 && (bombReady != _lastBombReady || bombCdTenths != _lastBombCooldownTenths)))
                     {
                         _lastAlive = true;
                         _lastInkStateMode = mode;
                         _lastInkVal = inkVal;
                         _lastHpVal = hpVal;
-                        _lastCanBomb = canBomb;
-                        _lastBombCostVal = bombCostVal;
+                        _lastBombReady = bombReady;
+                        _lastBombCooldownTenths = bombCdTenths;
 
                         if (mode == 1)
                         {
-                            inkStateText.text = $"[潜行极速回墨] 墨水 {motor.CurrentInk:F0}/100  HP {health.CurrentHealth:F0}";
+                            SetLegacyText(inkStateText, _inkStateTmp,
+                                $"[潜行极速回墨] 墨水 {motor.CurrentInk:F0}/100  HP {health.CurrentHealth:F0}");
                         }
                         else if (mode == 2)
                         {
-                            inkStateText.text = $"[敌方墨水减速!] 墨水 {motor.CurrentInk:F0}/100  HP {health.CurrentHealth:F0}";
+                            SetLegacyText(inkStateText, _inkStateTmp,
+                                $"[敌方墨水减速!] 墨水 {motor.CurrentInk:F0}/100  HP {health.CurrentHealth:F0}");
                         }
                         else
                         {
-                            string bombHint = canBomb
+                            string bombHint = bombReady
                                 ? "手雷[E]就绪"
-                                : $"墨水不足手雷(需{bombCost:F0})";
-                            inkStateText.text = $"墨水 {motor.CurrentInk:F0}/100 ({bombHint})  |  HP {health.CurrentHealth:F0}";
+                                : $"手雷冷却 {weapon.BombCooldownRemaining:F1}s";
+                            SetLegacyText(inkStateText, _inkStateTmp,
+                                $"墨水 {motor.CurrentInk:F0}/100 ({bombHint})  |  HP {health.CurrentHealth:F0}");
                         }
                     }
                 }
@@ -1018,15 +1518,10 @@ namespace P1.UI
             if (specialBarFill != null)
             {
                 specialBarFill.fillAmount = weapon.SpecialCharge01;
-                if (weapon.IsSpecialReady)
-                {
-                    float pulse = 0.78f + Mathf.Sin(Time.time * 10f) * 0.22f;
-                    specialBarFill.color = new Color(1f, 0.92f * pulse, 0.15f, 1f);
-                }
-                else
-                {
-                    specialBarFill.color = new Color(0.25f, 0.78f, 1f, 1f);
-                }
+                // 满能只做纯色硬切（规范禁止正弦呼吸/循环脉冲）
+                specialBarFill.color = weapon.IsSpecialReady
+                    ? ComicStyle.Yellow
+                    : new Color(0.25f, 0.78f, 1f, 1f);
             }
 
             if (specialStateText != null && specialStateText.gameObject.activeInHierarchy)
@@ -1050,15 +1545,16 @@ namespace P1.UI
 
                     if (isPerforming)
                     {
-                        specialStateText.text = $">>> {specialName}释放中! <<<";
+                        SetLegacyText(specialStateText, _specialStateTmp, $">>> {specialName}释放中! <<<");
                     }
                     else if (isReady)
                     {
-                        specialStateText.text = $"【 大招已满！按 [Q] {specialName} 】";
+                        SetLegacyText(specialStateText, _specialStateTmp, $"【 大招已满！按 [Q] {specialName} 】");
                     }
                     else
                     {
-                        specialStateText.text = $"大招充能 {(weapon.SpecialCharge01 * 100f):F0}% (涂地攒能量)";
+                        SetLegacyText(specialStateText, _specialStateTmp,
+                            $"大招充能 {(weapon.SpecialCharge01 * 100f):F0}% (涂地攒能量)");
                     }
                 }
             }
@@ -1082,7 +1578,25 @@ namespace P1.UI
             {
                 liquidOrbView.SetSpecialKind(specialKind);
                 liquidOrbView.SetCharge(specialCharge01, specialReady);
+                EnsureReadyHintHardShadow();
             }
+        }
+
+        /// <summary>
+        /// 满能提示块 = 色签档硬影 (2,-3)。
+        /// LiquidOrbView 的满能状态刷新会把 hintPill 的硬影复位成 false，
+        /// 这里在每次喂充能后幂等补回（值相同不触发重绘，零 GC）。
+        /// </summary>
+        private void EnsureReadyHintHardShadow()
+        {
+            if (_readyHintShadowPill == null && liquidOrbView != null)
+            {
+                Transform hint = liquidOrbView.transform.Find("ReadyHint");
+                if (hint != null) _readyHintShadowPill = hint.GetComponent<UIInkShapeGraphic>();
+            }
+
+            if (_readyHintShadowPill == null) return;
+            UIThemeSO.Resolve(uiTheme).ApplyHardShadow(_readyHintShadowPill, UIHardShadowLevel.Tag);
         }
 
         private void UpdateMinimap()

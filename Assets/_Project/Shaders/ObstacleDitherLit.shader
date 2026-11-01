@@ -46,6 +46,10 @@ Shader "P1/ObstacleDitherLit"
         _SpecThreshold ("Spec Threshold", Range(0.5, 0.999)) = 0.95
         _SpecSoftness ("Spec Softness", Range(0.001, 0.1)) = 0.02
 
+        // P31 可选 albedo 细节层：默认 white 不贴图，与旧版纯色行为一致（向后兼容）
+        [Header(Albedo Detail P31)]
+        _BaseMap ("Albedo Map (optional)", 2D) = "white" {}
+
         [Header(Dither Occlusion Settings)]
         _DitherAlpha ("Dither Alpha", Range(0.0, 1.0)) = 1.0
         _FocusPos ("Focus World Pos", Vector) = (0, 0, 0, 0)
@@ -96,6 +100,8 @@ Shader "P1/ObstacleDitherLit"
             SAMPLER(sampler_SurfaceN);
             TEXTURE2D(_SurfaceRMO);
             SAMPLER(sampler_SurfaceRMO);
+            TEXTURE2D(_BaseMap);
+            SAMPLER(sampler_BaseMap);
 
             struct Attributes
             {
@@ -148,6 +154,7 @@ Shader "P1/ObstacleDitherLit"
                 float _SurfaceNormalStrength;
                 float _SurfaceAOStrength;
                 float _SurfaceSmoothnessScale;
+                float4 _BaseMap_ST;
             CBUFFER_END
 
             static const float4x4 _BayerMatrix4x4 = float4x4(
@@ -205,7 +212,10 @@ Shader "P1/ObstacleDitherLit"
 
                 // 2. 集装箱条纹瓦楞造型 (Container Corrugation Ribs)
                 float3 geomN = normalize(input.normalWS);
-                half3 surfaceColor = _BaseColor.rgb;
+                // P31 可选 albedo 细节层：默认 white 与旧版纯色完全一致
+                float2 baseUV = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+                half3 surfaceColor = _BaseColor.rgb *
+                    SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUV).rgb;
 
                 // 2.1 混凝土/钢板结构细节：踢脚线、压顶、横向板缝与细噪点
                 float sideMask = 1.0 - saturate(abs(geomN.y) * 1.5);
@@ -318,10 +328,11 @@ Shader "P1/ObstacleDitherLit"
                 half rim = P1ToonRim(saturate(dot(worldN, V)), _RimPower, shadowAtten) * _RimStrength;
                 half3 rimLight = _RimColor.rgb * rim;
 
-                // 环境镜面反射（纯数学不分支，使用解析天空盒与太阳盘，暗部受 AO 遮挡）
+                // 环境镜面反射（桌面端 Cubemap + 移动端解析天空回退；暗部受 AO 遮挡）
                 float3 R = reflect(-V, worldN);
                 float rough = saturate(1.0 - smoothness);
-                half3 envSpec = P1InkEnvSpecular(R, rough, saturate(dot(worldN, V)));
+                float NdotV = saturate(dot(worldN, V));
+                half3 envSpec = P1InkEnvSpecularFull(R, rough, NdotV, half3(1.0, 1.0, 1.0));
                 envSpec *= lerp(half3(1.0, 1.0, 1.0), surfaceColor, metallic) * ao;
 
                 half3 shaded = diffuse + specular + rimLight + envSpec;
@@ -407,6 +418,7 @@ Shader "P1/ObstacleDitherLit"
                 float _SurfaceNormalStrength;
                 float _SurfaceAOStrength;
                 float _SurfaceSmoothnessScale;
+                float4 _BaseMap_ST;
             CBUFFER_END
 
             static const float4x4 _BayerMatrix4x4 = float4x4(
@@ -514,6 +526,7 @@ Shader "P1/ObstacleDitherLit"
                 float _SurfaceNormalStrength;
                 float _SurfaceAOStrength;
                 float _SurfaceSmoothnessScale;
+                float4 _BaseMap_ST;
             CBUFFER_END
 
             static const float4x4 _BayerMatrix4x4 = float4x4(

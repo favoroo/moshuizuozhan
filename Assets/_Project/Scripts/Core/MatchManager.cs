@@ -1,4 +1,5 @@
 using System;
+using P1.Environment;
 using P1.Ink;
 using UnityEngine;
 
@@ -34,6 +35,11 @@ namespace P1.Core
         public float FinalCoverageB => _finalB;
         public float ResultRollSeconds => resultRollSeconds;
         public bool PlayerWon => _finalA >= _finalB;
+        public GameConfigSO Config => gameConfig;
+
+        private OutOfBoundsGuard _boundsGuard;
+        private SpawnZone _spawnZoneA;
+        private SpawnZone _spawnZoneB;
 
         public event Action<Phase> PhaseChanged;
         public event Action<int> CountdownTicked;
@@ -49,12 +55,48 @@ namespace P1.Core
         {
             Instance = this;
             _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
+            EnsureRuntimeGuards();
         }
 
         public void Configure(GameConfigSO config)
         {
             gameConfig = config;
             _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
+            EnsureRuntimeGuards();
+            if (_boundsGuard != null) _boundsGuard.Configure(gameConfig);
+            if (_spawnZoneA != null) _spawnZoneA.Configure(Team.TeamA, gameConfig);
+            if (_spawnZoneB != null) _spawnZoneB.Configure(Team.TeamB, gameConfig);
+        }
+
+        private void EnsureRuntimeGuards()
+        {
+            if (_boundsGuard == null)
+            {
+                _boundsGuard = GetComponent<OutOfBoundsGuard>();
+                if (_boundsGuard == null)
+                {
+                    _boundsGuard = gameObject.AddComponent<OutOfBoundsGuard>();
+                }
+                _boundsGuard.Configure(gameConfig);
+            }
+
+            if (_spawnZoneA == null)
+            {
+                _spawnZoneA = SpawnZone.FindZone(Team.TeamA);
+                if (_spawnZoneA == null)
+                {
+                    _spawnZoneA = SpawnZone.CreateZone(Team.TeamA, transform, gameConfig);
+                }
+            }
+
+            if (_spawnZoneB == null)
+            {
+                _spawnZoneB = SpawnZone.FindZone(Team.TeamB);
+                if (_spawnZoneB == null)
+                {
+                    _spawnZoneB = SpawnZone.CreateZone(Team.TeamB, transform, gameConfig);
+                }
+            }
         }
 
         private void OnDestroy()

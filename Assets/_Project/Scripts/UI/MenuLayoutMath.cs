@@ -2,26 +2,100 @@ using UnityEngine;
 
 namespace P1.UI
 {
+    /// <summary>
+    /// 首页盒子：以「安全区左上角」为原点，X 向右、Y 向下，单位是 1920×1080 参考画布像素。
+    ///
+    /// 为什么用左上原点 + Y 向下：首页卡片全部以 anchor/pivot = (0,1) 摆放，
+    /// 版面表里读到的数字就是屏幕上「离左边多远、离顶部多远」，调用方不需要在脑内翻符号；
+    /// <see cref="AnchoredPosition"/> 已经替调用方取好负号。
+    /// 这些盒子是**纯数据**，EditMode 可以直接断言不重叠 / 不出屏（MenuLayoutMathTests）。
+    /// </summary>
+    public struct HomeBox
+    {
+        public float X;
+        public float Y;
+        public float Width;
+        public float Height;
+
+        public HomeBox(float x, float y, float width, float height)
+        {
+            X = x;
+            Y = y;
+            Width = width;
+            Height = height;
+        }
+
+        public Vector2 Size => new Vector2(Width, Height);
+
+        public Vector2 Min => new Vector2(X, Y);
+
+        public Vector2 Center => new Vector2(X + Width * 0.5f, Y + Height * 0.5f);
+
+        public float Right => X + Width;
+
+        public float Bottom => Y + Height;
+
+        /// <summary>宽或高为 0：该元素在当前平台不显示（例如移动端左下的角签让位给整备卡）。</summary>
+        public bool IsEmpty => Width <= 0.01f || Height <= 0.01f;
+
+        /// <summary>anchorMin = anchorMax = (0,1)、pivot = (0,1) 时的 anchoredPosition。</summary>
+        public Vector2 AnchoredPosition => new Vector2(X, -Y);
+
+        public bool Overlaps(HomeBox other)
+        {
+            return !IsEmpty && !other.IsEmpty &&
+                   X < other.Right - 0.01f && other.X < Right - 0.01f &&
+                   Y < other.Bottom - 0.01f && other.Y < Bottom - 0.01f;
+        }
+
+        public bool Contains(float px, float py)
+        {
+            return px >= X - 0.01f && px <= Right + 0.01f && py >= Y - 0.01f && py <= Bottom + 0.01f;
+        }
+
+        /// <summary>盒子是否完整落在给定画布内（左上原点坐标系）。</summary>
+        public bool FitsIn(Vector2 canvas)
+        {
+            return X >= -0.01f && Y >= -0.01f &&
+                   Right <= canvas.x + 0.01f && Bottom <= canvas.y + 0.01f;
+        }
+
+        /// <summary>四边内缩，用于「卡内内容框」。</summary>
+        public HomeBox Inset(float left, float top, float right, float bottom)
+        {
+            return new HomeBox(X + left, Y + top, Mathf.Max(0f, Width - left - right),
+                Mathf.Max(0f, Height - top - bottom));
+        }
+
+        public override string ToString()
+        {
+            return "(" + X.ToString("0") + "," + Y.ToString("0") + " " +
+                   Width.ToString("0") + "×" + Height.ToString("0") + ")";
+        }
+    }
+
     /// <summary>首页（Ready 主菜单）的版面度量：只描述盒子与间距，字号由 UITypography 再放大。</summary>
     public struct HomeMenuMetrics
     {
         /// <summary>距屏幕/安全区边缘的基础留白。</summary>
         public float Margin;
 
+        /// <summary>Hero 卡左上角签（PLAY）的尺寸与字号。</summary>
         public Vector2 TagSize;
         public float TagFont;
 
-        /// <summary>Hero 区（标题 + 拉丁副标题 + 规格行）的可用宽度。</summary>
+        /// <summary>Hero 卡（左侧大色块）的设计尺寸；运行时会按实际安全区宽度自适应。</summary>
         public Vector2 HeroBox;
 
         public float TitleFont;
         public float LatinFont;
         public float SpecFont;
 
-        /// <summary>主 CTA（开始比赛）尺寸与字号。</summary>
+        /// <summary>Hero 卡底部主 CTA（开始游戏）尺寸与字号。</summary>
         public Vector2 CtaSize;
         public float CtaFont;
 
+        /// <summary>兼容字段：旧版「次级小按钮」尺寸（首页已改为 2×2 卡片，数值保留给旧调用方与测试）。</summary>
         public Vector2 SecondarySize;
         public float SecondaryFont;
 
@@ -30,6 +104,129 @@ namespace P1.UI
         /// <summary>背景装饰圆与旋转方块直径。</summary>
         public float DecoCircle;
         public float DecoSquare;
+
+        // ==================== t-1 新野兽派首页（波次3a） ====================
+
+        /// <summary>安全区顶部到卡片区顶部的距离（移动端给顶部小按钮留出行李架）。</summary>
+        public float CardTop;
+
+        /// <summary>安全区底部到卡片区底部的距离：预留左下「武器整备」整备卡 + 角签。</summary>
+        public float CardBottom;
+
+        /// <summary>Hero 卡与右侧 2×2 卡阵之间的横向间隔。</summary>
+        public float ColumnGap;
+
+        /// <summary>右侧 2×2 卡阵总宽度（桌面/移动端两套数）。</summary>
+        public float GridWidth;
+
+        /// <summary>2×2 卡片之间的间隔（横竖同值）。</summary>
+        public float TileGap;
+
+        /// <summary>卡片顶部身份色带高度（规范：5px，不承载文字）。</summary>
+        public float TileBandHeight;
+
+        public float CardBorderWidth;
+        public float TileBorderWidth;
+
+        /// <summary>Hero 卡内边距（左, 上）。</summary>
+        public Vector2 HeroPadding;
+
+        /// <summary>次级卡内边距（左, 上）。</summary>
+        public Vector2 TilePadding;
+
+        public Vector2 TileTagSize;
+        public float TileTagFont;
+        public float TileTitleFont;
+        public float TileInfoFont;
+        public float TileArrowFont;
+
+        /// <summary>左下 / 右下黑底角签（宽或高为 0 表示该平台不显示）。</summary>
+        public Vector2 FooterTagSize;
+        public float FooterTagFont;
+        public Vector2 VersionTagSize;
+        public float FooterInset;
+
+        /// <summary>是否显示顶部右侧小按钮（「自定义按键」只在移动端出现）。</summary>
+        public bool ShowTopButton;
+
+        public float BoardHeight => MenuLayoutMath.RefHeight - CardTop - CardBottom;
+
+        /// <summary>卡片区（Hero + 2×2 卡阵）外框。</summary>
+        public HomeBox Board =>
+            new HomeBox(Margin, CardTop, MenuLayoutMath.RefWidth - Margin * 2f, BoardHeight);
+
+        /// <summary>左侧 Hero 大卡：设计宽度 = HeroBox.x，运行时按安全区宽度自适应。</summary>
+        public HomeBox HeroCard => new HomeBox(Margin, CardTop, HeroBox.x, BoardHeight);
+
+        public float TileWidth => (GridWidth - TileGap) * 0.5f;
+
+        public float TileHeight => (BoardHeight - TileGap) * 0.5f;
+
+        public HomeBox Grid =>
+            new HomeBox(MenuLayoutMath.RefWidth - Margin - GridWidth, CardTop, GridWidth, BoardHeight);
+
+        /// <summary>2×2 卡阵：0=左上 1=右上 2=左下 3=右下（阅读顺序 = 入场错峰顺序）。</summary>
+        public HomeBox Tile(int index)
+        {
+            int col = index % 2;
+            int row = index / 2;
+            HomeBox grid = Grid;
+            return new HomeBox(
+                grid.X + col * (TileWidth + TileGap),
+                grid.Y + row * (TileHeight + TileGap),
+                TileWidth,
+                TileHeight);
+        }
+
+        public HomeBox HeroTag =>
+            new HomeBox(Margin + HeroPadding.x, CardTop + HeroPadding.y, TagSize.x, TagSize.y);
+
+        /// <summary>Hero 卡内嵌的武器整备卡绝对盒子（以 MenuSafeArea 左上角为原点）。</summary>
+        public HomeBox HeroWeaponSlot
+        {
+            get
+            {
+                float innerWidth = HeroBox.x - HeroPadding.x * 2f;
+                Vector2 cardSize = MenuLayoutMath.LoadoutCard(ShowTopButton).Size;
+                float width = Mathf.Min(innerWidth, cardSize.x);
+                float height = cardSize.y;
+                float x = Margin + HeroPadding.x;
+
+                // 垂直排版：位于顶部 Tag 之下，与 CTA 左右严格对齐，垂直居中偏上留出呼吸空间
+                float topSpace = CardTop + HeroPadding.y + TagSize.y + (ShowTopButton ? 32f : 68f);
+                return new HomeBox(x, topSpace, width, height);
+            }
+        }
+
+        /// <summary>Hero 卡底部主 CTA（「开始游戏 》》」）的绝对盒子。</summary>
+        public HomeBox HeroCta => new HomeBox(
+            Margin + HeroPadding.x,
+            CardTop + BoardHeight - HeroPadding.y - CtaSize.y,
+            CtaSize.x,
+            CtaSize.y);
+
+        /// <summary>顶部右侧小按钮（移动端「自定义按键」；桌面端返回空盒）。</summary>
+        public HomeBox TopButton => !ShowTopButton
+            ? default
+            : new HomeBox(
+                MenuLayoutMath.RefWidth - Margin - SecondarySize.x,
+                Margin,
+                SecondarySize.x,
+                SecondarySize.y);
+
+        /// <summary>左下黑底角签（社区位）；移动端让位给整备卡，返回空盒。</summary>
+        public HomeBox FooterTag => new HomeBox(
+            Margin,
+            MenuLayoutMath.RefHeight - FooterInset - FooterTagSize.y,
+            FooterTagSize.x,
+            FooterTagSize.y);
+
+        /// <summary>右下黑底角签（版本号）。</summary>
+        public HomeBox VersionTag => new HomeBox(
+            MenuLayoutMath.RefWidth - Margin - VersionTagSize.x,
+            MenuLayoutMath.RefHeight - FooterInset - VersionTagSize.y,
+            VersionTagSize.x,
+            VersionTagSize.y);
     }
 
     /// <summary>左下角「武器整备」入口卡（取代旧的窄黄条）的度量。</summary>
@@ -86,8 +283,11 @@ namespace P1.UI
     ///
     /// 为什么单独抽出来：移动端「看起来很小」的根因是整块 UI 只按桌面比例排、只给字号 ×1.28；
     /// 手机屏幕物理尺寸只有显示器的零头，必须显式给出更大的盒子（CTA、卡片、图标、触控目标）。
-    /// 这些数字要能被 EditMode 直接断言（移动端一律 &gt; 桌面端、抽屉宽度占比合理），
+    /// 这些数字要能被 EditMode 直接断言（移动端一律 &gt; 桌面端、抽屉宽度占比合理、卡片不重叠），
     /// 不再靠人眼看截图猜。
+    ///
+    /// 波次3a（t-1 新野兽派）：首页从「白底大留白 + 角落按钮」改为「深色舞台 + 左侧 Hero 大卡 +
+    /// 右侧 2×2 次级卡」，盒子由 <see cref="HomeMenuMetrics"/> 的 HeroCard / Tile(i) / HeroCta 等给出。
     /// </summary>
     public static class MenuLayoutMath
     {
@@ -101,41 +301,87 @@ namespace P1.UI
         {
             if (!mobile)
             {
+                // 桌面：整屏铺满（卡片区 1792×816，横向占屏 93%），左下给整备卡留 200px 底带。
                 return new HomeMenuMetrics
                 {
                     Margin = 64f,
-                    TagSize = new Vector2(320f, 52f),
-                    TagFont = 18f,
-                    HeroBox = new Vector2(980f, 400f),
+                    TagSize = new Vector2(132f, 44f),
+                    TagFont = 20f,
+                    HeroBox = new Vector2(728f, 816f),
                     TitleFont = 120f,
                     LatinFont = 32f,
-                    SpecFont = 22f,
-                    CtaSize = new Vector2(520f, 144f),
+                    SpecFont = 20f,
+                    CtaSize = new Vector2(640f, 148f),
                     CtaFont = 46f,
-                    SecondarySize = new Vector2(224f, 64f),
-                    SecondaryFont = 21f,
+                    SecondarySize = new Vector2(196f, 56f),
+                    SecondaryFont = 20f,
                     VersionFont = 18f,
                     DecoCircle = 240f,
                     DecoSquare = 110f,
+
+                    CardTop = 64f,
+                    CardBottom = 200f,
+                    ColumnGap = 32f,
+                    GridWidth = 1032f,
+                    TileGap = 24f,
+                    TileBandHeight = 5f,
+                    CardBorderWidth = 4f,
+                    TileBorderWidth = 3f,
+                    HeroPadding = new Vector2(40f, 32f),
+                    TilePadding = new Vector2(24f, 24f),
+                    TileTagSize = new Vector2(118f, 36f),
+                    TileTagFont = 18f,
+                    TileTitleFont = 44f,
+                    TileInfoFont = 18f,
+                    TileArrowFont = 40f,
+                    FooterTagSize = new Vector2(320f, 36f),
+                    FooterTagFont = 18f,
+                    VersionTagSize = new Vector2(300f, 36f),
+                    FooterInset = 18f,
+                    ShowTopButton = false,
                 };
             }
 
+            // 移动端：顶部留出「自定义按键」小按钮；卡片区 1856×704，横向占屏 97%。
+            // CTA 860×200、Hero 940 宽：手机逻辑画布不宽，靠"更大更高的盒子"而不是继续放大字号。
             return new HomeMenuMetrics
             {
-                Margin = 40f,
-                TagSize = new Vector2(560f, 72f),
-                TagFont = 26f,
-                HeroBox = new Vector2(1180f, 460f),
-                TitleFont = 132f,
+                Margin = 32f,
+                TagSize = new Vector2(168f, 56f),
+                TagFont = 20f,
+                HeroBox = new Vector2(940f, 704f),
+                TitleFont = 120f,
                 LatinFont = 34f,
                 SpecFont = 22f,
-                CtaSize = new Vector2(820f, 200f),
+                CtaSize = new Vector2(860f, 200f),
                 CtaFont = 48f,
                 SecondarySize = new Vector2(300f, 96f),
                 SecondaryFont = 22f,
-                VersionFont = 18f,
+                VersionFont = 20f,
                 DecoCircle = 320f,
                 DecoSquare = 130f,
+
+                CardTop = 148f,
+                CardBottom = 228f,
+                ColumnGap = 20f,
+                GridWidth = 896f,
+                TileGap = 20f,
+                TileBandHeight = 5f,
+                CardBorderWidth = 4f,
+                TileBorderWidth = 3f,
+                HeroPadding = new Vector2(40f, 32f),
+                TilePadding = new Vector2(24f, 22f),
+                TileTagSize = new Vector2(140f, 44f),
+                TileTagFont = 20f,
+                TileTitleFont = 44f,
+                TileInfoFont = 18f,
+                TileArrowFont = 44f,
+                // 移动端左下是「武器整备」整备卡的地盘，社区角签不显示（返回空盒）。
+                FooterTagSize = Vector2.zero,
+                FooterTagFont = 18f,
+                VersionTagSize = new Vector2(360f, 44f),
+                FooterInset = 20f,
+                ShowTopButton = true,
             };
         }
 
@@ -145,23 +391,23 @@ namespace P1.UI
             {
                 return new LoadoutCardMetrics
                 {
-                    Size = new Vector2(380f, 112f),
-                    IconDiameter = 80f,
-                    TitleFont = 26f,
-                    NameFont = 19f,
-                    ChevronSize = 60f,
+                    Size = new Vector2(640f, 200f),
+                    IconDiameter = 110f,
+                    TitleFont = 18f,
+                    NameFont = 38f,
+                    ChevronSize = 64f,
                     ChevronFont = 26f,
                 };
             }
 
             return new LoadoutCardMetrics
             {
-                Size = new Vector2(680f, 176f),
-                IconDiameter = 128f,
-                TitleFont = 30f,
-                NameFont = 22f,
-                ChevronSize = 96f,
-                ChevronFont = 40f,
+                Size = new Vector2(860f, 220f),
+                IconDiameter = 136f,
+                TitleFont = 22f,
+                NameFont = 42f,
+                ChevronSize = 88f,
+                ChevronFont = 36f,
             };
         }
 

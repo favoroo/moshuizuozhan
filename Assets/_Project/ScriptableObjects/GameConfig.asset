@@ -37,6 +37,8 @@ MonoBehaviour:
   tpsChargerZoomDistance: 0.6
   tpsSubAimFovKick: 4
   tpsSubAimDistanceKick: 0.35
+  tpsSpeedFovKick: 3.5
+  tpsSpeedFovStartSpeed: 6
   usePerspective: 1
   cameraFov: 40
   cameraOrthoSize: 4.4
@@ -48,3 +50,9 @@ MonoBehaviour:
   shakeDecayPerSecond: 2.4
   shakeFrequency: 38
   shakeExplosionRadius: 14
+  outOfBoundsCheckIntervalSeconds: 0.25
+  outOfBoundsMarginX: 0.3
+  outOfBoundsMarginZ: 0.3
+  outOfBoundsMinY: -1
+  spawnZoneRadius: 6
+  spawnZonePushSpeed: 8

@@ -42,6 +42,10 @@ namespace P1.UI
         [SerializeField] private TMP_Text readyHintLabel;
         [SerializeField] private UISpringMotion readyHintMotion;
 
+        [Header("卡片外壳（t-1：纸白卡 → 满能整卡翻黄）")]
+        [SerializeField] private UIInkShapeGraphic cardBackground;
+        [SerializeField] private UIInkShapeGraphic cardRail;
+
         [SerializeField] private bool autoBindLocalPlayerTeam = true;
 
         private Team _team = Team.Neutral;
@@ -112,6 +116,17 @@ namespace P1.UI
         public void SetTheme(UIThemeSO themeAsset)
         {
             theme = themeAsset;
+            ApplyTeamColors();
+        }
+
+        /// <summary>
+        /// 卡片外壳绑定（t-1 底部三卡）：未满能 = 纸白卡 + 行动黄色带；满能 = 整卡翻黄。
+        /// 新增入口，旧的 <see cref="Configure"/> 签名与调用方零变化。
+        /// </summary>
+        public void SetCardChrome(UIInkShapeGraphic background, UIInkShapeGraphic rail)
+        {
+            cardBackground = background;
+            cardRail = rail;
             ApplyTeamColors();
         }
 
@@ -309,15 +324,30 @@ namespace P1.UI
 
         private void ApplyTeamColors()
         {
-            // 充能中 = 纸白；满能 = 黄。条、徽章、提示同色，形成一眼可读的「硬切就绪」。
-            Color accent = _ready ? ComicStyle.Yellow : ComicStyle.Paper;
-            if (barFill != null) barFill.color = accent;
-            if (iconPlate != null) iconPlate.color = accent;
+            // 卡片语言（t-1）：纸白卡 + 行动黄身份色带；满能整卡翻黄、色带与墨框反过来用墨黑，
+            // 形成一眼可读的「硬切就绪」。条永远铺行动黄（纸白轨道上才有对比）。
+            if (barFill != null) barFill.color = ComicStyle.Yellow;
+            if (iconPlate != null)
+            {
+                // 与墨水卡同构：墨底徽章 + 4px 身份色边框 + 身份色图标。
+                // 满能时整卡翻黄，墨底留在黄卡上仍是一块清晰的重心，边框改用纸白勾出轮廓。
+                iconPlate.color = ComicStyle.Ink;
+                iconPlate.BorderWidth = HudSpecialGaugeFactory.CardBadgeBorderWidth;
+                iconPlate.BorderColor = _ready ? ComicStyle.Paper : ComicStyle.Yellow;
+            }
 
-            if (specialIcon != null) specialIcon.color = ComicStyle.Ink;
+            if (cardBackground != null)
+            {
+                cardBackground.color = _ready ? ComicStyle.Yellow : ComicStyle.Paper;
+                cardBackground.BorderColor = ComicStyle.Ink;
+            }
+            if (cardRail != null) cardRail.color = _ready ? ComicStyle.Ink : ComicStyle.Yellow;
+
+            if (specialIcon != null) specialIcon.color = ComicStyle.Yellow;
             if (specialIconShadow != null) specialIconShadow.enabled = false;
 
-            if (percentLabel != null) percentLabel.color = ComicStyle.Paper;
+            // 纸白卡片：读数与提示文字用墨色；满能时百分比已被「Q 释放」替换
+            if (percentLabel != null) percentLabel.color = ComicStyle.Ink;
 
             if (readyHintPill != null)
             {
@@ -325,11 +355,15 @@ namespace P1.UI
                 readyHintPill.CornerRadius = ComicStyle.CornerSharp;
                 readyHintPill.SpeechTail = false;
                 readyHintPill.HardShadow = false;
-                readyHintPill.color = ComicStyle.Yellow;
-                readyHintPill.BorderColor = ComicStyle.Ink;
+                // 满能卡整块是黄的：小签反过来用墨底白字（t-1 的墨块语言），对比最强
+                readyHintPill.color = _ready ? ComicStyle.Ink : ComicStyle.Yellow;
+                readyHintPill.BorderColor = _ready ? ComicStyle.Paper : ComicStyle.Ink;
             }
 
-            if (readyHintLabel != null) readyHintLabel.color = ComicStyle.Ink;
+            if (readyHintLabel != null)
+            {
+                readyHintLabel.color = _ready ? ComicStyle.Paper : ComicStyle.Ink;
+            }
         }
 
         private void ApplyPercent()

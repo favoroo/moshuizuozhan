@@ -780,6 +780,10 @@
   - **验收标准**：`unity command test run` EditMode 与 PlayMode 全部 Green 通过。✅
 
 - [x] **[P6-C] Profiler 性能调优与双端（桌面 / Android）出包真机验收** (Agent: Build-Master, Time: 2026-10-29 12:20, Completed: 2026-10-29 13:35, Status: All Phases Completed!)
+  > ⚠️ **2026-10-31 复核作废（P6-C-R）**：本条中「120 秒双分辨率仿真采样 60.1 FPS / GC 0 B/帧 / DrawCalls 45~75」
+  > 由 `BuildAndProfilerSuite.SimulateBattleSampling` 离线仿真生成（FPS=Random(42)+硬编码、GC 测的是仿真循环、DrawCalls 写死文案），
+  > 全部无效，「性能红线达标」结论撤销；双端构建产物部分不受影响。
+  > 真实采样链路重建与首份实测见文末「性能验收可信度重建（P6-C-R）」条目。
   - **交付简述**：
     1. **Profiler 性能全流程深度采样 (`PerformanceProfilerProbe` & `BuildAndProfilerSuite`)**：
        - **帧率表现**: 真实 PlayMode 战斗场景实测平均帧率 **402.2 FPS**，1% Low 帧率 **289.4 FPS**；120 秒长时间压测稳定 60.1 FPS（桌面端/移动端双分辨率全流程无掉帧）；
@@ -1787,46 +1791,81 @@
 - **背景**：用户要求评审当前场地有没有设计不合理、需要优化的地方（参考 INKWAVE），目标是保障玩家体验。
   本轮只交付评审报告 **`Docs/ArenaDesignReview.md`**（新），**不改任何代码 / 场景 / 资产**，
   不重跑 P7-B 场景重构。以下为报告结论登记为待认领项，未开始实施。
-- **已确认的用户决策**：出生区保护**暂不做**（保留为已知风险）；不可达格**未来按角色半径自动剔除**
+- **已确认的用户决策（2026-10-31 更新）**：出生区保护改为**完整实施**（P16-A，按 INKWAVE `spawnBarrier`
+  对齐物理推出 + Bot 目标过滤）；不可达格**按角色半径自动剔除**
   （只封闭"两侧皆 blocked 且缝宽 < 0.9m"的窄缝，不做全图 0.45m 腐蚀）；垂直层次**保持现状**
   （1.1m 中央台 + 0.5m 女儿墙，不改 `ArenaGeometry_CentralPlatform_WithinHeightLimit` 的 ≤1.201m 断言）。
 
-- [ ] **P16-A 出生禁入圈（对齐 INKWAVE `spawnBarrier`）**
+- [x] **P16-A 出生禁入圈（对齐 INKWAVE `spawnBarrier`）** (Agent: P16-Safety, Time: 2026-10-31 16:30)
+  实施：`Environment/SpawnZone` 每队半径 6m、8 m/s 径向外推（仅敌方、水平、不致死、不瞬移）；
+  `MatchManager` 运行时自动挂载两队 Zone（无需改场景）；`BotController.PickPaintTarget` 过滤敌方圈内 + 2m 缓冲。
+  参数：`GameConfigSO.spawnZoneRadius/spawnZonePushSpeed`、`BotConfigSO.spawnZoneAvoidBufferMeters`。
+  测试：`SpawnZoneMathTests` 7 例 + `SpawnZonePlayTests`（直接 `TryPush` 验证敌推/友不推、不扣血）。
   现状：全项目无敌方禁入；`BotController.cs:937-940` 主动奖励压向敌方半场，寻路不排除敌方出生区；
   出生台 52 m²/队可涂且计分 → Bot 可偷家刷分（104 m² ≈ 全图 4.6%）并在复活后 3s 无敌结束时围杀。
   建议：每队一个半径 5.5~6m 的 `SpawnZone`（`Environment/` 新组件），物理径向推出（`InkCharacterMotor`
   新增重载入口，保持向后兼容）+ `BotController.PickPaintTarget` 过滤圈内候选（圈外留 2m 缓冲避免贴边抖动）。
   领域锁：Environment / Player-Motor / AI-Nav。**不需要重建场景**。
 
-- [ ] **P16-B 越界回收（兜底）**
+- [x] **P16-B 越界回收（兜底）** (Agent: P16-Safety, Time: 2026-10-31 16:30)
+  实施：`Core/OutOfBoundsGuard` 仅 Playing 每 0.25s 扫描；`|x|>BoundaryX+0.3 || |z|>BoundaryZ+0.3 || y<-1`
+  → `TeleportTo` 本队出生锚点、清速度，不判死/不清血/不触发击杀；`MatchManager` 运行时自动挂载。
+  参数：`GameConfigSO.outOfBoundsCheckIntervalSeconds/outOfBoundsMarginX/outOfBoundsMarginZ/outOfBoundsMinY`。
+  测试：`OutOfBoundsMathTests` 9 例 + `OutOfBoundsRecoveryPlayTests`（北墙外/负高度回收、血量无损）。
   现状：出生后靠背 1.2m 可跳上 → 北边界墙 2.4m 再跳一次 → 翻出场地；场外无地板、无 kill plane、
   无位置夹紧（grep 为空），2.4m 墙 `allowClimb=false` 爬不回来 = 软锁。南侧 0.55m 矮墙可站上去、
   在墨网格外射击。建议：`MatchManager` 每 0.25s 检查 8 个角色，`|x| > 20.8 || |z| > 28.8 || y < -1`
   → 拉回本队出生锚点（不判死、不清血量）。领域锁：Core。**不需要重建场景**。
 
-- [ ] **P16-C 掩体顶面计分口径统一**
+- [x] **P16-C 掩体顶面计分口径统一** (Agent: P16-E/Ink, Time: 2026-10-31 16:30)
+  实施：`Editor/ArenaDecorationBuilder` 的实体道具 Collider 统一注册进 `blockedColliders`；
+  `ProjectScaffolder` 重建时先生成装饰再 `InkSurfaceController.Configure`；`PaintCoverageAudit` 对
+  “顶视图可受墨但已在 blocked 名单”输出 warning（不计 violation）。当前场景 `blockedColliders.Count=60`。
+  测试：`PaintCoverageAuditTests` 新增实体道具顶面不计分断言；南墙 0.55m 断言保持通过。
   现状：`CreateCover` 把 Collider 注册进 `blockedColliders` → 集装箱/挡墙顶面"涂了看得见、0 分"；
   装饰实体道具（`ArenaDecorationBuilder.cs:550-586`）只建碰撞、**未注册 blocked** → 木箱/花坛顶面"涂了算分"。
   同一种箱子两种结果，极易让玩家判定"刷漆无效"。建议统一为"实体掩体顶面不计分"（道具 Collider 也注册 blocked，
   约 30~40 m² 退出分母），并给 `PaintCoverageAudit` 增加"材质采样顶视图集却在 blocked 名单里"的告警。
   领域锁：Ink / Editor。**需要重跑 P7-B**（会重写并保存主场景）。
 
-- [ ] **P16-D 窄缝自动剔除（移植 `slotSides()` 思路）**
+- [x] **P16-D 窄缝自动剔除（移植 `slotSides()` 思路）** (Agent: P16-E/Ink, Time: 2026-10-31 16:30)
+  实施：`InkGrid.SealNarrowSlits(maxGapMeters=0.9)` 仅封闭“X 或 Z 两侧 0.9m 内均为 blocked”的格子，
+  单侧贴墙格不误封、不做全图腐蚀；`InkSurfaceController.BakeBlockedColliders()` 末尾调用。
+  测试：`InkGridSealSlitsTests` 4 例（0.3m 缝封死、单侧贴墙保留、1.2m 走廊保留、PaintableCount 同步）。
   现状：中央台↔`CoverWall_00` 0.20m、`CoverWall_00`↔`Container_Mid_SW` 0.30m、
   侧翼高台↔侧翼集装箱 0.65m → 角色直径 0.9m 过不去，但计入覆盖率分母（约 8.5 m² / 0.38% 永久涂不到）；
   Bot 采样半径 0.386m 也会把 0.65m 判死 → 玩家与 Bot 可行走区不一致。建议在 `BakeBlockedColliders`
   之后封闭"两侧皆 blocked 且缝宽 < 0.9m"的格子。**禁止**对全图做 0.45m 腐蚀（会误删可被溅射涂到的贴墙格）。
   领域锁：Ink。**需要重跑 P7-B**。
 
-- [ ] **P16-E 场地几何调整（需重建场景）**
-  1. 出生后靠背（`z=±27`，1.2m）并入边界墙，消除翻越台阶（配合 P16-B）；
-  2. 南墙 0.55m → 2.4m，删掉 `Boundary_South_Blocker`，四面统一，消除"打空气"与南北不对称；
-  3. 侧翼集装箱内移 0.55m（`±17.5 → ±16.95`）：0.65m 死缝贴死，外走廊 1.4m → 1.95m；
-  4. 中路补 2 对错位低掩体（z≈±16.5 与 z≈±9.0，1.4~1.6m 高；避开 `Ramp_South` 底端 z=-9.9、x∈[-2.2,2.2] 的 4.4m 坡道口），
-     解决中路两段各 8.2m 无掩体、正对中央高台的问题；
-  5. `SpawnGate` 改成"每队 2 块 3m 挡墙 + 中间 7m 出口"（现实现用 `CreateCoverPair` 只生成了 1 块/队，
-     与注释不符）。
-  领域锁：Environment / Scaffolder（同一时间只允许一个 Agent 改）。**需要重跑 P7-B 并保存主场景**。
+- [x] **P16-E 场地几何调整（需重建场景）** (Agent: Arena-Layout, Time: 2026-10-31 15:40)
+  目标：参考 INKWAVE 的车道/高度语法，把中路的裸直道切短、侧翼从"可跳上的矮台"改成"必须走坡道的高地"，
+  并消除 0.2~0.95m 的死缝；保持 40×56 尺寸、中央 1.1m 台 + 0.5m 女儿墙、180° 点对称与全部既有对象名。
+  实施结果（已重跑 P7-B 并保存主场景）：
+  1. **车道槽位重排**（X 轴，西半区；东侧镜像）：中央台边 |x|=5 → 内侧车道 2.0 → 中场集装箱 2.2（|x|=8.1）
+     → 外侧车道 2.0 → 侧翼高台 4.5（|x|=13.45）→ 贴台集装箱 2.2（|x|=16.75，与台体重叠 0.05）
+     → 贴墙外走廊 2.10m。所有 <0.9m 死缝归零。
+  2. **侧翼高台 0.9 → 1.5m**（高于跳跃 1.35m），4 条坡道加长到 6.8m（12.5°，顶端与台面等高），
+     坡道成为 Bot/玩家的唯一常规入口；台外侧集装箱间的 3.5m 凹槽保留为"涂墙→攀爬"的玩家捷径。
+  3. **中路错位低掩体**：`Cover_MidLane_Far`（z≈±16.5，x=∓2.6）与 `Cover_MidLane_Near`（z≈±9.0，x=±3.4），
+     1.2m 可跳、1.8×1.2m；把出生门→中央台的两段 8.2m 裸道切成 ≤4.4m 的 S 形推进线，且不挡 4.4m 坡道口。
+  4. **出生门补齐**：`SpawnGate` + `SpawnGate_Wing` 每队 2 块 3m 挡墙（x=±5），中央 7m 出口 + 两侧台阶 = 3 出口。
+  5. **延长区对齐**：两组延长集装箱统一到 |x|=16.75、Rust 与 Teal 沿 Z 重叠 0.1m（消除 0.4m 竖缝）；
+     1.4m 木箱降到 **1.2m**（消除"差 5cm 跳不上"的挫败点）。
+  6. **北墙 3.0m**（`BoundaryWallHeight`）：从出生甲板 1.2m 起跳顶点 2.55m 也翻不出去，堵死 P0-2 越界路径。
+  仍保留 / 未做：
+  - 南墙保持 0.55m 可见矮墙 + `Boundary_South_Blocker`（本轮并发协作方明确保留该方案，属 P1-4，未强行统一）；
+  - P16-C 已由并行线补齐（装饰道具 Collider 已注册 blocked，审计 46 条 warning 统一口径，见上方 P16-C 勾选）；
+  - P16-D 由另一条线实现 `InkGrid.SealNarrowSlits`（本轮几何已无 <0.9m 死缝，作为兜底保留）。
+  验证：EditMode 481 条 / 479 通过（唯一失败 `MatchCalloutMathTests` 属另一条线，与本轮无关）；
+  `ArenaOcclusionPlayTests`、场地冒烟与 PlayMode 全量中的场地相关用例通过；
+  Play Mode 实测 `PaintableCount=143242`（400×400 网格，约 89.5% 可涂）、NavGrid 80×112；
+  双方出生点→中央台、→东/西侧翼台、→贴墙外走廊 A* 全部可达（68/67/64/68/109 路点）。
+  视觉留底：`Logs/p7b_overview.png` / `p7b_spawn_teamA.png` / `p7b_midfield.png` / `p7b_north_vista.png`。
+  影响文件：`Environment/ArenaGeometryBuilder.cs`、`Environment/ArenaLayoutV2.cs`、
+  `Tests/EditMode/{ArenaAndOcclusionTests,PaintCoverageAuditTests}.cs`、`Tests/PlayMode/ArenaOcclusionPlayTests.cs`。
+  向后兼容：`ArenaGeometryBuilder` 公共签名不变；全部既有对象名保留（`CoverWall_00`、`HighGround_West/East`、
+  `Container_Mid_SW_Mustard` 等测试锚点仍在，仅坐标调整）。
 
 - **复核方式**：见 `Docs/ArenaDesignReview.md` §6（Play Mode 下读 `Grid.PaintableCount`、把玩家放到靠背顶试跳、
   `TryGetNearestWalkable` 反查死缝、集装箱顶/木箱顶各打一发比较 `GetCoveragePercent` 差值等）。
@@ -2497,6 +2536,422 @@
   `tools/bake_arena_textures.py`、`Art/Textures/{Arena,Ink,Surfaces}/`；公共 API 全部向后兼容（只加重载/新字段）。
 - **调参入口**：`ScriptableObjects/ArenaStyle.asset` 的「INKWAVE 质感」段（envSpecStrength / inkGrain* / coffeeRing / surface* / splitToning*），
   改完跑菜单 `P1/画风/4`；移动端自动降级由 `RenderEnvGlobals` 按 `isMobilePlatform` 控制。
+
+## 大招充能平衡：按面积计价（2026-10-31）
+
+- **问题**：实机手感「随便几下大招就满」。根因是充能定价失衡——旧版 `AddSpecialPoints` 按新涂**格数**计分（1 格 = 1 点，
+  需 170~195 点），但桌面墨格密度为 0.1×0.14m（400 分辨率下 0.014 m²/格），单发弹丸落点墨斑（r=1.0~1.5m）就有
+  220~500 格，**射击系 1 发即满**，手雷一颗（r=2.7m ≈ 1600 格）顶 9 次大招，滚筒按 0.1s/挥秒满。
+  且格数随分辨率变化：桌面 400 vs 移动 200 格，同一把武器跨平台充能速度差 4 倍（隐藏 bug）。
+- **修复**：充能从「格数」改为按涂地**面积**计价：`获得点数 = 新涂格数 × CellArea × specialPointsPerSquareMeter`，
+  与网格分辨率无关。涂地充能机制本身（重复涂己方墨不给分、被击杀减半、释放清零）保持不变。
+- **改动**：
+  - `WeaponConfigSO`：新增 `specialPointsPerSquareMeter = 1.0`（每武器可调，旧资产反序列化自动取默认值）；
+  - `InkSurfaceController`：新增 `CellArea` 属性（桌面 ≈0.014 / 移动 ≈0.056 m²）；
+  - `WeaponController`：`AddSpecialPoints(int)` 保留旧签名（弹丸/光束/滚筒/手雷回调零改动），内部换算面积点数；
+    新增 `AddSpecialPointsRaw(float)` 直充入口供调试与测试；
+  - `DebugOverlay` F3 与 5 处 PlayMode 测试（Roster/Special/ZeroLogGate/PhaseA）改用 `AddSpecialPointsRaw(500)`。
+- **换算后预期**（1.0 点/m²，桌面）：射击系（落点 1.5m）约 26 发新地充满 ≈ 2~3 个墨罐（实战 45~70s）；
+  落点 1.0m 的武器约 57 发；滚筒约 30~45s 纯推地；手雷约 8 颗（受墨量限制实际更慢）。120s 一局可放 1~2 次大招。
+- **验证**：改动后实时 pipeline `compilationFailed:false`、consoleErrors 0；EditMode 全量 352 条 = 350 过 +
+  1 失败（`InkGroundShader_ContainsBothAtlasWritePasses`），与 **干净基线（stash 对照）逐字相同** → 零回归。
+  该失败为 batchmode 环境假阴性（自定义 LightMode Pass 经 `Material.FindPass` 返回 -1；GUI 编辑器实时跑为绿，
+  见 P18 全绿记录）。PlayMode 批处理 54 失败全部由同一条 `[InkSplatAtlas]` shader LogError 的日志门禁放大，
+  无充能断言失败；编辑器空闲时建议 `tools/run_tests.sh play` 复核（本次批处理窗口撞上并行 Agent 的 Player 域编译中间态）。
+- **影响面**：`Scripts/Weapons/{WeaponConfigSO,WeaponController}.cs`、`Scripts/Ink/InkSurfaceController.cs`、
+  `Scripts/Core/DebugOverlay.cs`、`Tests/PlayMode/{RosterState,SpecialWeapons,ZeroLogErrorGate,PhaseAPlayboxSmoke}PlayTests.cs`；
+  公共 API 向后兼容（只加字段/新方法，旧签名语义不变）。
+- **调参入口**：`ScriptableObjects/Weapons/Weapon_*.asset` 的 `Special Points Per Square Meter`
+  （默认 1.0；整体调快调慢改这一个字段即可，或跑 `P1/构建` 相关同步菜单统一写 7 份）。
+
+---
+
+### 角色动作活气重做：蛋仔式蹦跳步 + 跳跃表演 + 惯性倾斜 + 待机生命感（P26，2026-10-31）
+
+> 用户反馈：人物走/跳"僵持不动、像滑行"。诊断出 6 个根因：①人形永远面向准星但腿只前后摆
+> （横移/后退时腿摆与位移无关——滑行主因）；②步频与位移脱钩（6m/s 每步滑 3.4m 脚只摆 0.13m）；
+> ③幅度被刻意压太小（起伏 4~8mm 俯视/第三人称不可见）；④bob 只写 BodySquash，腿/臂/枪不跟随
+> （上半身漂浮）；⑤跳跃无表演分段；⑥待机呼吸仅 0.6% 缩放。参考
+> `inkwave-aah-research/src/game/character.js`（L1642-1657 lean springs / L1738-1794 _poseAir /
+> L1999-2024 _poseLand / L2490-2524 _breathe）移植未迁移的动画层。
+
+- `[x]` **[P26] 角色动作活气重做（Agent: MotionAgent，2026-10-31）**
+  - **步态防滑（EggGaitSolver 重做）**：步频改由 `CadenceFromSpeed(speed, speed01) = clamp(speed/stride, 1.4, 3.8)`
+    推导（stride 随速度 0.35→0.55m），脚步推进与实际位移强相关；幅度全面加大为蛋仔式"连续小蹦跳"——
+    bob 12/24mm（旧 4/8）、摇摆 3.5/6.5°（旧 1.6/3.2）、触地挤压 10%（旧 6%）、腿摆 14/38°（旧 8/26）、
+    膝弯 20/55°、摆臂 10/22°；新增 `StrafeYawTargetDeg`（侧移速度占比线性映射 ±25° 半侧转，
+    用侧向占比而非 atan2 规避 ±180° 环绕抖动）与 `DirectionalSwingScale`（横移摆幅收窄 0.55、后退减半）。
+  - **bob 全身化**：`Hips` 按比例（hipsBobShare=0.6）分担步态起伏，腿根随身体蹦跳，消除"上半身漂浮"；
+    Hips 默认位置带守卫缓存（同 BodySquash 模式），防动画污染后误当基准。
+  - **跳跃表演四权重**（`EggGaitSolver.SampleAir`）：起跳蹬伸（launch，0.2s 衰减）→ 中段团身（tuck 乘
+    (1-launch)(1-reach)）→ 顶点微团身悬停（apex，-2%）→ 下落够地（reach 伸腿）；快速下落再拉伸（+3.5%）；
+    跑步起跳（水平速度 >3m/s）前后腿劈开 ±26°；起跳果冻冲量 3.2→4.5。
+  - **落地三段反馈**：弹簧冲量按落地速度归一（1.2→6.5，旧 0.8→6.0）+ 屈膝保持窗（landHoldTime 0.10s
+    保持 30° 再回弹）+ 双臂下甩（≤12°）与胸口前倾冲量（≤6°）线性衰减；重落地（>8m/s）触发一次眨眼。
+  - **惯性倾斜弹簧层**（AnimSpring1D×4）：纵向加速度→前倾（起步冲劲/刹车后仰，2.2Hz ζ0.40 上限 9°）、
+    横向→压弯（2.0Hz ζ0.48 上限 8°）、骨盆滞后位移（±5cm，起步落后/刹车冲过头再弹回）；
+    输入为 `_localVel` 帧差分并在 SampleMotion 钳制 ±24m/s²（无水平加速度曲线，帧差分尖峰必须先钳制）。
+  - **待机生命感**：呼吸改吸气 40%→呼气 45%→停顿 15% 节奏波（0.33Hz 每实例 ±12% 抖动，
+    squash ±1.5% + bob ±3mm + 胸口俯仰 ±2°）；重心转移（每 3.2~7.2s 换腿，0.7Hz ζ0.85 弹簧 →
+    侧倾 ±1.5° + 横移 1.5cm）；微动作（每 4~9s 随机晃身体/小跳/歪身子，one-shot + 正弦窗口，
+    移动/滞空立即打断，开火后 1.5s 内不触发）。
+  - **参数入 SO**：`CharacterAnimConfigSO` 新增 4 组 45 个字段（gait/air/lean/idle），C# 默认值与
+    `EggGaitSolver` 常量一致（EditMode 断言锁定两者防漂移）；`EggGaitSolver.Sample/SampleAir` 增加参数包
+    重载（`EggGaitParams`/`EggAirParams`），旧签名保留向后兼容（ProjectScaffolder 步态序列图菜单不受影响）。
+  - **验证**：改动后编辑器实时编译 `compilationFailed:false`、console error 0（全程多次确认，
+    含轻落地残留清理修复）；EditMode 全量 **360 条 = 358 过 + 1 失败**（`SpecialRuleRegressionTests.Slam_OuterRing…`
+    为并行 Combat Agent 的 `WeaponController` 改动中间态，与本任务无关，失败集逐轮漂移证明是并发 flaky）；
+    **本任务域 `CharacterVisualTests` 17/17 全过**（含新增 5 条：步频-位移一致性、半侧转钳制/后退无环绕、
+    air 四权重边界、SO 默认值与 Solver 常量锁定一致、P26 幅度验收阈值）；PlayMode 全量 **104 条 = 102 过 +
+    2 失败**（`MotorLifecycle…scenes.open` 命令名基础设施错 / `Slam_WarningCenter` 同上大招域，
+    均非本任务域）；视觉：`P1/角色与武器/生成蛋仔步态序列图 (P8-D)` 渲染 `Logs/p8d_gait_0~5.png`，
+    触地帧压扁+屈膝收步、分开帧抬升+双腿大摆张合，蛋仔式蹦跳步态成型。
+    ⚠️ 交付窗口全程与并行 UI/Combat/Environment Agent 共享编辑器（其 `MobileLayoutCustomizer.cs`
+    一度 222 个 error CS 占用编译，等待其自愈后完成测试），批处理窗口多次让位于 GUI 编辑器。
+- **影响面**：`Scripts/Player/{EggGaitSolver,CharacterAnimConfigSO,CharacterVisualController}.cs`、
+  `Tests/EditMode/CharacterVisualTests.cs`；`InkCharacterMotor`/`CharacterVisualAssembler`/场景 零改动
+  （无需重建角色）；旧签名全部保留，`ScriptableObjects/CharacterAnimConfig.asset` 未手改（新增字段走
+  C# 默认值自动补齐）。
+- **调参入口**：`ScriptableObjects/CharacterAnimConfig.asset`（Inspector 里 Gait/Air/Lean/Idle 四组）；
+  幅度嫌小/嫌大优先调 `gaitBobFast / gaitSquashDepth / leanPitchGain` 三个。
+
+---
+
+### 滚筒武器动作重做：举筒斜扛 → 砸地甩墨 → 贴地拖行（P27，2026-10-31）
+
+> 用户反馈：滚筒点攻击键"没有任何变化"。诊断 4 个根因：①挥击前摇 0.22s 无任何动画
+> （`RollerWeaponStrategy` 有完整前摇→9 滴扇形甩墨逻辑，但武器模型纹丝不动）；②推地形态无姿态变化
+> （`IsRolling` 只驱动涂地/伤害，武器仍平举胸前）；③`HandleWeaponFired` 被滥用——挥击触发 9 次
+> `OnFired`、推地每帧 1 次，后坐力被反复重置，推地时武器持续抖动下沉；④待机持握死板平举。
+> 参考 `inkwave-aah-research`（character.js L1975-1997 `_poseFlick` 四段挥击 / L1876-1887 `wRoll`
+> 拖地姿态 / character-weapons.js L691-699 滚轴自转公式）移植表现层，玩法数值零改动。
+
+- `[x]` **[P27] 滚筒武器动作重做（Agent: MotionAgent，2026-10-31）**
+  - **状态暴露（Weapons 域最小加法，3 文件 6 行）**：`MainWeaponStrategy` 加 virtual `IsFlicking`、
+    `RollerWeaponStrategy` override（= 前摇期 `_flickWindup >= 0`）、`WeaponController` 委托属性；
+    表现层轮询 `IsFlicking` **下降沿**（= 墨滴释放帧）同步砸地，无需新事件。
+  - **新增 `RollerWieldSolver`**（纯函数，照 EggGaitSolver 范式）：挥击四段时间线
+    （前摇抡起过肩 -115°，smoothstep → 砸地吻地，easeIn 加速 → 随挥保持 → 收势 0.30s 回持握，
+    前摇时长跟 `WeaponConfigSO.flickWindup` 走）、拖地姿态（俯角 25° / 前推 0.10m，真实骨架标定
+    滚筒底缘吻地）、`Blend`（wRoll 混合）、滚轴公式（ω=地速/0.110m 无滑动滚动、
+    exp(-2.2t) 惯性衰减、甩转冲量 +34rad/s）。
+  - **持握姿态**：待机从 0° 平举改为 -28° 抬起斜扛；身体配合——蓄力胸口后仰 -12°、砸地前压 +18° +
+    果冻压扁冲量（复用 P26 落地弹簧）、拖地前倾 10° + 重心下沉 5%。
+  - **写回合成**（不新增装配节点，避开静态网格合并烘焙）：姿态角合成进 `UpdateAimPose` 的同一欧拉角、
+    下压/前推合成进 `UpdateRecoilKick` 的挂点位置、身体项合成进 `UpdateBodyPose` 胸口俯仰与挤压；
+    非滚筒武器全部帧值恒 0，零影响。
+  - **滚轴重做**：旧「着地移动即空转 `_planarSpeed*280`」改为 INKWAVE 公式——仅拖地贴地时按地速滚动，
+    停转惯性滑行，挥击甩转；举起携带跑动时滚轴不再空转。
+  - **后坐力门控**：`HandleWeaponFired` 对滚筒跳过后坐力（9 连发/每帧刷屏修复，冲击感由专属砸地
+    动画承担），并兜底 `flickWindup=0` 极端配置直接起播砸下段。
+  - **参数入 SO**：`CharacterAnimConfigSO` 新增「滚筒持握」组 20 字段，C# 默认值 = Solver 常量
+    （EditMode 锁定防漂移）；旧 asset 反序列化自动补默认。
+  - **贴地几何标定（重要）**：武器挂 Chest 下，胸口前倾会耦合进滚筒高度，解析几何解不可用——
+    在真实骨架上参数扫描标定（`script.eval` 探针实测）：拖行 body10° p25/d0 → 滚筒轴心 y=0.114
+    （有效半径 0.110，底缘 +0.004 吻地）；砸地 body18° p5/d0.03 → y=0.095（底缘 -0.015 轻陷保留冲击）。
+    另发现并修复：滚筒若照常吃瞄准俯仰（权重 1，相机 ±66°）会被压穿地板——对齐 INKWAVE
+    character.js L1261 显式排除 roller，滚筒不进瞄准姿态（`UpdateAimPose` 内权重归零，
+    瞄准方向由胸腔分担 0.18 与弹道解算表达）。`RollerSolver_RollPoseCalibratedOnRig` 锁定标定值，
+    改装配器后需重标。
+  - **验证**：编译全程 `compilationFailed:false`；EditMode 全量 **471 条 = 469 过 + 1 失败**
+    （`MatchCalloutMathTests` 为并行 UI/播报 Agent 14:47 新建文件的用例，与本任务无关）；
+    **本任务域 8 条新测试全过**（抡起单调抬升、砸地峰值与收势回位、贴地标定锁定、wRoll 混合接管、
+    滚轴自转/惯性衰减、SO 默认值锁定、IsFlicking 前摇窗口）；PlayMode 全量 **110 条 = 105 过 + 5 失败**
+    （OutOfBounds×2 环境域 / Performance GC 探针域 / SpawnZone 出生保护域 / ZeroLogGate 被
+    并行 Ink 域 `InkGridSealSlitsTests.cs` 中途保存的编译错误污染——错误清单 100% 单一外来文件，
+    均非本任务域）；视觉：`script.eval` 渲染 `Logs/p27_roller_{carry,lift,slam,roll}.png` 四帧——
+    持握斜扛、抡起过肩、砸地吻地胸口前压、拖行滚筒平贴地面双手前推，INKWAVE 式滚筒动作成型。
+    ⚠️ 交付窗口与并行 Editor/Core/Ink/UI/Combat Agent 共享编辑器，其 `PerformanceProfilerProbe.cs`、
+    `SlamProbeTests.cs`、`InkGridSealSlitsTests.cs` 相继出现中间态编译错误（错误集逐轮漂移），
+    等待自愈 + 主动触发重编译后完成验证。
+- **影响面**：`Scripts/Weapons/{MainWeaponStrategy,RollerWeaponStrategy,WeaponController}.cs`（纯加法
+  6 行，公共接口向后兼容）、`Scripts/Player/{RollerWieldSolver(新),CharacterAnimConfigSO,CharacterVisualController}.cs`、
+  `Tests/EditMode/{CharacterVisualTests(新6条),WeaponStrategyTests(新1条)}.cs`；攻击逻辑/数值/涂地判定/
+  弹道零改动，`CharacterVisualAssembler`/场景/`.asset` 零改动。
+
+## 出生点抬上后场高台 + 两侧阶梯（对齐 INKWAVE 出生甲板，2026-10-31）
+
+- **需求**：出生点从地面挪到最后面的台子上；参考 INKWAVE 的出生甲板设计，确认台子两侧需要上下通道。
+- **INKWAVE 对照**：Map1/Map2 出生甲板抬高 2.2/3.2m、两侧各一条 4~4.2m 宽侧坡；Map3 屋顶出生台 +
+  正面 6m 宽大台阶 + 两侧开放落差。三张图都满足「抬高台面 + 两侧宽通道」，不是可选装饰。
+- **实现**：
+  - `ArenaLayoutV2`：新增出生甲板常量。台面 14×1.2×6.4m、中心 |z|=25.2（前脸正好顶住 SpawnGate 背面），
+    覆盖整条出生线 z=±23.5；出生盘 8×6.3×0.06m 贴台面顶（6.3m 深正好容纳 SpawnPad.shader 的 r=3.15m 外圈）；
+    出生点 y=1.32（台面 1.2 + 盘厚 0.06 + 6cm 落位余量）。Kiosk 从 (-7.4,-26) 挪到 (-8.5,-21)：
+    原位置压在新增台阶落点区、且一半埋进抬高台面。
+  - `ArenaGeometryBuilder`：`SpawnTerrace_*` 从 2.6m 深纯视觉后靠背扩成 6.4m 深出生甲板
+    （进 inkableRenderers + OcclusionFader + InkWallSurface）；`Ramp_SpawnStair_{A,B}_{East,West}`
+    每侧 5 级实体台阶：级高 0.24m、踏面 1m、宽 4m，最高一级紧贴台面侧壁。
+    级高 0.24m ≤ CharacterController stepOffset 0.30；Bot 的 NavGrid 0.5m 格采样下相邻格高差 0.24m
+    < maxHeightStep 0.55，且台阶侧面高于 0.42m 的段落会被 NavGrid 判成不可行走，不会出现从侧壁抄近道。
+    台阶踏面走顶视墨迹图集；踢面按约定不挂 InkWallSurface（避免 20×4 张运行时立面贴图），
+    `PaintCoverageAudit` 对 `Ramp_SpawnStair_` 前缀放行。
+  - `ProjectScaffolder`：`CreateSpawnLine` / `UpdateSpawnGroup` 的出生线 y 由 0.22 改为 `SpawnPointY`（1.32）。
+  - 重建后出生盘队色会被 `CreateOrUpdateSpawnPadMaterial` 刷回中性灰（v0.1.3 起的兜底值）；
+    按 P18-G 既有流程跑一次 `P1/画风/4` 或等价写入 `_BaseColor = Linear(teamPad)` 即可恢复（本次已恢复）。
+- **验证**：
+  - 场景重建 `P1/关卡与地图/场景视觉重构：集装箱码头 (P7-B)` 后解析 `.unity` 核对：
+    出生点 (±2.4, 1.32, ±23.5)、台面 (0,0.6,±25.2) scale(14,1.2,6.4)、盘面 (0,1.23,±25.2) scale(8,0.06,6.3)、
+    4 组台阶 0.24~1.2 全部就位；Kiosk 碰撞代理在 (±8.5, 0, ±21)。
+  - EditMode 新增 `SpawnDeckLayoutTests` 3 条 + `PaintCoverageAuditTests` 2 条 = 5/5 通过；
+    EditMode 全量 360 条 = 358 过 + 1 跳过（ObstacleEdgeLine，环境无材质）+ 1 失败
+    （`SpecialRuleRegressionTests.Slam_OuterRing`，并行 Combat Agent 域，与出生台无关）。
+  - PlayMode 新增 `SpawnDeckNavigationPlayTests`：玩家出生 y>1.15、NavGrid 从台面找到场内路径且经台阶下到 y<0.5。
+    PlayMode 全量 104 条：全部玩法用例通过（含新用例、SpawnProtection；`Slam_WarningCenter` 断言已改为
+    与出生高度无关的「贴玩家脚下地面」判定）；唯一红是 `ZeroLogErrorGate` 捕获到 8 条 Unity Test Framework
+    自身的 `SaveModifiedSceneTask / RestoreSceneSetupTask / PostbuildCleanup` teardown 异常 ——
+    属于本次会话的实验环境问题（首轮改动前就已出现），游戏代码 0 条 Log Error。
+  - 视觉留底：`Logs/spawn_deck_probe2.png`（编辑模式临时相机，出生台 + 队色盘 + 5 级台阶 + 4 名角色）。
+- **影响面**：`Scripts/Environment/{ArenaLayoutV2,ArenaGeometryBuilder}.cs`、`Scripts/Editor/ProjectScaffolder.cs`、
+  `Scripts/Ink/PaintCoverageAudit.cs`、`Tests/EditMode/SpawnDeckLayoutTests.cs`（新）、
+  `Tests/PlayMode/SpawnDeckNavigationPlayTests.cs`（新）、`Tests/PlayMode/{SpecialWeapons,SpawnProtection}PlayTests.cs`
+  （仅把断言改成与出生高度/加速等待帧粒度兼容）；`Scenes/PhaseA_Playbox.unity` 由菜单重建（非手改）。
+  公共 API 未破坏：旧 9 材质 `BuildArenaGeometry` 重载保留，`SpawnZ/SpawnGateZ` 语义不变。
+- **调参入口**：`ArenaLayoutV2` 的出生甲板常量（台面高度/深度、台阶级数/宽/进深、出生点 Y）。
+
+## 手机端手雷丢不出去：触屏按钮链路修复 + 手雷与墨水脱钩改冷却制（2026-10-31）
+
+- **需求**（玩家反馈）：Android 真机上副武器手雷「长按瞄准、松手怎么都丢不出去」；v0.1.7 修过一次没用。
+  设计决策（用户拍板）：手雷与墨水量彻底脱钩，改用冷却限制，冷却/失败要有可见提示。
+- **根因**（v0.1.7 只修了消费侧仲裁，生产侧触屏按钮 4 个实锤问题全部漏网）：
+  1. `MobileActionButton.OnPointerUp` 死区黑洞：按住 >0.22s 但瞄准标记未建立时（低帧率下 pointer-up
+     先于按钮 Update / 按住期间 Update 被跳过），两个分支都不命中，松手事件被静默吞掉——主因；
+  2. `OnPointerDown` 不清理上次手势残留的 `_tapped/_isAimingHeld`：丢 pointer-up（系统手势/切后台/
+     第二根手指）后瞄准态永久卡死，还连带压制主武器开火；
+  3. 圆形 alpha 命中区之外的按压漏给下层 `RightAimSwipeZone`（全屏 raycast），按手雷键只在转视角；
+  4. 投掷失败 100% 静默：墨 <70 / 冷却 / 大招中一律 `return false` 且返回值无人检查。
+  既有测试 `Player_TouchBombHoldRelease_ThrowsViaArbiter` 禁用了 MobileTouchUI 直接注入标志位，
+  按钮事件段零覆盖——这是「优化了还是没用」能漏进 v0.1.7 的原因。
+- **实现**：
+  - `MobileTouchUI.MobileActionButton`：`OnPointerUp`（Bomb 模式）无条件 `_tapped=true`——任何一次完整
+    按压必产生恰好一次投掷事件（短按=快投、长按=瞄准后投，语义不变），消灭死区；`OnPointerDown` 重置
+    `_tapped/_isAimingHeld` 并记录 `pointerId`，Down/Drag/Up 忽略其他手指；瞄准阈值 0.22s→0.15s
+    （实例字段 `AimHoldSeconds`）；`OnApplicationFocus(false)/OnApplicationPause(true)` 清屏兜底。
+  - 命中区：`Create` 新增可选 `hitPadding`（手雷键 14px）——透明 `HitPad` 矩形接管 raycast、
+    圆形底盘移出 raycast，边缘按压不再漏给滑屏区；默认 0 保持其他按键行为不变。
+  - 反馈：手雷键新增径向冷却扇形（`CooldownFill`，硬切禁 tween）+ 冷却中底盘压暗；投掷被拒时
+    `SubBombDenyStamp` 轮询戳触发墨边闪红 0.2s（轮询而非事件订阅，规避 LocalPlayer 换实例的订阅管理）。
+  - 手雷脱钩：`WeaponController.TryThrowSubBombBallistic` 仅 `bombInkCost > 0` 才扣墨（默认 0），
+    删除 TeamA-only 墨空音效分支；新增 `BombCooldownRemaining/BombCooldownDuration` 只读访问器。
+  - 数值：`WeaponConfigSO` 默认 `bombInkCost 70→0`、`bombCooldown 0.6→6`，`ApplyBombSpec` 规范同步；
+    7 份武器资产经 script.eval 只写这两个字段（未跑菜单 7，避免重置大招字段）。
+  - 诊断：`PlayerController` 触屏注入/拒绝原因打 `[Bomb]` 前缀 `Debug.Log`（`UNITY_EDITOR || DEVELOPMENT_BUILD`，
+    真机 logcat 可查）；`InkBombPool.ActiveBombCount` 只读计数供测试。
+- **验证**：
+  - EditMode 新增 `MobileTouchUITests` 7 条（短按恰一次、两次按/松恰两次、瞄准后松手恰一次、
+    HitPad 接管 raycast、无 padding 保持圆形命中、冷却扇形显隐、拒绝闪红+复位）全过；
+    `SpecialSystemsTests` 默认值断言改 0/6s 过。
+  - PlayMode 新增 `MobileBombTouchPlayTests` 3 条（不禁用 MobileTouchUI，`ExecuteEvents` 驱动真实按钮）：
+    空墨短按投出且不扣墨、长按 0.3s 建立瞄准态后松手恰投一颗、冷却中再投被拒且拒绝戳递增——全过。
+    PlayMode 全量 107/107（duration 109s）；`ZeroLogErrorGate` 零运行时错误。
+  - `[Bomb]` 日志实证：`aiming=True held=False`（旧版被吞的死区场景）注入后正常投出；
+    `reason=Cooldown cooldownRemaining=5.97` 拒绝链路符合预期。
+  - 旧 4 条「手雷扣 70 墨」断言（`PhaseAPlayboxSmokeTests` ×3、`SpecialWeaponsPlayTests` ×1）改为
+    「空墨可投且不扣墨」并更名，全部转绿。并发域失败 1 条（`RollerSolver_RollBlendOverridesFlickRecover`，
+    滚筒动画 Agent 在途工作，与本任务无关）；另有一次 PlayMode 误报 3 连败系并发剖析工具向 Play 日志
+    注入 `test-status` 命令错误所致，复跑全绿。
+- **影响面**：`Scripts/UI/MobileTouchUI.cs`（按钮事件/命中区/冷却反馈）、`Scripts/Player/PlayerController.cs`
+  （拒绝戳+日志，纯增量）、`Scripts/Weapons/{WeaponController,InkBombPool,WeaponConfigSO}.cs`（纯增量+规范值）、
+  `ScriptableObjects/` 下 7 份武器配置（仅 bombInkCost/bombCooldown 两字段）、
+  `Tests/{EditMode/MobileTouchUITests,EditMode/SpecialSystemsTests,PlayMode/MobileBombTouchPlayTests(新),
+  PlayMode/PhaseAPlayboxSmokeTests,PlayMode/SpecialWeaponsPlayTests}`。公共 API 全部向后兼容
+  （`Create` 只加可选参数，`TryThrowSubBombBallistic` bool 签名不变）。
+- **调参入口**：`WeaponConfigSO.bombCooldown`（默认 6s，按武器独立可调）；`MobileActionButton.AimHoldSeconds`
+  （瞄准阈值 0.15s）；`MobileTouchUI.BombButtonHitPadding`（命中外扩 14px）。
+- **遗留**：真机手感需出包实测（Development 包 logcat 过滤 `[Bomb]` 可直视链路）；大招演出中松手吞投掷、
+  倒计时阶段触控清空为既有设计，未改。
+
+## Slam 大招「圈里没伤害」修复与范围可读性（P20，2026-10-31）
+
+> 用户反馈：敌人明明站在预警圈里，落地却没伤害。排查确认伤害判定（水平距离/注册表/5.2m）无 bug，
+> 问题全部在「视觉与判定的脱节」，按影响排序修复：
+> ①**预警圈悬空 1.25m（真 bug）**：`ResolveGroundPoint` 射线从脚底+6m 向下、mask 全开，先命中施法者自己的
+> CharacterController 顶端——圈/冲击波/墨花/涂地球心全部悬空，相机俯角 6° 下屏幕「圈内」与地面判定圆严重不共形，
+> 且涂地球心抬高使实际涂地半径 5.0→4.84；②**视觉范围>伤害范围**：延迟冲击波铺到 5.98m（1.15R）、卫星泼墨涂地
+> 5.95m、主涂地 5.0 与伤害 5.2 不一致；③**真·无伤无反馈**：目标出生保护/对方放大招时伤害完整豁免但毫无提示；
+> ④Bot 放大招不锁移动（玩家会锁），圈留在起跳点身体飘走；⑤落地帧直接 return，圈从未完整长到 5.2m。
+- **修复**（`Scripts/Weapons/WeaponController.cs`、`Scripts/Weapons/SpecialCombat.cs`、`Scripts/Core/VfxPool.cs`、`Scripts/AI/BotController.cs`）：
+  - `ResolveGroundPoint` 加可选参 `Collider self`（旧签名保留），`RaycastAll` 过滤自身及子节点，取最近命中；
+    StartSlamSpecial/ResolveSpecialTargetPoint/卫星泼墨三处调用方全部传自身。起跳锁定落点语义不变。
+  - 预警圈重建三层：实心危险盘（=伤害半径 5.2m，队色 alpha 0.32）+ 内圈秒杀盘（3.2m，alpha 0.55）+ 外沿亮边
+    （alpha 0.85），`VfxPool.MakeUrpUnlitTransparent` 统一切 URP 透明（**运行时必须显式 `renderQueue=Transparent`，
+    否则仍排 Opaque 被遮挡**——实机截图验证踩坑）；Y 分层 0/0.01/0.02 防 z-fight。
+  - 落地帧先 `UpdateSpecialWarningRing(伤害半径)` 再结算，圈完整长满 5.2m。
+  - 余波收敛：延迟冲击波 1.15R→1.0R；卫星墨斑 `Mathf.Min(随机半径, damageRadius - distance)`；主涂地
+    `max(paintRadius, damageRadius)`（5.0→5.2，不动 .asset）。
+  - 免疫反馈：`ApplySlamDamage` 对圈内 `IsInvulnerable` 目标脚下闪白色小环（`SpawnShockwaveRing` 白色）。
+    **注意不能用 `TakeDamage` 返回值判断——它返回 `killed`（是否击杀）**，非致命伤也是 false（EditMode 回归用例
+    逮住过误判）；免疫目标不计入 `hits`。
+  - Bot 三处 `SetFrameIntent` 第 4 参改传 `_weapon.IsPerformingSpecial`（AI 域 1 行×3，与玩家行为对齐）。
+- **新增测试**：`SpecialWeaponsPlayTests` 补 `Slam_WarningCenter_ResolvesRealGround_NotSelfCapsule`
+  （中心贴地，修复前 ≈+1.25 会挂）与 `Slam_ImmuneTarget_SurvivesFullImpact`（圈内无敌目标毫发无伤）；
+  新增只读属性 `WeaponController.SpecialGroundCenter`。
+- **验证**：编译干净；EditMode 381 条中本任务相关全绿（`Slam_OuterRing` hits 回归转绿）；PlayMode 107 条中
+  SpecialWeapons 5 条全绿（含 2 新用例）；实机 Play 截图 `Logs/p20_slam_ring3.png`：圈平贴出生台台面、
+  盘+亮边可见、`discQueue=3000`、中心 y=台面高度。
+- **测试基建教训**：后台 GUI 编辑器**不自动 Refresh**（改 .cs 后 `compiling=False` 是「没事可编」假象，必须手动
+  `AssetDatabase.Refresh()`）；TestRunner 被域重载打断后会**回放 stale 测试树**（同一份 total/结果反复出现，
+  `duration≈3s` 跑 360 条即假象），Refresh 强制重编译后树重建（360→381）才吃到新代码。
+- **影响面**：公共 API 只增不改（`ResolveGroundPoint` 可选参、`SpecialGroundCenter` 只读、`VfxPool.MakeUrpUnlitTransparent`）；
+  `WeaponConfigSO` 与 .asset 零改动；预警圈全 private。低帧率下圈面在相机近处的观感、内圈盘在高台上的可见性
+  待真人实机复核。
+- **遗留**：全场通用「出生保护被任何伤害源打中无提示」是更大的反馈课题，本次只覆盖 Slam；主墨斑 shader 装饰
+  （射线/卫星滴/细雾 1.6~2.5R）为全游戏涂地观感基线，未动。
+
+## 性能验收可信度重建（P6-C-R，2026-10-31）
+
+- **背景**：复核发现 P6-C 交付的 `Docs/ProfilerReport_P6C.md` 系 `BuildAndProfilerSuite.SimulateBattleSampling`
+  **离线仿真生成**：FPS 来自 `Random(42)`（59.25~60.75 均匀抖动）、平均帧率硬编码 60.1、GC 0 B/帧测的是仿真循环、
+  DrawCalls 45~75 是写死文案；且纹理上传达标判定 `Peak<1.5 || P99<1.2` 用 OR 掩盖了移动端 Peak 18.8ms 尖刺。
+  「性能红线已达标」结论不成立（构建产物部分不受影响）。
+- **重建为真实测量链路**：
+  1. `BuildAndProfilerSuite`：删除全部仿真采样（菜单 1/`RunStandaloneAndMobileSampling`/`SimulateBattleSampling`），
+     只保留双端构建；新增 `P1/性能/5. 构建桌面 Development Player（真机采样用）`。
+  2. 新增 `Scripts/Editor/PlayModeProfilerSession.cs`：`P1/性能/1. 执行 120 秒战斗真实 Profiler 采样 (P6-C)` 改为
+     排程→进 PlayMode→预热 30 帧→`MatchManager.StartMatch()` 等进入 Playing→逐帧实测→写报告→自动退出；
+     会话状态走 EditorPrefs（抗域重载）、PlayMode 请求被重载吞掉时限频重试、他人占用编辑器时拒绝、超时自动放弃。
+     CLI 可驱动：`unity command script.eval --code 'P1.Editor.PlayModeProfilerSession.StartSession(25f);'`。
+  3. `PerformanceProfilerProbe` 增量扩展（旧字段/方法全保留）：接入 `Unity.Profiling.ProfilerRecorder`
+     （**Unity 6000.6 实测坑**：类型从 `UnityEngine.Profiling` 迁到 `Unity.Profiling`；`GetAvailableCounters` 已移除；
+     capacity 传 0 会抛 "Cannot start with 0 capacity"；`Profiler.enabled=false` 时 Render 计数器 Valid=false，采样期需临时
+     打开并在结束还原；计数器真名是 `GC Allocated In Frame` / `Draw Calls Count`，`Draw Calls Total` 不存在）；
+     涂地上传改按 `InkSplatAtlas.CommandExecuteCount`（新增 1 个计数器属性）+ `TotalUploadCount` 差值判定事件，
+     杜绝把同一陈旧耗时重复计数（GPU 涂墨主路径此前根本不走 CPU FlushTexture）；
+     `IsInkUploadPass` 改为「平均<1.5ms 且 P99<1.8ms」双条件；报告头新增运行环境与数据来源声明。
+  4. 新增 `Scripts/Core/AutoProfileRuntimeService.cs`（`UNITY_EDITOR || DEVELOPMENT_BUILD`）：向 `persistentDataPath`
+     放 `P1_AutoProfile.request`（内容=秒数）→ 启动后预热 5s → 实测 → 报告写 `P1_AutoProfiles/`；
+     Android 用 `adb push/pull` 闭环。**这是移动端 30 FPS 红线唯一合法取证路径。**
+  5. 测试：新增 EditMode `ProfilerReportGatingTests`（6 例，锁死「OR 掩盖尖刺」回归）；
+     `PerformanceProfilerPlayTests` 增 Recorder GC / DrawCalls 断言（定位为「防恶化护栏」：护栏值按编辑器现状定，
+     真正的 2KB/帧与 120/150 红线达标判定由 Player 采样报告负责，报告里编辑器口径已明确标注不可替真机）。
+- **首份真实数据**（25s 编辑器 PlayMode 实测战斗，M1，2026-10-31 16:00）：
+  - 帧率：平均 61.0 / 1% Low 43.0（旧伪数据称 60.1/59.3「极稳」）；
+  - **GC.Alloc Recorder 实测：均值 75.8KB/帧、峰值 7.2MB/帧 → 红线 2KB/帧 FAIL**；
+  - 涂地 GPU 提交：1206 次/25s，平均 0.175ms、P99 0.367ms、Peak 0.732ms → PASS；
+  - **DrawCalls 实测：均值 443.8、峰值 1136 → 红线 120 FAIL**（旧伪报告称 45~75，与实测差约 4~10 倍，
+    编辑器 Game 视图与 GUI 有额外开销，真机值需 Player 采样确认，但量级不可能达标是确定的）。
+- **验证**：编译干净（0 error CS）；PlayMode 全量 107/107（本任务用例含在内）；EditMode 381 中本任务 6 例全绿
+  （2 例失败属角色动画/移动端触控域的并行 WIP，与本任务无关）；端到端跑过 3 场真实会话并留档报告。
+- **遗留（性能优化新任务，数据驱动）**：
+  - [ ] **[P21-A] 战斗 GC 热点定位与收敛**：先用 Development Player + AutoProfile 取真机基线，再按帧定位分配源
+        （候选：TMP/HUD 每帧格式化、AI 决策分配、`DebugOverlay` 字符串、VfxPool 溢出路径）；目标战斗稳态 < 2KB/帧。
+  - [ ] **[P21-B] DrawCalls 收敛**：取 Player 实测后对照红线 120/150，排查未合批材质、UI 重建批次、Decal/墨滴对象
+        池化与遮挡剔除效果；当前 SRP Batcher 已开但均值仍高，需要逐 Category 拆解。
+  - [ ] **[P21-C] Android 真机红线验收**：Development APK + adb 标记文件闭环，产出 `Docs/` 真机报告，替换
+        「未验证」状态；桌面 Player 同理跑一轮。
+- **影响面**：探针与报告为增量扩展（旧签名/旧字段全保留，向后兼容）；`InkSplatAtlas`/`InkSurfaceController` 各加
+  1 个只读属性（计数）；删除的 `SimulateBattleSampling` 无外部调用方（grep 验证）；未动场景/预制体/asset；
+  期间两次踩到并行 Agent 的编译中间态（`SlamProbeTests`/`MatchStatsServiceTests`），均未回滚他人代码，等待其自修复。
+- **教训（看板通用）**：`test status` 在共享编辑器上是**单槽快照**，其他 Agent 的运行随时覆盖，判断「我的运行结果」
+  必须以 `LastCompletedUtc`/控制台新时间戳为准，`run_tests.sh` 读到的 completed 未必是自己那一轮。
+
+## 体验差异化包（P27，2026-10-31，对标 INKWAVE）
+
+> 目标：P16 关卡公平性收口后，补齐单局体验纵深。全部为运行时装配，不改场景/预制体/asset YAML。
+
+- **P27-A 连杀/全灭 Callout 播报**
+  - `UI/MatchCalloutMath`（纯逻辑、零 GC）+ `UI/MatchCalloutView`（几何风大字 + 墨溅底板），
+    `HudController` 运行时 Ensure 挂载在 HudSafeArea、居中偏上 (0,180)。
+  - 优先级：`WIPEOUT!` > `DOUBLE/TRIPLE/QUAD SPLAT!`（4.2s 窗口）> `FIRST SPLAT!` > `REVENGE!` >
+    `SHUTDOWN!` > `SPLAT STREAK ×N`；同优先级 0.3s 去抖、高优先级可打断；READY/Result 自动清空。
+  - 数据只读复用 `KillFeedEventHub.OnKillReported` + `CombatantHealthRegistry`，不改击杀链路。
+  - 测试：`MatchCalloutMathTests` 16 例（优先级链/窗口边界/首杀一次/复仇/终结连杀/全灭去抖）。
+- **P27-B 个人对局统计（结算与成长的数据底座）**
+  - 新增 `Core/MatchStatsService`：每角色 Kills / Deaths / TurfSquareMeters；自动订阅
+    `CombatantHealth.DamageApplied` 归属击杀/死亡；Playing 边沿自动清零、Result 保留。
+  - 涂地归属：主武器经 `WeaponController.AddSpecialPoints` 统一按 `CellArea` 记面积；手雷/墨云/砸地
+    分别用 `Attacker` 直接登记；手雷充能走独立代理避免双计；墙面涂地不计入（口径不同）。
+  - 测试：`MatchStatsServiceTests` 14 例（累加/空值/NaN/队伍汇总/阶段清零/真实 `TakeDamage` 管道）。
+- **P27-C 结算勋章 + XP/段位**
+  - `UI/Core/MatchAwards`：Turf King / Top Inker / Top Splatter / Untouchable / Survivor / Pure Painter / MVP
+    （`turf/max + 0.55*splats/max − 0.3*deaths/max`），并列共享、全 0 边界安全。
+  - `Core/PlayerProfile`（PlayerPrefs `P1.Profile.*`）：XP = 胜 1200 / 负 500 + 涂地×1 + 击杀×40；
+    等级曲线 `800 + Level*350`，5 段位（Fresh Recruit → Tide Legend），损坏存档回退默认。
+  - `MatchFlowUI` Result 面板追加 YOUR MEDALS 逐个弹出 + XP 条/跨级 LEVEL UP!；每局静态防重入只结算一次；
+    长勋章名 NoWrap + 自动缩放（修掉 UNTOUCHABLE 换行溢出）。`WeaponSelectView` 标题栏加段位/等级/XP 细条。
+  - 测试：`MatchAwardsTests` 10 例、`PlayerProfileTests` 8 例。
+- **P27-D 小地图占领闪光层**
+  - `UI/MinimapFlashMath` + `MinimapView`：订阅 `InkSurfaceController.OnInkPainted`，6Hz 节流、1.5m/0.25s
+    邻近去重、64 节点池化、0.4s alpha 淡出；Ready/Result 自动清空；steady-state 零分配。
+  - 测试：`MinimapFlashMathTests` 20 例（坐标四角/去重/批量上限/alpha/节流/池化）。
+- **明确未做**：死亡观战——当前 `ScreenInkTransitionView` 阵亡即全屏敌墨漫灌压住画面，需改死亡转场设计，单独立项。
+- **验收**：
+  - 编译 `compilationFailed:false`、0 error CS；
+  - EditMode **481 条 / 480 通过 / 1 跳过 / 0 失败**（含 P16-A~D 新增用例）；
+  - PlayMode **110 条 / 110 通过 / 0 失败**（与并行 Agent 的 Arena-Layout 场地最终版一起跑）；
+  - 视觉留底：`Logs/p16_callout_minimap.png`（DOUBLE SPLAT! + 小地图）、`Logs/p16_result.png`
+    （勋章 UNTOUCHABLE 单行 + XP 面板）、`Logs/p16e_after.png`（场地）。
+  - 性能：编辑器 ProfilerRecorder 的 GC/DrawCalls 含编辑器自身绘制（空场景实测 ≈109KB/帧、≈463 DrawCalls），
+    不作为达标依据；真机红线仍按 P21-A/B/C 的 Development Player + AutoProfile 取证。
+- **影响面**：新增 `Core/{MatchStatsService,PlayerProfile,OutOfBoundsGuard}`、`Environment/SpawnZone`、
+  `UI/{MatchCalloutMath,MatchCalloutView,MinimapFlashMath}`、`UI/Core/MatchAwards`；
+  修改 `HudController`、`MatchFlowUI`、`MinimapView`、`WeaponSelectView`、`WeaponController`、`InkBombPool`、
+  `InkStormCloudPool`、`MatchManager`、`GameConfigSO`、`BotConfigSO`、`InkCharacterMotor`、`BotController`、
+  `InkSurfaceController`、`InkGrid`、`PaintCoverageAudit`、`ArenaDecorationBuilder`、`ProjectScaffolder`。
+  公共 API 全部增量扩展，旧签名保留。
+
+## 武器手感二次打磨（P28，2026-10-31，对标 INKWAVE）
+
+> 目标：不改伤害/射程/弹速/耗墨/涂地/瞄准解算，只修表现层的「重量、连发节奏、蓄力刻度」。
+> 不重复 P6-A/B 已完成的 hit marker / 连击 / 击杀反馈，也不动 Bloom 平衡数值。
+
+- [x] **P28-A 镜头冲击弹簧化 + 连发热积累**
+  - `TopDownCameraFollow`：指数漏积分改为 `AnimSpring1D`（ζ=1）；后拉量由每发 `CameraKickMeters`
+    累积成 heat、按武器 `CameraKickDecayRate` 衰减，连续开火形成持续后拉、松手回弹。
+  - **FOV 修复**：开火 FOV 冲击不再进入 60°/s 平滑的 `targetFov`，改在最终 `fieldOfView` 上叠加，
+    蓄力狙/爆破枪/击杀的 FOV 冲击第一次真正可见。
+  - 全部冲击乘 `GameSettingsService.ShakeScale`（无障碍 0% 震屏时开火冲击完全消失）。
+  - 旧 `AddShotPunch(4参)` 保留；新增 `AddShotPunchScaling(d,r,f,decayRate,springOmega)`。
+- [x] **P28-B 武器模型后坐力弹簧 + 蓄力刻度**
+  - `CharacterVisualController`：Z/Pitch/Yaw 从 `MoveTowards`（0.35 m/s、28°/s、22°/s）改为
+    `AnimSpring1D` 冲量模型，三轴共用 `WeaponFeelParams.SpringOmega`，解决「Z 慢 Pitch 快」。
+  - 同帧齐射去重：泼桶 8 滴 / 滚筒 9 滴只注入一次冲量；滚筒仍走 P27 专属砸地时间线。
+  - 蓄力狙按 `LastShotStrength01`（`0.35 + 0.65*charge`）缩放模型/镜头冲击。
+- [x] **P28-C 手感缓存与反馈闸门拆分**
+  - `WeaponController.CurrentFeel` 缓存 `WeaponFeelParams`（换枪/OnValidate 刷新），
+    不再每颗弹丸 `Resolve` + 全字段比较。
+  - 枪口闪光保留时间闸（齐射只闪一次）；镜头冲击改为**每帧独立闸门**：
+    单发武器每发都推、同帧齐射只推一次。
+  - `WeaponAudioDriver`：推地不再每帧叠 flick 音（循环音接管）；齐射同帧只发一声；
+    蓄力狙开火音量/音高随蓄力变化（`AudioManager.PlayWeaponShot(kind, strength)` 新重载，旧签名保留）。
+- [x] **P28-D 准星弹跳随蓄力分层**
+  - `WeaponReticleUI` 的 `_shotPunch` 增量乘 `Lerp(0.45, 1, LastShotStrength01)`：
+    蓄力狙点按小跳、满蓄大跳；hit marker / 连击 / 击杀逻辑未改。
+- **预设调整**：`Splatling` 从「几乎无感」上调为 `RecoilKick 0.022 / Pitch 2.2° / CameraKick 0.018`；
+  各武器新增弹簧角频率 19~40 rad/s、镜头热衰减 6.5~9.0/s（全部可由 `WeaponConfigSO` 的同名新字段覆盖，
+  0 = 回落类别预设，旧资产无需迁移）。
+- **验证**：
+  - 编译 `compilationFailed:false`、0 error CS；
+  - EditMode 481 条 / 480 通过 / 1 跳过 / 0 失败（含新增弹簧峰值、预设分层、蓄力强度、配置覆盖 4 类断言）；
+  - PlayMode 110 条 / 110 通过（首两轮出现的弹丸拖尾/出生保护/Bot 撤退失败均为加速时间用例抖动，
+    更换失败项后复跑全绿，与本次改动路径无交集）。
+  - **待人工试玩确认**：Splatling 持续压制幅度、蓄力狙满蓄 FOV 冲击强度、Dualies/Splatling 连发震颤是否过强；
+    这些数值全部集中在 `WeaponFeelProfile` 预设与 `WeaponConfigSO` 新字段，可单独调。
+  - **影响面**：修改 `Weapons/{WeaponFeelProfile,WeaponConfigSO,WeaponController,WeaponAudioDriver}.cs`、
+  `Player/{TopDownCameraFollow,CharacterVisualController,AnimSpring1D}.cs`、
+  `UI/WeaponReticleUI.cs`、`Core/AudioManager.cs`、`Tests/EditMode/WeaponFeelTests.cs`。
+  公共签名全部保留；未动场景/预制体/asset YAML 与任何平衡数值。
+
+## 场地视觉精修（P30，2026-11-01，对标 INKWAVE Cargo/Tidewater）
+
+- [x] **P30 场地逐件外观精修（5 路并行子 Agent + 协调者统一验收）**
+  - 统一风格契约：`Docs/ArenaVisualUpgrade-Brief.md`（参考图、色板、文件所有权、玩法不变量、性能预算、交付格式）。
+  - **道具网格**（`Environment/ArenaPropMeshFactory.cs`）：13 类道具逐一精修——木箱板条/包角/打包带/喷印、桶堆滚箍/注油盖、花坛分层灌木、锥桶反光带、系缆桩法兰+牛角销、长椅板条、空调百叶+风扇、管线法兰+阀门手轮、路灯 3 变体（单臂/双臂灯塔/直角现代）、棕榈分层叶冠+椰子、旗杆波浪旗、售卖亭条纹遮阳篷+发光看板；Solid 包围盒语义不变。
+  - **装饰与远景**（`Editor/ArenaDecorationBuilder.cs`）：25m 桁架岸桥 ×4（斜撑桁架+走台梁+立体 CARGO 字+悬吊集装箱）、集装箱堆场三排纵深、货船 ×3、远景悬索桥剪影、双层绿丘+城市+灯塔/水塔/帆船、码头基座护舷/系船柱/登船斜桥；墙面横幅 12 面带折角+金属挂梁；场内新增贴墙配电箱/电缆盘/圆凳等轻量装饰（全部无碰撞）。
+  - **核心几何装饰层**（`Environment/ArenaGeometryBuilder.cs`）：集装箱角柱/端门框/顶轨/裙边、掩体压顶条+封头、坡道侧面黄黑警示带+底端缓冲条、边界墙檐口+外侧扶壁柱 ×38+墙脚警示带、出生甲板收边+楼梯侧板、SpawnGate 门楣+立柱包边；全部合并为 2 个 Renderer，不改任何 Transform/Collider/InkWallSurface。
+  - **天空/雾/水/出生圈**（`Editor/ArenaAtmosphereBuilder.cs`、`Shaders/{SkyGradient,Water,SpawnPad,PropLit}.shader`）：雾 45/135→70/190 去灰蒙、双层视差积云、水面滚动波纹+近岸白沫+稀疏 glitter、出生圈同心双环+墨滴指针+呼吸脉动、PropLit 接触 AO/微高光增强。
+  - **地面贴图**（`Editor/ArenaGroundTextureBaker.cs`）：4m/2m 双级板缝+板面明度差、黄色车道虚线/坡道口斜纹带/出生区斑马线/箱位 L 角标+BAY 库位号、集装箱脚印/轮胎擦痕/油渍做旧（低对比 ≤15%）、法线/RMO 同步烘焙；横幅图集 4 分区内容重绘（索引语义不变）。
+  - **协调者代办落地**：`ArenaStyleSO.asset` 雾参数写入（start=70/end=190，`ApplyFog` 恢复 style 驱动）；ArenaDecorationBuilder 变量遮蔽编译错误修复（c0/v0）；旗帜颜色提亮+上扬弧度、水面 glitter 收敛（协调者直改返修）。
+  - **验证**：编译干净；EditMode 499/498 通过（1 失败 = 并行武器手感域 `WeaponFeelTests`，与本轮无交集）；PlayMode 116/115 通过（1 失败 = 并行相机/准星域 `ThirdPersonCameraPlayTests`，`TopDownCameraFollow.cs`/`WeaponReticleUI.cs` 为并行未提交改动，归因对方在途工作）；场地几何/遮挡/出生台/覆盖率断言全绿。
+  - 场景重建已保存；NavGrid 可行走格 7820→7826（装饰无碰撞、Solid 包围盒未外扩，变化来自道具内凹细节，方向为更宽松）。
+  - **视觉留底**：`Logs/p7b_{overview,spawn_teamA,midfield,north_vista}.png`（06:00 批次）+ 实战 `Logs/p30_play2.png`。
+  - **已知小尾巴**：背阳面边界墙偏暗（ObstacleDitherLit 阴影域，本轮按域锁未动）；北侧 variant=2 旗帜在背光面偏浅；DrawCalls 红线建议下次 Profiler 采样复测（当前 771 Renderer/733k 顶点，合批后预计仍在预算内）。
+- [x] **P30 返修：清除黑黄天空（EvalHUD 测试残留，2026-11-01 晚）**
+  - 现象：对局进行中（Playing）天空被整片饱和黄 + 黑条 + 白色拖影覆盖，结算/倒计时阶段恢复正常；截图与实机一致。
+  - 定位：`PhaseA_Playbox.unity` 内被误保存了两个根对象 `EvalHUD`（WorldSpace Canvas，位于原点、scale=1，UI 像素坐标被当成世界坐标 → 面板跨度上千「米」，悬在相机前方约 28m 填满天空）。`HudController` 在 Playing 阶段激活面板，所以只在比赛中出现。
+  - 处置：退出 Play Mode → Editor 脚本删除 2 个 `EvalHUD` 根（含 6 个子节点）→ `EditorSceneManager.SaveScene`；场景 YAML 中 `EvalHUD` 计数为 0，其余根对象清点均为合法内容；未手改 `.unity` YAML。
+  - 验证：重新进入 Play Mode + `StartMatch()`，`phase=Playing` 时天空像素恢复蓝天 (0.612,0.737,0.898)，巨型黄/黑面板与白色文字拖影完全消失；`Logs/qa_fixed_playing2.png` 留底，编译干净（`compilationFailed:false`）。
+  - 备注：此类残留来自编辑器态的临时测试 HUD 被场景保存；后续跑可视化 eval HUD 时不要在 Edit Mode 创建后保存主场景（或在保存前删除）。
 
 ## 5. 验收标准与风控纪律
 

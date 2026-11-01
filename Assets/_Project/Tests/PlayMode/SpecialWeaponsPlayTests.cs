@@ -73,7 +73,7 @@ namespace P1.Tests
             var player = PlayerController.LocalPlayer;
             var weapon = player.Weapon;
             weapon.ResetAllWeaponState();
-            weapon.AddSpecialPoints(500);
+            weapon.AddSpecialPointsRaw(500);
             Assert.IsTrue(weapon.IsSpecialReady, "充能后大招应就绪");
 
             Vector3 forward = Vector3.forward;
@@ -106,6 +106,55 @@ namespace P1.Tests
         }
 
         [UnityTest]
+        public IEnumerator Slam_WarningCenter_ResolvesRealGround_NotSelfCapsule()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            var weapon = player.Weapon;
+            weapon.ResetAllWeaponState();
+            weapon.AddSpecialPointsRaw(500);
+
+            // 修复前 ResolveGroundPoint 的射线（脚底+6m 向下、mask 全开）会先命中施法者自己的
+            // CharacterController 顶端（脚底+1.25m），预警圈/冲击波/涂地球心全部悬空，
+            // 玩家按屏幕读圈与地面判定圆严重不共形。修复后必须落在真实地面。
+            // 注意：出生点已抬到 1.2m 高的出生甲板上，这里不能再断言绝对 y≈0，
+            // 改为「贴玩家脚下的地面」：允许脚下薄盘/坡面带来的 -0.45m 误差，
+            // 但 +1.25m 的自胶囊命中仍会明显越界。
+            Assert.IsTrue(weapon.TryActivateSpecial(), "满充能时应能释放超级降落");
+            Assert.IsTrue(weapon.IsSlamAirborne, "释放后应进入升空状态");
+
+            float feetY = player.transform.position.y;
+            float groundY = weapon.SpecialGroundCenter.y;
+            Assert.That(groundY, Is.InRange(feetY - 0.45f, feetY + 0.15f),
+                $"预警中心应贴地（玩家脚底 y={feetY:F2}），实际 {groundY:F2} —— 若 ≈+1.25 说明射线又打中了自己的胶囊");
+        }
+
+        [UnityTest]
+        public IEnumerator Slam_ImmuneTarget_SurvivesFullImpact()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            var weapon = player.Weapon;
+            weapon.ResetAllWeaponState();
+            weapon.AddSpecialPointsRaw(500);
+
+            // 内圈目标带无敌（出生保护 / 对方正在放大招）：伤害应完整豁免，且不再被计入命中
+            var target = CreateCombatant("SlamImmune", Team.TeamB,
+                player.transform.position + Vector3.forward * 2f);
+            var targetHealth = target.GetComponent<CombatantHealth>();
+            targetHealth.IsInvulnerable = true;
+
+            Assert.IsTrue(weapon.TryActivateSpecial(), "满充能时应能释放超级降落");
+            yield return new WaitForSeconds(1.4f);
+
+            Assert.IsTrue(targetHealth.IsAlive, "无敌目标不应被砸死");
+            Assert.AreEqual(targetHealth.MaxHealth, targetHealth.CurrentHealth,
+                "无敌目标应毫发无伤（出生保护/大招无敌豁免）");
+        }
+
+        [UnityTest]
         public IEnumerator InkTempest_SpawnsDriftingCloud_PaintsAndDamagesOverTime()
         {
             yield return LoadPlaybox();
@@ -120,7 +169,7 @@ namespace P1.Tests
             // 后面的"寿命结束回收"走同一条代码路径，仅省下纯等待。
             _tempConfig.stormDuration = 3.0f;
             weapon.EquipWeapon(_tempConfig);
-            weapon.AddSpecialPoints(500);
+            weapon.AddSpecialPointsRaw(500);
             Assert.IsTrue(weapon.IsSpecialReady, "换装风暴云武器并充能后应就绪");
 
             Vector3 target = player.transform.position + Vector3.forward * 6f;
@@ -165,21 +214,22 @@ namespace P1.Tests
         }
 
         [UnityTest]
-        public IEnumerator SplatBomb_Costs70Ink_AndKillsWith95SecondFuse()
+        public IEnumerator SplatBomb_IndependentOfInk_AndKillsWith95SecondFuse()
         {
             yield return LoadPlaybox();
 
             var player = PlayerController.LocalPlayer;
             var weapon = player.Weapon;
-            player.Motor.RefillInkFull();
+            // 手雷与墨水脱钩（设计变更）：清空墨水也必须能投，投掷不扣墨，只受冷却限制
+            player.Motor.TryConsumeInk(player.Motor.CurrentInk);
             float inkBefore = player.Motor.CurrentInk;
 
             Vector3 target = player.transform.position + Vector3.forward * 4f;
             target.y = 0f;
             float coverageBefore = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
 
-            Assert.IsTrue(weapon.TryThrowSubBomb(target), "墨水充足时应能投掷手雷");
-            Assert.AreEqual(inkBefore - 70f, player.Motor.CurrentInk, 0.5f, "手雷耗墨应为 70%");
+            Assert.IsTrue(weapon.TryThrowSubBomb(target), "手雷已与墨水脱钩：空墨也应能投掷");
+            Assert.AreEqual(inkBefore, player.Motor.CurrentInk, 0.5f, "投掷手雷不得消耗墨水");
 
             var victim = CreateCombatant("BombVictim", Team.TeamB, new Vector3(target.x, 0f, target.z));
             var victimHealth = victim.GetComponent<CombatantHealth>();

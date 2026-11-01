@@ -54,10 +54,23 @@ namespace P1.Editor
             SetColor(so, "accentBlue", ComicStyle.Blue);
             SetColor(so, "accentGreen", ComicStyle.Green);
 
-            // ---------- 实线边框；阴影与网点全局禁用 ----------
+            // ---------- 实线边框 + t-1 零模糊硬偏移阴影 ----------
             SetFloat(so, "inkBorderWidth", ComicStyle.Border);
             SetFloat(so, "inkBorderHeavyWidth", ComicStyle.BorderHeavy);
-            SetVector2(so, "hardShadowOffset", Vector2.zero);
+
+            // 硬影令牌（唯一立体感来源：同形状纯色偏移底板、零模糊、不透明纯墨黑）
+            SetColor(so, "hardShadowColor", ComicStyle.Ink);
+            SetVector2(so, "shadowOffsetTag", ComicStyle.ShadowTag);
+            SetVector2(so, "shadowOffsetButton", ComicStyle.ShadowButton);
+            SetVector2(so, "shadowOffsetButtonHover", ComicStyle.ShadowButtonHover);
+            SetVector2(so, "shadowOffsetButtonPressed", ComicStyle.ShadowButtonPressed);
+            SetVector2(so, "shadowOffsetPanel", ComicStyle.ShadowPanel);
+            SetVector2(so, "shadowOffsetHero", ComicStyle.ShadowHero);
+            SetVector2(so, "shadowOffsetDialog", ComicStyle.ShadowDialog);
+            SetBool(so, "pressContentShift", true);
+
+            // 旧字段保留兼容：通用硬影偏移写面板档 (4,-5)
+            SetVector2(so, "hardShadowOffset", ComicStyle.ShadowPanel);
             SetBool(so, "halftoneOnMobile", false);
 
             SetFloat(so, "halftoneSpacing", ComicStyle.HalftoneSpacing);
@@ -65,13 +78,18 @@ namespace P1.Editor
             SetFloat(so, "halftoneAlpha", 0f);
             SetFloat(so, "halftoneHoverAlpha", 0f);
 
-            // ---------- 动效：≤100ms linear 硬切，无回弹 ----------
+            // ---------- 动效：按压 0ms 硬切 + 0.1s Cubic-Out 回弹；入场 0.22s Back-Out ----------
             SetFloat(so, "pressDuration", ComicStyle.PressDuration);
             SetFloat(so, "hoverDuration", ComicStyle.HoverDuration);
-            SetFloat(so, "entranceDuration", ComicStyle.EntranceDuration);
+            SetFloat(so, "entranceDuration", 0.22f);
             SetFloat(so, "hoverScale", ComicStyle.HoverScale);
             SetFloat(so, "hoverTiltDegrees", 0f);
             SetFloat(so, "pressScale", ComicStyle.PressScale);
+            SetBool(so, "pressInstant", true);
+            SetFloat(so, "pressReboundDuration", 0.1f);
+            SetEasing(so, "pressReboundEasing", 0.22f, 1f, 0.36f, 1f); // Cubic-Out
+            SetBool(so, "entranceBackOut", true);
+            SetFloat(so, "entranceStagger", 0.05f);
             SetFloat(so, "entranceFadeDuration", 0.12f);
 
             // 弹簧已不被 UISpringMotion 使用，但字段保留；写成临界阻尼防止旧代码回弹。
@@ -89,11 +107,16 @@ namespace P1.Editor
                 SetFloat(easing, "y2", 1f);
             }
 
-            // ---------- 文字：几何风不做硬阴影套色 ----------
+            // ---------- 文字：t-1 大标题 4px 硬影 ----------
+            // em 字段保留（旧档回退用），像素字段才是 t-1 的实际来源：
+            // 固定 4px 硬影不会随字号放大成糊块，方向（右下 = 正 x 负 y）。
             SetFloat(so, "chunkyOutlineWidth", 0.04f);
             SetFloat(so, "chunkyInnerOutlineWidth", 0f);
-            SetFloat(so, "chunkyShadowOffsetY", 0f);
-            SetFloat(so, "chunkyShadowOffsetX", 0f);
+            SetBool(so, "chunkyShadowInPixels", true);
+            SetVector2(so, "chunkyShadowOffsetPixels", new Vector2(4f, -4f)); // 大标题 4px 硬影（右下）
+            // em 回退档：像素模式关掉时，在 100px 标题上等价于右下 4px 硬影（填充层向反方向让位）。
+            SetFloat(so, "chunkyShadowOffsetX", -0.04f);
+            SetFloat(so, "chunkyShadowOffsetY", 0.04f);
 
             // ---------- 字体 ----------
             SetObject(so, "displayFont", LoadFont("TitanOne-Regular SDF"));
@@ -114,7 +137,7 @@ namespace P1.Editor
             AssetDatabase.Refresh();
 
             ReportContrast();
-            Debug.Log(k_LogTag + " 已应用：直角 / 实线 " + ComicStyle.Border + "px / 无阴影无网点 / 动效 ≤100ms linear / 中文字体已接。");
+            Debug.Log(k_LogTag + " 已应用：直角 / 实线 " + ComicStyle.Border + "px / 零模糊硬偏移阴影（按钮 3,-4 · 面板 4,-5 · 弹窗 8,-9） / 按压 0ms+0.1s Cubic-Out / 入场 0.22s Back-Out / 中文字体已接。");
         }
 
         [MenuItem("P1/画风/几何风/1b. 校验几何 token 对比度", false, 3)]
@@ -275,6 +298,21 @@ namespace P1.Editor
             var d = p.FindPropertyRelative("damping");
             if (f != null) f.floatValue = frequency;
             if (d != null) d.floatValue = damping;
+        }
+
+        static void SetEasing(SerializedObject so, string path, float x1, float y1, float x2, float y2)
+        {
+            var p = so.FindProperty(path);
+            if (p == null)
+            {
+                Debug.LogWarning(k_LogTag + " 缺缓动字段: " + path);
+                return;
+            }
+
+            SetFloat(p, "x1", x1);
+            SetFloat(p, "y1", y1);
+            SetFloat(p, "x2", x2);
+            SetFloat(p, "y2", y2);
         }
     }
 }

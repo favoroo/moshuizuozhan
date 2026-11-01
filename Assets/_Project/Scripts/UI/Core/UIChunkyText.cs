@@ -45,6 +45,13 @@ namespace P1.UI
 
         [SerializeField, Range(-0.25f, 0.25f)] private float shadowOffsetX;
 
+        [Header("t-1 像素级硬影（固定像素，不随字号缩放）")]
+        [Tooltip("用像素偏移代替 em：大标题统一 4px 硬影，小字不会被 em 放大成糊块")]
+        [SerializeField] private bool shadowInPixels;
+
+        [Tooltip("硬影向量（像素，uGUI y 向上：右下 = 正 x 负 y）。填充层会向反方向位移")]
+        [SerializeField] private Vector2 shadowOffsetPixels = new Vector2(4f, -4f);
+
         [Tooltip("自动把父层 TMP 的文本/字号/对齐同步给填充层")]
         [SerializeField] private bool autoSync = true;
 
@@ -177,6 +184,14 @@ namespace P1.UI
             SetFillColor(UIThemeSO.Resolve(theme).GetTeamColor(team));
         }
 
+        /// <summary>像素级硬影（t-1）：固定像素偏移，不随字号缩放。</summary>
+        public void SetHardShadowPixels(Vector2 shadowVector, bool enabled = true)
+        {
+            shadowInPixels = enabled;
+            shadowOffsetPixels = shadowVector;
+            ApplyShadowOffset();
+        }
+
         public void ApplyTheme(UIThemeSO themeAsset)
         {
             theme = themeAsset;
@@ -189,6 +204,8 @@ namespace P1.UI
                 innerOutlineWidth = resolved.chunkyInnerOutlineWidth;
                 shadowOffsetY = resolved.chunkyShadowOffsetY;
                 shadowOffsetX = resolved.chunkyShadowOffsetX;
+                shadowInPixels = resolved.chunkyShadowInPixels;
+                shadowOffsetPixels = resolved.chunkyShadowOffsetPixels;
             }
 
             if (!Application.isPlaying)
@@ -235,6 +252,8 @@ namespace P1.UI
                 innerOutlineWidth = resolved.chunkyInnerOutlineWidth;
                 shadowOffsetY = resolved.chunkyShadowOffsetY;
                 shadowOffsetX = resolved.chunkyShadowOffsetX;
+                shadowInPixels = resolved.chunkyShadowInPixels;
+                shadowOffsetPixels = resolved.chunkyShadowOffsetPixels;
             }
 
             TMP_FontAsset font = ResolveFontForText(resolved);
@@ -337,7 +356,8 @@ namespace P1.UI
         private TMP_FontAsset ResolveFontForText(UIThemeSO resolved)
         {
             if (autoCjkFont) return resolved.ResolveFont(useDisplayFont, source != null ? source.text : null);
-            return useDisplayFont ? resolved.displayFont : resolved.bodyFont;
+            // 走 GetFont 而不是直接读字段：主题资产缺字体时全局兜底，绝不把 null 丢给 TMP。
+            return resolved.GetFont(useDisplayFont);
         }
 
         private void ApplyUppercase()
@@ -395,8 +415,20 @@ namespace P1.UI
         {
             if (_fillRect == null || source == null) return;
 
-            float size = source.fontSize;
-            Vector2 offset = new Vector2(shadowOffsetX * size, shadowOffsetY * size);
+            // 像素模式：shadowOffsetPixels 描述「阴影向量」（右下 = 正 x 负 y），
+            // 填充层要往阴影的反方向让开，黑色描边才会从右下露出来。
+            // em 模式：沿用旧语义（数值就是填充层位移，正 y 向上、正 x 向右）。
+            Vector2 offset;
+            if (shadowInPixels)
+            {
+                offset = new Vector2(-shadowOffsetPixels.x, -shadowOffsetPixels.y);
+            }
+            else
+            {
+                float size = source.fontSize;
+                offset = new Vector2(shadowOffsetX * size, shadowOffsetY * size);
+            }
+
             _fillRect.offsetMin = offset;
             _fillRect.offsetMax = offset;
         }

@@ -81,6 +81,27 @@ namespace P1.Tests
                 Assert.Less(report.P99InkUploadMs, 1.8f,
                     $"P99 纹理上传耗时应无严重尖刺，实际为: {report.P99InkUploadMs:F3} ms");
             }
+
+            // 4. [P6-C-R] ProfilerRecorder 真实 GC.Alloc（逐帧「GC Allocated In Frame」实测）。
+            //    红线口径是 Player 实测 2KB/帧（由真机 AutoProfile 采样报告判定），本用例只防「显著恶化」。
+            //    编辑器实测含测试框架/UI 重绘开销（空场景约 100KB/帧，满套件波动到 ~250KB），
+            //    因此防恶化护栏与上面 GC.GetTotalMemory 的编辑器口径一致取 256KB；Player 仍按 4KB 严格断言。
+            if (report.HasRecorderGcAllocSamples)
+            {
+                float recorderGcLimit = Application.isEditor ? 262144f : 4096f;
+                Assert.Less(report.AverageRecorderGcAllocBytesPerFrame, recorderGcLimit,
+                    $"GC.Alloc 实测均值越过防恶化护栏（当前已知超标 ~100KB/帧，优化任务见 OptimizationPlan P6-C-R 遗留）: {report.AverageRecorderGcAllocBytesPerFrame:F0} B/帧 (limit {recorderGcLimit:F0})");
+            }
+
+            // 5. [P6-C-R] DrawCalls 实测（ProfilerRecorder Render 组计数器）。
+            //    红线 120(桌面)/150(移动) 由 Player 报告判定；编辑器实测当前战斗均值 ~450-520（含 Game 视图与
+            //    编辑器 GUI 开销，真机值待 Player 采样确认），此断言仅防「显著恶化/异常暴涨」，非达标声明。
+            if (report.HasDrawCallSamples)
+            {
+                Assert.Greater(report.AverageDrawCalls, 0f, "DrawCalls 采样值应大于 0（计数器已生效）");
+                Assert.Less(report.AverageDrawCalls, 800f,
+                    $"DrawCalls 均值越过防恶化护栏 800，实际: {report.AverageDrawCalls:F1}");
+            }
         }
     }
 }

@@ -3,7 +3,7 @@ using UnityEngine;
 namespace P1.Player
 {
     /// <summary>
-    /// 乌贼游动姿态纯函数求解器（对标 EggGaitSolver 的人形态步态）。
+    /// 乌贼游动姿态纯函数求解器（对标 KidGaitSolver 的人形态步态）。
     /// 数值全部来自 INKWAVE 逆向源码（inkwave-aah-research/src/game/character.js L3550-3611）：
     /// 身体起伏波（频率随速度 5→14 rad/s）、转向侧倾 banking（-yawRate·0.08，钳 ±20° 保守版）、
     /// 保体积速度拉伸（Z 轴 1+0.2·sv，横向 1/√sy）、头部点摆、触手行波（逐根相位差近似根→尖传播）。

@@ -75,8 +75,8 @@ namespace P1.UI
 
         [SerializeField, Range(0f, 0.6f)] private float glossThickness = 0.16f;
 
-        [Header("硬边偏移阴影 · 几何风禁用（偏移归零）")]
-        [Tooltip("几何风禁止阴影：保持 false；即使打开，ShadowOffset 为 0 也不会绘制")]
+        [Header("硬边偏移阴影（t-1：唯一允许的立体感来源，零模糊）")]
+        [Tooltip("关闭时等于无阴影；t-1 请用主题 ApplyHardShadow/ApplyStyle 按档位打开")]
         [SerializeField] private bool hardShadow;
 
         [SerializeField] private Vector2 shadowOffset = Vector2.zero;
@@ -215,11 +215,14 @@ namespace P1.UI
             drawGloss = false;
             innerRimAlpha = 0f;
 
-            // 几何大胆风全局禁用阴影与网点（与主题资产里的旧值无关，代码层兜底）。
-            hardShadow = false;
-            shadowOffset = Vector2.zero;
-            shadowPadding = 0f;
-            shadowColor = style.borderColor;
+            // 几何风：卡片预设自带的 shadowOffset 一旦非 0 就按 t-1 硬影绘制
+            // （旧资产/旧预设的偏移是 0，行为与之前完全一致）。
+            hardShadow = Mathf.Abs(style.shadowOffset.x) > 0.01f || Mathf.Abs(style.shadowOffset.y) > 0.01f;
+            shadowOffset = hardShadow ? style.shadowOffset : Vector2.zero;
+            shadowPadding = hardShadow ? Mathf.Max(style.shadowPadding, Mathf.Max(
+                Mathf.Abs(style.shadowOffset.x), Mathf.Abs(style.shadowOffset.y))) : 0f;
+            shadowColor = hardShadow ? ComicStyle.Ink : style.borderColor;
+            shadowColor.a = 1f;
             halftone = false;
             halftoneAlpha = 0f;
             speechTail = false;
@@ -256,7 +259,7 @@ namespace P1.UI
             return graphic;
         }
 
-        /// <summary>实心偏移阴影开关（漫画印刷感的核心）。</summary>
+        /// <summary>实心偏移阴影开关（t-1 的立体感唯一来源：同形状纯色偏移底板、零模糊）。</summary>
         public bool HardShadow
         {
             get => hardShadow;
@@ -266,6 +269,37 @@ namespace P1.UI
                 hardShadow = value;
                 Refresh();
             }
+        }
+
+        /// <summary>是否正在绘制可见硬影（开关开着且偏移非 0）。</summary>
+        public bool HasHardShadow =>
+            hardShadow && (Mathf.Abs(shadowOffset.x) > 0.01f || Mathf.Abs(shadowOffset.y) > 0.01f);
+
+        /// <summary>
+        /// 一键开硬影：偏移 + 颜色（默认用 ComicStyle 墨黑并强制不透明）。
+        /// 偏移为 0 时等价于关掉硬影，不留下半透明残影。
+        /// </summary>
+        public void ApplyHardShadow(Vector2 offset, Color? color = null)
+        {
+            shadowOffset = offset;
+            shadowColor = color ?? ComicStyle.Ink;
+            shadowColor.a = 1f;
+            shadowPadding = Mathf.Max(Mathf.Abs(offset.x), Mathf.Abs(offset.y));
+            bool visible = Mathf.Abs(offset.x) > 0.01f || Mathf.Abs(offset.y) > 0.01f;
+            if (hardShadow != visible)
+            {
+                hardShadow = visible;
+            }
+
+            Refresh();
+        }
+
+        /// <summary>关掉硬影（保留偏移值，方便同一按钮在 hover/pressed 之间来回切）。</summary>
+        public void ClearHardShadow()
+        {
+            if (!hardShadow) return;
+            hardShadow = false;
+            Refresh();
         }
 
         public Vector2 ShadowOffset
@@ -387,7 +421,8 @@ namespace P1.UI
 
         /// <summary>
         /// 一键套几何大胆风观感：直角 + 实线粗边 + 关掉高光/内沿/网点/阴影。
-        /// 供主题安装器与各屏快速换肤用；不传参数时取 ComicStyle 的静态 token。
+        /// t-1 的硬影不在这里开——用 <see cref="UIThemeSO.ApplyHardShadow"/> 显式选档，
+        /// 避免各界面把偏移编成五花八门的数值。不传参数时取 ComicStyle 的静态 token。
         /// （方法名沿用旧名，调用方零改动。）
         /// </summary>
         public void ApplyComic(Color fill, bool dots = true, float border = ComicStyle.Border,
@@ -494,15 +529,18 @@ namespace P1.UI
             Vector2 appliedShadow = Vector2.zero;
             if (hardShadow && (Mathf.Abs(shadowOffset.x) > 0.01f || Mathf.Abs(shadowOffset.y) > 0.01f))
             {
-                // ① 硬边阴影：整块形状平移复制，实心墨色，不模糊。
+                // ① 硬边阴影：整块形状平移复制，实心纯色，零模糊（t-1 唯一允许的立体感来源）。
+                // alpha 强制 1：规范禁止半透明阴影，避免“实心墨色阴影”被误当蒙层。
                 appliedShadow = shadowOffset;
                 Rect shadowRect = new Rect(
                     rect.x + appliedShadow.x,
                     rect.y + appliedShadow.y,
                     rect.width,
                     rect.height);
+                Color solidShadow = shadowColor;
+                solidShadow.a = 1f;
                 BuildRing(_shadowRing, count, shadowRect, 0f, perCorner, effectiveRadius);
-                AddPolygonFan(vh, shadowRect.center, _shadowRing, count, shadowColor);
+                AddPolygonFan(vh, shadowRect.center, _shadowRing, count, solidShadow);
             }
 
             bool drawTail = speechTail || isBubble;

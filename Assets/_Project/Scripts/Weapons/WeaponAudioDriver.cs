@@ -15,6 +15,7 @@ namespace P1.Weapons
         private WeaponController _weapon;
         private CombatantHealth _health;
         private bool _wasChargerFull;
+        private int _lastShotFrame = -1;
 
         private void Awake()
         {
@@ -60,7 +61,16 @@ namespace P1.Weapons
             if (!CombatantHealth.IsLocalPlayer(_health))
                 return;
 
-            AudioManager.Instance.PlayWeaponShot(_weapon.CurrentWeaponKind);
+            // P28：滚筒推地由推地循环音承担，不能再每帧叠一发 flick 音
+            if (_weapon.IsRolling)
+                return;
+
+            // P28 齐射去重：泼桶一次 8 滴 / 滚筒一次 9 滴在同一帧只发一声
+            if (Time.frameCount == _lastShotFrame)
+                return;
+            _lastShotFrame = Time.frameCount;
+
+            AudioManager.Instance.PlayWeaponShot(_weapon.CurrentWeaponKind, _weapon.LastShotStrength01);
         }
 
         private void Update()

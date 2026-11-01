@@ -1,70 +1,45 @@
-# P1 项目 Profiler 性能调优与双端出包验收报告 [P6-C]
+# P1 性能采样报告 [P6-C-R]
 
-> **采样时间**: 2026-10-30 08:43:17 | **Unity 版本**: 6000.6.7f1 | **测试套件**: P1 Profiler Suite
+> **生成时间**: 2026-10-31 22:15:55
+> **运行环境**: Unity Editor PlayMode · 平台 OSXEditor · GPU Metal (Apple M1) · 设备 MacBookPro17,1 · CPU 8 核 (Apple M1) · 内存 16.0 GB · 分辨率 1845x1121 · targetFrameRate 60 · Unity 6000.6.7f1
+> **数据来源**: 真实 PlayMode 战斗逐帧实测（Time.unscaledDeltaTime + ProfilerRecorder + InkSurfaceController 上报），无任何仿真或写死数值
 
-## 1. 概述与验收标准
-- **帧率标准**: 桌面端稳定 60+ FPS，移动端稳定 30+ FPS；
-- **GC.Alloc 标准**: 战斗过程中 GC.Alloc 趋近于 0（平均每帧分配 < 2 KB），杜绝由 GC 触发的掉帧卡顿；
-- **纹理上传标准**: `InkSurfaceController.LateUpdate` 涂地纹理上传平均耗时稳定 < 1.5ms，无主线程掉帧尖刺（Spike）；
-- **双端出包标准**: macOS 独立执行程序与 Android ARM64 APK 成功编译产出。
-
----
-
-## 2. 桌面端测试采样（1920 x 1080）
-### Profiler 性能测试报告：Desktop (1920x1080, 400x400 InkTex)
-- **分辨率**: 1920 x 1080
-- **总采样帧数**: 7200 帧（运行时长：120.00 秒）
+## 采样结果
+### Profiler 性能测试报告：Editor PlayMode 实测 · MacBookPro17,1
+- **运行环境**: Unity Editor PlayMode · 平台 OSXEditor · GPU Metal (Apple M1) · 设备 MacBookPro17,1 · CPU 8 核 (Apple M1) · 内存 16.0 GB · 分辨率 1845x1121 · targetFrameRate 60 · Unity 6000.6.7f1
+- **总采样帧数**: 7141 帧（运行时长：120.00 秒）
 - **帧率表现 (FPS)**:
-  - 平均 FPS: **60.1**
-  - 1% Low FPS: **59.3**
-  - 极值范围: 59.3 ~ 60.7 FPS
+  - 平均 FPS: **61.6**
+  - 1% Low FPS: **37.2**
+  - 极值范围: 3.2 ~ 147.5 FPS
+  - 说明: 编辑器 PlayMode 数值受帧率上限设置与编辑器自身开销影响，真机红线以 Player 采样为准
 - **GC 内存分配 (GC.Alloc)**:
-  - 平均每帧分配: **0.0 Bytes/frame** (0.00 KB)
-  - 单帧最高分配: **0 Bytes** (0.00 KB)
-  - 总 GC.Alloc: 0 KB
-- **涂地纹理上传 (InkSurfaceController.LateUpdate)**:
-  - 上传次数: 3559 次
-  - 平均上传耗时: **0.118 ms**
-  - P95 耗时: **0.270 ms**
-  - P99 耗时: **0.997 ms**
-  - 单帧最高耗时 (Peak): **6.003 ms**
+  - **[Recorder 实测] 平均每帧分配: 53561 Bytes/frame** (52.31 KB)
+  - **[Recorder 实测] 单帧最高分配: 8850379 Bytes** (8642.95 KB)
+  - [近似口径·托管堆差值] 平均每帧: 31860.0 Bytes/frame，单帧最高: 6639616 Bytes，总计: 222180 KB
+- **涂地上传 (GPU 图集提交 InkSplatAtlas.Execute + 小地图 CPU FlushTexture)**:
+  - 上传次数: 7365 次
+  - 平均上传耗时: **0.154 ms**
+  - P95 耗时: **0.240 ms**
+  - P99 耗时: **0.375 ms**
+  - 单帧最高耗时 (Peak): **0.813 ms**
+- **Draw Calls (ProfilerRecorder)**:
+  - 平均每帧: **378.1**，峰值: **1436**（红线：桌面 < 120 / 移动端 < 150）
 - **指标综合达标判定**:
   - 帧率达标 (Desktop >= 60 / Mobile >= 30): PASS
-  - GC.Alloc 趋零 (< 2KB/帧): PASS
-  - 纹理上传稳定 (< 1.5ms 无 Spike): PASS
+  - GC.Alloc 趋零 (Recorder 实测 < 2KB/帧): FAIL
+  - 纹理上传稳定 (平均 < 1.5ms 且 P99 < 1.8ms): PASS
+  - DrawCalls (均值 < 120 桌面红线): FAIL
 
+## 真机数据状态与红线口径
+- 本表为 **编辑器 PlayMode** 数据：帧率受编辑器自身开销与「帧率上限」设置影响，
+  桌面 60 FPS / Android 30+ FPS 红线 **必须以 Player 包（真机/本机运行 Development Build）实测为准**。
+- Player 自动采样流程（`P1.Core.AutoProfileRuntimeService`）：
+  1. 构建 Development Build（菜单 `P1/构建/8` 或 9，改传 `BuildOptions.Development`）；
+  2. 放置请求文件（内容为采样秒数）：Android 例 `adb push profile_request.txt /sdcard/Android/data/com.p1studio.inkturfdemo/files/P1_AutoProfile.request`；
+  3. 启动游戏（预热 5s 后自动实测并结束），报告写入同目录 `P1_AutoProfiles/`；
+  4. 回收：`adb pull /sdcard/Android/data/com.p1studio.inkturfdemo/files/P1_AutoProfiles/ Docs/`。
+- 在获得 Player 实测数据前，本项目的移动端性能红线状态应记为 **未验证**。
 
-## 3. 移动端测试采样（2340 x 1080 / 1280 x 720）
-### Profiler 性能测试报告：Mobile (2340x1080, 200x200 InkTex)
-- **分辨率**: 2340 x 1080
-- **总采样帧数**: 7200 帧（运行时长：120.00 秒）
-- **帧率表现 (FPS)**:
-  - 平均 FPS: **60.1**
-  - 1% Low FPS: **59.3**
-  - 极值范围: 59.3 ~ 60.7 FPS
-- **GC 内存分配 (GC.Alloc)**:
-  - 平均每帧分配: **0.0 Bytes/frame** (0.00 KB)
-  - 单帧最高分配: **0 Bytes** (0.00 KB)
-  - 总 GC.Alloc: 0 KB
-- **涂地纹理上传 (InkSurfaceController.LateUpdate)**:
-  - 上传次数: 3539 次
-  - 平均上传耗时: **0.032 ms**
-  - P95 耗时: **0.039 ms**
-  - P99 耗时: **0.058 ms**
-  - 单帧最高耗时 (Peak): **18.841 ms**
-- **指标综合达标判定**:
-  - 帧率达标 (Desktop >= 60 / Mobile >= 30): PASS
-  - GC.Alloc 趋零 (< 2KB/帧): PASS
-  - 纹理上传稳定 (< 1.5ms 无 Spike): PASS
-
-
-## 4. 渲染批次与 DrawCalls 分析
-- **渲染管线**: Universal Render Pipeline (URP 17.x)
-- **合批优化**: 开启 SRP Batcher + GPU Instancing + 动态合批
-- **实时 DrawCalls / Batches**: 保持在 45 ~ 75 Batches 区间（远低于移动端 150 Batches 上限）
-- **遮挡剔除**: P5-B Screen-Door Dither 方案在深度测试中直接剔除，零多余 Overdraw
-
-## 5. 双端包体验收结论
-- **macOS 独立桌面包**: `Builds/StandaloneOSX/InkTurfDemo.app` 构建成功，免安装即开即玩；
-- **Android APK 安装包**: `Builds/Android/InkTurfDemo.apk` 构建成功（ARM64 + Vulkan/GLES3），Safe Area 与触控摇杆全适配；
-- **整体评价**: 全系统无内存泄漏、无纹理尖刺、高帧率流畅运行，**[P6-C] 验收圆满通过，P1 优化计划全面结项！**
+## 历史数据作废说明
+旧版 `Docs/ProfilerReport_P6C.md`（≤ 2026-10-30）由 `BuildAndProfilerSuite.SimulateBattleSampling` 的离线仿真生成（FPS 来自 `Random(42)`、平均帧率硬编码 60.1、DrawCalls 45~75 为写死文案、GC 0 B/帧测的是仿真循环），全部作废；其「验收圆满通过」结论不成立。旧版纹理上传判定使用 `Peak < 1.5 || P99 < 1.2` 的 OR 条件会掩盖单帧尖刺，已改为均值+P99 双条件。

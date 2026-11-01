@@ -27,11 +27,11 @@ Material:
     m_Floats:
     - _DepthThreshold: 0.02
     - _FadeEnd: 65
-    - _FadeStart: 25
+    - _FadeStart: 18
     - _NormalThreshold: 0.35
-    - _OutlineThickness: 1.6
+    - _OutlineThickness: 1
     - _SkyCutoff: 0.97
     m_Colors:
-    - _OutlineColor: {r: 0.008540383, g: 0.010022826, b: 0.015325204, a: 1}
+    - _OutlineColor: {r: 0.0173891, g: 0.013411746, b: 0.027211785, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

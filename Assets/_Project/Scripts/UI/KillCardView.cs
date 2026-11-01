@@ -70,15 +70,14 @@ namespace P1.UI
                 cardBgGraphic.SpeechTail = false;
                 cardBgGraphic.BorderWidth = ComicStyle.Border;
                 cardBgGraphic.BorderColor = ComicStyle.Ink;
-                cardBgGraphic.HardShadow = false;
-                cardBgGraphic.ShadowOffset = Vector2.zero;
-                cardBgGraphic.ShadowColor = ComicStyle.Ink;
                 cardBgGraphic.Halftone = false;
                 cardBgGraphic.GlossAlpha = 0f;
                 cardBgGraphic.DrawGloss = false;
                 cardBgGraphic.InnerRimAlpha = 0f;
                 cardBgGraphic.color = ComicStyle.Ink;
                 cardBgGraphic.raycastTarget = false;
+                // 面板档硬影 (4,-5)：卡片右下 4px 处露出纯黑底板
+                UIThemeSO.Resolve(theme).ApplyHardShadow(cardBgGraphic, UIHardShadowLevel.Panel);
             }
 
             if (weaponIconCircle == null)
@@ -89,8 +88,8 @@ namespace P1.UI
                 weaponIconCircle.anchorMin = new Vector2(0f, 0.5f);
                 weaponIconCircle.anchorMax = new Vector2(0f, 0.5f);
                 weaponIconCircle.pivot = new Vector2(0.5f, 0.5f);
-                weaponIconCircle.anchoredPosition = new Vector2(32f, 0f);
-                weaponIconCircle.sizeDelta = new Vector2(44f, 44f);
+                weaponIconCircle.anchoredPosition = new Vector2(40f, 0f);
+                weaponIconCircle.sizeDelta = new Vector2(52f, 52f);
 
                 weaponCircleBg = circleGo.GetComponent<Image>();
                 weaponCircleBg.sprite = GetCircleSprite();
@@ -113,15 +112,22 @@ namespace P1.UI
                 kRect.anchorMin = new Vector2(0f, 0.5f);
                 kRect.anchorMax = new Vector2(0f, 0.5f);
                 kRect.pivot = new Vector2(0f, 0.5f);
-                kRect.anchoredPosition = new Vector2(66f, 13f);
-                kRect.sizeDelta = new Vector2(260f, 28f);
+                kRect.anchoredPosition = new Vector2(78f, 15f);
+                // 纵向 40 而不是 30：TMP 的 Truncate 会按行高做纵向截断，
+                // 30/28px 框放 24 号字（移动端 UITypography ×1.28 ≈ 30）会把整段字符丢掉。
+                // 居中轴心不变，视觉行位完全不动。
+                kRect.sizeDelta = new Vector2(300f, 40f);
 
                 killerText = killerGo.GetComponent<TextMeshProUGUI>();
-                killerText.fontSize = UITypography.FontSnapped(20f);
+                killerText.fontSize = UITypography.FontSnapped(24f);
                 killerText.fontStyle = FontStyles.Bold;
-                killerText.alignment = TextAlignmentOptions.Left;
+                killerText.alignment = TextAlignmentOptions.MidlineLeft;
                 killerText.color = ComicStyle.Paper;
                 killerText.raycastTarget = false;
+                killerText.textWrappingMode = TextWrappingModes.NoWrap;
+                // 名字走 body 字体 + Truncate：display 字体（TitanOne）缺省略号字形，
+                // 用 Ellipsis 每次重建都会刷一条 TMP 警告；Truncate 不依赖字形，永不告警。
+                killerText.overflowMode = TextOverflowModes.Truncate;
             }
 
             if (actionTagText == null)
@@ -132,16 +138,18 @@ namespace P1.UI
                 tRect.anchorMin = new Vector2(0f, 0.5f);
                 tRect.anchorMax = new Vector2(0f, 0.5f);
                 tRect.pivot = new Vector2(0f, 0.5f);
-                tRect.anchoredPosition = new Vector2(66f, -14f);
-                tRect.sizeDelta = new Vector2(100f, 26f);
+                tRect.anchoredPosition = new Vector2(78f, -16f);
+                tRect.sizeDelta = new Vector2(106f, 28f);
 
                 actionTagText = tagGo.GetComponent<TextMeshProUGUI>();
-                actionTagText.fontSize = UITypography.FontSnapped(20f);
+                actionTagText.fontSize = UITypography.FontSnapped(24f);
                 actionTagText.fontStyle = FontStyles.Bold;
-                actionTagText.alignment = TextAlignmentOptions.Left;
+                actionTagText.alignment = TextAlignmentOptions.MidlineLeft;
                 actionTagText.color = ComicStyle.Yellow;
                 actionTagText.text = "SPLAT";
                 actionTagText.raycastTarget = false;
+                actionTagText.textWrappingMode = TextWrappingModes.NoWrap;
+                actionTagText.overflowMode = TextOverflowModes.Overflow;
             }
 
             if (victimText == null)
@@ -152,15 +160,18 @@ namespace P1.UI
                 vRect.anchorMin = new Vector2(0f, 0.5f);
                 vRect.anchorMax = new Vector2(0f, 0.5f);
                 vRect.pivot = new Vector2(0f, 0.5f);
-                vRect.anchoredPosition = new Vector2(170f, -14f);
-                vRect.sizeDelta = new Vector2(160f, 26f);
+                // SPLAT 框右缘 184 + 12px 间距 → 受害者从 196 起，长名字截断不挤压
+                vRect.anchoredPosition = new Vector2(196f, -16f);
+                vRect.sizeDelta = new Vector2(192f, 40f);
 
                 victimText = victimGo.GetComponent<TextMeshProUGUI>();
-                victimText.fontSize = UITypography.FontSnapped(20f);
+                victimText.fontSize = UITypography.FontSnapped(24f);
                 victimText.fontStyle = FontStyles.Bold;
-                victimText.alignment = TextAlignmentOptions.Left;
+                victimText.alignment = TextAlignmentOptions.MidlineLeft;
                 victimText.color = ComicStyle.Paper;
                 victimText.raycastTarget = false;
+                victimText.textWrappingMode = TextWrappingModes.NoWrap;
+                victimText.overflowMode = TextOverflowModes.Truncate;
             }
 
             springMotion.SetTheme(theme);
@@ -180,14 +191,12 @@ namespace P1.UI
             Color killerCol = resolved.GetTeamColor(ev.KillerTeam);
             Color victimCol = resolved.GetTeamColor(ev.VictimTeam);
 
-            // 1. 直角黑底白字块（几何风：SharpRect，无阴影，无气泡尾）
+            // 1. 直角黑底白字块（几何风：SharpRect + 面板档硬影，无气泡尾）
             if (cardBgGraphic != null)
             {
                 cardBgGraphic.Shape = UIInkShape.SharpRect;
                 cardBgGraphic.CornerRadius = ComicStyle.CornerSharp;
                 cardBgGraphic.SpeechTail = false;
-                cardBgGraphic.HardShadow = false;
-                cardBgGraphic.ShadowOffset = Vector2.zero;
                 cardBgGraphic.BorderWidth = ComicStyle.Border;
 
                 if (ev.IsLocalPlayerVictim)
@@ -205,6 +214,9 @@ namespace P1.UI
                     cardBgGraphic.color = ComicStyle.Ink;
                     cardBgGraphic.BorderColor = ComicStyle.Ink;
                 }
+
+                // 面板档硬影 (4,-5)：Bind 每次重设样式后都要重新落档（旧代码在这里把它关了）
+                resolved.ApplyHardShadow(cardBgGraphic, UIHardShadowLevel.Panel);
             }
 
             // 2. 武器纯色圆底与纯白图标
@@ -220,14 +232,17 @@ namespace P1.UI
                 weaponIconImage.color = Color.white;
             }
 
-            // 3. 文字（字号 ≥20，移动端走 UITypography ≥24）
-            float fontSize = UITypography.FontSnapped(20f);
+            // 3. 文字（击杀卡档 24，移动端走 UITypography ×1.28）
+            float fontSize = UITypography.FontSnapped(24f);
 
             if (killerText != null)
             {
-                killerText.font = resolved.ResolveFont(true, ev.KillerName);
+                // 名字用 body 字体（Rubik-Bold / MiSans-Semibold：拉丁 + CJK + 省略号字形齐全）；
+                // display 字体（TitanOne）只留给 SPLAT! 这类纯拉丁大写标签。
+                killerText.font = resolved.ResolveFont(false, ev.KillerName);
                 killerText.text = ev.KillerName;
                 killerText.fontSize = fontSize;
+                killerText.overflowMode = TextOverflowModes.Truncate;
                 killerText.color = ev.IsLocalPlayerKiller ? ComicStyle.Yellow : ComicStyle.Paper;
             }
 
@@ -242,9 +257,10 @@ namespace P1.UI
 
             if (victimText != null)
             {
-                victimText.font = resolved.ResolveFont(true, ev.VictimName);
+                victimText.font = resolved.ResolveFont(false, ev.VictimName);
                 victimText.text = ev.VictimName;
                 victimText.fontSize = fontSize;
+                victimText.overflowMode = TextOverflowModes.Truncate;
                 victimText.color = ComicStyle.Paper;
             }
 

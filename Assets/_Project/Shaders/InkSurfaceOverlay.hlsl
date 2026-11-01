@@ -191,10 +191,12 @@ struct P1InkAtlasVaryings
     float4 splatB     : TEXCOORD2;
 };
 
+static float _P1TopInkContactShadowTerm = 0.0;
+
 /// <summary>
 /// 顶面/物体表面墨水完整物理求值函数（P18 画风重做）：
 /// 包含：队伍配色 + 三段湿润 (wet, sheen) + 胶质厚度 + 三渲二漫反射 (重定标 0.40)
-///       + 胶质内发光 + 太阳直射镜面 + 天空环境镜面 P1InkEnvSpecular (含掠射角抑制)。
+///       + 胶质内发光 + 双层清漆高光 + 环境镜面 P1InkEnvSpecularFull + 顶面 lip 法线扰动。
 /// </summary>
 bool P1EvaluateTopInk(
     float3 positionWS,
@@ -211,6 +213,7 @@ bool P1EvaluateTopInk(
 {
     outInkMask = 0.0;
     outLitInkColor = half3(0.0, 0.0, 0.0);
+    _P1TopInkContactShadowTerm = 0.0;
 
     // 仅在朝上的面绘制顶视图形（避免垂直立面拉伸，立面由 InkWallSurface 负责）
     half upness = smoothstep(0.28, 0.68, normalWS.y);
@@ -231,12 +234,55 @@ bool P1EvaluateTopInk(
     float inkTsNewest = saturate(inkSample.g * invA);
     float tone = saturate(inkSample.b * invA);
 
-    // 屏幕空间边缘抗锯齿
+    // 屏幕空间边缘抗锯齿（保留 0.55..0.72 收紧语义，防止拉伸）
     float fw = fwidth(amt);
     float maskEdge = clamp(fw * 1.2, 0.01, 0.06);
     float inkMask = smoothstep(0.55 - maskEdge, 0.72 + maskEdge, amt) * upness;
-    if (inkMask <= 0.005)
+
+    // 墨缘接触阴影 halo：smoothstep(0.03,0.55,amt) * (1-inkMask)，按太阳 XZ 方向给 shaded 压暗
+    float halo = smoothstep(0.03, 0.55, amt) * (1.0 - inkMask) * upness;
+    if (inkMask <= 0.005 && halo <= 0.005)
         return false;
+
+    // 覆盖率梯度与顶面 lip 法线偏移（P1_INK_HIGH：新增 2 次图集邻域采样）
+    float2 gradAmt = float2(0.0, 0.0);
+    float3 perturbedNormalWS = normalWS;
+
+#if defined(P1_INK_HIGH)
+    float2 texelUV = _GlobalInkTexelSize.xy > 1e-6 ? _GlobalInkTexelSize.xy : float2(1.0 / 4096.0, 1.0 / 4096.0);
+    float amtX = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(texelUV.x, 0.0))).a;
+    float amtZ = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(0.0, texelUV.y))).a;
+    gradAmt = float2(amtX - amt, amtZ - amt);
+
+    float gradLen = length(gradAmt);
+    if (gradLen > 0.0001)
+    {
+        float2 outDir = -gradAmt / gradLen;
+        float lipProfile = saturate((amt - 0.35) * 2.0) * saturate((1.0 - amt) * 3.0);
+        float2 lipOffsetXZ = outDir * (lipProfile * _P1InkTopDetailStrength * 0.35);
+        perturbedNormalWS = normalize(normalWS + float3(lipOffsetXZ.x, 0.0, lipOffsetXZ.y));
+    }
+#endif
+
+    // 计算墨缘接触阴影按太阳 XZ 偏向
+    float2 sunDirXZ = normalize(mainLightDir.xz + float2(0.001, 0.001));
+    float shadowBias = 1.0;
+#if defined(P1_INK_HIGH)
+    float gradLenM = length(gradAmt);
+    if (gradLenM > 0.0001)
+    {
+        float2 outN = -gradAmt / gradLenM;
+        shadowBias = clamp(0.65 - 0.75 * dot(outN, sunDirXZ), 0.25, 1.35);
+    }
+#endif
+    _P1TopInkContactShadowTerm = halo * shadowBias * 0.18 * _P1InkTopDetailStrength;
+
+    if (inkMask <= 0.005)
+    {
+        outInkMask = 0.0;
+        outLitInkColor = half3(0.0, 0.0, 0.0);
+        return true;
+    }
 
     // 队伍交界 1px 锐利过渡
     float wT = clamp(fwidth(tRaw) * 0.75, 0.012, 0.25);
@@ -261,9 +307,9 @@ bool P1EvaluateTopInk(
     // 漫反射光照（三渲二色阶，重定标下限 0.40）
     float3 L = normalize(mainLightDir);
     float3 V = normalize(viewDirWS);
-    float NdotL = saturate(dot(normalWS, L));
-    float NdotV = saturate(dot(normalWS, V));
-    half inkBand = P1ToonBand(NdotL, 0.48, 0.08);
+    float NdotL = saturate(dot(perturbedNormalWS, L));
+    float NdotV = saturate(dot(perturbedNormalWS, V));
+    half inkBand = P1ToonTriBand(NdotL, 0.48, 0.08);
     half inkShadow = P1ToonShadowTerm(shadowAtten, 0.55, 0.08);
     float diffuseLight = lerp(0.40, 1.0, inkBand * inkShadow);
 
@@ -273,7 +319,7 @@ bool P1EvaluateTopInk(
     float specPower = exp2(10.0 * smoothness + 1.0);
     float specNorm = (specPower + 8.0) / 8.0;
     float3 H = normalize(L + V);
-    float NdotH = saturate(dot(normalWS, H));
+    float NdotH = saturate(dot(perturbedNormalWS, H));
     float directSpec = pow(NdotH, specPower) * specNorm * (0.04 + 0.08 * wet);
 
     // 掠射菲涅尔
@@ -282,12 +328,23 @@ bool P1EvaluateTopInk(
     float F = clearcoatF0 + (0.35 - clearcoatF0) * fresnel;
     half3 directTerm = _MainLightColor.rgb * (half)(directSpec * F * NdotL);
 
-    // 环境镜面（含掠射角抑制）
-    float3 R = reflect(-V, normalWS);
-    half glanceDamp = (half)(1.0 - 0.65 * pow(saturate(1.0 - NdotV), 2.5));
-    half3 envSpec = P1InkEnvSpecular(R, rough, NdotV) * glanceDamp;
+    // 双层清漆叠加与薄缘高光（湿润果冻墨质感）
+    float edgeBand = P1InkWetRim(amt, wet, sheen);
+    half3 rimLight = _MainLightColor.rgb * (half)(edgeBand * (0.10 + 0.35 * F) * _P1InkEdgeRimStrength);
+    directTerm += _MainLightColor.rgb * P1InkCoatSpec(NdotH, NdotV, shadowAtten, wet, sheen) + rimLight;
 
-    half3 finalClearcoat = (directTerm + envSpec) * (half)clearcoatStrength;
+    // 湿润边缘队色轻微强化（与地面呼应）
+    inkColor += teamCol * (half)(0.12 * edgeBand * saturate(wet + sheen * 0.4));
+
+    // 环境镜面（桌面端 Cubemap + 解析太阳盘，含掠射角抑制）
+    float3 R = reflect(-V, perturbedNormalWS);
+    half glanceDamp = (half)(1.0 - 0.65 * pow(saturate(1.0 - NdotV), 2.5));
+    half3 envSpec = P1InkEnvSpecularFull(R, rough, NdotV, teamCol) * glanceDamp;
+    // 与地面一致：新墨短期增强环境反射，干后回落，保证顶面/地面同一套湿润语言。
+    envSpec *= (half)(1.0 + 0.70 * wet + 0.25 * sheen);
+
+    half3 envTint = lerp(half3(1.0, 1.0, 1.0), saturate(teamCol * 2.2), 0.80);
+    half3 finalClearcoat = (directTerm + envSpec * envTint) * (half)clearcoatStrength;
 
     // 胶质内发光
     float effectiveGlow = (inkGlow > 0.0) ? inkGlow : _GlobalInkGlow;
@@ -322,6 +379,8 @@ bool ApplyTopInkOverlayPBR(
     {
         return false;
     }
+    // 墨缘接触阴影 halo：压暗底色，让顶面墨有厚度
+    surfaceColor *= saturate(1.0 - _P1TopInkContactShadowTerm);
     surfaceColor = lerp(surfaceColor, litInkColor, inkMask);
     return true;
 }

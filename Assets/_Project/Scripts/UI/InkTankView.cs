@@ -30,6 +30,11 @@ namespace P1.UI
         [SerializeField] private TMP_Text percentLabel;
         [SerializeField] private AudioSource warningSource;
 
+        [Header("卡片外壳（t-1：顶部身份色带 + 墨底徽章）")]
+        [SerializeField] private UIInkShapeGraphic cardRail;
+        [SerializeField] private UIInkShapeGraphic badgePlate;
+        [SerializeField] private Image badgeIcon;
+
         [Tooltip("留空则依次尝试 AudioManager.lowInkWarningClip 与编辑器内置路径")]
         [SerializeField] private AudioClip lowInkClip;
 
@@ -104,6 +109,18 @@ namespace P1.UI
         public void SetTheme(UIThemeSO themeAsset)
         {
             theme = themeAsset;
+            ApplyTeamColors();
+        }
+
+        /// <summary>
+        /// 卡片外壳绑定（t-1 底部三卡）：身份色带 / 墨底徽章 / 水滴图标随队伍墨色硬切。
+        /// 新增入口，旧的 <see cref="Configure"/> 签名与调用方零变化。
+        /// </summary>
+        public void SetCardChrome(UIInkShapeGraphic rail, UIInkShapeGraphic plate, Image icon)
+        {
+            cardRail = rail;
+            badgePlate = plate;
+            badgeIcon = icon;
             ApplyTeamColors();
         }
 
@@ -257,7 +274,8 @@ namespace P1.UI
 
             if (frameShape != null)
             {
-                frameShape.BorderColor = blinkOn ? ComicStyle.Red : ComicStyle.Paper;
+                // 纸白卡片上墨框才是常态：低墨时硬切翻红，不闪回不可见的白边
+                frameShape.BorderColor = blinkOn ? ComicStyle.Red : ComicStyle.Ink;
                 frameShape.BorderWidth = ComicStyle.BorderThin;
             }
         }
@@ -265,18 +283,24 @@ namespace P1.UI
         private void ApplyTeamColors()
         {
             UIThemeSO themeResolved = UIThemeSO.Resolve(theme);
+            Color ink = InkTeamColorFilter.ResolveTeamColor(_team, theme);
 
             if (barFill != null)
             {
-                Color ink = InkTeamColorFilter.ResolveTeamColor(_team, theme);
                 barFill.color = new Color(ink.r, ink.g, ink.b, 1f);
             }
+
+            // 卡片身份色带 / 墨底徽章边框 / 水滴图标：同一支队伍色，换队一起硬切
+            if (cardRail != null) cardRail.color = new Color(ink.r, ink.g, ink.b, 1f);
+            if (badgePlate != null) badgePlate.BorderColor = new Color(ink.r, ink.g, ink.b, 1f);
+            if (badgeIcon != null) badgeIcon.color = new Color(ink.r, ink.g, ink.b, 1f);
 
             if (frameShape != null)
             {
                 frameShape.Shape = UIInkShape.SharpRect;
                 frameShape.CornerRadius = ComicStyle.CornerSharp;
-                frameShape.BorderColor = ComicStyle.Paper;
+                // 轨道边框：纸白卡片上墨框常态（低墨告警时由 UpdateWarningVisuals 硬切翻红）
+                frameShape.BorderColor = ComicStyle.Ink;
                 frameShape.BorderWidth = ComicStyle.BorderThin;
                 // 描边层填充全透明：UIInkShapeGraphic 的实心阴影一开就会把整条盖成墨黑。
                 frameShape.HardShadow = false;
@@ -287,7 +311,8 @@ namespace P1.UI
 
             if (percentLabel != null)
             {
-                percentLabel.color = ComicStyle.Paper;
+                // 纸白卡片：大百分比用墨色（旧黑底信息条时代是纸白字）
+                percentLabel.color = ComicStyle.Ink;
             }
 
             // 队伍色解析失败时退回主题默认墨色，避免白条看不见
@@ -300,6 +325,14 @@ namespace P1.UI
         private void ApplyThreshold()
         {
             if (thresholdMarker == null) return;
+
+            // 手雷已与墨水脱钩（bombInkCost = 0）：刻度线无意义，直接隐藏，避免条首出现误导性红线
+            bool visible = _threshold01 > 0.001f;
+            if (thresholdMarker.gameObject.activeSelf != visible)
+            {
+                thresholdMarker.gameObject.SetActive(visible);
+            }
+            if (!visible) return;
 
             RectTransform bar = barFill != null ? barFill.rectTransform : (RectTransform)transform;
             float width = bar.rect.width;

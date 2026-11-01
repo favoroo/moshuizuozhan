@@ -114,6 +114,8 @@ Shader "P1/InkWall"
             // 全局胶质内发光（InkSurfaceController 每帧 SetGlobalFloat），与地面/顶面墨共用，
             // 不放进 UnityPerMaterial，避免不同材质各写一份导致墙地墨色再次分叉。
             float _GlobalInkGlow;
+            float _P1WallDripSpeed;
+            float4 _InkTex_TexelSize;
 
             Varyings vert(Attributes input)
             {
@@ -154,11 +156,12 @@ Shader "P1/InkWall"
                 float2 sampleUV = input.uv;
                 #if defined(P1_INK_HIGH)
                 float2 meterPos = input.uv * input.uv2;
-                if (_WallDripStrength > 0.001 && input.uv2.y > 0.05)
+                if (_WallDripStrength > 0.001 && input.uv2.y > 0.05 && _WallWetness > 0.01)
                 {
                     float colSize = 0.38;
                     float col = floor(meterPos.x / colSize);
                     float rnd = frac(sin(col * 317.15 + 1.37) * 43758.5453);
+                    float phase = frac(_Time.y * max(0.0, _P1WallDripSpeed) * (0.25 + rnd * 0.35) + rnd * 7.13);
                     float colCenter = (col + 0.5 + (rnd - 0.5) * 0.55) * colSize;
                     float distCol = abs(meterPos.x - colCenter);
                     float dripW = lerp(0.012, 0.024, rnd);
@@ -166,7 +169,8 @@ Shader "P1/InkWall"
                     if (dripMaskX > 0.001)
                     {
                         float dripLenM = lerp(0.06, 0.22, rnd) * (_WallWetness * 0.75 + 0.25) * _WallDripStrength;
-                        float dripV = (dripLenM / input.uv2.y) * dripMaskX;
+                        dripLenM *= 0.72 + 0.28 * sin(phase * 6.2831853);
+                        float dripV = (dripLenM / input.uv2.y) * dripMaskX * (0.8 + 0.2 * phase);
                         float2 dripUV = sampleUV + float2(0.0, dripV);
                         half4 upperInk = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, dripUV);
                         if (upperInk.a > 0.35)
@@ -199,6 +203,24 @@ Shader "P1/InkWall"
 
                 float roughPerturb = 0.0;
                 #if defined(P1_INK_HIGH)
+                // 墙面 lip 法线：±1 texel 采样求覆盖率梯度，只在边缘带且湿润时扰动法线
+                if (_WallWetness > 0.01)
+                {
+                    float a = inkSample.a;
+                    float lipBand = smoothstep(0.30, 0.55, a) * (1.0 - smoothstep(0.62, 0.95, a));
+                    if (lipBand > 0.001)
+                    {
+                        float2 tx = _InkTex_TexelSize.xy;
+                        float aR = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, sampleUV + float2(tx.x, 0.0)).a;
+                        float aL = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, sampleUV - float2(tx.x, 0.0)).a;
+                        float aU = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, sampleUV + float2(0.0, tx.y)).a;
+                        float aD = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, sampleUV - float2(0.0, tx.y)).a;
+                        float2 gradA = float2(aR - aL, aU - aD) * 0.5;
+                        float3 lipN = -(T1 * gradA.x + T2 * gradA.y);
+                        N = normalize(N + lipN * (_P1InkTopDetailStrength * 0.15 * _WallWetness * lipBand));
+                    }
+                }
+
                 float2 grainUV = (input.uv * input.uv2) * float2(0.9, 0.42) * _InkGrainScale;
                 half4 grainNSample = SAMPLE_TEXTURE2D(_InkGrainN, sampler_InkGrainN, grainUV);
                 float3 grainNormal = UnpackNormalScale(grainNSample, _InkGrainStrength);
@@ -210,7 +232,7 @@ Shader "P1/InkWall"
                 float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
                 Light mainLight = GetMainLight(shadowCoord);
                 float3 L = normalize(mainLight.direction);
-                half band = P1ToonBand(dot(N, L), _ShadeThreshold, _ShadeSoftness);
+                half band = P1ToonTriBand(dot(N, L), _ShadeThreshold, _ShadeSoftness);
                 half shadowTerm = P1ToonShadowTerm(mainLight.shadowAttenuation, 0.72, _ShadeSoftness);
 
                 // 与地面墨（InkGround）和顶面墨（ApplyTopInkOverlay）同一套"墨色明暗"：
@@ -229,15 +251,40 @@ Shader "P1/InkWall"
                 float rim = smoothstep(0.52, 0.9, coreMask) * (1.0 - smoothstep(0.9, 0.995, coreMask));
                 inkColor *= 1.0 + rim * 0.3;
 
-                // 环境镜面（P1InkEnvSpecular）与防掠射糊白
+                // 视线与高光参数
                 float3 V = normalize(_WorldSpaceCameraPos - input.positionWS);
-                float3 R = reflect(-V, N);
+                float3 H = normalize(L + V);
+                float NdotH = saturate(dot(N, H));
                 float NdotV = saturate(dot(N, V));
+                float NdotL = saturate(dot(N, L));
 
-                float rough = P1InkRoughness(_WallWetness, _WallWetness * 0.45, 0.08, 0.52);
+                float wet = _WallWetness;
+                float sheen = _WallWetness * 0.5;
+                float rough = saturate(1.0 - (_WallWetness * 0.6 + 0.2));
                 rough = clamp(rough + roughPerturb, 0.04, 0.95);
+                float smoothVal = saturate(1.0 - rough);
 
-                half3 envSpec = P1InkEnvSpecular(R, rough, NdotV) * (half)_WallEnvSpec;
+                // 直接太阳高光 (克制自然高光)
+                float shadowAtten = mainLight.shadowAttenuation;
+                float specPower = exp2(8.0 * smoothVal + 1.0);
+                float specNorm = (specPower + 8.0) / 8.0;
+                float directSpec = pow(NdotH, specPower) * specNorm * (0.04 + 0.10 * wet) * shadowAtten * saturate(NdotL * 2.0);
+                half3 directTerm = _MainLightColor.rgb * (half)directSpec;
+
+                // 双层清漆镜面高光 (P1InkCoatSpec)
+                directTerm += _MainLightColor.rgb * P1InkCoatSpec(NdotH, NdotV, shadowAtten, wet, sheen);
+
+                // 湿润薄缘 (P1InkWetRim)：队色提亮 + 清漆高光
+                float edgeBand = P1InkWetRim(inkSample.a, wet, sheen);
+                directTerm += _MainLightColor.rgb * (half)(edgeBand * 0.25 * _P1InkEdgeRimStrength * shadowAtten);
+                inkColor += coreInkColor * (half)(0.12 * edgeBand * _P1InkEdgeRimStrength * saturate(wet + sheen * 0.4));
+
+                // 直接光高光叠加上墙墨
+                inkColor += directTerm * coreMask;
+
+                // 全量环境反射（P1InkEnvSpecularFull，支持桌面 Cubemap 反射与掠射抑制）
+                float3 R = reflect(-V, N);
+                half3 envSpec = P1InkEnvSpecularFull(R, rough, NdotV, coreInkColor) * (half)_WallEnvSpec;
 
                 // 竖直立面防掠射糊白对策：
                 // 1. 在大掠射角（NdotV接近0）适度平滑衰减，防止整面大角度反光刺眼
@@ -246,7 +293,7 @@ Shader "P1/InkWall"
                 half3 specTint = lerp(half3(1.0, 1.0, 1.0), coreInkColor, 0.25);
                 half3 finalSpec = envSpec * specTint * lerp(0.45, 1.0, grazeDamp);
 
-                // 镜面高光叠加（随 _WallWetness 强度调制）
+                // 环境镜面高光叠加（随 _WallWetness 强度调制）
                 inkColor += finalSpec * coreMask * (half)(_WallWetness * 0.7 + 0.3);
 
                 // 掩体立面边界线（P17-A）：UV1 = (面宽, 面高) 米，到 quad 四条边的米距离取 min。

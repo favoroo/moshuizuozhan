@@ -18,6 +18,13 @@ namespace P1.Weapons
         public readonly float TrailVisualScale;
         public readonly float ImpactRippleScale;
 
+        /// <summary>后坐力/镜头冲击弹簧角频率（rad/s）：越大回弹越快，连发越「震」。</summary>
+        public readonly float SpringOmega;
+
+        /// <summary>镜头冲击热积累衰减率（/s）：越小持续连发时视轴后拉越明显。</summary>
+        public readonly float CameraKickDecayRate;
+
+        /// <summary>旧 9 参构造保留（跨系统调用方/测试无需迁移），弹簧参数回落小枪预设。</summary>
         public WeaponFeelParams(
             float recoilKickMeters,
             float recoilPitchDegrees,
@@ -28,6 +35,36 @@ namespace P1.Weapons
             float projectileVisualScale,
             float trailVisualScale,
             float impactRippleScale)
+            : this(
+                recoilKickMeters,
+                recoilPitchDegrees,
+                cameraKickMeters,
+                cameraKickRollDegrees,
+                cameraKickFovDegrees,
+                muzzleFlashScale,
+                projectileVisualScale,
+                trailVisualScale,
+                impactRippleScale,
+                DefaultSpringOmega,
+                DefaultCameraKickDecayRate)
+        {
+        }
+
+        private const float DefaultSpringOmega = 30f;
+        private const float DefaultCameraKickDecayRate = 8.5f;
+
+        public WeaponFeelParams(
+            float recoilKickMeters,
+            float recoilPitchDegrees,
+            float cameraKickMeters,
+            float cameraKickRollDegrees,
+            float cameraKickFovDegrees,
+            float muzzleFlashScale,
+            float projectileVisualScale,
+            float trailVisualScale,
+            float impactRippleScale,
+            float springOmega,
+            float cameraKickDecayRate)
         {
             RecoilKickMeters = recoilKickMeters;
             RecoilPitchDegrees = recoilPitchDegrees;
@@ -38,6 +75,8 @@ namespace P1.Weapons
             ProjectileVisualScale = projectileVisualScale;
             TrailVisualScale = trailVisualScale;
             ImpactRippleScale = impactRippleScale;
+            SpringOmega = springOmega;
+            CameraKickDecayRate = cameraKickDecayRate;
         }
     }
 
@@ -58,30 +97,30 @@ namespace P1.Weapons
             {
                 case WeaponKind.Roller:
                     // 挥击是单次大动作：武器模型明显下沉，镜头推一下
-                    return new WeaponFeelParams(0.075f, 5.6f, 0.050f, 0.30f, 0.90f, 1.15f, 1.15f, 1.10f, 1.25f);
+                    return new WeaponFeelParams(0.075f, 5.6f, 0.050f, 0.30f, 0.90f, 1.15f, 1.15f, 1.10f, 1.25f, 21f, 8.0f);
 
                 case WeaponKind.Charger:
-                    // 一枪定生死：最重的镜头冲击 + 最长枪口火光
-                    return new WeaponFeelParams(0.105f, 8.5f, 0.090f, 0.55f, 1.60f, 1.45f, 1.20f, 1.15f, 1.35f);
+                    // 一枪定生死：最重的镜头冲击 + 最长枪口火光（实际幅度按蓄力刻度缩放）
+                    return new WeaponFeelParams(0.105f, 8.5f, 0.090f, 0.55f, 1.60f, 1.45f, 1.20f, 1.15f, 1.35f, 19f, 6.5f);
 
                 case WeaponKind.Dualies:
-                    // 12~15 发/秒：冲击必须小到不干扰连续瞄准
-                    return new WeaponFeelParams(0.032f, 3.0f, 0.025f, 0.12f, 0.40f, 0.85f, 0.90f, 0.90f, 0.90f);
+                    // 12~15 发/秒：单发冲击小、弹簧频率高，连发读作「震」而不是「漂」
+                    return new WeaponFeelParams(0.032f, 3.0f, 0.025f, 0.12f, 0.40f, 0.85f, 0.90f, 0.90f, 0.90f, 39f, 9.0f);
 
                 case WeaponKind.Slosher:
-                    return new WeaponFeelParams(0.060f, 5.0f, 0.040f, 0.22f, 0.70f, 1.10f, 1.25f, 1.15f, 1.15f);
+                    return new WeaponFeelParams(0.060f, 5.0f, 0.040f, 0.22f, 0.70f, 1.10f, 1.25f, 1.15f, 1.15f, 28f, 7.5f);
 
                 case WeaponKind.Blaster:
                     // 慢速重弹：后坐与镜头冲击最接近「炮」
-                    return new WeaponFeelParams(0.095f, 7.5f, 0.085f, 0.50f, 1.50f, 1.40f, 1.35f, 1.20f, 1.40f);
+                    return new WeaponFeelParams(0.095f, 7.5f, 0.085f, 0.50f, 1.50f, 1.40f, 1.35f, 1.20f, 1.40f, 20f, 7.0f);
 
                 case WeaponKind.Splatling:
-                    // 15 发/秒弹雨：几乎没有单发后坐，靠弹丸速度拉伸表达火力
-                    return new WeaponFeelParams(0.018f, 1.8f, 0.012f, 0.07f, 0.22f, 0.80f, 0.85f, 0.95f, 0.75f);
+                    // 15 发/秒弹雨：单发幅度仍然低，但弹簧够快 + 镜头热积累，读作「持续压制」
+                    return new WeaponFeelParams(0.022f, 2.2f, 0.018f, 0.07f, 0.22f, 0.80f, 0.85f, 0.95f, 0.75f, 40f, 9.0f);
 
                 default:
                     // Spritzer：10 发/秒的基准手感
-                    return new WeaponFeelParams(0.045f, 3.8f, 0.035f, 0.16f, 0.55f, 1.00f, 1.00f, 1.00f, 1.00f);
+                    return new WeaponFeelParams(0.045f, 3.8f, 0.035f, 0.16f, 0.55f, 1.00f, 1.00f, 1.00f, 1.00f, 30f, 8.5f);
             }
         }
 
@@ -104,7 +143,9 @@ namespace P1.Weapons
                 Pick(config.muzzleFlashScale, preset.MuzzleFlashScale),
                 Pick(config.projectileVisualScale, preset.ProjectileVisualScale),
                 Pick(config.trailVisualScale, preset.TrailVisualScale),
-                Pick(config.impactRippleScale, preset.ImpactRippleScale));
+                Pick(config.impactRippleScale, preset.ImpactRippleScale),
+                Pick(config.feelSpringOmega, preset.SpringOmega),
+                Pick(config.cameraKickDecayRate, preset.CameraKickDecayRate));
         }
 
         private static float Pick(float overrideValue, float presetValue)
@@ -118,6 +159,21 @@ namespace P1.Weapons
     /// </summary>
     public static class WeaponFeelMath
     {
+        /// <summary>武器模型后坐力弹簧阻尼比：略低于临界，保留约 1.5% 的过冲让「这一下」更脆。</summary>
+        public const float RecoilDampingRatio = 0.8f;
+
+        /// <summary>镜头冲击弹簧阻尼比：临界阻尼，只冲不回弹，避免准星周围出现二次晃动。</summary>
+        public const float CameraKickDampingRatio = 1f;
+
+        /// <summary>
+        /// 蓄力刻度 → 手感强度倍率：点按（0.12）约 0.428，满蓄 1。
+        /// 对齐 INKWAVE 的 charger 后坐 `0.005 + charge*0.013` 的分层方式。
+        /// </summary>
+        public static float ShotStrengthScale(float strength01)
+        {
+            return 0.35f + 0.65f * Mathf.Clamp01(strength01);
+        }
+
         /// <summary>拉伸下限：低速抛物弹保持接近球形。</summary>
         public const float MinStretch = 0.9f;
 

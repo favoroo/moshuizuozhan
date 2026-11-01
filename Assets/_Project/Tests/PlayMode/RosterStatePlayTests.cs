@@ -139,7 +139,7 @@ namespace P1.Tests
             // 存活 + 大招就绪 → 几何风改为右上角黄色方块角标点亮（旋转金环已禁用）
             var targetWeapon = victim.GetComponent<WeaponController>();
             Assert.IsNotNull(targetWeapon, "队员应挂载 WeaponController");
-            targetWeapon.AddSpecialPoints(500);
+            targetWeapon.AddSpecialPointsRaw(500);
             Assert.IsTrue(targetWeapon.IsSpecialReady, "充能后大招应就绪");
 
             yield return new WaitForSeconds(0.6f);

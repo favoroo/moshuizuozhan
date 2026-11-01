@@ -7,7 +7,8 @@ namespace P1.Player
     /// - 潜行中按开火 → 立刻出枪；
     /// - 只松开开火、仍按住潜行键 → 自动回到潜行；
     /// - 手雷/大招（可用时）按下会打断潜行；
-    /// - 脚下没有己方墨水时潜行不生效，开火优先，避免按住 Shift 时按键失效。
+    /// - 是否允许潜行由调用方经 swimAvailable 传入（当前玩家侧恒为 true：对齐 Inkwave，
+    ///   无墨地面也允许乌贼形态，干地慢速蹦行），不满足时开火优先，避免按住 Shift 时按键失效。
     ///
     /// 丝滑进出水仲裁（带 deltaTime 的 Update 重载）：
     /// - 潜墨钻出人形的瞬间起 <see cref="EmergeTransitionTime"/>（默认 0.07s）快速过渡期内
@@ -80,7 +81,7 @@ namespace P1.Player
         /// <param name="fireHeld">开火键是否按住（左键 / 右扳机 / 触控按钮）。</param>
         /// <param name="bombPressed">本帧是否按下了手雷。</param>
         /// <param name="specialReadyPressed">本帧是否按下了已就绪的大招（未就绪不打断潜行）。</param>
-        /// <param name="swimAvailable">脚下是否具备潜行条件（己方墨水，或当前已在潜行）。</param>
+        /// <param name="swimAvailable">是否允许进入潜行（由调用方按当前策略传入；玩家侧干地也允许乌贼形态）。</param>
         /// <param name="specialLocked">是否正在释放大招（锁定人形动作）。</param>
         /// <param name="deltaTime">本帧时长（秒）。驱动出水过渡计时与开火缓冲衰减。</param>
         public void Update(

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<test-run id="2" testcasecount="1" result="Passed" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0" engine-version="3.5.0.0" clr-version="4.0.30319.42000" start-time="2026-10-31 05:41:14Z" end-time="2026-10-31 05:41:15Z" duration="0.5571414">
+  <test-suite type="TestSuite" id="1137" name="InkTurfDemo" fullname="InkTurfDemo" runstate="Runnable" testcasecount="101" result="Passed" start-time="2026-10-31 05:41:14Z" end-time="2026-10-31 05:41:15Z" duration="0.557141" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+    <properties>
+      <property name="platform" value="PlayMode" />
+    </properties>
+    <test-suite type="Assembly" id="1268" name="P1.Tests.PlayMode.dll" fullname="/Users/a1/Documents/01Code/Unity/P1/Library/ScriptAssemblies/P1.Tests.PlayMode.dll" runstate="Runnable" testcasecount="101" result="Passed" start-time="2026-10-31 05:41:14Z" end-time="2026-10-31 05:41:15Z" duration="0.551471" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+      <properties>
+        <property name="_PID" value="8249" />
+        <property name="_APPDOMAIN" value="Unity Child Domain" />
+        <property name="platform" value="PlayMode" />
+        <property name="EditorOnly" value="False" />
+      </properties>
+      <test-suite type="TestSuite" id="1269" name="P1" fullname="P1" runstate="Runnable" testcasecount="101" result="Passed" start-time="2026-10-31 05:41:14Z" end-time="2026-10-31 05:41:15Z" duration="0.537185" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+        <properties />
+        <test-suite type="TestSuite" id="1270" name="Tests" fullname="P1.Tests" runstate="Runnable" testcasecount="101" result="Passed" start-time="2026-10-31 05:41:14Z" end-time="2026-10-31 05:41:15Z" duration="0.520542" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+          <properties />
+          <test-suite type="TestFixture" id="1188" name="MobileLayoutCustomizerPlayTests" fullname="P1.Tests.MobileLayoutCustomizerPlayTests" classname="P1.Tests.MobileLayoutCustomizerPlayTests" runstate="Runnable" testcasecount="8" result="Passed" start-time="2026-10-31 05:41:14Z" end-time="2026-10-31 05:41:15Z" duration="0.503158" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+            <properties>
+              <property name="Category" value="UI" />
+            </properties>
+            <test-case id="1196" name="Customizer_VisualVerification_CaptureScreenshot" fullname="P1.Tests.MobileLayoutCustomizerPlayTests.Customizer_VisualVerification_CaptureScreenshot" methodname="Customizer_VisualVerification_CaptureScreenshot" classname="P1.Tests.MobileLayoutCustomizerPlayTests" runstate="Runnable" seed="713310289" result="Passed" start-time="2026-10-31 05:41:14Z" end-time="2026-10-31 05:41:15Z" duration="0.482660" asserts="0">
+              <properties>
+                <property name="_JOINTYPE" value="UnityCombinatorial" />
+                <property name="retryIteration" value="0" />
+                <property name="repeatIteration" value="0" />
+              </properties>
+              <output><![CDATA[Saving results to: /Users/a1/Library/Application Support/P1Studio/InkTurfDemo/TestResults.xml
+]]></output>
+            </test-case>
+          </test-suite>
+        </test-suite>
+      </test-suite>
+    </test-suite>
+  </test-suite>
+</test-run>

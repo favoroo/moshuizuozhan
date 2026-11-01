@@ -21,8 +21,8 @@ namespace P1.UI
         [Header("主题与配置")]
         [SerializeField] private UIThemeSO theme;
         [SerializeField] private int maxVisibleCards = 4;
-        [SerializeField] private float cardSpacing = 84f;
-        [SerializeField] private Vector2 cardSize = new Vector2(350f, 76f);
+        [SerializeField] private float cardSpacing = 96f;
+        [SerializeField] private Vector2 cardSize = new Vector2(400f, 88f);
 
         [Header("武器与技能图标库")]
         [SerializeField] private Sprite shooterIcon;
@@ -68,16 +68,16 @@ namespace P1.UI
         {
             if (_rectTransform == null) _rectTransform = GetComponent<RectTransform>();
 
-            // 默认定位在屏幕右侧、计时器与小地图下方（约 Y=-260）。
-            // 小地图框底边约 -250，起点再往上会让第一张击杀卡压住地图。
+            // 默认定位在屏幕右侧、计时器与小地图下方。
+            // 小地图 240×336、上边距 20 → 底边约 -356；击杀卡起点再下移 12px 避免压住地图。
             _rectTransform.anchorMin = new Vector2(1f, 1f);
             _rectTransform.anchorMax = new Vector2(1f, 1f);
             _rectTransform.pivot = new Vector2(1f, 1f);
             if (_rectTransform.anchoredPosition == Vector2.zero)
             {
-                _rectTransform.anchoredPosition = new Vector2(-20f, -260f);
+                _rectTransform.anchoredPosition = new Vector2(-20f, -368f);
             }
-            _rectTransform.sizeDelta = new Vector2(cardSize.x, 300f);
+            _rectTransform.sizeDelta = new Vector2(cardSize.x, 4f * cardSpacing);
         }
 
         private void LoadIconsIfNeeded()

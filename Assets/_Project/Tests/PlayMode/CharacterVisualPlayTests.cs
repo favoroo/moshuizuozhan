@@ -122,5 +122,51 @@ namespace P1.Tests
             Assert.IsFalse(motor.IsSwimming, "松开潜行后角色应脱离潜行");
             Assert.IsTrue(visual.KidRoot.activeSelf, "脱离潜行后人形态应重新可见");
         }
+
+        [UnityTest]
+        public IEnumerator Running_GaitCadenceTracksDistance()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            player.enabled = false; // 禁用外部输入覆盖，直接驱动 Motor
+
+            var motor = player.Motor;
+            var visual = player.GetComponentInChildren<CharacterVisualController>();
+            Assert.IsNotNull(motor);
+            Assert.IsNotNull(visual);
+
+            // 出生台按竞技规则不可涂色，移到可涂地主地面；中央走廊 (x≈0, z −11→−5) 无道具遮挡
+            var startSpot = new Vector3(0f, 0.1f, -11f);
+            var cc = player.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;
+            player.transform.position = startSpot;
+            player.transform.rotation = Quaternion.LookRotation(Vector3.forward);
+            if (cc != null) cc.enabled = true;
+            yield return null;
+
+            // P33 防滑契约（真骨骼长腿 0.433m）：满速 6m/s 下步频约 6.0Hz（≈1.2 次触地/米）。
+            int steps = 0;
+            System.Action<bool> onStep = _ => steps++;
+            visual.FootstepLanded += onStep;
+
+            Vector3 runDir = Vector3.forward;
+            float elapsed = 0f;
+            const float runDuration = 1.0f;
+            while (elapsed < runDuration)
+            {
+                motor.SetFrameIntent(runDir, runDir, false, false);
+                yield return null;
+                elapsed += Time.deltaTime;
+            }
+            visual.FootstepLanded -= onStep;
+
+            float distance = Vector3.Distance(startSpot, player.transform.position);
+            Assert.Greater(distance, 4f, "满速直跑 1 秒应前进 4m 以上（速度模型未被破坏）");
+            Assert.GreaterOrEqual(steps, 5, $"1 秒至少 5 次触地（6.0Hz 正常跑姿），实测 {steps} 次");
+            float contactsPerMeter = steps / Mathf.Max(0.1f, distance);
+            Assert.GreaterOrEqual(contactsPerMeter, 1.0f,
+                $"每米触地 {contactsPerMeter:F2} 次应 ≥1.0（P33 长腿真实跑姿）");
+        }
     }
 }

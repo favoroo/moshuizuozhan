@@ -71,6 +71,7 @@ namespace P1.Ink
             }
 
             var registered = new HashSet<Renderer>();
+            var blockedSet = new HashSet<Collider>();
             if (surface != null)
             {
                 IReadOnlyList<Renderer> list = surface.InkableSurfaceRenderers;
@@ -79,6 +80,15 @@ namespace P1.Ink
                     for (int i = 0; i < list.Count; i++)
                     {
                         if (list[i] != null) registered.Add(list[i]);
+                    }
+                }
+
+                IReadOnlyList<Collider> bList = surface.BlockedColliders;
+                if (bList != null)
+                {
+                    for (int i = 0; i < bList.Count; i++)
+                    {
+                        if (bList[i] != null) blockedSet.Add(bList[i]);
                     }
                 }
             }
@@ -99,6 +109,11 @@ namespace P1.Ink
                     GameObject go = col.gameObject;
                     if (WhitelistedNames.Contains(go.name))
                         continue;
+                    // 出生台台阶：踏面由 ArenaGeometryBuilder 注册进 inkableSurfaceRenderers 走顶视墨迹图集；
+                    // 每级踢面只有 0.24m 高，按性能约定不挂 InkWallSurface（避免 20×4 张运行时立面贴图），
+                    // 因此审计不再要求它额外具备立面墨面。
+                    if (go.name.StartsWith("Ramp_SpawnStair_", System.StringComparison.Ordinal))
+                        continue;
 
                     Renderer ownRenderer = go.GetComponent<Renderer>();
                     // 纯拦截体：没有渲染器也没有墨面 —— 不产生可视表面，跳过
@@ -109,12 +124,27 @@ namespace P1.Ink
 
                     // 1) 立面受墨
                     if (HasSideInk(go))
+                    {
+                        // 统一计分口径告警：若顶视图材质可受墨（如 PropLit / ObstacleDitherLit），但已被注册进 blockedColliders 名单
+                        // （例如木箱/花坛实体道具），记录为提示（顶面不计分），不算作违规
+                        Renderer top = FindTopInkRenderer(go, registered);
+                        if (top != null && blockedSet.Contains(col))
+                        {
+                            warnings?.Add($"{DescribePath(go)}: 顶视图材质可受墨但已注册进 blockedColliders 名单（实体掩体顶面不计分）");
+                        }
                         continue;
+                    }
 
                     // 2) 顶面受墨
                     Renderer topRenderer = FindTopInkRenderer(go, registered);
                     if (topRenderer != null)
                     {
+                        if (blockedSet.Contains(col))
+                        {
+                            warnings?.Add($"{DescribePath(go)}: 顶视图材质可受墨但已注册进 blockedColliders 名单（实体掩体顶面不计分）");
+                            continue;
+                        }
+
                         if (!registered.Contains(topRenderer))
                         {
                             warnings?.Add($"{DescribePath(go)}: 顶面着色器 {topRenderer.sharedMaterial.shader.name} 可受墨，但渲染器未注册进 inkableSurfaceRenderers");

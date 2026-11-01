@@ -35,6 +35,12 @@ namespace P1.UI
         /// <summary>平滑缓出：cubic-bezier(.22, 1, .36, 1)。</summary>
         public static UICubicBezier EaseOut => new UICubicBezier(0.22f, 1f, 0.36f, 1f);
 
+        /// <summary>
+        /// t-1 入场 Back-Out：cubic-bezier(.34, 1.56, .64, 1)。
+        /// 起步快、落点前轻微过冲再收回，用于 0.22s 的卡片/标题 pop-in。
+        /// </summary>
+        public static UICubicBezier BackOut => new UICubicBezier(0.34f, 1.56f, 0.64f, 1f);
+
         /// <summary>平滑缓入：cubic-bezier(.6, 0, .8, .25)。</summary>
         public static UICubicBezier EaseIn => new UICubicBezier(0.6f, 0f, 0.8f, 0.25f);
 

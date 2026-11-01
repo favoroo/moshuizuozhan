@@ -48,6 +48,7 @@ Shader "P1/InkBody"
 
             #pragma multi_compile _ DOTS_INSTANCING_ON
             #pragma multi_compile_instancing
+            #pragma multi_compile _ P1_INK_HIGH
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #pragma multi_compile_fog
@@ -144,14 +145,20 @@ Shader "P1/InkBody"
                 half trans = (half)(pow(transDot, 3.2) * _BacklightTransmittance);
                 diffuseCol += baseColor * trans * 1.6;
 
-                // 太阳高光 + P1InkEnvSpecular 环境反射
+                // 太阳高光 + P1InkEnvSpecularFull 环境反射 + 双层清漆高光
                 float3 R = reflect(-V, N);
                 float rough = lerp(_DryGloss, _WetGloss, 0.9);
-                half3 envSpec = P1InkEnvSpecular(R, rough, NdotV) * (half)_EnvSpec;
+                half3 envSpec = P1InkEnvSpecularFull(R, rough, NdotV, baseColor) * (half)_EnvSpec;
 
                 // 队色纯度保护：镜面高光染上队伍底色，强光下不发白洗脱颜色
                 half3 specTint = lerp(half3(1.0, 1.0, 1.0), baseColor, (half)_SpecTintFactor);
                 half3 finalSpec = envSpec * specTint;
+
+                // 清漆高光（湿墨权重 0.9，轻微染色保持色纯）
+                float3 H = normalize(L + V);
+                float NdotH = saturate(dot(N, H));
+                half3 coatSpec = _MainLightColor.rgb * P1InkCoatSpec(NdotH, NdotV, mainLight.shadowAttenuation, 0.9, 0.4);
+                finalSpec += coatSpec * specTint * 0.75;
 
                 half3 finalRgb = diffuseCol + finalSpec;
                 finalRgb = MixFog(finalRgb, input.fogFactor);

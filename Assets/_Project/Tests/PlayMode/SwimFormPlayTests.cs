@@ -135,16 +135,29 @@ namespace P1.Tests
 
             // --- 4 根触须逐根行波：相邻触须旋转姿态应互不相同 ---
             Assert.GreaterOrEqual(tentaclesRoot.childCount, 4, "应存在 4 根拖尾触须");
-            Quaternion t0 = tentaclesRoot.GetChild(0).localRotation;
-            Quaternion t1 = tentaclesRoot.GetChild(1).localRotation;
-            Quaternion t2 = tentaclesRoot.GetChild(2).localRotation;
-            Quaternion t3 = tentaclesRoot.GetChild(3).localRotation;
-            float q01 = Mathf.Abs(Quaternion.Dot(t0, t1));
-            float q02 = Mathf.Abs(Quaternion.Dot(t0, t2));
-            float q03 = Mathf.Abs(Quaternion.Dot(t0, t3));
-            Assert.Less(q01, 0.9999f, "相邻触须应因相位差呈现不同旋转（根→尖行波近似）");
-            Assert.Less(q02, 0.9999f);
-            Assert.Less(q03, 0.9999f);
+            // 单帧采样可能正撞上行波相位重合（相邻触须姿态瞬时接近），
+            // 连续采样多帧取「差异最大」的一帧，验证相位差确实存在。
+            float minQ01 = 1f;
+            float minQ02 = 1f;
+            float minQ03 = 1f;
+            for (int i = 0; i < 12; i++)
+            {
+                KeepOnInk(player);
+                player.Motor.SetFrameIntent(Vector3.forward, Vector3.forward, true, false);
+                yield return null;
+
+                Quaternion t0 = tentaclesRoot.GetChild(0).localRotation;
+                Quaternion t1 = tentaclesRoot.GetChild(1).localRotation;
+                Quaternion t2 = tentaclesRoot.GetChild(2).localRotation;
+                Quaternion t3 = tentaclesRoot.GetChild(3).localRotation;
+                minQ01 = Mathf.Min(minQ01, Mathf.Abs(Quaternion.Dot(t0, t1)));
+                minQ02 = Mathf.Min(minQ02, Mathf.Abs(Quaternion.Dot(t0, t2)));
+                minQ03 = Mathf.Min(minQ03, Mathf.Abs(Quaternion.Dot(t0, t3)));
+            }
+
+            Assert.Less(minQ01, 0.9999f, "相邻触须应因相位差呈现不同旋转（根→尖行波近似）");
+            Assert.Less(minQ02, 0.9999f);
+            Assert.Less(minQ03, 0.9999f);
         }
 
         [UnityTest]

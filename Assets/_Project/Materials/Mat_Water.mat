@@ -25,9 +25,14 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
+    - _FoamStrength: 0.65
+    - _GlitterStrength: 0.72
+    - _GlitterThreshold: 0.972
+    - _ShoreDistance: 12
+    - _WaveNormalStrength: 0.36
     - _WaveScale: 1
-    - _WaveSpeed: 0.15
-    - _WaveStrength: 0.25
+    - _WaveSpeed: 0.18
+    - _WaveStrength: 0.35
     m_Colors:
     - _DeepColor: {r: 0.0039359396, g: 0.046964195, b: 0.10653924, a: 1}
     - _HorizonColor: {r: 0.3931232, g: 0.5704816, b: 0.67385954, a: 1}

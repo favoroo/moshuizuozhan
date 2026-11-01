@@ -10,10 +10,12 @@ using UnityEngine.Rendering;
 namespace P1.Editor
 {
     /// <summary>
-    /// 竞技场场景装饰与港口远景构建器（P7-B）：
+    /// 竞技场场景装饰与港口远景构建器（P7-B / P30 视觉精修）：
     /// 负责按 ArenaLayoutV2 数据与 ArenaStyleSO 风格，生成合并网格资产并保存至磁盘，
-    /// 并在场景中装配静态近景道具（4 材质合并 + 墙面横幅）与港口远景（码头基座、水面、集装箱堆场、岸桥、货船、城市剪影）。
-    /// 完全兼容 URP 与 SRP Batcher，全场 draw call 增量受控在 ~8 次以内。
+    /// 并在场景中装配静态近景道具（4 材质合并 + 墙面横幅）与港口远景。
+    /// 升级为三层纵深港口远景：大型黄色岸桥群（含 CARGO 标识、黄黑警示条、起吊姿态）、
+    /// 三排进深集装箱堆场、货船（带甲板吊杆）、远景悬索桥剪影、海岛双层绿丘与海滨城市剪影。
+    /// 完全兼容 URP 与 SRP Batcher，全场 draw call 受控。
     /// </summary>
     public static class ArenaDecorationBuilder
     {
@@ -25,7 +27,7 @@ namespace P1.Editor
         /// <summary>
         /// 构建场内地表道具与边界墙横幅，合并为 4 个材质子网格 + 1 个横幅网格。
         /// </summary>
-        public static GameObject Build(Transform parent, ArenaStyleSO style, ArenaMaterialSet mats)
+        public static GameObject Build(Transform parent, ArenaStyleSO style, ArenaMaterialSet mats, List<Collider> blockedColliders = null)
         {
             var decorRoot = new GameObject("Arena_Decor");
             if (parent != null)
@@ -40,8 +42,6 @@ namespace P1.Editor
             // 实体掩体与纯装饰分开合批。实体掩体（木箱/花坛/售卖亭）不再使用合并网格的
             // MeshCollider：改为每个道具一个盒碰撞代理 + InkWallSurface（见 CreateInkPropProxy），
             // 这样弹丸命中时能把墨涂在对应立面上，而不是穿透到地面。
-            // 锥桶、系缆桩、旗杆、墙顶空调与管线这类细杆件仍不带碰撞：
-            // 它们会把 1.25m 高的角色胶囊顶住，同时挡子弹、切碎 Bot 寻路。
             var matteSolidBucket = new MeshCombiner();
             var metalSolidBucket = new MeshCombiner();
             var matteDecorBucket = new MeshCombiner();
@@ -116,13 +116,17 @@ namespace P1.Editor
                 }
 
                 // 实体道具：每个道具一个盒碰撞代理 + 四面可涂墨面。
-                // 旋转盒必须用朝向盒建面（见 InkWallSurface.ConfigureOrientedBox），
-                // 用世界 AABB 会让旋转木箱/花坛的墨片悬在四个角外。
                 if (solid && hasSolidBounds)
                 {
-                    CreateInkPropProxy(decorRoot.transform, prop, rot, solidBounds, mats, inkCfg, proxySerial++);
+                    CreateInkPropProxy(decorRoot.transform, prop, rot, solidBounds, mats, inkCfg, proxySerial++, blockedColliders);
                 }
             }
+
+            var pal = new BackdropPalette(style);
+
+            // 1.1 场内轻量纯装饰增强（贴墙配电箱、走线管、死角电缆盘、售卖亭圆凳与垃圾桶）
+            // 全走 MeshCombiner，无 Collider、无 InkWallSurface，严守通道与坡道安全。
+            BuildInArenaDecorations(matteDecorBucket, metalDecorBucket, density, pal);
 
             // 2. 生成并保存 6 个合并网格资产
             Mesh matteMesh = matteSolidBucket.BuildMesh("arena_decor_matte");
@@ -139,8 +143,7 @@ namespace P1.Editor
             SaveAsset(emissiveMesh, $"{MeshFolder}/arena_decor_emissive.asset");
             SaveAsset(clothMesh, $"{MeshFolder}/arena_decor_cloth.asset");
 
-            // 3. 创建子渲染对象 (近景装饰阴影开启；碰撞与涂墨由每个实体道具的盒代理负责，
-            //    合并网格不再挂 MeshCollider —— 否则弹丸命中合并网格找不到对应的 InkWallSurface)
+            // 3. 创建子渲染对象 (近景装饰阴影开启；碰撞与涂墨由每个实体道具的盒代理负责)
             CreateRendererChild(decorRoot.transform, "Decor_Matte", matteMesh, mats?.propMatte ?? mats?.concrete, true, false);
             CreateRendererChild(decorRoot.transform, "Decor_Metal", metalMesh, mats?.propMetal ?? mats?.steel, true, false);
             CreateRendererChild(decorRoot.transform, "Decor_Matte_Thin", matteDecorMesh, mats?.propMatte ?? mats?.concrete, true, false);
@@ -148,8 +151,8 @@ namespace P1.Editor
             CreateRendererChild(decorRoot.transform, "Decor_Emissive", emissiveMesh, mats?.propEmissive ?? mats?.propMatte, true, false);
             CreateRendererChild(decorRoot.transform, "Decor_Cloth", clothMesh, mats?.propCloth ?? mats?.propMatte, true, false);
 
-            // 4. 边界墙内侧图集横幅 (6-8 个 Quad，独占 mats.bannerAtlas)
-            Mesh bannersMesh = BuildWallBannersMesh();
+            // 4. 边界墙内侧图集横幅 (12 个 Banner，含折角造型与安装挂梁)
+            Mesh bannersMesh = BuildWallBannersMesh(metalDecorBucket, pal);
             SaveAsset(bannersMesh, $"{MeshFolder}/arena_banners.asset");
             CreateRendererChild(decorRoot.transform, "Banners", bannersMesh, mats?.bannerAtlas ?? mats?.propMatte, false);
 
@@ -157,7 +160,7 @@ namespace P1.Editor
         }
 
         /// <summary>
-        /// 构建港口远景（码头基座、水面、集装箱堆场、岸桥、货船、城市剪影）。
+        /// 构建港口远景（码头基座、水面、集装箱堆场、岸桥、货船、悬索桥、城市绿丘剪影）。
         /// 无 Collider、无阴影投放与接收、静态合批。
         /// </summary>
         public static GameObject BuildBackdrop(Transform parent, ArenaStyleSO style, ArenaMaterialSet mats)
@@ -186,20 +189,23 @@ namespace P1.Editor
             var matteBucket = new MeshCombiner();
             var metalBucket = new MeshCombiner();
 
-            // 2.1 码头混凝土高台基座 (52 x 1.1 x 68m, 顶面 y=-0.15)
-            BuildPierBase(matteBucket, palette);
+            // 2.1 码头混凝土高台基座 (74 x 1.2 x 84m，边缘护舷、系船柱、登船梯)
+            BuildPierBase(matteBucket, metalBucket, palette);
 
-            // 2.2 场外集装箱堆场 (24 组 1-3 层集装箱堆叠)
-            BuildContainerYards(matteBucket, palette);
+            // 2.2 场外集装箱堆场 (3 排进深层次，前排鲜艳，后排压暗，走廊分明)
+            BuildContainerYards(matteBucket, metalBucket, palette);
 
-            // 2.3 岸桥/龙门吊 (4 座黄色桁架剪影，高 16m，位于外场四角)
-            BuildGantryCranes(metalBucket, palette);
+            // 2.3 岸桥/大型集装箱龙门吊 (4 座黄色钢构桁架，高 25m，含 CARGO 标识、黄黑警示条、起吊集装箱)
+            BuildGantryCranes(metalBucket, matteBucket, palette);
 
-            // 2.4 仓库 4 座 + 货船 2 艘
+            // 2.4 仓库 4 座 + 货船 3 艘 (含甲板起重机与深色船体)
             BuildWarehousesAndShips(matteBucket, metalBucket, palette);
 
-            // 2.5 远景城市剪影 24 座方块 + 低多边形山丘 8 座 (半径 78-94m)
-            BuildCityAndHills(matteBucket, palette);
+            // 2.5 远景悬索桥剪影 (跨度 190m，双塔 + 主缆 + 吊杆)
+            BuildSuspensionBridge(matteBucket, metalBucket, palette);
+
+            // 2.6 远景城市剪影 + 双层绿丘 + 灯塔 + 水塔 + 帆船
+            BuildCityAndHills(matteBucket, metalBucket, palette);
 
             // 3. 保存合并资产并创建子物体
             Mesh matteMesh = matteBucket.BuildMesh("arena_backdrop_matte");
@@ -217,37 +223,65 @@ namespace P1.Editor
 
         #region 边界墙横幅网格生成
         /// <summary>
-        /// 在边界墙内侧生成 8 个横幅 Quad，分 4 个 UV 图集区域。
-        /// 距墙面只留 4mm：墨迹立面 Quad 在墙外 10mm 处，涂墨后墨会盖住横幅，
-        /// 不再出现"横幅挡在墨前面、打了看不见"的死角（未涂区域仍能看到横幅）。
+        /// 在边界墙内侧生成 12 个横幅，分 4 个 UV 图集区域。
+        /// 带有旗面底角折角造型与顶部金属挂杆。
+        /// 距墙面只留 4mm：墨迹立面 Quad 在墙外 10mm 处，涂墨后墨会盖住横幅。
         /// </summary>
-        private static Mesh BuildWallBannersMesh()
+        private static Mesh BuildWallBannersMesh(MeshCombiner metalComb = null, BackdropPalette? pal = null)
         {
             var combiner = new MeshCombiner();
-            float w = 6.0f;
-            float h = 2.4f;
-            float cy = 1.2f;
+            float w = 5.2f;
+            float h = 2.2f;
+            float cy = 1.35f;
             const float bannerOffset = 0.004f;
 
-            // 北墙内侧 (z=+28.0，朝 -Z，正常墙高足够)
+            void PlaceBanner(Vector3 center, Vector3 normal, int atlasIndex)
+            {
+                AddBannerQuad(combiner, center, w, h, normal, atlasIndex);
+                if (metalComb != null && pal.HasValue)
+                {
+                    AddBannerMountingRails(metalComb, center, w, h, normal, pal.Value);
+                }
+            }
+
+            // 北墙内侧 (z=+28.0 - bannerOffset，朝 -Z，正常墙高 3.0m，4 面横幅富有韵律)
             float northZ = 28.0f - bannerOffset;
-            AddBannerQuad(combiner, new Vector3(-8.0f, cy, northZ), w, h, Vector3.back, 0);
-            AddBannerQuad(combiner, new Vector3(8.0f, cy, northZ), w, h, Vector3.back, 1);
+            PlaceBanner(new Vector3(-13.0f, cy, northZ), Vector3.back, 2);
+            PlaceBanner(new Vector3(-5.0f,  cy, northZ), Vector3.back, 0);
+            PlaceBanner(new Vector3(5.0f,   cy, northZ), Vector3.back, 1);
+            PlaceBanner(new Vector3(13.0f,  cy, northZ), Vector3.back, 3);
 
-            // 西墙内侧 (x=-20.0，朝 +X)
+            // 西墙内侧 (x=-20.0 + bannerOffset，朝 +X)
             float westX = -20.0f + bannerOffset;
-            AddBannerQuad(combiner, new Vector3(westX, cy, -14.0f), w, h, Vector3.right, 2);
-            AddBannerQuad(combiner, new Vector3(westX, cy, 0.0f), w, h, Vector3.right, 3);
-            AddBannerQuad(combiner, new Vector3(westX, cy, 14.0f), w, h, Vector3.right, 0);
+            PlaceBanner(new Vector3(westX, cy, -18.0f), Vector3.right, 0);
+            PlaceBanner(new Vector3(westX, cy, -6.0f),  Vector3.right, 1);
+            PlaceBanner(new Vector3(westX, cy, 6.0f),   Vector3.right, 2);
+            PlaceBanner(new Vector3(westX, cy, 18.0f),  Vector3.right, 3);
 
-            // 东墙内侧 (x=+20.0，朝 -X)
+            // 东墙内侧 (x=+20.0 - bannerOffset，朝 -X)
             float eastX = 20.0f - bannerOffset;
-            AddBannerQuad(combiner, new Vector3(eastX, cy, -14.0f), w, h, Vector3.left, 1);
-            AddBannerQuad(combiner, new Vector3(eastX, cy, 0.0f), w, h, Vector3.left, 2);
-            AddBannerQuad(combiner, new Vector3(eastX, cy, 14.0f), w, h, Vector3.left, 3);
+            PlaceBanner(new Vector3(eastX, cy, -18.0f), Vector3.left, 2);
+            PlaceBanner(new Vector3(eastX, cy, -6.0f),  Vector3.left, 3);
+            PlaceBanner(new Vector3(eastX, cy, 6.0f),   Vector3.left, 0);
+            PlaceBanner(new Vector3(eastX, cy, 18.0f),  Vector3.left, 1);
 
             // 南墙为矮围墙 (0.35m)，按契约跳过
             return combiner.BuildMesh("arena_banners");
+        }
+
+        private static void AddBannerMountingRails(MeshCombiner metalComb, Vector3 center, float width, float height, Vector3 normal, BackdropPalette pal)
+        {
+            Vector3 right = Vector3.Cross(normal, Vector3.up).normalized;
+            Vector3 up = Vector3.up;
+
+            Vector3 topCenter = center + up * (height * 0.5f + 0.04f);
+            // 挂杆横梁
+            metalComb.AddBox(topCenter, new Vector3(width + 0.35f, 0.07f, 0.05f), pal.SteelDark, Quaternion.LookRotation(normal));
+            // 墙面固定扣
+            Vector3 b1 = topCenter - right * (width * 0.45f) - normal * 0.02f;
+            Vector3 b2 = topCenter + right * (width * 0.45f) - normal * 0.02f;
+            metalComb.AddBox(b1, new Vector3(0.08f, 0.12f, 0.08f), pal.Steel, Quaternion.LookRotation(normal));
+            metalComb.AddBox(b2, new Vector3(0.08f, 0.12f, 0.08f), pal.Steel, Quaternion.LookRotation(normal));
         }
 
         private static void AddBannerQuad(MeshCombiner comb, Vector3 center, float width, float height, Vector3 normal, int atlasIndex)
@@ -266,25 +300,233 @@ namespace P1.Editor
             Vector3 halfR = right * (width * 0.5f);
             Vector3 halfU = up * (height * 0.5f);
 
-            Vector3 vtx0 = center - halfR - halfU;
-            Vector3 vtx1 = center + halfR - halfU;
-            Vector3 vtx2 = center + halfR + halfU;
-            Vector3 vtx3 = center - halfR + halfU;
+            // 右下角做折角切口 (35cm)
+            float cut = 0.35f;
+            float uCut = (cut / width) * 0.5f;
+            float vCut = (cut / height) * 0.5f;
 
-            comb.AddQuadRaw(vtx0, vtx1, vtx2, vtx3, normal,
-                new Vector2(u0, v0), new Vector2(u1, v0), new Vector2(u1, v1), new Vector2(u0, v1), Color.white);
+            Vector3 c0 = center - halfR - halfU;
+            Vector3 v1a = center + halfR - halfU - right * cut;
+            Vector3 v1b = center + halfR - halfU + up * cut;
+            Vector3 v2 = center + halfR + halfU;
+            Vector3 v3 = center - halfR + halfU;
+
+            Vector2 uv0 = new Vector2(u0, v0);
+            Vector2 uv1a = new Vector2(u1 - uCut, v0);
+            Vector2 uv1b = new Vector2(u1, v0 + vCut);
+            Vector2 uv2 = new Vector2(u1, v1);
+            Vector2 uv3 = new Vector2(u0, v1);
+
+            // 主体分为 2 个四边形平铺拼合，保持 UV 映射严格无拉伸
+            Vector3 vTopCut = center + halfR + halfU - right * cut;
+            Vector2 uvTopCut = new Vector2(u1 - uCut, v1);
+
+            comb.AddQuadRaw(c0, v1a, vTopCut, v3, normal, uv0, uv1a, uvTopCut, uv3, Color.white);
+            comb.AddQuadRaw(v1a, v1b, v2, vTopCut, normal, uv1a, uv1b, uv2, uvTopCut, Color.white);
+
+            // 折角面：折向内侧稍凸起 6mm，带背面阴影色
+            Vector3 vFoldApex = center + halfR - halfU - right * (cut * 0.3f) + up * (cut * 0.7f) + normal * 0.006f;
+            Vector2 uvFoldApex = new Vector2(u1 - uCut * 0.5f, v0 + vCut * 0.5f);
+            Color foldColor = new Color(0.72f, 0.72f, 0.72f, 1f);
+
+            Vector3 foldNorm = (normal + right * 0.2f - up * 0.2f).normalized;
+            int start = comb.Vertices.Count;
+            comb.Vertices.Add(v1a);
+            comb.Vertices.Add(v1b);
+            comb.Vertices.Add(vFoldApex);
+            comb.Normals.Add(foldNorm);
+            comb.Normals.Add(foldNorm);
+            comb.Normals.Add(foldNorm);
+            comb.UVs.Add(uv1a);
+            comb.UVs.Add(uv1b);
+            comb.UVs.Add(uvFoldApex);
+
+            Color linFold = QualitySettings.activeColorSpace == ColorSpace.Linear ? foldColor.linear : foldColor;
+            comb.Colors.Add(linFold);
+            comb.Colors.Add(linFold);
+            comb.Colors.Add(linFold);
+
+            comb.Triangles.Add(start);
+            comb.Triangles.Add(start + 1);
+            comb.Triangles.Add(start + 2);
+        }
+        #endregion
+
+        #region 场内轻量纯装饰增强
+        /// <summary>
+        /// 场内轻量纯装饰：贴墙配电箱、金属走线管、死角电缆盘、售卖亭周边圆凳与分类垃圾桶。
+        /// 无 Collider、无 InkWallSurface，严格贴墙/贴道具死角放置，绝不阻挡通道与坡道。
+        /// </summary>
+        private static void BuildInArenaDecorations(
+            MeshCombiner matteComb,
+            MeshCombiner metalComb,
+            float density,
+            BackdropPalette pal)
+        {
+            // 1. 贴墙配电箱与金属走线管 (6 处：西墙 2、东墙 2、北墙 2)
+            // 贴附在边界墙内侧（y=1.25m，厚仅 0.14m，不占用行走主干，无法站立）
+            var boxSpecs = new[]
+            {
+                new { pos = new Vector3(-19.92f, 1.25f, -12.0f), rot = Quaternion.Euler(0f, 90f, 0f) },
+                new { pos = new Vector3(-19.92f, 1.25f, 12.0f),  rot = Quaternion.Euler(0f, 90f, 0f) },
+                new { pos = new Vector3(19.92f, 1.25f, -12.0f),  rot = Quaternion.Euler(0f, -90f, 0f) },
+                new { pos = new Vector3(19.92f, 1.25f, 12.0f),   rot = Quaternion.Euler(0f, -90f, 0f) },
+                new { pos = new Vector3(-17.5f, 1.25f, 27.92f),  rot = Quaternion.Euler(0f, 180f, 0f) },
+                new { pos = new Vector3(17.5f, 1.25f, 27.92f),   rot = Quaternion.Euler(0f, 180f, 0f) },
+            };
+
+            for (int i = 0; i < boxSpecs.Length; i++)
+            {
+                var spec = boxSpecs[i];
+                // 混凝土/工业灰箱体
+                matteComb.AddBox(spec.pos, new Vector3(0.44f, 0.65f, 0.14f), pal.ConcreteMid, spec.rot);
+                // 箱门与把手
+                metalComb.AddBox(spec.pos + spec.rot * new Vector3(0f, 0f, 0.08f), new Vector3(0.38f, 0.58f, 0.02f), pal.SteelDark, spec.rot);
+                // 警示小黄标
+                matteComb.AddBox(spec.pos + spec.rot * new Vector3(0f, 0.12f, 0.09f), new Vector3(0.12f, 0.12f, 0.01f), pal.HazardYellow, spec.rot);
+                // 向上延伸至墙顶的镀锌导管
+                float pipeLen = 2.85f - (spec.pos.y + 0.325f);
+                Vector3 pipeCenter = spec.pos + spec.rot * new Vector3(0f, 0.325f + pipeLen * 0.5f, 0.04f);
+                metalComb.AddBox(pipeCenter, new Vector3(0.04f, pipeLen, 0.04f), pal.Steel, spec.rot);
+            }
+
+            // 移动端低密度裁剪散件
+            if (density < 0.99f) return;
+
+            // 2. 木制电缆盘 (2 处，位于北墙阶梯侧翼与南墙角落死角)
+            Vector3[] spoolPositions =
+            {
+                new Vector3(-18.5f, 0.45f, 25.5f),
+                new Vector3(18.5f, 0.45f, -25.5f)
+            };
+            for (int i = 0; i < spoolPositions.Length; i++)
+            {
+                Vector3 sp = spoolPositions[i];
+                // 两个大圆木盘法兰
+                matteComb.AddCylinder(sp + new Vector3(-0.22f, 0f, 0f), 0.45f, 0.05f, 10, pal.Wood, Quaternion.Euler(0f, 0f, 90f));
+                matteComb.AddCylinder(sp + new Vector3(0.18f, 0f, 0f), 0.45f, 0.05f, 10, pal.Wood, Quaternion.Euler(0f, 0f, 90f));
+                // 中间缠线轴心
+                matteComb.AddCylinder(sp + new Vector3(-0.17f, 0f, 0f), 0.22f, 0.35f, 8, pal.WoodDark, Quaternion.Euler(0f, 0f, 90f));
+            }
+
+            // 3. 售卖亭周边圆凳与垃圾桶 (Kiosk 位于 (-8.5, 0, -21.0) 与 (8.5, 0, 21.0))
+            Vector3[] kioskOffsets =
+            {
+                new Vector3(-8.5f, 0f, -21.0f),
+                new Vector3(8.5f, 0f, 21.0f)
+            };
+            for (int k = 0; k < kioskOffsets.Length; k++)
+            {
+                float sign = (k == 0) ? 1f : -1f;
+                Vector3 kPos = kioskOffsets[k];
+
+                // 圆凳 2 只 (贴售卖亭侧面)
+                Vector3[] stoolLocs =
+                {
+                    kPos + new Vector3(sign * 1.4f, 0f, sign * 0.8f),
+                    kPos + new Vector3(sign * 1.4f, 0f, sign * -0.6f)
+                };
+                for (int s = 0; s < stoolLocs.Length; s++)
+                {
+                    Vector3 st = stoolLocs[s];
+                    // 金属底盘 + 立柱
+                    metalComb.AddCylinder(st, 0.18f, 0.03f, 8, pal.SteelDark);
+                    metalComb.AddCylinder(st, 0.04f, 0.40f, 6, pal.Steel);
+                    // 软垫座面 (高 0.45m，不可作为攀爬阶梯)
+                    matteComb.AddCylinder(st + new Vector3(0f, 0.40f, 0f), 0.20f, 0.08f, 10, pal.ContainerMustard);
+                }
+
+                // 小型分类垃圾桶 (置于售卖亭后角)
+                Vector3 binPos = kPos + new Vector3(sign * -1.3f, 0f, sign * -0.7f);
+                metalComb.AddCylinder(binPos, 0.22f, 0.60f, 8, pal.SteelDark);
+                matteComb.AddBox(binPos + new Vector3(0f, 0.61f, 0f), new Vector3(0.46f, 0.06f, 0.46f), pal.ContainerTeal);
+            }
         }
         #endregion
 
         #region 远景各模块生成
         /// <summary>
-        /// 码头基座：64x1.1x76m 混凝土基座，顶面 y=-0.15，彻底托住两翼集装箱堆场。
+        /// 码头基座：74x1.2x84m 混凝土基座，顶面 y=-0.15，边缘护舷、系船柱与登船梯。
         /// </summary>
-        private static void BuildPierBase(MeshCombiner comb, BackdropPalette pal)
+        private static void BuildPierBase(MeshCombiner matteComb, MeshCombiner metalComb, BackdropPalette pal)
         {
-            Vector3 sz = new Vector3(64f, 1.1f, 76f);
-            Vector3 center = new Vector3(0f, -0.70f, 0f);
-            comb.AddBox(center, sz, pal.ConcreteDark);
+            // 主码头大板
+            Vector3 sz = new Vector3(74f, 1.2f, 84f);
+            Vector3 center = new Vector3(0f, -0.75f, 2f);
+            matteComb.AddBox(center, sz, pal.ConcreteDark);
+
+            // 边缘混凝土压顶 (沿四周边缘凸出)
+            float halfX = sz.x * 0.5f;
+            float halfZ = sz.z * 0.5f;
+            float topY = -0.15f;
+            float curbH = 0.12f;
+            float curbW = 0.65f;
+
+            matteComb.AddBox(new Vector3(0f, topY + curbH * 0.5f, center.z - halfZ + curbW * 0.5f), new Vector3(sz.x, curbH, curbW), pal.ConcreteMid);
+            matteComb.AddBox(new Vector3(0f, topY + curbH * 0.5f, center.z + halfZ - curbW * 0.5f), new Vector3(sz.x, curbH, curbW), pal.ConcreteMid);
+            matteComb.AddBox(new Vector3(-halfX + curbW * 0.5f, topY + curbH * 0.5f, center.z), new Vector3(curbW, curbH, sz.z), pal.ConcreteMid);
+            matteComb.AddBox(new Vector3(halfX - curbW * 0.5f, topY + curbH * 0.5f, center.z), new Vector3(curbW, curbH, sz.z), pal.ConcreteMid);
+
+            // 码头边缘橡胶护舷 (Rubber Arch Fenders)
+            Vector3 fenderSz = new Vector3(0.65f, 0.85f, 0.45f);
+            Color fenderCol = pal.HazardDark;
+
+            // 南侧护舷
+            for (float x = -32f; x <= 32f; x += 6.4f)
+            {
+                matteComb.AddBox(new Vector3(x, -0.70f, center.z - halfZ - fenderSz.z * 0.4f), fenderSz, fenderCol);
+            }
+            // 北侧护舷
+            for (float x = -32f; x <= 32f; x += 6.4f)
+            {
+                matteComb.AddBox(new Vector3(x, -0.70f, center.z + halfZ + fenderSz.z * 0.4f), fenderSz, fenderCol);
+            }
+            // 东西侧泊位护舷
+            Vector3 fenderSideSz = new Vector3(0.45f, 0.85f, 0.65f);
+            for (float z = -36f; z <= 40f; z += 7.0f)
+            {
+                matteComb.AddBox(new Vector3(-halfX - fenderSideSz.x * 0.4f, -0.70f, z), fenderSideSz, fenderCol);
+                matteComb.AddBox(new Vector3(halfX + fenderSideSz.x * 0.4f, -0.70f, z), fenderSideSz, fenderCol);
+            }
+
+            // 码头边缘系船柱 (Bollards)
+            float bollardR = 0.18f;
+            float bollardH = 0.55f;
+            float[] bollardX = { -30f, -18f, -6f, 6f, 18f, 30f };
+            for (int i = 0; i < bollardX.Length; i++)
+            {
+                Vector3 bSouth = new Vector3(bollardX[i], topY, center.z - halfZ + curbW * 0.5f);
+                metalComb.AddCylinder(bSouth, bollardR, bollardH, 8, pal.SteelDark);
+                metalComb.AddBox(bSouth + new Vector3(0f, bollardH * 0.8f, 0f), new Vector3(0.55f, 0.10f, 0.18f), pal.SteelDark);
+
+                Vector3 bNorth = new Vector3(bollardX[i], topY, center.z + halfZ - curbW * 0.5f);
+                metalComb.AddCylinder(bNorth, bollardR, bollardH, 8, pal.SteelDark);
+                metalComb.AddBox(bNorth + new Vector3(0f, bollardH * 0.8f, 0f), new Vector3(0.55f, 0.10f, 0.18f), pal.SteelDark);
+            }
+
+            float[] bollardZ = { -32f, -18f, -4f, 10f, 24f, 38f };
+            for (int i = 0; i < bollardZ.Length; i++)
+            {
+                Vector3 bWest = new Vector3(-halfX + curbW * 0.5f, topY, bollardZ[i]);
+                metalComb.AddCylinder(bWest, bollardR, bollardH, 8, pal.SteelDark);
+                metalComb.AddBox(bWest + new Vector3(0f, bollardH * 0.8f, 0f), new Vector3(0.18f, 0.10f, 0.55f), pal.SteelDark);
+
+                Vector3 bEast = new Vector3(halfX - curbW * 0.5f, topY, bollardZ[i]);
+                metalComb.AddCylinder(bEast, bollardR, bollardH, 8, pal.SteelDark);
+                metalComb.AddBox(bEast + new Vector3(0f, bollardH * 0.8f, 0f), new Vector3(0.18f, 0.10f, 0.55f), pal.SteelDark);
+            }
+
+            // 登船梯斜桥 (Gangway Ramp，连接西侧码头到西侧货船登船口)
+            Vector3 gangwayStart = new Vector3(-halfX, topY + curbH, 4.0f);
+            Vector3 gangwayEnd = new Vector3(-halfX - 7.5f, 1.20f, 4.0f);
+            Vector3 gMid = (gangwayStart + gangwayEnd) * 0.5f;
+            float gLen = Vector3.Distance(gangwayStart, gangwayEnd);
+            float gAngle = Mathf.Atan2(gangwayEnd.y - gangwayStart.y, gangwayStart.x - gangwayEnd.x) * Mathf.Rad2Deg;
+            Quaternion gRot = Quaternion.Euler(0f, 0f, -gAngle);
+
+            metalComb.AddBox(gMid, new Vector3(gLen, 0.12f, 1.3f), pal.Steel, gRot);
+            metalComb.AddBox(gMid + Vector3.up * 0.55f + Vector3.forward * 0.65f, new Vector3(gLen, 0.08f, 0.08f), pal.HazardYellow, gRot);
+            metalComb.AddBox(gMid + Vector3.up * 0.55f + Vector3.back * 0.65f, new Vector3(gLen, 0.08f, 0.08f), pal.HazardYellow, gRot);
         }
 
         /// <summary>
@@ -307,219 +549,572 @@ namespace P1.Editor
         }
 
         /// <summary>
-        /// 场外集装箱堆场 (布置 24 组 1-3 层集装箱)。
+        /// 场外集装箱堆场 (3 排进深层次，前排鲜艳，后排压暗派生色，留出通道感)。
         /// </summary>
-        private static void BuildContainerYards(MeshCombiner comb, BackdropPalette pal)
+        private static void BuildContainerYards(MeshCombiner matteComb, MeshCombiner metalComb, BackdropPalette pal)
         {
-            Color[] colors = { pal.ContainerTeal, pal.ContainerRust, pal.ContainerMustard, pal.ContainerSlate };
+            Color[] colorsFront = { pal.ContainerTeal, pal.ContainerRust, pal.ContainerMustard, pal.ContainerSlate };
             Vector3 cSz = new Vector3(2.44f, 2.59f, 6.06f);
 
-            void AddStack(Vector3 basePos, float yaw, int tiers, int colOffset)
+            void AddContainerBox(Vector3 pos, Color col, Quaternion rot)
+            {
+                matteComb.AddBox(pos, cSz, col, rot);
+                // 4 个角柱/角件加深金属描边感
+                float hx = cSz.x * 0.5f;
+                float hy = cSz.y;
+                float hz = cSz.z * 0.5f;
+                Vector3 postSz = new Vector3(0.10f, hy, 0.10f);
+                Color postCol = Color.Lerp(col, pal.SteelDark, 0.40f);
+                metalComb.AddBox(pos + rot * new Vector3(-hx, 0f, -hz), postSz, postCol, rot);
+                metalComb.AddBox(pos + rot * new Vector3(hx, 0f, -hz), postSz, postCol, rot);
+                metalComb.AddBox(pos + rot * new Vector3(-hx, 0f, hz), postSz, postCol, rot);
+                metalComb.AddBox(pos + rot * new Vector3(hx, 0f, hz), postSz, postCol, rot);
+            }
+
+            void AddStack(Vector3 basePos, float yaw, int tiers, int colOffset, bool isBackRow)
             {
                 Quaternion rot = Quaternion.Euler(0f, yaw, 0f);
                 for (int t = 0; t < tiers; t++)
                 {
                     Vector3 localOffset = new Vector3(t * 0.04f, t * cSz.y + cSz.y * 0.5f - 0.15f, 0f);
                     Vector3 worldPos = basePos + rot * localOffset;
-                    Color col = colors[(t + colOffset) % colors.Length];
-                    comb.AddBox(worldPos, cSz, col, rot);
+                    Color baseCol = colorsFront[(t + colOffset) % colorsFront.Length];
+                    Color finalCol = isBackRow ? Color.Lerp(baseCol, pal.SteelDark, 0.35f) : baseCol;
+                    AddContainerBox(worldPos, finalCol, rot);
                 }
             }
 
-            // 西侧外场堆场 (10 组，Z 限制在 -30 到 30 之间，确保稳立在码头基座上)
-            float[] westZ = { -30f, -24f, -17f, -10f, -3f, 4f, 11f, 18f, 24f, 30f };
-            for (int i = 0; i < westZ.Length; i++)
+            // ---- 西侧外场三排进深堆场 ----
+            // 第一排 (前排，近墙 |x|=25.5m，鲜艳原色)
+            float[] westZ1 = { -26f, -19f, -12f, -5f, 2f, 9f, 16f, 23f };
+            for (int i = 0; i < westZ1.Length; i++)
             {
-                float x = -25f - (i % 3) * 3.4f;
-                float yaw = ((i * 17) % 7 - 3) * 1.5f;
-                int tiers = (i % 3) + 1;
-                AddStack(new Vector3(x, 0f, westZ[i]), yaw, tiers, i);
+                int tiers = (i % 2) + 1;
+                AddStack(new Vector3(-25.5f, 0f, westZ1[i]), (i % 2 == 0 ? 0.5f : -0.5f), tiers, i, false);
+            }
+            // 第二排 (中排，|x|=30.8m，2-3层)
+            float[] westZ2 = { -23f, -16f, -9f, -2f, 5f, 12f, 19f };
+            for (int i = 0; i < westZ2.Length; i++)
+            {
+                int tiers = (i % 2 == 0) ? 3 : 2;
+                AddStack(new Vector3(-30.8f, 0f, westZ2[i]), (i % 3 - 1) * 1.2f, tiers, i + 1, false);
+            }
+            // 第三排 (后排，|x|=36.0m，压暗派生色，强化进深)
+            float[] westZ3 = { -25f, -18f, -11f, -4f, 3f, 10f, 17f, 24f };
+            for (int i = 0; i < westZ3.Length; i++)
+            {
+                int tiers = (i % 3 == 1) ? 3 : 2;
+                AddStack(new Vector3(-36.0f, 0f, westZ3[i]), 0f, tiers, i + 2, true);
             }
 
-            // 东侧外场堆场 (10 组)
-            float[] eastZ = { -30f, -23f, -16f, -9f, -2f, 5f, 12f, 19f, 25f, 30f };
-            for (int i = 0; i < eastZ.Length; i++)
+            // ---- 东侧外场三排进深堆场 ----
+            // 第一排 (前排，|x|=25.5m)
+            float[] eastZ1 = { -26f, -19f, -12f, -5f, 2f, 9f, 16f, 23f };
+            for (int i = 0; i < eastZ1.Length; i++)
             {
-                float x = 25f + (i % 3) * 3.4f;
-                float yaw = ((i * 13) % 7 - 3) * 1.5f;
-                int tiers = ((i + 1) % 3) + 1;
-                AddStack(new Vector3(x, 0f, eastZ[i]), yaw, tiers, i + 2);
+                int tiers = ((i + 1) % 2) + 1;
+                AddStack(new Vector3(25.5f, 0f, eastZ1[i]), (i % 2 == 0 ? -0.5f : 0.5f), tiers, i + 2, false);
+            }
+            // 第二排 (中排，|x|=30.8m)
+            float[] eastZ2 = { -23f, -16f, -9f, -2f, 5f, 12f, 19f };
+            for (int i = 0; i < eastZ2.Length; i++)
+            {
+                int tiers = (i % 2 == 1) ? 3 : 2;
+                AddStack(new Vector3(30.8f, 0f, eastZ2[i]), (1 - i % 3) * 1.2f, tiers, i + 3, false);
+            }
+            // 第三排 (后排，|x|=36.0m，压暗派生色)
+            float[] eastZ3 = { -25f, -18f, -11f, -4f, 3f, 10f, 17f, 24f };
+            for (int i = 0; i < eastZ3.Length; i++)
+            {
+                int tiers = (i % 3 == 0) ? 3 : 2;
+                AddStack(new Vector3(36.0f, 0f, eastZ3[i]), 0f, tiers, i, true);
             }
 
-            // 北侧延展区 (2 组，位于基座末端 z=32)
-            AddStack(new Vector3(-10f, 0f, 32f), 85f, 2, 1);
-            AddStack(new Vector3(10f, 0f, 32f), -85f, 3, 3);
+            // ---- 北侧延展区 (北墙外前景堆叠，填补北向地平线) ----
+            AddStack(new Vector3(-13.5f, 0f, 33.5f), 90f, 2, 0, false);
+            AddStack(new Vector3(-7.5f,  0f, 34.0f), 88f, 3, 2, false);
+            AddStack(new Vector3(7.5f,   0f, 34.0f), -88f, 3, 1, false);
+            AddStack(new Vector3(13.5f,  0f, 33.5f), -90f, 2, 3, false);
+
+            // 堆场过道木质栈板/杂物箱散落 (增加生活气息)
+            Vector3[] palletLocs =
+            {
+                new Vector3(-28.2f, -0.15f, -10f),
+                new Vector3(-28.2f, -0.15f, 8f),
+                new Vector3(28.2f, -0.15f, -8f),
+                new Vector3(28.2f, -0.15f, 12f),
+            };
+            for (int p = 0; p < palletLocs.Length; p++)
+            {
+                matteComb.AddBox(palletLocs[p] + new Vector3(0f, 0.12f, 0f), new Vector3(1.6f, 0.24f, 1.4f), pal.Wood);
+                matteComb.AddBox(palletLocs[p] + new Vector3(0.1f, 0.55f, 0.1f), new Vector3(1.1f, 0.60f, 1.0f), pal.WoodDark);
+            }
         }
 
         /// <summary>
-        /// 岸桥/龙门吊 (4 座黄色钢构桁架，高 16m，立于四角)。
+        /// 岸桥/大型集装箱龙门吊 (4 座黄色钢构桁架，高 25m，含 CARGO 标识、支脚黄黑警示条、起吊集装箱姿态)。
         /// </summary>
-        private static void BuildGantryCranes(MeshCombiner metalComb, BackdropPalette pal)
+        private static void BuildGantryCranes(MeshCombiner metalComb, MeshCombiner matteComb, BackdropPalette pal)
         {
-            Vector3[] positions =
+            var craneSpecs = new[]
             {
-                new Vector3(-28.5f, -0.15f, -34.0f),
-                new Vector3(-28.5f, -0.15f, 34.0f),
-                new Vector3(28.5f, -0.15f, -34.0f),
-                new Vector3(28.5f, -0.15f, 34.0f),
+                new { pos = new Vector3(-18f, -0.15f, -38f), yaw = 180f, hoistContainer = true },
+                new { pos = new Vector3(18f, -0.15f, -38f),  yaw = 180f, hoistContainer = false },
+                new { pos = new Vector3(-20f, -0.15f, 40f),  yaw = 0f,   hoistContainer = false },
+                new { pos = new Vector3(22f,  -0.15f, 40f),  yaw = 0f,   hoistContainer = false }
             };
 
-            float[] yaws = { 15f, -15f, 165f, -165f };
-
-            for (int k = 0; k < positions.Length; k++)
+            for (int k = 0; k < craneSpecs.Length; k++)
             {
-                Vector3 origin = positions[k];
-                Quaternion rot = Quaternion.Euler(0f, yaws[k], 0f);
+                var spec = craneSpecs[k];
+                Vector3 origin = spec.pos;
+                Quaternion rot = Quaternion.Euler(0f, spec.yaw, 0f);
 
-                // 4 根倾斜金属桁架构件腿 (由地面升至 12m)
-                float legH = 12f;
-                float spanX = 6.0f;
-                float spanZ = 8.0f;
+                float spanX = 8.0f;
+                float spanZ = 9.0f;
+                float portalH = 13.5f;
 
-                Vector3 l1 = origin + rot * new Vector3(-spanX * 0.5f, legH * 0.5f, -spanZ * 0.5f);
-                Vector3 l2 = origin + rot * new Vector3(spanX * 0.5f, legH * 0.5f, -spanZ * 0.5f);
-                Vector3 l3 = origin + rot * new Vector3(-spanX * 0.5f, legH * 0.5f, spanZ * 0.5f);
-                Vector3 l4 = origin + rot * new Vector3(spanX * 0.5f, legH * 0.5f, spanZ * 0.5f);
+                // 1. 支脚台车 (4 组支腿底盘，带黄黑斜向警示条)
+                Vector3[] footOffsets =
+                {
+                    new Vector3(-spanX * 0.5f, 0.5f, -spanZ * 0.5f),
+                    new Vector3(spanX * 0.5f,  0.5f, -spanZ * 0.5f),
+                    new Vector3(-spanX * 0.5f, 0.5f, spanZ * 0.5f),
+                    new Vector3(spanX * 0.5f,  0.5f, spanZ * 0.5f),
+                };
 
-                Vector3 legSz = new Vector3(0.55f, legH, 0.55f);
-                metalComb.AddBox(l1, legSz, pal.HazardYellow, rot);
-                metalComb.AddBox(l2, legSz, pal.HazardYellow, rot);
-                metalComb.AddBox(l3, legSz, pal.HazardYellow, rot);
-                metalComb.AddBox(l4, legSz, pal.HazardYellow, rot);
+                Vector3 bogieSz = new Vector3(1.1f, 1.0f, 3.4f);
+                for (int f = 0; f < footOffsets.Length; f++)
+                {
+                    metalComb.AddHazardBogie(origin + rot * footOffsets[f], bogieSz, pal.HazardYellow, pal.HazardDark, rot);
+                }
 
-                // 腿部水平与对角加强桁架
-                metalComb.AddBox(origin + rot * new Vector3(0f, legH, -spanZ * 0.5f), new Vector3(spanX, 0.45f, 0.45f), pal.HazardYellow, rot);
-                metalComb.AddBox(origin + rot * new Vector3(0f, legH, spanZ * 0.5f), new Vector3(spanX, 0.45f, 0.45f), pal.HazardYellow, rot);
-                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, legH, 0f), new Vector3(0.45f, 0.45f, spanZ), pal.HazardYellow, rot);
-                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f, legH, 0f), new Vector3(0.45f, 0.45f, spanZ), pal.HazardYellow, rot);
+                // 2. 门架立柱 (4 根高强度倾斜钢柱)
+                float legLen = portalH - 1.0f;
+                Vector3 legSz = new Vector3(0.85f, legLen, 0.85f);
+                for (int f = 0; f < footOffsets.Length; f++)
+                {
+                    Vector3 legCenter = footOffsets[f] + new Vector3(0f, legLen * 0.5f + 0.5f, 0f);
+                    metalComb.AddBox(origin + rot * legCenter, legSz, pal.HazardYellow, rot);
+                }
 
-                // 顶部向外挑出的主悬臂桁架 (长 22m，高 1.6m)
-                Vector3 boomCenter = origin + rot * new Vector3(-4f, legH + 1.2f, 0f);
-                metalComb.AddBox(boomCenter, new Vector3(22f, 1.6f, 2.2f), pal.HazardYellow, rot);
+                // 3. 门架横梁与侧翼 X 撑桁架
+                metalComb.AddBox(origin + rot * new Vector3(0f, portalH, -spanZ * 0.5f), new Vector3(spanX + 0.8f, 1.1f, 1.0f), pal.HazardYellow, rot);
+                metalComb.AddBox(origin + rot * new Vector3(0f, portalH, spanZ * 0.5f), new Vector3(spanX + 0.8f, 1.1f, 1.0f), pal.HazardYellow, rot);
+                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, portalH, 0f), new Vector3(1.0f, 1.1f, spanZ), pal.HazardYellow, rot);
+                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f, portalH, 0f), new Vector3(1.0f, 1.1f, spanZ), pal.HazardYellow, rot);
 
-                // 顶部后方重载卷扬机房 (深钢色)
-                Vector3 cabCenter = origin + rot * new Vector3(5f, legH + 2.6f, 0f);
-                metalComb.AddBox(cabCenter, new Vector3(4.5f, 2.2f, 3.2f), pal.SteelDark, rot);
+                Vector3 braceSz = new Vector3(0.35f, 0.35f, spanZ * 1.25f);
+                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, portalH * 0.5f + 0.5f, 0f), braceSz, pal.HazardYellow, rot * Quaternion.Euler(38f, 0f, 0f));
+                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, portalH * 0.5f + 0.5f, 0f), braceSz, pal.HazardYellow, rot * Quaternion.Euler(-38f, 0f, 0f));
+                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f, portalH * 0.5f + 0.5f, 0f), braceSz, pal.HazardYellow, rot * Quaternion.Euler(38f, 0f, 0f));
+                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f, portalH * 0.5f + 0.5f, 0f), braceSz, pal.HazardYellow, rot * Quaternion.Euler(-38f, 0f, 0f));
 
-                // 下挂吊具小车 (吊在悬臂下方)
-                Vector3 trolleyCenter = origin + rot * new Vector3(-5f, legH + 0.1f, 0f);
-                metalComb.AddBox(trolleyCenter, new Vector3(2.5f, 0.8f, 1.8f), pal.SteelDark, rot);
+                // 4. 顶部 A 字塔架 (从 y=13.5m 升至 25m)
+                float aFrameH = 11.5f;
+                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.3f, portalH + aFrameH * 0.5f, 0f), new Vector3(0.7f, aFrameH, 0.7f), pal.HazardYellow, rot * Quaternion.Euler(0f, 0f, 7f));
+                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.3f, portalH + aFrameH * 0.5f, 0f), new Vector3(0.7f, aFrameH, 0.7f), pal.HazardYellow, rot * Quaternion.Euler(0f, 0f, -7f));
+                metalComb.AddBox(origin + rot * new Vector3(0f, portalH + aFrameH, 0f), new Vector3(spanX * 0.75f, 0.9f, 1.4f), pal.HazardYellow, rot);
+
+                // 5. 主悬臂走台梁 (长 32m，伸向外海与堆场)
+                float boomLength = 32f;
+                float boomZOffset = 2.0f;
+                float boomY = 15.5f;
+                Vector3 boomCenter = origin + rot * new Vector3(0f, boomY, boomZOffset);
+                metalComb.AddBox(boomCenter, new Vector3(2.4f, 2.0f, boomLength), pal.HazardYellow, rot);
+
+                // 梁顶安全护栏
+                metalComb.AddBox(origin + rot * new Vector3(-1.1f, boomY + 1.3f, boomZOffset), new Vector3(0.12f, 0.7f, boomLength), pal.SteelDark, rot);
+                metalComb.AddBox(origin + rot * new Vector3(1.1f, boomY + 1.3f, boomZOffset), new Vector3(0.12f, 0.7f, boomLength), pal.SteelDark, rot);
+
+                // 塔顶至主梁的前后斜拉索 (Tension Tie Rods)
+                Vector3 apexTop = origin + rot * new Vector3(0f, portalH + aFrameH, 0f);
+                Vector3 stayFront = origin + rot * new Vector3(0f, boomY + 1.0f, boomZOffset + 12f);
+                Vector3 stayBack = origin + rot * new Vector3(0f, boomY + 1.0f, boomZOffset - 12f);
+                AddStayRod(metalComb, apexTop, stayFront, 0.12f, pal.SteelDark);
+                AddStayRod(metalComb, apexTop, stayBack, 0.12f, pal.SteelDark);
+
+                // 6. 梁顶重载卷扬机房与操作舱 (白浅灰 + CARGO 醒目标识)
+                Vector3 cabPos = origin + rot * new Vector3(0f, boomY + 2.3f, -4.5f);
+                matteComb.AddBox(cabPos, new Vector3(3.6f, 2.6f, 5.8f), pal.ConcreteLight, rot);
+                matteComb.AddBox(cabPos + new Vector3(0f, 1.4f, 0f), new Vector3(3.8f, 0.25f, 6.0f), pal.SteelDark, rot);
+
+                // 左右两侧醒目 CARGO 几何大字
+                matteComb.AddWordCargo(cabPos + rot * new Vector3(1.85f, 0.1f, 0f), 1.1f, pal.HazardDark, rot * Quaternion.Euler(0f, 90f, 0f));
+                matteComb.AddWordCargo(cabPos + rot * new Vector3(-1.85f, 0.1f, 0f), 1.1f, pal.HazardDark, rot * Quaternion.Euler(0f, -90f, 0f));
+
+                // 7. 下挂小车、吊具缆绳与集装箱起吊
+                float trolleyZ = spec.hoistContainer ? (boomZOffset + 9f) : (boomZOffset + 2f);
+                Vector3 trolleyPos = origin + rot * new Vector3(0f, boomY - 1.25f, trolleyZ);
+                metalComb.AddBox(trolleyPos, new Vector3(2.4f, 0.6f, 3.0f), pal.SteelDark, rot);
+
+                float cableLen = spec.hoistContainer ? 6.5f : 3.0f;
+                float spreaderY = trolleyPos.y - cableLen;
+                Vector3 spreaderPos = origin + rot * new Vector3(0f, spreaderY, trolleyZ);
+
+                // 4 根垂直悬挂钢缆
+                float cOffX = 0.9f;
+                float cOffZ = 1.1f;
+                Vector3[] cablePts =
+                {
+                    new Vector3(-cOffX, trolleyPos.y - cableLen * 0.5f, trolleyZ - cOffZ),
+                    new Vector3(cOffX,  trolleyPos.y - cableLen * 0.5f, trolleyZ - cOffZ),
+                    new Vector3(-cOffX, trolleyPos.y - cableLen * 0.5f, trolleyZ + cOffZ),
+                    new Vector3(cOffX,  trolleyPos.y - cableLen * 0.5f, trolleyZ + cOffZ),
+                };
+                for (int c = 0; c < cablePts.Length; c++)
+                {
+                    metalComb.AddBox(origin + rot * cablePts[c], new Vector3(0.06f, cableLen, 0.06f), pal.SteelDark, rot);
+                }
+
+                // 吊具框架 (Spreader)
+                metalComb.AddBox(spreaderPos, new Vector3(2.5f, 0.45f, 6.2f), pal.SteelDark, rot);
+
+                // 悬空吊起的集装箱（主角姿态）
+                if (spec.hoistContainer)
+                {
+                    Vector3 containerPos = spreaderPos - new Vector3(0f, 1.45f, 0f);
+                    Vector3 contSz = new Vector3(2.44f, 2.59f, 6.06f);
+                    matteComb.AddBox(containerPos, contSz, pal.ContainerRust, rot);
+                    // 角柱细节
+                    Color postCol = Color.Lerp(pal.ContainerRust, pal.SteelDark, 0.4f);
+                    metalComb.AddBox(containerPos + rot * new Vector3(-1.22f, 0f, -3.03f), new Vector3(0.12f, 2.6f, 0.12f), postCol, rot);
+                    metalComb.AddBox(containerPos + rot * new Vector3(1.22f,  0f, -3.03f), new Vector3(0.12f, 2.6f, 0.12f), postCol, rot);
+                    metalComb.AddBox(containerPos + rot * new Vector3(-1.22f, 0f, 3.03f),  new Vector3(0.12f, 2.6f, 0.12f), postCol, rot);
+                    metalComb.AddBox(containerPos + rot * new Vector3(1.22f,  0f, 3.03f),  new Vector3(0.12f, 2.6f, 0.12f), postCol, rot);
+                }
             }
         }
 
+        private static void AddStayRod(MeshCombiner comb, Vector3 p0, Vector3 p1, float thickness, Color color)
+        {
+            Vector3 mid = (p0 + p1) * 0.5f;
+            float len = Vector3.Distance(p0, p1);
+            if (len < 0.001f) return;
+            Quaternion rot = Quaternion.FromToRotation(Vector3.up, (p1 - p0).normalized);
+            comb.AddBox(mid, new Vector3(thickness, len, thickness), color, rot);
+        }
+
         /// <summary>
-        /// 港口仓库 4 座 + 货船 2 艘。
+        /// 港口仓库 4 座 + 货船 3 艘 (深色船体、甲板集装箱垛、驾驶楼、甲板起重吊杆)。
         /// </summary>
         private static void BuildWarehousesAndShips(MeshCombiner matteComb, MeshCombiner metalComb, BackdropPalette pal)
         {
-            // 4 座港口货运仓库 (混凝土墙 + 钢构双坡屋顶)
+            // 4 座港口货运仓库 (移至两侧堆场后方外沿)
             Vector3[] whPos =
             {
-                new Vector3(-37f, -0.15f, -18f),
-                new Vector3(-37f, -0.15f, 18f),
-                new Vector3(37f, -0.15f, -18f),
-                new Vector3(37f, -0.15f, 18f),
+                new Vector3(-43f, -0.15f, -18f),
+                new Vector3(-43f, -0.15f, 18f),
+                new Vector3(43f,  -0.15f, -18f),
+                new Vector3(43f,  -0.15f, 18f),
             };
 
             for (int i = 0; i < whPos.Length; i++)
             {
                 Vector3 p = whPos[i];
-                float w = 14f;
+                float w = 12f;
                 float wallH = 6.5f;
                 float len = 22f;
 
-                // 混凝土仓库主体
                 matteComb.AddBox(p + Vector3.up * (wallH * 0.5f), new Vector3(w, wallH, len), pal.ConcreteMid);
-
-                // 双坡屋顶 (金属色)
                 metalComb.AddBox(p + Vector3.up * (wallH + 1.2f), new Vector3(w * 1.06f, 1.8f, len * 1.02f), pal.Steel);
-                // 门洞深色装饰
                 matteComb.AddBox(p + Vector3.up * 2.2f + (i < 2 ? Vector3.right : Vector3.left) * (w * 0.505f),
                     new Vector3(0.1f, 4.2f, 6.0f), pal.SteelDark);
             }
 
-            // 2 艘集装箱货船 (漂浮在水面 y=-1.35)
-            void AddCargoShip(Vector3 origin, float yaw, Color hullColor)
+            // 货船 1：西侧大型集装箱货船（停泊在西侧码头，带甲板起重吊杆）
+            BuildMooredCargoShip(
+                matteComb, metalComb, pal,
+                origin: new Vector3(-53f, -1.35f, 2f),
+                yaw: 0f,
+                shipL: 66f, shipW: 13f, hullH: 5.2f,
+                hullColor: pal.SteelDark,
+                hasDeckCrane: true);
+
+            // 货船 2：东侧深铁锈色货船（停泊在东侧码头）
+            BuildMooredCargoShip(
+                matteComb, metalComb, pal,
+                origin: new Vector3(53f, -1.35f, -6f),
+                yaw: 180f,
+                shipL: 60f, shipW: 12f, hullH: 5.0f,
+                hullColor: Color.Lerp(pal.ContainerRust, pal.SteelDark, 0.45f),
+                hasDeckCrane: false);
+
+            // 货船 3：北侧海湾远洋支线集装箱船（航行在海湾中，直接填补北向眺望海面）
+            BuildMooredCargoShip(
+                matteComb, metalComb, pal,
+                origin: new Vector3(-14f, -1.35f, 85f),
+                yaw: 80f,
+                shipL: 50f, shipW: 11f, hullH: 4.5f,
+                hullColor: Color.Lerp(pal.Steel, pal.SteelDark, 0.45f),
+                hasDeckCrane: false);
+        }
+
+        private static void BuildMooredCargoShip(
+            MeshCombiner matteComb,
+            MeshCombiner metalComb,
+            BackdropPalette pal,
+            Vector3 origin,
+            float yaw,
+            float shipL,
+            float shipW,
+            float hullH,
+            Color hullColor,
+            bool hasDeckCrane)
+        {
+            Quaternion rot = Quaternion.Euler(0f, yaw, 0f);
+
+            // 1. 船体下半部防污漆吃水线 (深铁锈红带)
+            Color waterLineCol = Color.Lerp(pal.ContainerRust, pal.SteelDark, 0.40f);
+            matteComb.AddBox(origin + rot * new Vector3(0f, hullH * 0.25f, 0f), new Vector3(shipW * 0.95f, hullH * 0.5f, shipL * 0.72f), waterLineCol, rot);
+            matteComb.AddBox(origin + rot * new Vector3(0f, hullH * 0.25f, shipL * 0.42f), new Vector3(shipW * 0.65f, hullH * 0.5f, shipL * 0.26f), waterLineCol, rot);
+
+            // 2. 主船体 (平直中段 + 尖削船首)
+            matteComb.AddBox(origin + rot * new Vector3(0f, hullH * 0.75f, 0f), new Vector3(shipW, hullH * 0.5f, shipL * 0.72f), hullColor, rot);
+            matteComb.AddBox(origin + rot * new Vector3(0f, hullH * 0.75f, shipL * 0.42f), new Vector3(shipW * 0.70f, hullH * 0.5f, shipL * 0.26f), hullColor, rot);
+            metalComb.AddBox(origin + rot * new Vector3(0f, hullH * 0.4f, shipL * 0.54f), new Vector3(shipW * 0.35f, hullH * 0.45f, shipL * 0.08f), hullColor, rot);
+
+            // 3. 船尾驾驶楼 (白浅灰 4 层)
+            float bridgeZ = -shipL * 0.27f;
+            Vector3 bridgePos = origin + rot * new Vector3(0f, hullH + 4.5f, bridgeZ);
+            matteComb.AddBox(bridgePos, new Vector3(shipW * 0.82f, 8.5f, 8.0f), pal.ConcreteLight, rot);
+
+            // 驾驶台飞桥
+            metalComb.AddBox(bridgePos + new Vector3(0f, 3.2f, 0f), new Vector3(shipW * 1.05f, 0.8f, 3.0f), pal.ConcreteLight, rot);
+
+            // 驾驶楼烟囱
+            Vector3 funnelPos = origin + rot * new Vector3(0f, hullH + 10.2f, bridgeZ - 3.2f);
+            matteComb.AddBox(funnelPos, new Vector3(2.4f, 4.2f, 3.0f), pal.SteelDark, rot);
+            matteComb.AddBox(funnelPos + new Vector3(0f, 0.6f, 0f), new Vector3(2.45f, 1.2f, 3.05f), pal.ContainerMustard, rot);
+
+            // 雷达桅杆
+            metalComb.AddBox(bridgePos + new Vector3(0f, 6.2f, 0f), new Vector3(0.35f, 4.5f, 0.35f), pal.Steel, rot);
+            metalComb.AddBox(bridgePos + new Vector3(0f, 7.8f, 0f), new Vector3(2.6f, 0.15f, 0.15f), pal.Steel, rot);
+
+            // 4. 甲板集装箱垛 (3 个货舱贝位，色彩丰富)
+            Color[] cCols = { pal.ContainerTeal, pal.ContainerRust, pal.ContainerMustard, pal.ContainerSlate };
+            Vector3 cSz = new Vector3(2.44f, 2.59f, 6.06f);
+            for (int row = -1; row <= 1; row++)
             {
-                Quaternion rot = Quaternion.Euler(0f, yaw, 0f);
-                float shipL = 54f;
-                float shipW = 11f;
-                float hullH = 4.8f;
-
-                // 船体 (平直中段 + 尖削船首)
-                Vector3 midPos = origin + rot * new Vector3(0f, hullH * 0.5f, 0f);
-                matteComb.AddBox(midPos, new Vector3(shipW, hullH, shipL * 0.7f), hullColor, rot);
-
-                Vector3 bowPos = origin + rot * new Vector3(0f, hullH * 0.5f, shipL * 0.42f);
-                matteComb.AddBox(bowPos, new Vector3(shipW * 0.7f, hullH, shipL * 0.28f), hullColor, rot);
-
-                // 船尾驾驶楼 (白浅灰 4 层塔楼)
-                Vector3 bridgePos = origin + rot * new Vector3(0f, hullH + 4.5f, -shipL * 0.26f);
-                matteComb.AddBox(bridgePos, new Vector3(shipW * 0.85f, 8.5f, 7.5f), pal.ConcreteLight, rot);
-
-                // 楼顶金属雷达桅杆
-                metalComb.AddBox(bridgePos + Vector3.up * 5.2f, new Vector3(0.4f, 4.5f, 0.4f), pal.Steel, rot);
-
-                // 甲板集装箱垛 (密集阵列)
-                Color[] cCols = { pal.ContainerTeal, pal.ContainerRust, pal.ContainerMustard, pal.ContainerSlate };
-                for (int row = -1; row <= 1; row++)
+                for (int col = 0; col < 4; col++)
                 {
-                    for (int col = 0; col < 4; col++)
+                    int maxTier = (col == 3) ? 1 : 2;
+                    for (int tier = 0; tier < maxTier; tier++)
                     {
-                        for (int tier = 0; tier < 2; tier++)
-                        {
-                            Vector3 boxPos = origin + rot * new Vector3(row * 2.8f, hullH + tier * 2.6f + 1.3f, -4f + col * 6.5f);
-                            Color cCol = cCols[(row + col + tier + 5) % cCols.Length];
-                            matteComb.AddBox(boxPos, new Vector3(2.44f, 2.59f, 6.06f), cCol, rot);
-                        }
+                        Vector3 boxPos = origin + rot * new Vector3(row * 2.7f, hullH + tier * 2.6f + 1.3f, -5f + col * 6.6f);
+                        Color cCol = cCols[(row + col + tier + 7) % cCols.Length];
+                        matteComb.AddBox(boxPos, cSz, cCol, rot);
                     }
                 }
             }
 
-            AddCargoShip(new Vector3(-62f, -1.35f, 8f), 8f, new Color(0.22f, 0.24f, 0.28f, 1f));
-            AddCargoShip(new Vector3(62f, -1.35f, -12f), 188f, new Color(0.32f, 0.22f, 0.20f, 1f));
+            // 5. 甲板起重吊杆 (Deck Crane)
+            if (hasDeckCrane)
+            {
+                Vector3 craneBase = origin + rot * new Vector3(0f, hullH, 8.5f);
+                metalComb.AddCylinder(craneBase, 1.2f, 2.2f, 8, pal.SteelDark, rot);
+                metalComb.AddBox(craneBase + rot * new Vector3(0f, 3.0f, 0f), new Vector3(2.2f, 1.8f, 2.4f), pal.HazardYellow, rot);
+
+                float boomL = 15f;
+                Quaternion boomRot = rot * Quaternion.Euler(-32f, 45f, 0f);
+                Vector3 boomCenter = craneBase + rot * new Vector3(0f, 3.8f, 0f) + boomRot * new Vector3(0f, boomL * 0.5f, 0f);
+                metalComb.AddBox(boomCenter, new Vector3(0.6f, boomL, 0.6f), pal.HazardYellow, boomRot);
+            }
         }
 
         /// <summary>
-        /// 远景城市剪影 24 座方块 + 低多边形山丘 8 座 (半径 78-94m)。
+        /// 远景悬索桥剪影 (跨度 190m，双柱塔身 + 悬索弧线 + 桥面，单色压暗不抢戏)。
         /// </summary>
-        private static void BuildCityAndHills(MeshCombiner matteComb, BackdropPalette pal)
+        private static void BuildSuspensionBridge(MeshCombiner matteComb, MeshCombiner metalComb, BackdropPalette pal)
         {
-            // 远景城市剪影 (24 座方块楼，半径 78-92m，沉稳的青蓝深灰)
-            Color cityColor = new Color(0.22f, 0.28f, 0.36f, 1f);
+            float zBridge = 120f;
+            float deckY = 17.0f;
+            float towerTopY = 46.0f;
+            float waterY = -1.35f;
+            float spanHalf = 95f;
+            Color bridgeColor = pal.BridgeColor;
+            Color cableColor = Color.Lerp(bridgeColor, pal.SteelDark, 0.25f);
+
+            // 1. 桥面主梁
+            matteComb.AddBox(new Vector3(0f, deckY, zBridge), new Vector3(spanHalf * 2f, 2.2f, 6.0f), bridgeColor);
+            matteComb.AddBox(new Vector3(0f, deckY + 1.15f, zBridge), new Vector3(spanHalf * 2f, 0.1f, 5.2f), pal.ConcreteDark);
+            metalComb.AddBox(new Vector3(0f, deckY + 1.8f, zBridge - 2.8f), new Vector3(spanHalf * 2f, 1.2f, 0.3f), bridgeColor);
+            metalComb.AddBox(new Vector3(0f, deckY + 1.8f, zBridge + 2.8f), new Vector3(spanHalf * 2f, 1.2f, 0.3f), bridgeColor);
+
+            // 2. 双桥塔 (双柱门式造型)
+            float[] towerX = { -40f, 40f };
+            for (int t = 0; t < towerX.Length; t++)
+            {
+                float tx = towerX[t];
+                float legZSpan = 5.6f;
+                float legW = 1.3f;
+                float legH = towerTopY - waterY;
+                float legCenterY = waterY + legH * 0.5f;
+
+                metalComb.AddBox(new Vector3(tx, legCenterY, zBridge - legZSpan * 0.5f), new Vector3(legW, legH, legW), bridgeColor);
+                metalComb.AddBox(new Vector3(tx, legCenterY, zBridge + legZSpan * 0.5f), new Vector3(legW, legH, legW), bridgeColor);
+
+                float[] crossTiers = { deckY, deckY + 9f, deckY + 18f, towerTopY };
+                for (int c = 0; c < crossTiers.Length; c++)
+                {
+                    metalComb.AddBox(new Vector3(tx, crossTiers[c], zBridge), new Vector3(legW * 0.9f, 1.1f, legZSpan), bridgeColor);
+                }
+
+                metalComb.AddBox(new Vector3(tx, towerTopY + 0.8f, zBridge - legZSpan * 0.5f), new Vector3(legW * 1.3f, 0.8f, legW * 1.3f), pal.SteelDark);
+                metalComb.AddBox(new Vector3(tx, towerTopY + 0.8f, zBridge + legZSpan * 0.5f), new Vector3(legW * 1.3f, 0.8f, legW * 1.3f), pal.SteelDark);
+            }
+
+            // 3. 悬索主缆与吊杆
+            float[] cableZOffsets = { -2.7f, 2.7f };
+            for (int cz = 0; cz < cableZOffsets.Length; cz++)
+            {
+                float czOff = cableZOffsets[cz];
+                float cableZ = zBridge + czOff;
+
+                float CableY(float x)
+                {
+                    if (x < -40f)
+                    {
+                        float t = (x - (-95f)) / 55f;
+                        return Mathf.Lerp(deckY, towerTopY, t * t);
+                    }
+                    else if (x <= 40f)
+                    {
+                        float normX = x / 40f;
+                        float sag = towerTopY - 20.0f;
+                        return 20.0f + sag * (normX * normX);
+                    }
+                    else
+                    {
+                        float t = (x - 40f) / 55f;
+                        return Mathf.Lerp(towerTopY, deckY, (1f - (1f - t) * (1f - t)));
+                    }
+                }
+
+                int totalSegs = 36;
+                float minX = -spanHalf;
+                float maxX = spanHalf;
+                float step = (maxX - minX) / totalSegs;
+
+                for (int s = 0; s < totalSegs; s++)
+                {
+                    float x0 = minX + s * step;
+                    float x1 = x0 + step;
+                    float y0 = CableY(x0);
+                    float y1 = CableY(x1);
+
+                    Vector3 p0 = new Vector3(x0, y0, cableZ);
+                    Vector3 p1 = new Vector3(x1, y1, cableZ);
+                    Vector3 mid = (p0 + p1) * 0.5f;
+                    float segLen = Vector3.Distance(p0, p1);
+                    float angle = Mathf.Atan2(y1 - y0, x1 - x0) * Mathf.Rad2Deg;
+                    Quaternion rot = Quaternion.Euler(0f, 0f, angle);
+
+                    metalComb.AddBox(mid, new Vector3(segLen, 0.22f, 0.22f), cableColor, rot);
+
+                    if (s % 2 == 1 && y0 > deckY + 1.5f && Mathf.Abs(x0 - (-40f)) > 2.5f && Mathf.Abs(x0 - 40f) > 2.5f)
+                    {
+                        float suspH = y0 - deckY - 1.1f;
+                        metalComb.AddBox(new Vector3(x0, deckY + 1.1f + suspH * 0.5f, cableZ), new Vector3(0.08f, suspH, 0.08f), cableColor);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 远景城市剪影 + 双层低多边形山丘 + 海角灯塔 + 工业水塔 + 海面白帆船。
+        /// </summary>
+        private static void BuildCityAndHills(MeshCombiner matteComb, MeshCombiner metalComb, BackdropPalette pal)
+        {
+            // ---- 1. 远景海岛低多边形山丘 (双层纵深派生绿) ----
+            // 近层山丘
+            var nearHills = new[]
+            {
+                new { pos = new Vector3(-65f, -1.35f, 138f), r = 36f, h = 28f },
+                new { pos = new Vector3(-22f, -1.35f, 148f), r = 42f, h = 34f },
+                new { pos = new Vector3(25f,  -1.35f, 145f), r = 40f, h = 32f },
+                new { pos = new Vector3(68f,  -1.35f, 136f), r = 34f, h = 26f },
+                new { pos = new Vector3(-88f, -1.35f, 65f),  r = 32f, h = 24f },
+                new { pos = new Vector3(88f,  -1.35f, 60f),  r = 30f, h = 23f }
+            };
+            for (int i = 0; i < nearHills.Length; i++)
+            {
+                var h = nearHills[i];
+                matteComb.AddCone(h.pos, h.r, 2.5f, h.h, 10, pal.HillNearColor);
+            }
+
+            // 远层更高山丘 (更淡青绿大气色)
+            var farHills = new[]
+            {
+                new { pos = new Vector3(-45f, -1.35f, 168f), r = 48f, h = 42f },
+                new { pos = new Vector3(2f,   -1.35f, 175f), r = 52f, h = 45f },
+                new { pos = new Vector3(48f,  -1.35f, 170f), r = 46f, h = 39f },
+                new { pos = new Vector3(-96f, -1.35f, 25f),  r = 38f, h = 26f },
+                new { pos = new Vector3(96f,  -1.35f, 20f),  r = 36f, h = 25f }
+            };
+            for (int i = 0; i < farHills.Length; i++)
+            {
+                var h = farHills[i];
+                matteComb.AddCone(h.pos, h.r, 3.0f, h.h, 10, pal.HillFarColor);
+            }
+
+            // ---- 2. 远景海滨城市剪影 (20 栋建筑) ----
             float[] cityAngles =
             {
-                25f, 38f, 52f, 66f, 80f, 95f, 110f, 125f, 140f, 155f,
-                205f, 218f, 232f, 245f, 260f, 275f, 290f, 305f, 320f, 335f,
-                348f, 5f, 15f, 170f
+                30f, 42f, 54f, 66f, 78f, 90f, 102f, 114f, 126f, 138f,
+                222f, 234f, 246f, 258f, 270f, 282f, 294f, 306f, 318f, 330f
             };
-
             for (int i = 0; i < cityAngles.Length; i++)
             {
                 float ang = cityAngles[i] * Mathf.Deg2Rad;
-                float dist = 80f + ((i * 13) % 7) * 1.8f;
-                float w = 8f + (i % 4) * 2.2f;
-                float d = 8f + ((i + 2) % 4) * 2.2f;
-                float h = 12f + ((i * 19) % 15) * 1.3f;
+                float dist = 82f + ((i * 17) % 7) * 2.2f;
+                float w = 9f + (i % 3) * 2.5f;
+                float d = 9f + ((i + 1) % 3) * 2.5f;
+                float h = 12f + ((i * 23) % 11) * 1.5f;
 
                 Vector3 pos = new Vector3(Mathf.Sin(ang) * dist, h * 0.5f - 1.35f, Mathf.Cos(ang) * dist);
                 Quaternion rot = Quaternion.Euler(0f, cityAngles[i], 0f);
-                matteComb.AddBox(pos, new Vector3(w, h, d), cityColor, rot);
+                matteComb.AddBox(pos, new Vector3(w, h, d), pal.CityColor, rot);
             }
 
-            // 远景低多边形山丘 (8 座，半径 84-95m，深海岛绿灰)
-            Color hillColor = new Color(0.18f, 0.25f, 0.22f, 1f);
-            float[] hillAngles = { 45f, 75f, 105f, 135f, 225f, 255f, 285f, 315f };
+            // ---- 3. 海角灯塔 (Lighthouse，位于东北岬角) ----
+            Vector3 lhPos = new Vector3(68f, -1.35f, 75f);
+            matteComb.AddCone(lhPos, 8.0f, 5.0f, 4.0f, 8, pal.ConcreteDark);
+            matteComb.AddCone(lhPos + Vector3.up * 4.0f, 2.4f, 1.6f, 6.0f, 8, pal.ConcreteLight);
+            matteComb.AddCone(lhPos + Vector3.up * 10.0f, 1.6f, 1.3f, 4.5f, 8, pal.ContainerRust);
+            matteComb.AddCone(lhPos + Vector3.up * 14.5f, 1.3f, 1.1f, 3.5f, 8, pal.ConcreteLight);
+            metalComb.AddCylinder(lhPos + Vector3.up * 18.0f, 1.4f, 1.6f, 8, pal.SteelDark);
+            matteComb.AddBox(lhPos + Vector3.up * 18.8f, new Vector3(1.0f, 1.0f, 1.0f), pal.LampGlass);
+            metalComb.AddCone(lhPos + Vector3.up * 19.6f, 1.5f, 0.1f, 1.2f, 8, pal.SteelDark);
 
-            for (int k = 0; k < hillAngles.Length; k++)
+            // ---- 4. 工业水塔 (Water Tower，位于西北岸边) ----
+            Vector3 wtPos = new Vector3(-68f, -1.35f, 72f);
+            float wtLegH = 13.0f;
+            float wtLegR = 2.4f;
+            for (int l = 0; l < 4; l++)
             {
-                float ang = hillAngles[k] * Mathf.Deg2Rad;
-                float dist = 86f + (k % 3) * 3.5f;
-                float baseR = 18f + (k % 4) * 2.5f;
-                float hillH = 14f + (k % 3) * 3.0f;
+                float a = l * Mathf.PI * 0.5f;
+                Vector3 legP = wtPos + new Vector3(Mathf.Cos(a) * wtLegR, wtLegH * 0.5f, Mathf.Sin(a) * wtLegR);
+                metalComb.AddBox(legP, new Vector3(0.35f, wtLegH, 0.35f), pal.Steel);
+            }
+            metalComb.AddCylinder(wtPos + Vector3.up * wtLegH, 3.0f, 3.5f, 10, pal.Steel);
+            metalComb.AddCone(wtPos + Vector3.up * (wtLegH + 3.5f), 3.2f, 0.1f, 1.4f, 10, pal.SteelDark);
 
-                Vector3 center = new Vector3(Mathf.Sin(ang) * dist, -1.35f, Mathf.Cos(ang) * dist);
-                matteComb.AddCone(center, baseR, 2.0f, hillH, 8, hillColor);
+            // ---- 5. 海面白帆船 (Sailboats) ----
+            Vector3[] boatPos =
+            {
+                new Vector3(-18f, -1.35f, 62f),
+                new Vector3(32f,  -1.35f, 88f)
+            };
+            for (int b = 0; b < boatPos.Length; b++)
+            {
+                Vector3 bp = boatPos[b];
+                matteComb.AddBox(bp + Vector3.up * 0.35f, new Vector3(1.6f, 0.7f, 4.2f), pal.ConcreteLight);
+                metalComb.AddBox(bp + Vector3.up * 2.8f, new Vector3(0.1f, 4.5f, 0.1f), pal.SteelDark);
+                Vector3 v0 = bp + new Vector3(0f, 0.8f, -1.6f);
+                Vector3 v1 = bp + new Vector3(0f, 0.8f, 0.4f);
+                Vector3 v2 = bp + new Vector3(0f, 4.8f, -0.4f);
+                matteComb.AddQuadRaw(v0, v1, v2, v2, Vector3.right, Vector2.zero, Vector2.right, Vector2.up, Vector2.up, pal.ConcreteLight);
             }
         }
         #endregion
@@ -545,7 +1140,6 @@ namespace P1.Editor
         /// <summary>
         /// 实体道具的碰撞 + 涂墨代理：一个朝向盒碰撞体 + 四面 <see cref="InkWallSurface"/>。
         /// 合并网格仍然负责渲染；代理盒只负责挡子弹/挡人和"打中时把墨涂在哪一面"。
-        /// 尺寸取实体部件的局部包围盒（花坛的灌木、售卖亭的挑檐这类非实体件已排除）。
         /// </summary>
         private static void CreateInkPropProxy(
             Transform parent,
@@ -554,7 +1148,8 @@ namespace P1.Editor
             Bounds localBounds,
             ArenaMaterialSet mats,
             InkGridConfigSO inkCfg,
-            int serial)
+            int serial,
+            List<Collider> blockedColliders = null)
         {
             var go = new GameObject($"PropCollider_{prop.Kind}_{serial:00}");
             go.transform.SetParent(parent, false);
@@ -566,6 +1161,11 @@ namespace P1.Editor
             box.center = localBounds.center;
             box.size = localBounds.size;
 
+            if (box != null && blockedColliders != null)
+            {
+                blockedColliders.Add(box);
+            }
+
             if (inkCfg != null && !inkCfg.enableWallInk)
             {
                 return;
@@ -573,8 +1173,6 @@ namespace P1.Editor
 
             Vector3 centerWorld = prop.Position + rotation * localBounds.center;
             var wall = go.AddComponent<InkWallSurface>();
-            // 售卖亭 2.4m 高、顶檐外挑，爬上去会挡住俯视角视线，禁止上爬；
-            // 木箱 / 花坛保持可爬（与场上掩体一致）。
             wall.ConfigureOrientedBox(
                 box,
                 centerWorld,
@@ -615,7 +1213,7 @@ namespace P1.Editor
         }
 
         /// <summary>
-        /// 风格解包辅助结构。
+        /// 风格解包辅助结构：从 ArenaStyleSO 统一解构与派生颜色。
         /// </summary>
         private readonly struct BackdropPalette
         {
@@ -625,10 +1223,22 @@ namespace P1.Editor
             public readonly Color Steel;
             public readonly Color SteelDark;
             public readonly Color HazardYellow;
+            public readonly Color HazardDark;
             public readonly Color ContainerTeal;
             public readonly Color ContainerRust;
             public readonly Color ContainerSlate;
             public readonly Color ContainerMustard;
+            public readonly Color Wood;
+            public readonly Color WoodDark;
+            public readonly Color Foliage;
+            public readonly Color LampGlass;
+            public readonly Color WaterShallow;
+            public readonly Color WaterDeep;
+            public readonly Color WaterHorizon;
+            public readonly Color BridgeColor;
+            public readonly Color HillNearColor;
+            public readonly Color HillFarColor;
+            public readonly Color CityColor;
 
             public BackdropPalette(ArenaStyleSO s)
             {
@@ -638,10 +1248,23 @@ namespace P1.Editor
                 Steel = s != null ? s.steel : new Color(0.42f, 0.47f, 0.52f, 1f);
                 SteelDark = s != null ? s.steelDark : new Color(0.24f, 0.27f, 0.30f, 1f);
                 HazardYellow = s != null ? s.hazardYellow : new Color(0.86f, 0.68f, 0.20f, 1f);
+                HazardDark = s != null ? s.hazardDark : new Color(0.16f, 0.16f, 0.16f, 1f);
                 ContainerTeal = s != null ? s.containerTeal : new Color(0.25f, 0.52f, 0.50f, 1f);
                 ContainerRust = s != null ? s.containerRust : new Color(0.62f, 0.33f, 0.24f, 1f);
                 ContainerSlate = s != null ? s.containerSlate : new Color(0.37f, 0.46f, 0.57f, 1f);
                 ContainerMustard = s != null ? s.containerMustard : new Color(0.79f, 0.60f, 0.24f, 1f);
+                Wood = s != null ? s.wood : new Color(0.72f, 0.58f, 0.42f, 1f);
+                WoodDark = s != null ? s.woodDark : new Color(0.48f, 0.36f, 0.24f, 1f);
+                Foliage = s != null ? s.foliage : new Color(0.24f, 0.45f, 0.28f, 1f);
+                LampGlass = s != null ? s.lampGlass : new Color(1.00f, 0.85f, 0.60f, 1f);
+                WaterShallow = s != null ? s.waterShallow : new Color(0.20f, 0.55f, 0.62f, 1f);
+                WaterDeep = s != null ? s.waterDeep : new Color(0.05f, 0.24f, 0.36f, 1f);
+                WaterHorizon = s != null ? s.waterHorizon : new Color(0.66f, 0.78f, 0.84f, 1f);
+
+                BridgeColor = Color.Lerp(Steel, ContainerRust, 0.32f);
+                HillNearColor = Color.Lerp(Foliage, ConcreteMid, 0.20f);
+                HillFarColor = Color.Lerp(Foliage, Steel, 0.42f);
+                CityColor = Color.Lerp(SteelDark, ConcreteMid, 0.25f);
             }
         }
 
@@ -650,11 +1273,11 @@ namespace P1.Editor
         /// </summary>
         private sealed class MeshCombiner
         {
-            public readonly List<Vector3> Vertices = new List<Vector3>(2048);
-            public readonly List<Vector3> Normals = new List<Vector3>(2048);
-            public readonly List<Vector2> UVs = new List<Vector2>(2048);
-            public readonly List<Color> Colors = new List<Color>(2048);
-            public readonly List<int> Triangles = new List<int>(3072);
+            public readonly List<Vector3> Vertices = new List<Vector3>(4096);
+            public readonly List<Vector3> Normals = new List<Vector3>(4096);
+            public readonly List<Vector2> UVs = new List<Vector2>(4096);
+            public readonly List<Color> Colors = new List<Color>(4096);
+            public readonly List<int> Triangles = new List<int>(6144);
 
             private static Color Linear(Color c)
             {
@@ -765,6 +1388,164 @@ namespace P1.Editor
 
                     Triangles.Add(start); Triangles.Add(start + 3); Triangles.Add(start + 2);
                     Triangles.Add(start); Triangles.Add(start + 2); Triangles.Add(start + 1);
+                }
+            }
+
+            public void AddCylinder(Vector3 baseCenter, float radius, float height, int segments, Color color, Quaternion? rot = null)
+            {
+                int segs = Mathf.Max(segments, 6);
+                Matrix4x4 trs = Matrix4x4.TRS(baseCenter, rot ?? Quaternion.identity, Vector3.one);
+                Matrix4x4 normM = trs.inverse.transpose;
+                Color linearColor = Linear(color);
+
+                // 侧面
+                for (int i = 0; i < segs; i++)
+                {
+                    float a0 = i * Mathf.PI * 2f / segs;
+                    float a1 = (i + 1) * Mathf.PI * 2f / segs;
+
+                    Vector3 p0 = new Vector3(Mathf.Cos(a0) * radius, 0f, Mathf.Sin(a0) * radius);
+                    Vector3 p1 = new Vector3(Mathf.Cos(a1) * radius, 0f, Mathf.Sin(a1) * radius);
+                    Vector3 p2 = new Vector3(Mathf.Cos(a1) * radius, height, Mathf.Sin(a1) * radius);
+                    Vector3 p3 = new Vector3(Mathf.Cos(a0) * radius, height, Mathf.Sin(a0) * radius);
+
+                    Vector3 n0 = normM.MultiplyVector(new Vector3(Mathf.Cos(a0), 0f, Mathf.Sin(a0))).normalized;
+                    Vector3 n1 = normM.MultiplyVector(new Vector3(Mathf.Cos(a1), 0f, Mathf.Sin(a1))).normalized;
+
+                    Vector3 wp0 = trs.MultiplyPoint3x4(p0);
+                    Vector3 wp1 = trs.MultiplyPoint3x4(p1);
+                    Vector3 wp2 = trs.MultiplyPoint3x4(p2);
+                    Vector3 wp3 = trs.MultiplyPoint3x4(p3);
+
+                    int start = Vertices.Count;
+                    Vertices.Add(wp0); Vertices.Add(wp1); Vertices.Add(wp2); Vertices.Add(wp3);
+                    Normals.Add(n0); Normals.Add(n1); Normals.Add(n1); Normals.Add(n0);
+                    UVs.Add(new Vector2(0f, 0f)); UVs.Add(new Vector2(1f, 0f)); UVs.Add(new Vector2(1f, 1f)); UVs.Add(new Vector2(0f, 1f));
+                    Colors.Add(linearColor); Colors.Add(linearColor); Colors.Add(linearColor); Colors.Add(linearColor);
+
+                    Triangles.Add(start); Triangles.Add(start + 3); Triangles.Add(start + 2);
+                    Triangles.Add(start); Triangles.Add(start + 2); Triangles.Add(start + 1);
+                }
+
+                // 顶盖 (朝向 +Y)
+                int centerIdx = Vertices.Count;
+                Vector3 topCenter = trs.MultiplyPoint3x4(new Vector3(0f, height, 0f));
+                Vector3 upNorm = normM.MultiplyVector(Vector3.up).normalized;
+                Vertices.Add(topCenter);
+                Normals.Add(upNorm);
+                UVs.Add(new Vector2(0.5f, 0.5f));
+                Colors.Add(linearColor);
+
+                int rimStart = Vertices.Count;
+                for (int i = 0; i < segs; i++)
+                {
+                    float a = i * Mathf.PI * 2f / segs;
+                    Vector3 p = trs.MultiplyPoint3x4(new Vector3(Mathf.Cos(a) * radius, height, Mathf.Sin(a) * radius));
+                    Vertices.Add(p);
+                    Normals.Add(upNorm);
+                    UVs.Add(new Vector2(Mathf.Cos(a) * 0.5f + 0.5f, Mathf.Sin(a) * 0.5f + 0.5f));
+                    Colors.Add(linearColor);
+                }
+
+                for (int i = 0; i < segs; i++)
+                {
+                    int next = (i + 1) % segs;
+                    Triangles.Add(centerIdx);
+                    Triangles.Add(rimStart + next);
+                    Triangles.Add(rimStart + i);
+                }
+            }
+
+            public void AddHazardBogie(Vector3 center, Vector3 size, Color yellow, Color dark, Quaternion rot)
+            {
+                AddBox(center, size, dark, rot);
+
+                float halfX = size.x * 0.5f + 0.01f;
+                float halfY = size.y * 0.5f;
+                float halfZ = size.z * 0.5f;
+
+                int stripes = 6;
+                float stepZ = size.z / stripes;
+                float slantZ = stepZ * 0.5f;
+
+                for (int s = 0; s < stripes; s++)
+                {
+                    Color col = (s % 2 == 0) ? yellow : dark;
+                    float z0 = -halfZ + s * stepZ;
+                    float z1 = z0 + stepZ;
+
+                    Vector3 p0 = center + rot * new Vector3(halfX, -halfY, z0);
+                    Vector3 p1 = center + rot * new Vector3(halfX, -halfY, z1);
+                    Vector3 p2 = center + rot * new Vector3(halfX, halfY, z1 + slantZ);
+                    Vector3 p3 = center + rot * new Vector3(halfX, halfY, z0 + slantZ);
+                    Vector3 nX = rot * Vector3.right;
+                    AddQuadRaw(p0, p1, p2, p3, nX, Vector2.zero, Vector2.right, Vector2.one, Vector2.up, col);
+
+                    Vector3 q0 = center + rot * new Vector3(-halfX, -halfY, z1);
+                    Vector3 q1 = center + rot * new Vector3(-halfX, -halfY, z0);
+                    Vector3 q2 = center + rot * new Vector3(-halfX, halfY, z0 + slantZ);
+                    Vector3 q3 = center + rot * new Vector3(-halfX, halfY, z1 + slantZ);
+                    Vector3 nXn = rot * Vector3.left;
+                    AddQuadRaw(q0, q1, q2, q3, nXn, Vector2.zero, Vector2.right, Vector2.one, Vector2.up, col);
+                }
+            }
+
+            public void AddWordCargo(Vector3 center, float height, Color color, Quaternion rot)
+            {
+                float h = height;
+                float w = h * 0.65f;
+                float t = h * 0.18f;
+                float d = 0.08f;
+                float sp = h * 0.22f;
+                float totalW = 5 * w + 4 * sp;
+                float startX = -totalW * 0.5f + w * 0.5f;
+
+                void AddStroke(Vector3 letterPos, Vector3 localCenter, Vector3 size)
+                {
+                    Vector3 pos = letterPos + localCenter;
+                    AddBox(center + rot * pos, size, color, rot);
+                }
+
+                // C
+                {
+                    Vector3 lp = new Vector3(startX + 0 * (w + sp), 0f, 0f);
+                    AddStroke(lp, new Vector3(-w * 0.5f + t * 0.5f, 0f, 0f), new Vector3(t, h, d));
+                    AddStroke(lp, new Vector3(0f, h * 0.5f - t * 0.5f, 0f), new Vector3(w, t, d));
+                    AddStroke(lp, new Vector3(0f, -h * 0.5f + t * 0.5f, 0f), new Vector3(w, t, d));
+                }
+                // A
+                {
+                    Vector3 lp = new Vector3(startX + 1 * (w + sp), 0f, 0f);
+                    AddStroke(lp, new Vector3(-w * 0.5f + t * 0.5f, -t * 0.5f, 0f), new Vector3(t, h - t, d));
+                    AddStroke(lp, new Vector3(w * 0.5f - t * 0.5f, -t * 0.5f, 0f), new Vector3(t, h - t, d));
+                    AddStroke(lp, new Vector3(0f, h * 0.5f - t * 0.5f, 0f), new Vector3(w, t, d));
+                    AddStroke(lp, new Vector3(0f, 0f, 0f), new Vector3(w, t, d));
+                }
+                // R
+                {
+                    Vector3 lp = new Vector3(startX + 2 * (w + sp), 0f, 0f);
+                    AddStroke(lp, new Vector3(-w * 0.5f + t * 0.5f, 0f, 0f), new Vector3(t, h, d));
+                    AddStroke(lp, new Vector3(0f, h * 0.5f - t * 0.5f, 0f), new Vector3(w, t, d));
+                    AddStroke(lp, new Vector3(0f, 0.05f * h, 0f), new Vector3(w, t, d));
+                    AddStroke(lp, new Vector3(w * 0.5f - t * 0.5f, 0.28f * h, 0f), new Vector3(t, 0.45f * h, d));
+                    AddStroke(lp, new Vector3(w * 0.5f - t * 0.5f, -0.28f * h, 0f), new Vector3(t, 0.45f * h, d));
+                }
+                // G
+                {
+                    Vector3 lp = new Vector3(startX + 3 * (w + sp), 0f, 0f);
+                    AddStroke(lp, new Vector3(-w * 0.5f + t * 0.5f, 0f, 0f), new Vector3(t, h, d));
+                    AddStroke(lp, new Vector3(0f, h * 0.5f - t * 0.5f, 0f), new Vector3(w, t, d));
+                    AddStroke(lp, new Vector3(0f, -h * 0.5f + t * 0.5f, 0f), new Vector3(w, t, d));
+                    AddStroke(lp, new Vector3(w * 0.5f - t * 0.5f, -0.22f * h, 0f), new Vector3(t, 0.55f * h, d));
+                    AddStroke(lp, new Vector3(0.12f * w, 0f, 0f), new Vector3(w * 0.55f, t, d));
+                }
+                // O
+                {
+                    Vector3 lp = new Vector3(startX + 4 * (w + sp), 0f, 0f);
+                    AddStroke(lp, new Vector3(-w * 0.5f + t * 0.5f, 0f, 0f), new Vector3(t, h, d));
+                    AddStroke(lp, new Vector3(w * 0.5f - t * 0.5f, 0f, 0f), new Vector3(t, h, d));
+                    AddStroke(lp, new Vector3(0f, h * 0.5f - t * 0.5f, 0f), new Vector3(w, t, d));
+                    AddStroke(lp, new Vector3(0f, -h * 0.5f + t * 0.5f, 0f), new Vector3(w, t, d));
                 }
             }
 

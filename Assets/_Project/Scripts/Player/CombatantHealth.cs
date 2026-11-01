@@ -348,7 +348,13 @@ namespace P1.Player
             float damageRef = config != null && config.hitSplashDamageRef > 1f
                 ? config.hitSplashDamageRef
                 : HitSplashDamageRefFallback;
-            VfxPool.Instance.SpawnHitSplash(origin, shotDir, color, damage / damageRef);
+
+            // 白热高光只保留给「本地玩家打中」或「本地玩家被打中」：
+            // SpawnImpactFlash 是加法混合的米级软圆盘，8 人混战里全员命中都放的话，
+            // 每个角色胸口都会烧成一团白光（再被 Bloom 放大成整片白），
+            // 与 VfxPool.SpawnImpactFlash 注释里「只给本地玩家的命中用，避免全屏闪光污染」一致。
+            bool highlight = IsLocalPlayer(this) || (attacker != null && IsLocalPlayer(attacker));
+            VfxPool.Instance.SpawnHitSplash(origin, shotDir, color, damage / damageRef, highlight);
         }
 
         private void Die(Team killerTeam)
@@ -429,19 +435,11 @@ namespace P1.Player
             if (_spawnProtectionRemaining > 0f)
             {
                 _spawnProtectionRemaining = Mathf.Max(0f, _spawnProtectionRemaining - Time.deltaTime);
-                if (_spawnProtectionRemaining > 0f)
+                if (_spawnProtectionRemaining <= 0f)
                 {
-                    // 6Hz 闪白提示（INKWAVE 用着色器呼吸闪代替实体护盾，这里复用受击闪白通道）
-                    _spawnBlinkTimer -= Time.deltaTime;
-                    if (_spawnBlinkTimer <= 0f)
-                    {
-                        _spawnBlinkTimer = 0.1f;
-                        _spawnBlinkOn = !_spawnBlinkOn;
-                        ApplyHitFlash(_spawnBlinkOn);
-                    }
-                }
-                else
-                {
+                    // 6Hz 复活闪白已移除（用户反馈：满场角色乱闪白光，纯白身体再被 bloom
+                    // 放大成大团白晕，且发生在无人受击时，看起来像 bug）。
+                    // 出生保护的无敌时间与脚下的队色扩散环保留，身体不再闪白。
                     _spawnBlinkOn = false;
                     if (_hitFlashTimer <= 0f)
                     {

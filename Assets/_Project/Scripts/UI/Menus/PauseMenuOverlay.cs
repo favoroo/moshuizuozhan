@@ -527,20 +527,11 @@ namespace P1.UI.Menus
         private void BuildControlsCard(Transform parent)
         {
             bool mobile = UITypography.IsMobileLike;
-            string[] keys;
-            string[] labels;
-            if (mobile)
-            {
-                keys = new[] { "摇杆", "滑屏", "射击键", "潜墨键", "跳跃键", "大招键" };
-                labels = new[] { "移动", "转视角", "开火涂地", "潜墨 / 爬墙", "跳跃", "释放大招" };
-            }
-            else
-            {
-                keys = new[] { "WASD", "鼠标", "左键", "右键/Shift", "空格", "E / 中键", "Q", "Esc" };
-                labels = new[] { "移动", "转视角", "开火涂地", "潜墨 / 爬墙", "跳跃", "投掷手雷", "释放大招", "暂停 / 设置" };
-            }
 
-            int rowCount = keys.Length;
+            // 键位表统一来自 HomeInfoContent：首页「键位说明 / 操作指南」浮层与这里共用一份数据源，
+            // 以后改键位不会再出现两处各写一套文案的情况。
+            IReadOnlyList<ControlRow> keys = HomeInfoContent.Controls(mobile);
+            int rowCount = keys.Count;
             float rowsHeight = rowCount * ControlsRowHeight + (rowCount - 1) * ControlsRowGap;
             float cardHeight = 118f + rowsHeight;
             float halfWidth = ControlsCardWidth * 0.5f;
@@ -641,7 +632,7 @@ namespace P1.UI.Menus
                 capShape.DrawGloss = false;
                 _theme.ApplyHardShadow(capShape, UIHardShadowLevel.Tag);
 
-                var capText = CreateTextMesh("KeyLabel", capGo.transform, keys[i], UITypography.FontSnapped(20f),
+                var capText = CreateTextMesh("KeyLabel", capGo.transform, keys[i].Key, UITypography.FontSnapped(20f),
                     ComicStyle.Paper, null, TextAlignmentOptions.Center, isDisplay: false);
                 capText.fontStyle = FontStyles.Bold;
                 var capTextRt = capText.rectTransform;
@@ -650,7 +641,7 @@ namespace P1.UI.Menus
                 capTextRt.offsetMin = Vector2.zero;
                 capTextRt.offsetMax = Vector2.zero;
 
-                var action = CreateTextMesh("ActionLabel", cardGo.transform, labels[i], UITypography.FontSnapped(22f),
+                var action = CreateTextMesh("ActionLabel", cardGo.transform, keys[i].Action, UITypography.FontSnapped(22f),
                     ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
                 action.fontStyle = FontStyles.Bold;
                 var actionRt = action.rectTransform;
@@ -1108,6 +1099,10 @@ namespace P1.UI.Menus
 
             if (toggleRequested)
             {
+                // 首页详情浮层（战绩 / 键位说明）优先消费 Esc / Start：
+                // 关闭浮层并标记本帧已用，绝不能同一帧又打开暂停菜单。
+                if (HomeInfoOverlay.TryCloseFromMenuInput()) return;
+
                 if (MobileLayoutCustomizer.IsEditingAny)
                 {
                     MobileLayoutCustomizer.ActiveEditor?.Close(false);

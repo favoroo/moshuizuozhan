@@ -90,8 +90,8 @@ namespace P1.Tests.EditMode
                 fader.CacheRenderers();
 
                 Renderer faceRenderer = FindFaceRenderer(go);
-                Assert.IsNotNull(faceRenderer, "应存在 InkFace_* 立面渲染器");
-                Assert.IsTrue(faceRenderer.HasPropertyBlock(), "立面渲染器初始应绑定该面的墨迹贴图");
+                Assert.IsNotNull(faceRenderer, "应存在 InkWallMerged_* 合并立面渲染器");
+                Assert.IsTrue(faceRenderer.HasPropertyBlock(), "合并立面渲染器初始应绑定图集墨迹贴图");
 
                 for (int i = 0; i < 10; i++)
                 {
@@ -108,9 +108,9 @@ namespace P1.Tests.EditMode
                 faceRenderer.GetPropertyBlock(block);
 
                 Assert.IsTrue(faceRenderer.HasPropertyBlock(),
-                    "恢复不透明后立面渲染器应仍持有 MaterialPropertyBlock");
+                    "恢复不透明后合并立面渲染器应仍持有 MaterialPropertyBlock");
                 Assert.IsNotNull(block.GetTexture(InkTexId),
-                    "遮挡淡出/恢复不得抹掉立面墨迹贴图（否则墙面涂了也看不见）");
+                    "遮挡淡出/恢复不得抹掉立面墨迹图集（否则墙面涂了也看不见）");
             }
             finally
             {
@@ -124,7 +124,7 @@ namespace P1.Tests.EditMode
             Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
             for (int i = 0; i < renderers.Length; i++)
             {
-                if (renderers[i] != null && renderers[i].gameObject.name.StartsWith("InkFace_"))
+                if (renderers[i] != null && renderers[i].gameObject.name.StartsWith("InkWallMerged_"))
                 {
                     return renderers[i];
                 }

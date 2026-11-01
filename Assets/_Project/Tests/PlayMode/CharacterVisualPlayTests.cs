@@ -75,6 +75,61 @@ namespace P1.Tests
         }
 
         [UnityTest]
+        public IEnumerator RuntimeHoldPoses_EveryWeapon_HandTracksGrip()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            var visual = player.GetComponentInChildren<CharacterVisualController>();
+            Assert.IsNotNull(visual, "玩家应挂载 CharacterVisualController");
+
+            // 回归锁：P34 持握姿态字典只在装配期写入、不参与场景序列化，旧版运行期为空 →
+            // 右臂 identity 笔直垂下、枪漂在胸前。这里逐武器切枪并等一帧 LateUpdate，
+            // 断言右手始终落在真实握把上（由运行期重建 + 逐帧手持 IK 保证）。
+            WeaponKind[] kinds =
+            {
+                WeaponKind.Shooter, WeaponKind.Roller, WeaponKind.Charger, WeaponKind.Dualies,
+                WeaponKind.Slosher, WeaponKind.Blaster, WeaponKind.Splatling
+            };
+            for (int i = 0; i < kinds.Length; i++)
+            {
+                WeaponKind kind = kinds[i];
+                visual.EquipWeaponKind(kind);
+                yield return null;
+
+                Transform hand = visual.RightElbowPivot.Find("Hand");
+                Transform grip = FindRightGrip(visual, kind);
+                Assert.IsNotNull(hand, "右手必须存在");
+                Assert.IsNotNull(grip, $"{kind} 必须能找到握把部件");
+                float distance = Vector3.Distance(hand.position, grip.position);
+                Assert.Less(distance, 0.03f,
+                    $"{kind} 切枪后右手未贴住握把（距离 {distance:F3}m）——持握姿态在运行期丢失");
+            }
+        }
+
+        private static Transform FindRightGrip(CharacterVisualController visual, WeaponKind kind)
+        {
+            Transform model = null;
+            switch (kind)
+            {
+                case WeaponKind.Roller: model = visual.WeaponRoot.transform.Find("Swell_Roller"); break;
+                case WeaponKind.Charger: model = visual.WeaponRoot.transform.Find("Glint_Charger"); break;
+                case WeaponKind.Dualies: model = visual.WeaponRoot.transform.Find("Twinfin_Dualies"); break;
+                case WeaponKind.Slosher: model = visual.WeaponRoot.transform.Find("Tidebucket_Slosher"); break;
+                case WeaponKind.Blaster: model = visual.WeaponRoot.transform.Find("Popper_Blaster"); break;
+                case WeaponKind.Splatling: model = visual.WeaponRoot.transform.Find("Gyre_Splatling"); break;
+                default: model = visual.WeaponRoot.transform.Find("Spritzer_Shooter"); break;
+            }
+            if (model == null) return null;
+            if (kind == WeaponKind.Dualies)
+            {
+                Transform rightPistol = model.Find("RightPistol");
+                return rightPistol != null ? WeaponHoldRig.FindChildByName(rightPistol, "Grip") : null;
+            }
+            return WeaponHoldRig.FindChildByName(model, WeaponHoldTargets.RightGripName(kind));
+        }
+
+        [UnityTest]
         public IEnumerator Swimming_TransformsBetweenKidAndSquidForms()
         {
             yield return LoadPlaybox();

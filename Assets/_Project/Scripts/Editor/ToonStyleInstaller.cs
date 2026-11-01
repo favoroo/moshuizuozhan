@@ -28,6 +28,27 @@ namespace P1.Editor
         private const string BackupPath = "Logs/PC_Renderer.backup.asset";
         private const string MobileBackupPath = "Logs/Mobile_Renderer.backup.asset";
 
+        /// <summary>
+        /// 移动端是否安装「全屏描边」RendererFeature —— 默认 **关闭**（Android 切后台灰屏热修，2026-11-01）。
+        ///
+        /// 真机现象（v0.1.8 回归）：Android 切到别的 App 再切回来，3D 画面整片消失，
+        /// 屏幕上只剩相机 clear color 被后处理上色后的底色（观感「全屏灰」），
+        /// HUD / 触控 / 小地图 / 对局逻辑全部正常；v0.1.7 移动端 Renderer 里一个 Feature 都没有，同样操作正常。
+        ///
+        /// 原因：全屏 Pass 需要把当前画面拷进中间纹理再全屏重绘（`fetchColorBuffer = true` →
+        /// `requiresIntermediateTexture`），并额外要求一次深度拷贝；Android 恢复时会重建 surface，
+        /// 这条「中间纹理 + 最终呈现」链路在恢复后失效，后处理读到的只剩被清成 clear color 的缓冲。
+        ///
+        /// 所以移动端回到 v0.1.7 的直绘路径：角色自身的描边（`CharacterToonOutlined`）不受影响，
+        /// 同时省掉每帧一次全屏颜色拷贝 + 深度拷贝，对 30 FPS 目标更友好。
+        ///
+        /// 需要对比验证时：把此开关改回 `true` 再跑菜单 `P1/画风/5`，即可恢复移动端全屏描边。
+        ///
+        /// 用 `static readonly` 而非 `const`：常量会让 `if (!EnableMobileFullScreenOutline)` 之后的
+        /// 安装分支被判成不可达并报 CS0162 警告（本项目不接受「warning 而已」的交付）。
+        /// </summary>
+        private static readonly bool EnableMobileFullScreenOutline = false;
+
         private static readonly int ShadeThresholdId = Shader.PropertyToID("_ShadeThreshold");
         private static readonly int ShadeSoftnessId = Shader.PropertyToID("_ShadeSoftness");
         private static readonly int ShadowTintId = Shader.PropertyToID("_ShadowTint");
@@ -142,6 +163,28 @@ namespace P1.Editor
             EditorUtility.SetDirty(data);
             AssetDatabase.SaveAssets();
             Debug.Log($"[P10-A] 全屏卡通描边已{(style.sceneOutlineEnabled ? "开启" : "关闭")}。");
+        }
+
+        /// <summary>
+        /// 移动端灰屏热修入口：把 Mobile_Renderer 上的「P1 Toon Outline Mobile」停用（幂等）。
+        /// 只动这一个 Feature，不碰画风参数/材质/场景，可与菜单 5 之外的任何写入并行安全执行。
+        /// </summary>
+        [MenuItem("P1/画风/6. 应用移动端灰屏热修（停用移动端全屏描边）", false, 15)]
+        public static void ApplyMobileResumeHotfix()
+        {
+            var data = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(MobileRendererPath);
+            if (data == null)
+            {
+                Debug.LogError($"[P31] 找不到 {MobileRendererPath}，无法应用移动端灰屏热修。");
+                return;
+            }
+
+            DisableMobileOutlineFeature(data);
+
+            var pcData = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(RendererPath);
+            var pcFeature = pcData != null ? FindOutlineFeature(pcData) : null;
+            string pcState = pcFeature == null ? "未安装" : (IsFeatureActive(pcFeature) ? "已开启" : "已关闭");
+            Debug.Log($"[P31] 移动端灰屏热修已应用：移动端全屏描边停用（PC 全屏描边保持{pcState}）。");
         }
 
         [MenuItem("P1/画风/3. 截取当前画风截图（Play 模式）", false, 12)]
@@ -852,6 +895,10 @@ namespace P1.Editor
         ///    每像素省 4 次法线纹理采样；
         /// 3) 线宽 0.7px、距离淡化更早开始（14m），控制移动端像素与带宽开销。
         /// 与 PC 描边相互独立：单独材质 + 单独 RendererFeature，互不影响。
+        ///
+        /// 2026-11-01 热修：<see cref="EnableMobileFullScreenOutline"/> 默认 false。
+        /// 关闭时这里不再安装/更新 Feature，并把 v0.1.8 已装上的那份**停用**（保留对象便于复现），
+        /// 保证任何一次菜单写入（1/4/5）都不会再把移动端推回「全屏 Pass」路径。
         /// </summary>
         private static void InstallMobileOutlineFeature(ArenaStyleSO style)
         {
@@ -862,11 +909,40 @@ namespace P1.Editor
                 return;
             }
 
+            if (!EnableMobileFullScreenOutline)
+            {
+                DisableMobileOutlineFeature(data);
+                return;
+            }
+
             Material mobileMat = EnsureMobileOutlineMaterial(style);
             if (mobileMat == null) return;
 
             InstallOutlineFeatureOn(data, MobileRendererPath, MobileBackupPath, MobileOutlineFeatureName,
                 mobileMat, enabled: style.sceneOutlineEnabled, useNormals: false);
+        }
+
+        /// <summary>停用移动端全屏描边 Feature（幂等）：Android 切后台灰屏热修用。</summary>
+        private static void DisableMobileOutlineFeature(UniversalRendererData data)
+        {
+            FullScreenPassRendererFeature feature = FindOutlineFeature(data, MobileOutlineFeatureName);
+            if (feature == null)
+            {
+                Debug.Log("[P31] 移动端全屏描边：未安装，保持 v0.1.7 直绘路径（Android 切后台灰屏热修）。");
+                return;
+            }
+
+            if (!IsFeatureActive(feature))
+            {
+                Debug.Log("[P31] 移动端全屏描边：已是停用状态（Android 切后台灰屏热修）。");
+                return;
+            }
+
+            SetFeatureActive(feature, false);
+            EditorUtility.SetDirty(data);
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log("[P31] 移动端全屏描边已停用：移动端回到无全屏 Pass 的直绘路径（Android 切后台灰屏热修）。");
         }
 
         private static Material EnsureMobileOutlineMaterial(ArenaStyleSO style)
@@ -1021,6 +1097,13 @@ namespace P1.Editor
                 }
             }
             return null;
+        }
+
+        private static bool IsFeatureActive(ScriptableRendererFeature feature)
+        {
+            var so = new SerializedObject(feature);
+            SerializedProperty prop = so.FindProperty("m_Active");
+            return prop == null || prop.boolValue;
         }
 
         private static void SetFeatureActive(ScriptableRendererFeature feature, bool active)

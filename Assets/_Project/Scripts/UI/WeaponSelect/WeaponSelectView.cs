@@ -997,6 +997,15 @@ namespace P1.UI.WeaponSelect
             if (keyboard == null)
                 return;
 
+            // 首页详情浮层（战绩 / 键位说明）打开时，武器抽屉的 1~7 / 方向键 / Enter / Esc 全部让路：
+            // Esc 交给浮层关闭，且用同帧消费标记防止浮层刚关掉又立刻被这里重新打开。
+            if (HomeInfoOverlay.IsOpen)
+            {
+                if (keyboard.escapeKey.wasPressedThisFrame) HomeInfoOverlay.TryCloseFromMenuInput();
+                return;
+            }
+            if (HomeInfoOverlay.MenuInputConsumedThisFrame) return;
+
             if (keyboard.digit1Key.wasPressedThisFrame || keyboard.numpad1Key.wasPressedThisFrame) SelectWeapon(0);
             else if (keyboard.digit2Key.wasPressedThisFrame || keyboard.numpad2Key.wasPressedThisFrame) SelectWeapon(1);
             else if (keyboard.digit3Key.wasPressedThisFrame || keyboard.numpad3Key.wasPressedThisFrame) SelectWeapon(2);

@@ -10,6 +10,10 @@ namespace P1.Player
     {
         /// <summary>武器模型俯仰附加角（度）。</summary>
         public float PitchDeg;
+        /// <summary>武器模型偏航附加角（度，正 = 滚筒朝右前方斜提）。</summary>
+        public float YawDeg;
+        /// <summary>武器模型滚转附加角（度，负 = 右端略低左端略高斜靠）。</summary>
+        public float RollDeg;
         /// <summary>武器挂点竖向下压量（米，≥ 0）。</summary>
         public float DropMeters;
         /// <summary>武器挂点水平前推量（米，≥ 0）。</summary>
@@ -24,6 +28,8 @@ namespace P1.Player
         public static readonly RollerWieldPose Neutral = new RollerWieldPose
         {
             PitchDeg = 0f,
+            YawDeg = 0f,
+            RollDeg = 0f,
             DropMeters = 0f,
             ForwardMeters = 0f,
             BodyPitchDeg = 0f,
@@ -36,6 +42,8 @@ namespace P1.Player
     public struct RollerWieldParams
     {
         public float CarryPitchDeg;
+        public float CarryYawDeg;
+        public float CarryRollDeg;
         public float FlickLiftPitchDeg;
         public float FlickSlamPitchDeg;
         public float FlickSlamDropMeters;
@@ -59,6 +67,8 @@ namespace P1.Player
         public static RollerWieldParams Default => new RollerWieldParams
         {
             CarryPitchDeg = RollerWieldSolver.CarryPitchDeg,
+            CarryYawDeg = RollerWieldSolver.CarryYawDeg,
+            CarryRollDeg = RollerWieldSolver.CarryRollDeg,
             FlickLiftPitchDeg = RollerWieldSolver.FlickLiftPitchDeg,
             FlickSlamPitchDeg = RollerWieldSolver.FlickSlamPitchDeg,
             FlickSlamDropMeters = RollerWieldSolver.FlickSlamDropMeters,
@@ -82,20 +92,24 @@ namespace P1.Player
 
     /// <summary>
     /// 滚筒武器持握/攻击姿态求解（P27，参考 INKWAVE character.js / character-weapons.js / weapons.js）：
-    /// 1. 持握（carry）：滚筒抬起斜扛，替代旧版平举的死板姿态；
-    /// 2. 挥击（flick，对应 _poseFlick 四段）：前摇期抡起过肩 → 释放瞬间加速砸地（与 9 滴墨同步）→
+    /// 1. 持握（carry）：滚筒压低斜提（微偏右下），视野通透、双手握杆，替代旧版平举杠铃姿态；
+    /// 2. 挥击（flick，对应 _poseFlick 四段）：前摇期抡起过肩（旋转平滑拉直回中线）→ 释放瞬间加速砸地（与 9 滴墨同步）→
     ///    随挥保持 → 收势回持握；身体配合蓄力后仰 / 甩出前压；
-/// 3. 拖地（roll，对应 wRoll 姿态）：滚筒压到地面、身体前倾、重心下沉，
-        ///    权重按 INKWAVE 入 11 / 出 6 的阻尼混合；GroundContact01 标记"需要贴地闭环"的时段，
-        ///    由 CharacterVisualController 依据真实骨架/地面射线做俯仰修正（视角/坡度不再影响贴地）；
+    /// 3. 拖地（roll，对应 wRoll 姿态）：滚筒压到地面、身体前倾、重心下沉，
+    ///    权重按 INKWAVE 入 11 / 出 6 的阻尼混合；GroundContact01 标记"需要贴地闭环"的时段，
+    ///    由 CharacterVisualController 依据真实骨架/地面射线做俯仰修正（视角/坡度不再影响贴地）；
     /// 4. 滚轴自转：ω = 地速 / 滚筒半径（无滑动滚动），停转按 exp(-decay·t) 惯性衰减，挥击甩转冲量。
     /// 纯函数、无状态、零分配，可在 EditMode 直接单测；Transform 写回由 CharacterVisualController 负责。
     /// </summary>
     public static class RollerWieldSolver
     {
         // ---- 持握 / 挥击角度（度）----
-        /// <summary>待机持握俯仰：滚筒抬起斜扛（旧版 0° 平举显得死板）。</summary>
-        public const float CarryPitchDeg = -28f;
+        /// <summary>待机持握俯仰：滚筒压低斜提（旧版 -28° 把主鼓抬到胸口，正面整个挡住身体和视野）。</summary>
+        public const float CarryPitchDeg = 16f;
+        /// <summary>待机持握偏航：向右前方微偏 15°，让出身体正前与准星视野。</summary>
+        public const float CarryYawDeg = 15f;
+        /// <summary>待机持握滚转：向右侧微倾 12°，两手握杆自然贴身。</summary>
+        public const float CarryRollDeg = -12f;
         /// <summary>挥击抡起角：滚筒举过肩（INKWAVE _poseFlick 蓄力 -2.30rad ≈ -132°，按短杠杆收敛）。</summary>
         public const float FlickLiftPitchDeg = -115f;
         /// <summary>砸地角：whip 段末滚筒吻到身前地面（真实骨架标定：body18° 时滚筒轴心 y=0.095，
@@ -153,11 +167,13 @@ namespace P1.Player
                + Mathf.Max(0f, p.FlickFollowDuration)
                + Mathf.Max(0f, p.FlickRecoverDuration);
 
-        /// <summary>持握姿态（滚筒抬起斜扛）。</summary>
+        /// <summary>持握姿态（滚筒压低斜提）。</summary>
         public static RollerWieldPose SampleCarry(in RollerWieldParams p)
         {
             RollerWieldPose pose = RollerWieldPose.Neutral;
             pose.PitchDeg = p.CarryPitchDeg;
+            pose.YawDeg = p.CarryYawDeg;
+            pose.RollDeg = p.CarryRollDeg;
             return pose;
         }
 
@@ -173,13 +189,15 @@ namespace P1.Player
             windup = Mathf.Max(0f, windup);
             float whip = Mathf.Max(0.01f, p.FlickWhipDuration);
 
-            // 1. 抡起（前摇）：持握角 → 举过肩
+            // 1. 抡起（前摇）：持握角 → 举过肩（偏航/滚转平滑拉直回中线）
             if (time <= windup)
             {
                 float t01 = windup > 0.0001f ? Mathf.Clamp01(time / windup) : 1f;
                 float e = Mathf.SmoothStep(0f, 1f, t01);
                 RollerWieldPose pose = RollerWieldPose.Neutral;
                 pose.PitchDeg = Mathf.Lerp(p.CarryPitchDeg, p.FlickLiftPitchDeg, e);
+                pose.YawDeg = Mathf.Lerp(p.CarryYawDeg, 0f, e);
+                pose.RollDeg = Mathf.Lerp(p.CarryRollDeg, 0f, e);
                 pose.BodyPitchDeg = Mathf.Lerp(0f, p.FlickCoilBodyPitchDeg, e);
                 return pose;
             }
@@ -194,6 +212,8 @@ namespace P1.Player
                 float e = u * u;
                 RollerWieldPose pose = RollerWieldPose.Neutral;
                 pose.PitchDeg = Mathf.Lerp(p.FlickLiftPitchDeg, p.FlickSlamPitchDeg, e);
+                pose.YawDeg = 0f;
+                pose.RollDeg = 0f;
                 pose.DropMeters = Mathf.Lerp(0f, p.FlickSlamDropMeters, e);
                 pose.BodyPitchDeg = Mathf.Lerp(p.FlickCoilBodyPitchDeg, p.FlickWhipBodyPitchDeg, e);
                 pose.GroundContact01 = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((u - 0.6f) / 0.4f));
@@ -207,6 +227,8 @@ namespace P1.Player
             {
                 RollerWieldPose pose = RollerWieldPose.Neutral;
                 pose.PitchDeg = p.FlickSlamPitchDeg;
+                pose.YawDeg = 0f;
+                pose.RollDeg = 0f;
                 pose.DropMeters = p.FlickSlamDropMeters;
                 pose.BodyPitchDeg = p.FlickWhipBodyPitchDeg;
                 pose.GroundContact01 = 1f;
@@ -219,6 +241,8 @@ namespace P1.Player
             float ev = 1f - (1f - v) * (1f - v);
             RollerWieldPose tail = RollerWieldPose.Neutral;
             tail.PitchDeg = Mathf.Lerp(p.FlickSlamPitchDeg, p.CarryPitchDeg, ev);
+            tail.YawDeg = Mathf.Lerp(0f, p.CarryYawDeg, ev);
+            tail.RollDeg = Mathf.Lerp(0f, p.CarryRollDeg, ev);
             tail.DropMeters = Mathf.Lerp(p.FlickSlamDropMeters, 0f, ev);
             tail.BodyPitchDeg = Mathf.Lerp(p.FlickWhipBodyPitchDeg, 0f, ev);
             tail.GroundContact01 = 1f - ev;
@@ -230,6 +254,8 @@ namespace P1.Player
         {
             RollerWieldPose pose = RollerWieldPose.Neutral;
             pose.PitchDeg = p.RollPitchDeg;
+            pose.YawDeg = 0f;
+            pose.RollDeg = 0f;
             pose.DropMeters = p.RollDropMeters;
             pose.ForwardMeters = p.RollForwardMeters;
             pose.BodyPitchDeg = p.RollBodyPitchDeg;
@@ -244,6 +270,8 @@ namespace P1.Player
             t = Mathf.Clamp01(t);
             RollerWieldPose pose;
             pose.PitchDeg = Mathf.Lerp(a.PitchDeg, b.PitchDeg, t);
+            pose.YawDeg = Mathf.Lerp(a.YawDeg, b.YawDeg, t);
+            pose.RollDeg = Mathf.Lerp(a.RollDeg, b.RollDeg, t);
             pose.DropMeters = Mathf.Lerp(a.DropMeters, b.DropMeters, t);
             pose.ForwardMeters = Mathf.Lerp(a.ForwardMeters, b.ForwardMeters, t);
             pose.BodyPitchDeg = Mathf.Lerp(a.BodyPitchDeg, b.BodyPitchDeg, t);

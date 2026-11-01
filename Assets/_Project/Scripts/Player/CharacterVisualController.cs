@@ -130,6 +130,15 @@ namespace P1.Player
         private Quaternion _rightElbowPoseRot = Quaternion.identity;
         private Quaternion _leftElbowPoseRot = Quaternion.identity;
 
+        // P34 运行期握把追踪：当前武器真实的右手握把 / 左手托握点（每帧 IK 指过去）。
+        // 字典只在装配期写入、场景保存后丢失，运行期必须按当前武器重新缓存，
+        // 否则切枪后手臂会退回"笔直垂下"，武器则漂在胸前（v0.1.8 的实际表现）。
+        private Transform _heldRightGrip;
+        private Transform _heldLeftGrip;
+        private Transform _heldLeftSupportModel;
+        private Vector3 _heldLeftSupportLocal;
+        private bool _heldHasLeftSupport;
+
         // 双腿 FK 基准姿态（装配期为 identity，缓存防写回累乘）
         private Quaternion _defaultLeftLegRot = Quaternion.identity;
         private Quaternion _defaultRightLegRot = Quaternion.identity;
@@ -238,6 +247,8 @@ namespace P1.Player
         private float _drumSpinRadPerSec;
         // 滚筒姿态帧输出（UpdateAimPose / UpdateRecoilKick / UpdateBodyPose 消费；非滚筒武器恒为 0）
         private float _rollerPosePitchDeg;
+        private float _rollerPoseYawDeg;
+        private float _rollerPoseRollDeg;
         private float _rollerPoseDrop;
         private float _rollerPoseForward;
         private float _rollerBodyPitchDeg;
@@ -506,6 +517,118 @@ namespace P1.Player
         }
 
         /// <summary>
+        /// 按当前骨架与武器模型重建 7 套持握姿态（装配期与运行期共用 <see cref="WeaponHoldRig"/>）。
+        /// 场景里烘焙的角度不能作为唯一来源：字典不序列化，独立包/重载场景后必须能自洽重算。
+        /// </summary>
+        private void RebuildArmHoldPoses()
+        {
+            if (weaponRoot == null) return;
+
+            Dictionary<WeaponKind, ArmHoldPose> poses = WeaponHoldRig.Build(
+                weaponRoot.transform,
+                leftArmTransform, rightArmTransform, leftElbowPivot, rightElbowPivot,
+                weaponShooter, weaponRoller, weaponCharger, weaponDualies,
+                weaponSlosher, weaponBlaster, weaponSplatling,
+                WeaponHoldRig.ChestChainY);
+            BindArmHoldPoses(poses);
+        }
+
+        /// <summary>
+        /// 缓存当前武器可被 IK 追踪的握把：右手扳机握把 + （双枪）左手枪握把 / （滚筒）杆上托握点。
+        /// 每把武器只做一次层级查找，逐帧只读 Transform.position。
+        /// </summary>
+        private void CacheHeldGripTargets(WeaponKind kind)
+        {
+            _heldRightGrip = null;
+            _heldLeftGrip = null;
+            _heldLeftSupportModel = null;
+            _heldLeftSupportLocal = Vector3.zero;
+            _heldHasLeftSupport = WeaponHoldTargets.HasLeftWeaponSupport(kind);
+
+            if (_weaponMap.TryGetValue(kind, out GameObject modelGo) && modelGo != null)
+            {
+                Transform model = modelGo.transform;
+                if (kind == WeaponKind.Dualies)
+                {
+                    Transform rightPistol = WeaponHoldRig.FindChildByName(model, "RightPistol");
+                    Transform leftPistol = WeaponHoldRig.FindChildByName(model, "LeftPistol");
+                    _heldRightGrip = rightPistol != null
+                        ? WeaponHoldRig.FindChildByName(rightPistol, "Grip")
+                        : null;
+                    _heldLeftGrip = leftPistol != null
+                        ? WeaponHoldRig.FindChildByName(leftPistol, "Grip")
+                        : null;
+                }
+                else
+                {
+                    _heldRightGrip = WeaponHoldRig.FindChildByName(
+                        model, WeaponHoldTargets.RightGripName(kind));
+
+                    if (kind == WeaponKind.Roller)
+                    {
+                        _heldLeftSupportModel = model;
+                        _heldLeftSupportLocal = WeaponHoldTargets.LeftSupportLocal(kind);
+                    }
+                    else if (kind == WeaponKind.Splatling)
+                    {
+                        _heldLeftGrip = WeaponHoldRig.FindChildByName(model, "ForwardVerticalGrip");
+                    }
+                }
+            }
+
+            if (!_heldHasLeftSupport)
+            {
+                _heldLeftGrip = null;
+                _heldLeftSupportModel = null;
+            }
+        }
+
+        /// <summary>
+        /// 末段手持 IK：所有身体/武器姿态写完后，把两只手重新指到武器**当前**的握把位置。
+        /// 瞄准俯仰、后坐力、滚筒挥击/拖地都会让握把离开静态解算点，只靠切枪时的固定角度
+        /// 会出现"枪动了手没动"；逐帧两骨 IK 让手始终贴在握把上，肘部随身体自然弯折。
+        /// 零分配，每角色每帧最多 2 次解算。
+        /// </summary>
+        private void ApplyHeldHandTargets()
+        {
+            if (_formAmount >= 0.99f || _weaponVisuallyHidden) return;
+            if (chestTransform == null || rightArmTransform == null) return;
+
+            if (_heldRightGrip != null &&
+                WeaponHoldRig.SolveRightHand(
+                    chestTransform, rightArmTransform, _heldRightGrip.position,
+                    out Quaternion rightShoulder, out Quaternion rightElbow))
+            {
+                rightArmTransform.localRotation = rightShoulder;
+                if (rightElbowPivot != null) rightElbowPivot.localRotation = rightElbow;
+            }
+
+            if (!_heldHasLeftSupport || leftArmTransform == null) return;
+
+            Vector3 leftWorld;
+            if (_heldLeftGrip != null)
+            {
+                leftWorld = _heldLeftGrip.position;
+            }
+            else if (_heldLeftSupportModel != null)
+            {
+                leftWorld = _heldLeftSupportModel.TransformPoint(_heldLeftSupportLocal);
+            }
+            else
+            {
+                return;
+            }
+
+            if (WeaponHoldRig.SolveLeftHand(
+                    chestTransform, leftArmTransform, leftWorld,
+                    out Quaternion leftShoulder, out Quaternion leftElbow))
+            {
+                leftArmTransform.localRotation = leftShoulder;
+                if (leftElbowPivot != null) leftElbowPivot.localRotation = leftElbow;
+            }
+        }
+
+        /// <summary>
         /// 由 CharacterVisualAssembler 绑定 P33 骨骼链（脊柱三层 + 头骨 + 触须发两节弹簧链）。
         /// spine/neck/head 允许为 null（旧蛋形场景兜底：控制器退化为"胸腔整转 + 双 pivot 摆动"）。
         /// </summary>
@@ -619,6 +742,20 @@ namespace P1.Player
             BuildWeaponMaps();
             EnsureHairChainSprings();
 
+            // P34 持握姿态运行期重建：_armHoldPoses 是运行期字典（不参与场景序列化），
+            // 只在装配器里注入过一次，场景重载/独立包启动后必然为空 —— 旧版因此整套退化回
+            // "右臂 identity 笔直垂下、武器漂在胸前"。这里按当前骨架与武器握把重新解算一次，
+            // 之后 EquipWeaponKind 就能按武器套用姿态（不依赖场景里烘焙的角度）。
+            RebuildArmHoldPoses();
+
+            // P30-C 运行时武器网格合并兜底：场景烘焙角色若装配期合并被缓存瞬时失败跳过，
+            // 会保持逐件渲染（每把武器 6~16 个 DrawCall）。这里补一次，静态缓存跨实例共享、
+            // MergeWeaponRoot 幂等，全场 8 个角色只构建一次网格（详见 MergeWeaponsRuntime 注释）。
+            CharacterVisualAssembler.MergeWeaponsRuntime(
+                weaponShooter, weaponRoller, weaponCharger, weaponDualies,
+                weaponSlosher, weaponBlaster, weaponSplatling,
+                rollerDrumTransform, splatlingBarrelsTransform, chargerCoilRenderers);
+
             // 触须基准姿态重捕获：Awake 早于任何动画写入，此时场景里保存的就是 authored 姿态；
             // 序列化的绑定引用在 Play 克隆后保留，这里重建基准旋转，避免用残留动画姿态当基准。
             if (_squidTentacles != null && _squidTentacles.Length > 0)
@@ -639,7 +776,13 @@ namespace P1.Player
             // 否则开火后坐力与运行时换枪（EquipWeaponAt）都不会驱动外观。
             SubscribeWeaponEvents();
 
-            // 场景里保存的左手姿态可能是上一版装配结果：运行时按当前武器重新套用一次姿态与激活状态
+            // 场景里保存的左手姿态可能是上一版装配结果：运行时按当前武器重新套用一次姿态与激活状态。
+            // 武器种类优先取 WeaponController 的配置（玩家可能带着选枪结果进入对局），
+            // 避免启动首帧拿着默认 Shooter 姿态、等切枪事件才纠正。
+            if (_weaponController != null && _weaponController.Config != null)
+            {
+                _currentWeaponKind = _weaponController.Config.weaponKind;
+            }
             if (_weaponMap.Count > 0)
             {
                 EquipWeaponKind(_currentWeaponKind);
@@ -855,6 +998,17 @@ namespace P1.Player
             if (muzzleSlosher != null) _muzzleMap[WeaponKind.Slosher] = muzzleSlosher;
             if (muzzleBlaster != null) _muzzleMap[WeaponKind.Blaster] = muzzleBlaster;
             if (muzzleSplatling != null) _muzzleMap[WeaponKind.Splatling] = muzzleSplatling;
+
+            // 武器模型基准旋转：必须在任何动画写回之前捕获（Awake/BindHierarchy 阶段场景姿态即 authored）。
+            // 旧版在 UpdateAimPose 里懒缓存，一旦模型已带瞄准俯仰再切枪/重绑，就会把俯仰角当成基准，
+            // 造成"手追到旧角度、枪却偏一截"——这里一次性锁定，后续只叠加实时俯仰。
+            foreach (var kvp in _weaponMap)
+            {
+                if (kvp.Value != null)
+                {
+                    _weaponModelBaseRots[kvp.Value] = kvp.Value.transform.localRotation;
+                }
+            }
         }
 
         public void Initialize(InkCharacterMotor motor, WeaponController weapon, Team team)
@@ -871,6 +1025,9 @@ namespace P1.Player
             SubscribeWeaponEvents();
             CacheDefaultTransforms();
             ApplyVisualGroundOffset();
+
+            // 运行期/装配期都保证持握姿态表可用（场景重载后字典为空，必须重算）
+            RebuildArmHoldPoses();
 
             if (_weaponController != null)
             {
@@ -952,6 +1109,7 @@ namespace P1.Player
         public void EquipWeaponKind(WeaponKind kind)
         {
             _currentWeaponKind = kind;
+            CacheHeldGripTargets(kind);
 
             // P28 切枪复位后坐力弹簧，避免上一把枪的残余位移带到新枪
             _recoilZSpring.Reset();
@@ -1053,6 +1211,7 @@ namespace P1.Player
 
             UpdateWeaponMechanics(dt);
             ApplyRollerGroundContact(dt);   // P31 最后一步：所有姿态写完后按真实地面反解滚筒俯仰
+            ApplyHeldHandTargets();         // P34 手持 IK：手贴握把（含瞄准/后坐力/滚筒动画位移）
         }
 
         /// <summary>
@@ -2027,7 +2186,9 @@ namespace P1.Player
             // P27 滚筒持握/攻击姿态角直接合成进同一欧拉角（_rollerPosePitchDeg 非滚筒恒为 0，
             // 且位于瞄准权重之后不受其缩放）——不在 WeaponVisual 上另写旋转，避免与后坐力写回互踩
             modelTransform.localRotation = baseRot * Quaternion.Euler(
-                _aimPitchCurrent * weight + _rollerPosePitchDeg, 0f, 0f);
+                _aimPitchCurrent * weight + _rollerPosePitchDeg,
+                _rollerPoseYawDeg,
+                _rollerPoseRollDeg);
         }
 
         /// <summary>
@@ -2042,6 +2203,8 @@ namespace P1.Player
             if (_currentWeaponKind != WeaponKind.Roller)
             {
                 _rollerPosePitchDeg = 0f;
+                _rollerPoseYawDeg = 0f;
+                _rollerPoseRollDeg = 0f;
                 _rollerPoseDrop = 0f;
                 _rollerPoseForward = 0f;
                 _rollerBodyPitchDeg = 0f;
@@ -2057,6 +2220,8 @@ namespace P1.Player
             RollerWieldParams p = new RollerWieldParams
             {
                 CarryPitchDeg = cfg.rollerCarryPitchDeg,
+                CarryYawDeg = cfg.rollerCarryYawDeg,
+                CarryRollDeg = cfg.rollerCarryRollDeg,
                 FlickLiftPitchDeg = cfg.rollerFlickLiftPitchDeg,
                 FlickSlamPitchDeg = cfg.rollerFlickSlamPitchDeg,
                 FlickSlamDropMeters = cfg.rollerFlickSlamDrop,
@@ -2128,6 +2293,8 @@ namespace P1.Player
             pose = RollerWieldSolver.Blend(pose, RollerWieldSolver.SampleRoll(p), _rollerRollWeight);
 
             _rollerPosePitchDeg = pose.PitchDeg;
+            _rollerPoseYawDeg = pose.YawDeg;
+            _rollerPoseRollDeg = pose.RollDeg;
             _rollerPoseDrop = pose.DropMeters;
             _rollerPoseForward = pose.ForwardMeters;
             _rollerBodyPitchDeg = pose.BodyPitchDeg;

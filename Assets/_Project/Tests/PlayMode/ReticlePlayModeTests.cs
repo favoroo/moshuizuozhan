@@ -132,5 +132,82 @@ namespace P1.Tests
 
             Object.Destroy(canvasGo);
         }
+
+        /// <summary>
+        /// 回归：7 把主武器每一把都必须真的显示准星。
+        /// 旧实现屏幕准星只比较 Shooter/Roller/Charger 三种 kind，
+        /// 双枪 / 泼桶 / 爆破枪 / 加特林四把武器的三个容器权重全为 0，屏幕上一个准星都没有。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator WeaponReticleUI_EveryWeaponKind_ShowsAContainer()
+        {
+            var canvasGo = new GameObject("TestCanvas", typeof(Canvas));
+            var canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+
+            var reticleGo = new GameObject("TestReticleUI", typeof(RectTransform));
+            reticleGo.transform.SetParent(canvasGo.transform, false);
+            var reticleUI = reticleGo.AddComponent<WeaponReticleUI>();
+            reticleUI.EnsureInitialized();
+
+            var playerGo = new GameObject("TestLocalPlayer",
+                typeof(CharacterController),
+                typeof(CombatantHealth),
+                typeof(InkCharacterMotor),
+                typeof(WeaponController),
+                typeof(PlayerController));
+            var player = playerGo.GetComponent<PlayerController>();
+            player.Health.Configure(Team.TeamA, null);
+            var weapon = playerGo.GetComponent<WeaponController>();
+
+            yield return null;
+
+            Transform shooter = reticleGo.transform.Find("ShooterReticle");
+            Transform roller = reticleGo.transform.Find("RollerReticle");
+            Transform charger = reticleGo.transform.Find("ChargerReticle");
+            Assert.IsNotNull(shooter);
+            Assert.IsNotNull(roller);
+            Assert.IsNotNull(charger);
+
+            WeaponKind[] kinds =
+            {
+                WeaponKind.Shooter,
+                WeaponKind.Roller,
+                WeaponKind.Charger,
+                WeaponKind.Dualies,
+                WeaponKind.Slosher,
+                WeaponKind.Blaster,
+                WeaponKind.Splatling
+            };
+
+            for (int i = 0; i < kinds.Length; i++)
+            {
+                WeaponKind kind = kinds[i];
+                var cfg = ScriptableObject.CreateInstance<WeaponConfigSO>();
+                cfg.weaponKind = kind;
+                weapon.EquipWeapon(cfg);
+
+                // 形态权重以 dt*10 的速度淡入，给足 20 帧让权重从 0 走到 1
+                for (int f = 0; f < 20; f++)
+                    yield return null;
+
+                ReticleShape expected = ReticleStateMath.ShapeFor(kind);
+                bool anyVisible = shooter.gameObject.activeSelf
+                                  || roller.gameObject.activeSelf
+                                  || charger.gameObject.activeSelf;
+
+                Assert.IsTrue(anyVisible, $"{kind} 必须至少显示一个准星容器（期望形状 {expected}）");
+
+                bool expectedVisible = expected == ReticleShape.Shooter ? shooter.gameObject.activeSelf
+                    : expected == ReticleShape.Roller ? roller.gameObject.activeSelf
+                    : charger.gameObject.activeSelf;
+                Assert.IsTrue(expectedVisible, $"{kind} 应显示 {expected} 形态的准星");
+
+                Object.Destroy(cfg);
+            }
+
+            Object.Destroy(playerGo);
+            Object.Destroy(canvasGo);
+        }
     }
 }

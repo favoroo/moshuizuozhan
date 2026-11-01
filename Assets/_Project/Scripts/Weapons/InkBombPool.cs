@@ -45,6 +45,8 @@ namespace P1.Weapons
             public float InnerDamage;
             public float OuterDamage;
             public Action<int> OnCellsPainted;
+            /// <summary>墙面格数回调：墙格面积与地面格不同，且墙面不计涂地统计，必须分开上报。</summary>
+            public Action<int> OnWallCellsPainted;
             public CombatantHealth Attacker;
         }
 
@@ -124,7 +126,8 @@ namespace P1.Weapons
             Team team,
             WeaponConfigSO config,
             Action<int> onCellsPainted,
-            CombatantHealth attacker = null)
+            CombatantHealth attacker = null,
+            Action<int> onWallCellsPainted = null)
         {
             ActiveBomb b = _pool.Count > 0 ? _pool.Dequeue() : CreateBombNode(_active.Count + 16);
 
@@ -152,6 +155,8 @@ namespace P1.Weapons
             b.InnerDamage = config != null ? config.bombInnerDamage : 180f;
             b.OuterDamage = config != null ? config.bombOuterDamage : 35f;
             b.OnCellsPainted = onCellsPainted;
+            // 旧调用方（只传地面回调）保持原行为：墙面格数仍走同一个回调
+            b.OnWallCellsPainted = onWallCellsPainted ?? onCellsPainted;
             b.Attacker = attacker;
 
             b.BombTransform.gameObject.SetActive(true);
@@ -316,17 +321,20 @@ namespace P1.Weapons
                 {
                     MatchStatsService.RegisterTurf(b.Attacker, groundChanged * InkSurfaceController.Instance.CellArea);
                 }
+                if (groundChanged > 0)
+                {
+                    b.OnCellsPainted?.Invoke(groundChanged);
+                }
 
+                // 墙面格单独上报：按墙格面积充能，且不计入涂地统计
                 int wallChanged = 0;
                 if (InkWallSurface.ActiveCount > 0)
                 {
                     wallChanged = InkWallSurface.PaintAllInSphere(b.LandingPos, b.SplatRadius, b.Team);
                 }
-
-                int changed = groundChanged + wallChanged;
-                if (changed > 0)
+                if (wallChanged > 0)
                 {
-                    b.OnCellsPainted?.Invoke(changed);
+                    b.OnWallCellsPainted?.Invoke(wallChanged);
                 }
             }
 

@@ -318,8 +318,12 @@ namespace P1.Player
         public float idleFidgetIntervalMax = 9f;
 
         [Header("滚筒持握 (Roller Wield，参考 Inkwave _poseFlick 四段 / wRoll 拖地 / 滚轴自转)")]
-        [Tooltip("待机持握俯仰（度，负 = 滚筒抬起斜扛；旧版 0° 平举死板）")]
-        public float rollerCarryPitchDeg = -28f;
+        [Tooltip("待机持握俯仰（度，正 = 主鼓压低斜提；旧版 -28° 会把滚筒抬到胸口挡视野）")]
+        public float rollerCarryPitchDeg = 16f;
+        [Tooltip("待机持握偏航（度，正 = 滚筒朝右前方斜提，让出正前方与准星视野）")]
+        public float rollerCarryYawDeg = 15f;
+        [Tooltip("待机持握滚转（度，负 = 滚轴斜放，两手自然贴身握杆）")]
+        public float rollerCarryRollDeg = -12f;
         [Tooltip("挥击抡起角（度，负 = 举过肩；前摇期从持握角抡到此角）")]
         public float rollerFlickLiftPitchDeg = -115f;
         [Tooltip("砸地角（度，正 = 滚筒压向身前地面；默认视角造型角，落点贴地由运行时闭环修正）")]

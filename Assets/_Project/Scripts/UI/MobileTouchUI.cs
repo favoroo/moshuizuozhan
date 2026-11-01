@@ -894,10 +894,21 @@ namespace P1.UI
         {
             var rt = (RectTransform)transform;
             Rect safe = Screen.safeArea;
-            _lastSafeArea = safe;
-            _lastScreen = new Vector2Int(Screen.width, Screen.height);
 
             if (Screen.width <= 0 || Screen.height <= 0) return;
+
+            // 启动/旋转瞬间 safeArea 与 Screen 可能短暂不在同一像素空间（如 16:9 兼容缓冲
+            // 配物理像素安全区），归一化锚点会 >1，把安全区撑得比画布还大——真机 20:9 实测
+            // 会把首页 2×2 卡阵整列推出屏幕。此时先不套用也不缓存，等 surface settle 后
+            // Update 检测到新值再收敛。
+            if (safe.xMax > Screen.width + 0.5f || safe.yMax > Screen.height + 0.5f ||
+                safe.xMin < -0.5f || safe.yMin < -0.5f)
+            {
+                return;
+            }
+
+            _lastSafeArea = safe;
+            _lastScreen = new Vector2Int(Screen.width, Screen.height);
 
             Vector2 min = safe.position;
             Vector2 max = safe.position + safe.size;

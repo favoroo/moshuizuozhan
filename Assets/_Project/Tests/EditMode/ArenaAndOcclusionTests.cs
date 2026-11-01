@@ -254,30 +254,31 @@ namespace P1.Tests.EditMode
                 var cfg = ScriptableObject.CreateInstance<InkGridConfigSO>();
                 wall.Configure(go.GetComponent<BoxCollider>(), null, cfg, true);
 
-                // 运行时初始化生成 4 面（EditMode 下传入 force: true 强行构建 Quad 与贴图）
+                // 运行时初始化生成 4 面（EditMode 下传入 force: true 强行构建合并网格与图集）
                 Assert.IsTrue(wall.InitializeIfNeeded(true));
                 Assert.AreEqual(4, wall.FaceCount);
 
-                // 初始状态下所有子 Renderer 均应为 enabled = false，实现 0 DrawCall 空闲开销
+                // P30-C 渲染收敛后：整个表面合并为 1 个渲染器（原逐面 4 个）。
+                // 初始状态子 Renderer 应为 enabled = false，实现 0 DrawCall 空闲开销
                 var childRenderers = go.GetComponentsInChildren<MeshRenderer>();
-                // 其中 1 个是物体自身 MeshRenderer，4 个是立面 Quad
-                int quadRenderers = 0;
+                // 其中 1 个是物体自身 MeshRenderer，1 个是合并立面
+                int mergedRenderers = 0;
                 for (int i = 0; i < childRenderers.Length; i++)
                 {
                     if (childRenderers[i].gameObject != go)
                     {
-                        quadRenderers++;
-                        Assert.IsFalse(childRenderers[i].enabled, "初始未涂色的立面 MeshRenderer 必须为 false 节省渲染开销");
+                        mergedRenderers++;
+                        Assert.IsFalse(childRenderers[i].enabled, "初始未涂色的合并立面 MeshRenderer 必须为 false 节省渲染开销");
                     }
                 }
-                Assert.AreEqual(4, quadRenderers, "必须生成 4 个立面 Quad");
+                Assert.AreEqual(1, mergedRenderers, "必须只生成 1 个合并立面渲染器");
 
                 // 在南立面上涂墨
                 Vector3 southFacePoint = new Vector3(wall.WorldBounds.center.x, wall.WorldBounds.center.y, wall.WorldBounds.min.z);
                 int changed = wall.PaintAtWorld(southFacePoint, Vector3.back, 0.5f, Team.TeamA);
                 Assert.Greater(changed, 0, "涂墨必须成功写入格子");
 
-                // 命中面被激活
+                // 有墨后整表面渲染器被激活
                 int activeCount = 0;
                 for (int i = 0; i < childRenderers.Length; i++)
                 {
@@ -286,7 +287,7 @@ namespace P1.Tests.EditMode
                         activeCount++;
                     }
                 }
-                Assert.AreEqual(1, activeCount, "仅被涂墨的立面 Renderer 被激活开启");
+                Assert.AreEqual(1, activeCount, "落墨后合并立面 Renderer 被激活开启");
 
                 // 重置后恢复禁用
                 wall.ResetPaint();
@@ -294,7 +295,7 @@ namespace P1.Tests.EditMode
                 {
                     if (childRenderers[i].gameObject != go)
                     {
-                        Assert.IsFalse(childRenderers[i].enabled, "ResetPaint 后所有立面 Renderer 必须恢复禁用");
+                        Assert.IsFalse(childRenderers[i].enabled, "ResetPaint 后合并立面 Renderer 必须恢复禁用");
                     }
                 }
 

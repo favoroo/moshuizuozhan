@@ -169,5 +169,51 @@ namespace P1.Tests
             Assert.Greater(MenuLayoutMath.MobileDrawerWidthRatio, 0.7f,
                 "移动端抽屉又不能退回桌面那种窄条");
         }
+
+        [Test]
+        public void ResolveHomeBoard_ClampsInflatedSafeAreaToCanvas()
+        {
+            // 真机 20:9 复现值：启动首帧 safeArea 与 Screen 短暂不在同一像素空间，
+            // 读出的安全区（2533×1199）比画布（2146×966）还大。
+            // 未钳制时 GridX=1605 → 2×2 卡阵右列整列出屏；卡阵高 823 → CTA/下排被推出屏幕底。
+            HomeMenuMetrics mobile = MenuLayoutMath.Home(true);
+            Vector2 canvas = new Vector2(2146f, 966f);
+            HomeRuntimeBoard board = MenuLayoutMath.ResolveHomeBoard(mobile, 2533f, 1199f, canvas);
+
+            Assert.LessOrEqual(board.GridX + mobile.GridWidth, canvas.x + 0.01f,
+                "钳制后 2×2 卡阵右缘不得超出画布（右列必须可见）");
+            Assert.LessOrEqual(board.Top + board.Height, canvas.y + 0.01f,
+                "钳制后卡片区底缘不得超出画布（CTA / 下排卡必须可见）");
+            Assert.Less(board.Height, 700f, "卡片区高度必须按画布高收放，而不是按脏安全区撑爆");
+            Assert.AreEqual(966f - mobile.CardTop - mobile.CardBottom, board.Height, 0.5f,
+                "高度应等于画布高 - 上下留白");
+            Assert.AreEqual(mobile.HeroBox.x, board.HeroWidth, 0.5f, "Hero 卡钳制后仍应为设计宽度");
+        }
+
+        [Test]
+        public void ResolveHomeBoard_NormalSafeAreaMatchesDesign()
+        {
+            // 桌面 16:9、安全区=画布：运行时盒必须与设计表一致（回归锚点）。
+            HomeMenuMetrics desktop = MenuLayoutMath.Home(false);
+            Vector2 canvas = new Vector2(MenuLayoutMath.RefWidth, MenuLayoutMath.RefHeight);
+            HomeRuntimeBoard board = MenuLayoutMath.ResolveHomeBoard(desktop, canvas.x, canvas.y, canvas);
+
+            Assert.AreEqual(824f, board.GridX, 0.5f, "桌面 GridX = 1920 - 64 - 1032");
+            Assert.AreEqual(desktop.BoardHeight, board.Height, 0.5f);
+            Assert.AreEqual(desktop.HeroBox.x, board.HeroWidth, 0.5f);
+            Assert.AreEqual((desktop.GridWidth - desktop.TileGap) * 0.5f, board.TileWidth, 0.5f);
+            Assert.AreEqual((board.Height - desktop.TileGap) * 0.5f, board.TileHeight, 0.5f);
+        }
+
+        [Test]
+        public void ResolveHomeBoard_UnlaidCanvasKeepsRawSafeArea()
+        {
+            // 画布还没排版（rect=0）时不钳制，保持旧行为（参考分辨率兜底由调用方处理）。
+            HomeMenuMetrics mobile = MenuLayoutMath.Home(true);
+            HomeRuntimeBoard board = MenuLayoutMath.ResolveHomeBoard(mobile, 2533f, 1199f, Vector2.zero);
+
+            Assert.AreEqual(2533f - mobile.Margin - mobile.GridWidth, board.GridX, 0.5f);
+            Assert.AreEqual(1199f - mobile.CardTop - mobile.CardBottom, board.Height, 0.5f);
+        }
     }
 }

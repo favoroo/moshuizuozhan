@@ -82,6 +82,10 @@ namespace P1.UI
         private RectTransform _menuSafeArea;
         private RectTransform _homeHeroCard;
         private HomeRuntimeBoard _homeBoard;
+        // 首页几何指纹（安全区宽高 + 画布宽高）：几何变化时重建首页，见 Update / RebuildHomeVisuals。
+        private Vector4 _homeGeometryKey;
+        private Vector4 _homeGeometryKeyPrev;
+        private bool _homeGeometryKeyValid;
         private TextMeshProUGUI _homeAudioTitle;
         private TextMeshProUGUI _homeAudioInfo;
         private TextMeshProUGUI _homeRecordInfo;
@@ -331,6 +335,12 @@ namespace P1.UI
             if (legacyHint != null) legacyHint.gameObject.SetActive(false);
 
             PlayHomeEntrance();
+
+            // 记录本次构建使用的几何指纹：安全区/画布此后一旦变化（启动 settle、旋转、分屏），
+            // Update 会检测到并用真实几何重建首页——启动首帧的脏 safeArea 不能永久定格版面。
+            _homeGeometryKey = CurrentHomeGeometryKey();
+            _homeGeometryKeyPrev = _homeGeometryKey;
+            _homeGeometryKeyValid = true;
         }
 
         // ==================== 首页构建（波次3a） ====================
@@ -359,42 +369,87 @@ namespace P1.UI
             return height;
         }
 
-        /// <summary>首页卡片区的运行时几何：设计值优先，宽高比不是 16:9 时按实际安全区收放。</summary>
-        private struct HomeRuntimeBoard
+        /// <summary>MenuSafeArea 全屏父级（ReadyPanel）的尺寸，即画布逻辑尺寸；还没排版时为 0。</summary>
+        private Vector2 ResolveCanvasSize()
         {
-            public float Top;
-            public float Height;
-            public float HeroWidth;
-            public float GridX;
-            public float TileWidth;
-            public float TileHeight;
+            return _menuSafeArea != null && _menuSafeArea.parent is RectTransform parent
+                ? parent.rect.size
+                : Vector2.zero;
+        }
+
+        /// <summary>首页几何指纹 = (安全区宽, 安全区高, 画布宽, 画布高)；任一变化都需要重建首页。</summary>
+        private Vector4 CurrentHomeGeometryKey()
+        {
+            if (_menuSafeArea == null) return Vector4.zero;
+            Vector2 canvas = ResolveCanvasSize();
+            Rect safe = _menuSafeArea.rect;
+            return new Vector4(safe.width, safe.height, canvas.x, canvas.y);
+        }
+
+        private static float MaxDimensionDelta(Vector4 a, Vector4 b)
+        {
+            return Mathf.Max(
+                Mathf.Max(Mathf.Abs(a.x - b.x), Mathf.Abs(a.y - b.y)),
+                Mathf.Max(Mathf.Abs(a.z - b.z), Mathf.Abs(a.w - b.w)));
         }
 
         /// <summary>
-        /// 把 <see cref="MenuLayoutMath.Home"/> 的设计盒换算成运行时盒：
-        /// 高度必须跟着安全区高度走（20:9 手机的逻辑画布只有约 978 高，
-        /// 写死 1080 会把卡片压到左下「武器整备」卡上）；宽度按刘海内缩自适应。
+        /// 用当前安全区/画布几何重建首页（启动 settle、旋转、分屏后调用）。
+        /// 只销毁本脚本生成的节点；场景遗留按钮（开赛 / 检查更新 / 自定义按键）原样保留，
+        /// 由 EnsureReadyVisuals 重新收编与摆位。
+        /// </summary>
+        private void RebuildHomeVisuals()
+        {
+            if (readyPanel == null || _menuSafeArea == null) return;
+
+            // 首页重建会销毁并重建整棵卡片树：先收掉详情浮层，避免它挂在旧几何上。
+            HomeInfoOverlay.CloseIfOpen();
+
+            // 检查更新按钮已被铺进 HomeTile_UPDATE 的 Content 里，必须先搬出来再销毁卡片。
+            if (checkUpdateButton != null) ReparentInto(checkUpdateButton.transform, _menuSafeArea);
+
+            Transform stage = readyPanel.transform.Find("GeometricMenuRoot");
+            if (stage != null)
+            {
+                // 改名让 EnsureReadyVisuals 的「已构建」守卫失效；Destroy 延迟到帧末，不阻塞重建。
+                stage.name += "_Old";
+                Destroy(stage.gameObject);
+            }
+
+            for (int i = _menuSafeArea.childCount - 1; i >= 0; i--)
+            {
+                Transform child = _menuSafeArea.GetChild(i);
+                string childName = child.name;
+                bool built = childName.StartsWith("HomeTile_") || childName == "HomeHeroCard" ||
+                             childName == "HomeFooterTag" || childName == "HomeVersionTag";
+                if (built)
+                {
+                    child.name += "_Old";
+                    Destroy(child.gameObject);
+                }
+            }
+
+            // 旧 MenuSafeArea 本体也要退役：EnsureReadyVisuals 会新建一个同名节点，
+            // 老节点若只清空内容而不销毁，会永久残留为空壳（按名字查找会命中旧空容器，
+            // 表现为「首页内容不在安全区」）。场景遗留按钮（开赛 / 自定义按键）由
+            // EnsureReadyVisuals 先搬进新容器再销毁本节点。
+            _menuSafeArea.name += "_Old";
+            Destroy(_menuSafeArea.gameObject);
+
+            _homeEntrance.Clear();
+            _homeGeometryKeyValid = false;
+            EnsureReadyVisuals();
+        }
+
+        /// <summary>
+        /// 把 <see cref="MenuLayoutMath.Home"/> 的设计盒换算成运行时盒（纯函数版，含安全区钳制）：
+        /// 高度跟着安全区高度走（20:9 手机的逻辑画布只有约 966 高，
+        /// 写死 1080 会把卡片压到左下「武器整备」卡上）；宽度按刘海内缩自适应；
+        /// 安全区比画布还大（启动/旋转瞬间的脏 safeArea）时钳回画布，防止卡阵出屏。
         /// </summary>
         private HomeRuntimeBoard ResolveHomeBoard(HomeMenuMetrics m)
         {
-            float safeWidth = ResolveSafeWidth();
-            float safeHeight = ResolveSafeHeight();
-
-            float height = Mathf.Max(360f, safeHeight - m.CardTop - m.CardBottom);
-            float heroWidth = Mathf.Clamp(
-                safeWidth - m.Margin * 2f - m.ColumnGap - m.GridWidth,
-                m.HeroBox.x * 0.62f,
-                m.HeroBox.x);
-
-            return new HomeRuntimeBoard
-            {
-                Top = m.CardTop,
-                Height = height,
-                HeroWidth = heroWidth,
-                GridX = safeWidth - m.Margin - m.GridWidth,
-                TileWidth = (m.GridWidth - m.TileGap) * 0.5f,
-                TileHeight = Mathf.Max(140f, (height - m.TileGap) * 0.5f),
-            };
+            return MenuLayoutMath.ResolveHomeBoard(m, ResolveSafeWidth(), ResolveSafeHeight(), ResolveCanvasSize());
         }
 
         /// <summary>深色舞台上的背景装饰：低透明几何块 + 稀疏星点（纯程序、固定种子、无循环动画）。</summary>
@@ -564,7 +619,8 @@ namespace P1.UI
                 Title = "战绩",
                 Info = BuildRecordInfo(),
                 Accent = ComicStyle.Green,
-                Interactive = false,
+                Interactive = true,
+                ClickAction = () => ShowHomeInfo(HomeInfoTab.Record),
             }, theme, m, mobile, out _homeRecordInfo, out _);
 
             BuildHomeTile(new HomeTileSpec
@@ -587,7 +643,8 @@ namespace P1.UI
                     ? "摇杆 移动 · 射击键 开火 · 跳跃键 起跳 · 大招键 释放"
                     : "WASD 移动 · 左键 射击 · 空格 跳跃 · Q 大招",
                 Accent = ComicStyle.Blue,
-                Interactive = false,
+                Interactive = true,
+                ClickAction = () => ShowHomeInfo(HomeInfoTab.Controls),
             }, theme, m, mobile, out _homeKeysInfo, out _);
 
             HomeTileView updateTile = BuildHomeTile(new HomeTileSpec
@@ -2241,6 +2298,13 @@ namespace P1.UI
             UpdateManager.Instance?.CheckForUpdate(manual: true);
         }
 
+        /// <summary>首页信息卡（战绩 / 键位说明）打开详情浮层：浮层自带遮罩与同帧输入仲裁。</summary>
+        private void ShowHomeInfo(HomeInfoTab tab)
+        {
+            if (readyPanel == null) return;
+            HomeInfoOverlay.Show(readyPanel.transform as RectTransform, UIThemeSO.Resolve(uiTheme), tab);
+        }
+
         private void OnStartClicked()
         {
             MatchManager.Instance?.StartMatch();
@@ -2248,11 +2312,27 @@ namespace P1.UI
 
         private void Update()
         {
+            // 首页几何守护：Android 启动/旋转瞬间安全区与画布可能尚未 settle，
+            // EnsureReadyVisuals 只在 Awake 构建一次，首帧脏几何会把 2×2 卡阵永久推出屏幕
+            // （真机 20:9 实测：右列整体出屏、下排与 CTA 被裁）。几何稳定一帧后即用真实值重建。
+            if (_homeGeometryKeyValid && readyPanel != null && readyPanel.activeInHierarchy)
+            {
+                Vector4 key = CurrentHomeGeometryKey();
+                bool changed = MaxDimensionDelta(key, _homeGeometryKey) > 0.5f;
+                bool settled = MaxDimensionDelta(key, _homeGeometryKeyPrev) <= 0.5f;
+                _homeGeometryKeyPrev = key;
+                if (changed && settled)
+                {
+                    RebuildHomeVisuals();
+                }
+            }
+
             var match = MatchManager.Instance;
             if (match == null) return;
 
-            // 快捷键开赛与重开
+            // 快捷键开赛与重开：首页信息浮层打开时让路，否则 Space/Enter 会隔着遮罩直接把比赛开了
             if (!Application.isMobilePlatform && !MobileTouchUI.IsTouchSimulationActive &&
+                !HomeInfoOverlay.IsOpen &&
                 (match.CurrentPhase == MatchManager.Phase.Ready || match.CurrentPhase == MatchManager.Phase.Result))
             {
                 var kb = UnityEngine.InputSystem.Keyboard.current;
@@ -2306,6 +2386,11 @@ namespace P1.UI
         private void HandlePhaseChanged(MatchManager match, bool firstSync = false)
         {
             var phase = match.CurrentPhase;
+
+            // 任何离开首页的阶段切换都必须收掉详情浮层：readyPanel 会被关掉，
+            // 静态 IsOpen 若不复位会一直挡住开赛快捷键。
+            if (phase != MatchManager.Phase.Ready) HomeInfoOverlay.CloseIfOpen();
+
             if (phase == MatchManager.Phase.Ready)
             {
                 // 从对局/倒计时中返回主菜单：撤掉可能还挂着的倒计时横幅

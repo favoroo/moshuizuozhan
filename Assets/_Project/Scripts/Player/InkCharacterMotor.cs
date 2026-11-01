@@ -35,6 +35,11 @@ namespace P1.Player
         private bool _isFiringOrThrowing;
         private bool _isLockedBySpecial;
 
+        // P35 朝向解耦（对齐 INKWAVE actor.js _face）：人形在开火/投弹及之后一小段时间内面向瞄准方向，
+        // 其余移动时间面向移动方向 —— 相机固定在角色身后，若角色永远盯准星就永远只能看到后脑勺。
+        // 站立且未开火时保持当前朝向（与 INKWAVE 的 target=null 分支一致）。
+        private float _aimFacingTimer;
+
         // P29 移动手感：水平速度向量（S 曲线加减速 + 转向限速的积分状态）与跳跃宽容计时
         private Vector3 _planarVelocity;
         private bool _prevWantsJump;
@@ -212,6 +217,7 @@ namespace P1.Player
             _verticalVelocity = -2.0f;
             _planarVelocity = Vector3.zero;
             _isFiringOrThrowing = false;
+            _aimFacingTimer = 0f;
             _isLockedBySpecial = false;
 
             // 复活清除隐匿 / 敌墨惩罚 / 涟漪与视觉残留（CombatantHealth 已重新启用其收集的渲染器，
@@ -265,6 +271,11 @@ namespace P1.Player
             _wantsToSwim = wantsSwim;
             _wantsJump = wantsJump;
             _isFiringOrThrowing = isFiring;
+            if (isFiring)
+            {
+                // 开火瞬间重置保持计时：松手后仍面向准星 aimFacingHoldSeconds 秒
+                _aimFacingTimer = config != null ? Mathf.Max(0f, config.aimFacingHoldSeconds) : 0.4f;
+            }
             _isLockedBySpecial = lockedBySpecial;
         }
 
@@ -641,6 +652,15 @@ namespace P1.Player
                 _planarVelocity = Vector3.zero;
             }
 
+            // P35 朝向解耦（对齐 INKWAVE actor.js _face，优先级与引擎一致）：
+            //   爬墙 → 面朝墙；乌贼 → 面向移动方向；人形开火/投弹（含松手保持窗口）→ 面向准星；
+            //   人形其余移动 → 面向移动方向（横移/后退能看到侧面与正脸，不再永远后脑勺）；
+            //   站立且未开火 → 保持当前朝向（upper body 动画继续表达待机）。
+            if (_aimFacingTimer > 0f)
+                _aimFacingTimer = Mathf.Max(0f, _aimFacingTimer - dt);
+
+            bool aimFacing = !IsInSquidForm && (_isFiringOrThrowing || _aimFacingTimer > 0f);
+
             Vector3 desiredForward;
             if (IsWallClimbing && _wallNormal.sqrMagnitude > 0.001f)
             {
@@ -652,9 +672,22 @@ namespace P1.Player
                 // 乌贼形态面向移动方向（INKWAVE squidFaceOmega 语义），干地与潜墨一致
                 desiredForward = _moveInputWorld.normalized;
             }
-            else
+            else if (aimFacing)
             {
                 desiredForward = _aimDirectionWorld;
+            }
+            else if (_moveInputWorld.sqrMagnitude > 0.01f)
+            {
+                desiredForward = _moveInputWorld.normalized;
+            }
+            else if (_planarVelocity.sqrMagnitude > 0.36f)
+            {
+                // 松手滑行：无输入但仍有惯性速度时面向滑行方向（INKWAVE `hs > 0.6 → vel` 分支）
+                desiredForward = new Vector3(_planarVelocity.x, 0f, _planarVelocity.z).normalized;
+            }
+            else
+            {
+                desiredForward = Vector3.zero;
             }
 
             if (desiredForward.sqrMagnitude > 0.001f)

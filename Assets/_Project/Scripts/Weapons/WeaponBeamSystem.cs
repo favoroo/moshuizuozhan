@@ -26,7 +26,12 @@ namespace P1.Weapons
         private static readonly RaycastHit[] RaycastBuffer = new RaycastHit[16];
         private static readonly RaycastHit[] GroundBuffer = new RaycastHit[8];
 
-        public static BeamResult Fire(WeaponBeam beam, Team team, GameObject ownerRoot, Action<int> onCellsPainted)
+        public static BeamResult Fire(
+            WeaponBeam beam,
+            Team team,
+            GameObject ownerRoot,
+            Action<int> onCellsPainted,
+            Action<int> onWallCellsPainted = null)
         {
             Vector3 direction = beam.Direction.sqrMagnitude > 0.0001f ? beam.Direction.normalized : Vector3.forward;
             Vector3 origin = beam.Origin;
@@ -42,6 +47,8 @@ namespace P1.Weapons
 
             Vector3 end = origin + direction * worldDistance;
             int painted = 0;
+            // 墙面命中格数为导出量：墙格面积与地面格不同，且墙面不计涂地统计，必须与地面分开上报
+            int wallPainted = 0;
             CombatantHealth attacker = ownerRoot != null ? ownerRoot.GetComponent<CombatantHealth>() : null;
 
             // 2. 贯穿伤害：路径上所有敌人（到光束线段的距离在身体容差内）
@@ -104,7 +111,7 @@ namespace P1.Weapons
                     InkWallSurface wall = InkWallSurface.FindForCollider(worldCollider);
                     if (wall != null && worldNormal.y <= 0.55f)
                     {
-                        painted += wall.PaintAtWorld(end, worldNormal, impactRadius, team);
+                        wallPainted += wall.PaintAtWorld(end, worldNormal, impactRadius, team);
                     }
                 }
             }
@@ -116,6 +123,10 @@ namespace P1.Weapons
 
             if (painted > 0)
                 onCellsPainted?.Invoke(painted);
+
+            // 墙面墨迹只充能、不计涂地统计；旧调用方未传墙面回调时退回原行为
+            if (wallPainted > 0)
+                (onWallCellsPainted ?? onCellsPainted)?.Invoke(wallPainted);
 
             return new BeamResult
             {

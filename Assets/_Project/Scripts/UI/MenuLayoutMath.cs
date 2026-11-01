@@ -279,6 +279,20 @@ namespace P1.UI
     }
 
     /// <summary>
+    /// 首页卡片区的运行时几何：设计值优先，宽高比不是 16:9 时按实际安全区收放。
+    /// 由 <see cref="MenuLayoutMath.ResolveHomeBoard"/> 纯函数产出，EditMode 可直接断言。
+    /// </summary>
+    public struct HomeRuntimeBoard
+    {
+        public float Top;
+        public float Height;
+        public float HeroWidth;
+        public float GridX;
+        public float TileWidth;
+        public float TileHeight;
+    }
+
+    /// <summary>
     /// 首页 / 武器栏的纯逻辑版面表（桌面 1920×1080 基准，移动端一套更大的数）。
     ///
     /// 为什么单独抽出来：移动端「看起来很小」的根因是整块 UI 只按桌面比例排、只给字号 ×1.28；
@@ -470,6 +484,39 @@ namespace P1.UI
                 ScrollRightInset = 20f,
                 ScrollTopInset = 20f,
                 ScrollBottomInset = 56f,
+            };
+        }
+
+        /// <summary>
+        /// 首页卡片区的运行时几何（纯函数，MatchFlowUI 每次构建/重排时调用）：
+        /// 高度跟着安全区高度走（20:9 手机的逻辑画布只有约 966 高，写死 1080 会把卡片压出屏幕）；
+        /// 宽度按刘海内缩自适应。
+        ///
+        /// 防御：Android 启动/旋转瞬间 safeArea 与 Screen 可能短暂不在同一像素空间，
+        /// 读出的「安全区」会比画布还大（真机 20:9 实测约大 18% 宽 / 24% 高），
+        /// 直接采用会把 2×2 卡阵整列推出屏幕。画布尺寸有效时一律钳回画布；
+        /// 画布未排版（0）时保持原值，由调用方的参考分辨率兜底。
+        /// </summary>
+        public static HomeRuntimeBoard ResolveHomeBoard(HomeMenuMetrics m, float safeWidth, float safeHeight,
+            Vector2 canvasSize)
+        {
+            float safeW = canvasSize.x > 1f ? Mathf.Min(safeWidth, canvasSize.x) : safeWidth;
+            float safeH = canvasSize.y > 1f ? Mathf.Min(safeHeight, canvasSize.y) : safeHeight;
+
+            float height = Mathf.Max(360f, safeH - m.CardTop - m.CardBottom);
+            float heroWidth = Mathf.Clamp(
+                safeW - m.Margin * 2f - m.ColumnGap - m.GridWidth,
+                m.HeroBox.x * 0.62f,
+                m.HeroBox.x);
+
+            return new HomeRuntimeBoard
+            {
+                Top = m.CardTop,
+                Height = height,
+                HeroWidth = heroWidth,
+                GridX = safeW - m.Margin - m.GridWidth,
+                TileWidth = (m.GridWidth - m.TileGap) * 0.5f,
+                TileHeight = Mathf.Max(140f, (height - m.TileGap) * 0.5f),
             };
         }
     }

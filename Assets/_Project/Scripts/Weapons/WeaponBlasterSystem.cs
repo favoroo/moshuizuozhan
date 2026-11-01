@@ -24,7 +24,8 @@ namespace P1.Weapons
             Team attackerTeam,
             GameObject ownerRoot,
             CombatantHealth directHitTarget,
-            Action<int> onCellsPainted)
+            Action<int> onCellsPainted,
+            Action<int> onWallCellsPainted = null)
         {
             splashRadius = Mathf.Max(0.1f, splashRadius);
             splashDamageMax = Mathf.Max(0f, splashDamageMax);
@@ -63,15 +64,23 @@ namespace P1.Weapons
 
             // 2. 地面爆斑喷涂
             int painted = 0;
+            int wallPainted = 0;
             Vector3 groundPoint = ProjectToGround(burstCenter, out Vector3 groundNormal);
             float paintRadius = Mathf.Max(0.1f, groundPaintRadius);
 
             if (InkSurfaceController.Instance != null)
             {
-                painted = InkSurfaceController.Instance.PaintSphereWithWalls(burstCenter, paintRadius, attackerTeam);
-                if (painted > 0)
+                painted = InkSurfaceController.Instance.PaintSphereWithWalls(burstCenter, paintRadius, attackerTeam, out wallPainted);
+                int groundPainted = painted - wallPainted;
+                if (groundPainted > 0)
                 {
-                    onCellsPainted?.Invoke(painted);
+                    onCellsPainted?.Invoke(groundPainted);
+                }
+
+                // 墙面格单独上报：墙格 0.1m 与地面格面积不同，且墙面不计涂地统计
+                if (wallPainted > 0)
+                {
+                    (onWallCellsPainted ?? onCellsPainted)?.Invoke(wallPainted);
                 }
             }
 

@@ -14,22 +14,29 @@ namespace P1.Weapons
     /// </summary>
     public static class WeaponRollSystem
     {
-        /// <summary>执行一次清扫，返回本次新涂/改写的格子数。</summary>
+        /// <summary>执行一次清扫，返回本次新涂/改写的<strong>地面</strong>格子数。</summary>
         /// <param name="attacker">造成本次碾压的角色（P6-A 打击标记/击杀 Hitstop 归属；旧调用可省略）。</param>
+        /// <param name="onWallPainted">墙面格数回调（按墙格面积充能、不计涂地统计）；旧调用可省略。</param>
         public static int Apply(
             RollSweep sweep,
             Team team,
             Dictionary<CombatantHealth, float> hitTimes,
             float now,
-            CombatantHealth attacker = null)
+            CombatantHealth attacker = null,
+            Action<int> onWallPainted = null)
         {
-            int painted = PaintBand(sweep, team);
+            int painted = PaintBand(sweep, team, out int wallPainted);
             DealDamage(sweep, team, hitTimes, now, attacker);
+            if (wallPainted > 0)
+            {
+                onWallPainted?.Invoke(wallPainted);
+            }
             return painted;
         }
 
-        private static int PaintBand(RollSweep sweep, Team team)
+        private static int PaintBand(RollSweep sweep, Team team, out int wallPainted)
         {
+            wallPainted = 0;
             if (InkSurfaceController.Instance == null)
                 return 0;
 
@@ -72,10 +79,10 @@ namespace P1.Weapons
                 InkSurfaceController.Instance.TriggerRipple(to + forward * 0.2f, 0.045f, 0.34f, 3.4f, 0.9f);
             }
 
-            // 滚筒推抵墙面时同时给接触立面下沿涂上墨水
+            // 滚筒推抵墙面时同时给接触立面下沿涂上墨水（墙面格单独计数：只充能、不计涂地统计）
             if (InkWallSurface.All.Count > 0)
             {
-                changed += InkWallSurface.PaintAllInSphere(to + forward * 0.35f, radius * 1.5f, team);
+                wallPainted = InkWallSurface.PaintAllInSphere(to + forward * 0.35f, radius * 1.5f, team);
             }
 
             return changed;

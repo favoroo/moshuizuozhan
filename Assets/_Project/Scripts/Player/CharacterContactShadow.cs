@@ -10,8 +10,8 @@ namespace P1.Player
     /// 即使脚底只离地几毫米也会读作悬浮，因此额外生成一块跟随地面的软边暗斑。
     ///
     /// 实现要点：
-    /// - 零美术资产：64×64 径向 alpha 贴图 + 单 quad 网格 + URP Unlit 透明材质全部运行时生成，
-    ///   8 个角色共享网格/贴图/材质，逐实例用 MaterialPropertyBlock 写不透明度；
+    /// - 零美术资产：单 quad 网格 + 专用 P1/ContactShadow 着色器（UV 程序化径向软边、
+    ///   固定 SrcAlpha 混合）全部运行时生成；8 个角色共享网格/材质，逐实例用 MaterialPropertyBlock 写不透明度；
     /// - 贴地：LateUpdate 向下射线找地面（跳过角色自身碰撞体），按地面法线对齐、抬高数毫米防 z-fighting；
     /// - 滞空：阴影留在地面，随离地高度放大并淡出；潜墨/攀墙/隐匿/阵亡时隐藏。
     /// 只读 motor/health 的公共状态，不改变任何物理与命中判定。
@@ -85,8 +85,11 @@ namespace P1.Player
             // 只要任一运行时资源缺失就重建（域重载/上一次运行残留会让静态引用变 fake-null）
             if (_renderer != null && _propertyBlock != null) return;
             if (_quadMesh == null) _quadMesh = BuildQuadMesh();
-            if (_radialTexture == null) _radialTexture = BuildRadialTexture();
-            if (_sharedMaterial == null) _sharedMaterial = BuildMaterial(_radialTexture);
+            if (_sharedMaterial == null)
+            {
+                if (_radialTexture == null) _radialTexture = BuildRadialTexture();
+                _sharedMaterial = BuildMaterial(_radialTexture);
+            }
 
             var mf = GetComponent<MeshFilter>();
             if (mf == null) mf = gameObject.AddComponent<MeshFilter>();
@@ -253,12 +256,25 @@ namespace P1.Player
 
         private static Material BuildMaterial(Texture2D radial)
         {
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            // 首选项目专用着色器（Resources/ContactShadow.shader，固定 alpha 混合 + UV 软边）。
+            // URP Unlit 的透明路径依赖材质关键字 _SURFACE_TYPE_TRANSPARENT：运行时新建的材质
+            // 不参与打包期变体收集，独立包里该变体被剥离后 alpha 会被强制写成 1，
+            // 1.1m 的 quad 就变成一个不透明黑方块（Android 端实测）。
+            Shader shader = Shader.Find("P1/ContactShadow");
+            if (shader != null)
+            {
+                var contact = new Material(shader) { name = "ContactShadowMat" };
+                if (contact.HasProperty(ColorId)) contact.SetColor(ColorId, Color.black);
+                return contact;
+            }
+
+            shader = Shader.Find("Universal Render Pipeline/Unlit");
             if (shader == null) shader = Shader.Find("Sprites/Default");
 
             var material = new Material(shader) { name = "ContactShadowMat" };
 
-            // URP Unlit 切到透明 alpha 混合（运行时改材质属性，不新增 Shader 资产依赖）
+            // 兜底：专用着色器缺失时退回 URP Unlit 运行时切透明。
+            // 这条路径在独立包里可能因透明变体被剥离而退化成不透明方块，仅作编辑器/资源异常时兜底。
             if (shader != null && shader.name == "Universal Render Pipeline/Unlit")
             {
                 material.SetFloat("_Surface", 1f);

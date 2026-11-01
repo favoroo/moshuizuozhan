@@ -366,6 +366,7 @@ MonoBehaviour:
   kidSquashBulge: 0.018
   kidArmSwingSlowDeg: 12
   kidArmSwingFastDeg: 38
+  kidArmedArmSwingScale: 0.22
   kidLegSwingSlowDeg: 14
   kidLegSwingFastDeg: 42
   kidKneeBendSlowDeg: 22
@@ -442,7 +443,9 @@ MonoBehaviour:
   idleShiftSwayMeters: 0.015
   idleFidgetIntervalMin: 4
   idleFidgetIntervalMax: 9
-  rollerCarryPitchDeg: -28
+  rollerCarryPitchDeg: 16
+  rollerCarryYawDeg: 15
+  rollerCarryRollDeg: -12
   rollerFlickLiftPitchDeg: -115
   rollerFlickSlamPitchDeg: 5
   rollerFlickSlamDrop: 0.03

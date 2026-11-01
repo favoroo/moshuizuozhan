@@ -1435,17 +1435,10 @@ namespace P1.Player
             elbowPivot = elbowT;
         }
 
-        /// <summary>双枪左肩的额外外展位移（与右手对称持枪时给肘部留出空间）。</summary>
-        private static readonly Vector3 DualLeftShoulderOffset = new Vector3(-0.035f, 0f, 0.010f);
-
         /// <summary>
         /// 把每把武器的握把平移到右手手位，并反解出对应的手臂姿态。
-        /// 关键点：
-        /// 1) 手位表 <see cref="WeaponHoldTargets"/> 定义在 KidRoot 空间（脚底 y=0），
-        ///    换算到 Chest 空间只需减去脊柱链高度 chainY；
-        /// 2) 武器归位以"真实握把部件"为准（Grip / RearGrip / GripRubberRear / HandleRear），
-        ///    而不是模型原点 —— 枪身形状再变，手也永远落在扳机握把上；
-        /// 3) 双枪逐把平移左右手枪，让两只手各握一把；其余武器左手自然垂下。
+        /// 具体解算已抽到 <see cref="WeaponHoldRig"/>（装配器与运行期共用同一套数学），
+        /// 这里只保留装配器入口，避免两处手位表漂移。
         /// </summary>
         private static Dictionary<WeaponKind, ArmHoldPose> ResolveWeaponHoldPoses(
             Transform weaponRoot,
@@ -1454,114 +1447,10 @@ namespace P1.Player
             GameObject slosherGo, GameObject blasterGo, GameObject splatlingGo,
             float chainY)
         {
-            // ---- 1. 握把锚定（模型根无旋转，只有统一缩放，直接平移 localPosition 即可）----
-            AnchorWeaponGrip(weaponRoot, shooterGo, WeaponKind.Shooter, "Grip");
-            AnchorWeaponGrip(weaponRoot, rollerGo, WeaponKind.Roller, "GripRubberRear");
-            AnchorWeaponGrip(weaponRoot, chargerGo, WeaponKind.Charger, "Grip");
-            AnchorWeaponGrip(weaponRoot, blasterGo, WeaponKind.Blaster, "Grip");
-            AnchorWeaponGrip(weaponRoot, splatlingGo, WeaponKind.Splatling, "RearGrip");
-            AnchorWeaponGrip(weaponRoot, slosherGo, WeaponKind.Slosher, "HandleRear");
-
-            if (dualiesGo != null)
-            {
-                Transform rightPistol = dualiesGo.transform.Find("RightPistol");
-                Transform leftPistol = dualiesGo.transform.Find("LeftPistol");
-                AnchorGripToTarget(weaponRoot, rightPistol, "Grip", WeaponHoldTargets.RightHand(WeaponKind.Dualies));
-                AnchorGripToTarget(weaponRoot, leftPistol, "Grip", WeaponHoldTargets.LeftHand(WeaponKind.Dualies));
-            }
-
-            // ---- 2. 姿态反解 ----
-            Vector3 rightShoulderPos = rightArm != null ? rightArm.localPosition : Vector3.zero;
-            Vector3 leftShoulderPos = leftArm != null ? leftArm.localPosition : Vector3.zero;
-
-            // 非持枪的左手：自然垂在身侧，略微外展避免前臂埋进短裤/髋部
-            Quaternion relaxedLeftShoulder = Quaternion.Euler(-6f, 0f, -12f);
-            Quaternion relaxedLeftElbow = Quaternion.Euler(-14f, 0f, 0f);
-
-            var poses = new Dictionary<WeaponKind, ArmHoldPose>();
-            WeaponKind[] kinds =
-            {
-                WeaponKind.Shooter, WeaponKind.Roller, WeaponKind.Charger, WeaponKind.Dualies,
-                WeaponKind.Slosher, WeaponKind.Blaster, WeaponKind.Splatling
-            };
-
-            for (int i = 0; i < kinds.Length; i++)
-            {
-                WeaponKind kind = kinds[i];
-                Vector3 rightTarget = ToChestSpace(WeaponHoldTargets.RightHand(kind), chainY);
-
-                TwoBoneArmSolver.Solve(
-                    rightShoulderPos, rightTarget,
-                    CharacterMetrics.UpperArmLength, CharacterMetrics.ForearmLength,
-                    WeaponHoldTargets.RightPole,
-                    out Quaternion rightShoulder, out Quaternion rightElbowRot);
-
-                if (kind == WeaponKind.Dualies)
-                {
-                    Vector3 dualLeftShoulderPos = leftShoulderPos + DualLeftShoulderOffset;
-                    Vector3 leftTarget = ToChestSpace(WeaponHoldTargets.LeftHand(kind), chainY);
-                    TwoBoneArmSolver.Solve(
-                        dualLeftShoulderPos, leftTarget,
-                        CharacterMetrics.UpperArmLength, CharacterMetrics.ForearmLength,
-                        WeaponHoldTargets.LeftPole,
-                        out Quaternion leftShoulder, out Quaternion leftElbowRot);
-
-                    poses[kind] = new ArmHoldPose(
-                        rightShoulder, rightElbowRot, leftShoulder, leftElbowRot,
-                        rightShoulderPos, dualLeftShoulderPos);
-                }
-                else
-                {
-                    poses[kind] = new ArmHoldPose(
-                        rightShoulder, rightElbowRot, relaxedLeftShoulder, relaxedLeftElbow,
-                        rightShoulderPos, leftShoulderPos);
-                }
-            }
-
-            return poses;
-        }
-
-        private static Vector3 ToChestSpace(Vector3 kidSpacePoint, float chainY)
-            => new Vector3(kidSpacePoint.x, kidSpacePoint.y - chainY, kidSpacePoint.z);
-
-        /// <summary>把武器模型的握把部件平移到该武器的右手手位。</summary>
-        private static void AnchorWeaponGrip(Transform weaponRoot, GameObject model, WeaponKind kind, string gripName)
-        {
-            if (model == null) return;
-            AnchorGripToTarget(weaponRoot, model.transform, gripName, WeaponHoldTargets.RightHand(kind));
-        }
-
-        private static void AnchorGripToTarget(Transform weaponRoot, Transform modelRoot, string gripName, Vector3 target)
-        {
-            if (weaponRoot == null || modelRoot == null) return;
-
-            Transform grip = FindChildByName(modelRoot, gripName);
-            if (grip == null)
-            {
-                Debug.LogWarning($"[CharacterVisualAssembler] 武器 {modelRoot.name} 未找到握把部件 '{gripName}'，保持原挂点。");
-                return;
-            }
-
-            Vector3 gripInWeaponRoot = weaponRoot.InverseTransformPoint(grip.position);
-            Vector3 delta = target - gripInWeaponRoot;
-            // 目标点换算回的位移要从 weaponRoot 空间转到"模型父节点"空间：
-            // 双枪的手枪挂在 0.92 缩放的 Twinfin 下，直接加在 localPosition 上会被缩放吃掉 8%。
-            Vector3 parentDelta = modelRoot.parent != null
-                ? modelRoot.parent.InverseTransformVector(weaponRoot.TransformVector(delta))
-                : delta;
-            modelRoot.localPosition += parentDelta;
-        }
-
-        private static Transform FindChildByName(Transform root, string name)
-        {
-            if (root == null) return null;
-            if (root.name == name) return root;
-            for (int i = 0; i < root.childCount; i++)
-            {
-                Transform found = FindChildByName(root.GetChild(i), name);
-                if (found != null) return found;
-            }
-            return null;
+            return WeaponHoldRig.Build(
+                weaponRoot, leftArm, rightArm, leftElbow, rightElbow,
+                shooterGo, rollerGo, chargerGo, dualiesGo, slosherGo, blasterGo, splatlingGo,
+                chainY);
         }
 
         #endregion
@@ -2050,6 +1939,33 @@ namespace P1.Player
         }
 
         /// <summary>
+        /// 运行时兜底合并（P30-C）：场景烘焙的角色在编辑器装配期可能因合并缓存瞬时失败而
+        /// 保持逐件武器渲染（每把武器 6~16 个独立 MeshRenderer），这里在首次进入场景时补做一次。
+        /// 幂等：MergeWeaponRoot 对已有合并产物的根直接跳过；静态网格缓存跨实例共享，
+        /// 全场 8 个角色只有首个触发真实构建，其余复用。逐帧零开销（仅 Start 一次性）。
+        /// </summary>
+        public static void MergeWeaponsRuntime(
+            GameObject shooter, GameObject roller, GameObject charger, GameObject dualies,
+            GameObject slosher, GameObject blaster, GameObject splatling,
+            Transform rollerDrum, Transform splatlingBarrels, Renderer[] chargerCoils)
+        {
+            if (shooter == null || roller == null || charger == null || dualies == null
+                || slosher == null || blaster == null || splatling == null)
+                return;
+
+            try
+            {
+                MergeWeaponStaticMeshes(shooter, roller, charger, dualies, slosher, blaster, splatling,
+                    rollerDrum, splatlingBarrels, chargerCoils);
+            }
+            catch (System.Exception e)
+            {
+                // 装饰性优化失败不拖垮游戏（与装配期同一降级策略）
+                Debug.LogWarning($"[CharacterVisualAssembler] 运行时武器合并兜底失败，保持独立部件渲染：{e}");
+            }
+        }
+
+        /// <summary>
         /// 合并单个合并根下的静态部件：
         /// 收集 → 按 sharedMaterial 分组 → 生成/复用缓存网格 → 挂载 MergedStatic_* 物体 → 禁用组内源部件渲染。
         /// 只有组网格构建成功才禁用该组源部件，任何失败都让该组维持原状（降级而非缺件）。
@@ -2062,6 +1978,13 @@ namespace P1.Player
             Renderer[] skipRenderers)
         {
             if (bakeRoot == null || mergeIndex < 0 || mergeIndex >= MaxMergeRootsPerWeapon) return;
+
+            // 0. 幂等守卫：该合并根下已有合并产物（编辑器重装配 / 运行时兜底重入）直接跳过，
+            //    否则源部件虽已禁用仍会被再次收集，重复生成 MergedStatic_*。
+            for (int i = 0; i < bakeRoot.childCount; i++)
+            {
+                if (bakeRoot.GetChild(i).name.StartsWith(MergedPartPrefix)) return;
+            }
 
             // 1. 深度优先收集可合并部件（遍历顺序确定 → 材质组顺序确定 → 缓存组序跨队伍/实例一致）
             var parts = new List<MeshRenderer>();
@@ -2101,19 +2024,25 @@ namespace P1.Player
             bool reuseCache = cachedGroups != null && cachedGroups.Count == groups.Count;
 
             var builtMeshes = new Mesh[groups.Count];
+            bool allGroupsBuilt = true;
             for (int g = 0; g < groups.Count; g++)
             {
                 if (reuseCache)
                 {
-                    builtMeshes[g] = cachedGroups[g]; // 可能含 null（该组校验失败保持不合并）
+                    builtMeshes[g] = cachedGroups[g];
+                    if (builtMeshes[g] == null) allGroupsBuilt = false;
                     continue;
                 }
                 builtMeshes[g] = BuildMergedGroupMesh(kind, mergeIndex, g, bakeRoot, groups[g]);
+                if (builtMeshes[g] == null) allGroupsBuilt = false;
             }
-            if (!reuseCache)
+            if (!reuseCache && allGroupsBuilt)
             {
                 perRoot[mergeIndex] = new List<Mesh>(builtMeshes);
             }
+            // P30-C 修复：失败组不再写入缓存。网格构建受装配时机影响可能瞬时失败，
+            // 缓存 null 会把瞬时失败固化成永久静默跳过（实测场景烘焙武器自 v0.1.3 起从未合并成功）；
+            // 改为失败组不落缓存，下次装配自动重试，成功后幂等守卫防止重复挂载。
 
             // 4. 挂载合并网格物体并禁用组内源部件渲染（GameObject / 锚点层级全部保留）
             for (int g = 0; g < groups.Count; g++)

@@ -96,12 +96,10 @@ namespace P1.Ink
             _owners = new byte[total];
             _pixels = new Color32[total];
 
-            Texture = new Texture2D(Width, Height, TextureFormat.RGBA32, false, false)
-            {
-                name = $"InkWallTex_{name}",
-                wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Bilinear
-            };
+            // P30-C 性能收敛：单面不再自建 Texture2D（涂墙功能上线后 300+ 张激活的面材质
+            // 把 DrawCalls 推高约 300）。像素统一上传到 InkWallSurface 每表面一张的条带图集
+            // （见 UploadIfDirtyTo）；本属性保留但恒为 null，兼容旧签名与 null 安全检查。
+            Texture = null;
 
             ResetPaint();
         }
@@ -274,6 +272,21 @@ namespace P1.Ink
 
             Texture.SetPixels32(_pixels);
             Texture.Apply(false, false);
+            IsDirty = false;
+            return true;
+        }
+
+        /// <summary>
+        /// 把当前像素块写入外部图集的指定页（每表面合并贴图用）；仅在脏时写入。
+        /// pageX 为本面在图集中的像素横向偏移，图集高度必须 ≥ Height。
+        /// 返回是否发生了上传（调用方据此决定是否 atlas.Apply）。
+        /// </summary>
+        public bool UploadIfDirtyTo(Texture2D atlas, int pageX)
+        {
+            if (!IsDirty || atlas == null)
+                return false;
+
+            atlas.SetPixels32(pageX, 0, Width, Height, _pixels);
             IsDirty = false;
             return true;
         }

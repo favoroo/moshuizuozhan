@@ -95,6 +95,12 @@ namespace P1.Ink
         /// </summary>
         public float CellArea => _grid != null ? _grid.CellWidth * _grid.CellHeight : 0.014f;
 
+        /// <summary>
+        /// 单张墙墨格的世界面积（m²）：墙面涂墨充能/统计的换算基准，与地面 <see cref="CellArea"/> 无关。
+        /// 未初始化或未配置时回退到 0.1m 格（0.01 m²）。
+        /// </summary>
+        public float WallCellArea => config != null ? config.WallCellArea : 0.01f;
+
         /// <summary>CPU 粗网格贴图：小地图与编辑器工具使用，保持原有类型与语义。</summary>
         public Texture2D InkTexture => _inkTexture;
 
@@ -409,10 +415,22 @@ namespace P1.Ink
         /// </summary>
         public int PaintSphereWithWalls(Vector3 worldPos, float radius, Team team)
         {
+            return PaintSphereWithWalls(worldPos, radius, team, out _);
+        }
+
+        /// <summary>
+        /// 球形范围同时涂地面与附近墙面。返回值仍是总变化格数（地面 + 墙面，保持旧语义），
+        /// <paramref name="wallChanged"/> 单独给出其中的墙面格数：墙面格面积与地面格不同，
+        /// 充能与涂地统计必须分开换算。
+        /// </summary>
+        public int PaintSphereWithWalls(Vector3 worldPos, float radius, Team team, out int wallChanged)
+        {
             int changed = PaintCircle(worldPos, radius, team);
+            wallChanged = 0;
             if (config == null || config.enableWallInk)
             {
-                changed += InkWallSurface.PaintAllInSphere(worldPos, radius, team);
+                wallChanged = InkWallSurface.PaintAllInSphere(worldPos, radius, team);
+                changed += wallChanged;
             }
             return changed;
         }

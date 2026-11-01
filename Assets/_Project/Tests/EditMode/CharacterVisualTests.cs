@@ -822,6 +822,8 @@ namespace P1.Tests
             try
             {
                 Assert.AreEqual(RollerWieldSolver.CarryPitchDeg, cfg.rollerCarryPitchDeg, 0.001f);
+                Assert.AreEqual(RollerWieldSolver.CarryYawDeg, cfg.rollerCarryYawDeg, 0.001f);
+                Assert.AreEqual(RollerWieldSolver.CarryRollDeg, cfg.rollerCarryRollDeg, 0.001f);
                 Assert.AreEqual(RollerWieldSolver.FlickLiftPitchDeg, cfg.rollerFlickLiftPitchDeg, 0.001f);
                 Assert.AreEqual(RollerWieldSolver.FlickSlamPitchDeg, cfg.rollerFlickSlamPitchDeg, 0.001f);
                 Assert.AreEqual(RollerWieldSolver.FlickSlamDropMeters, cfg.rollerFlickSlamDrop, 0.0001f);
@@ -853,6 +855,100 @@ namespace P1.Tests
             {
                 ScriptableObject.DestroyImmediate(cfg);
             }
+        }
+
+        // ==================== P34 每把武器持握姿态（手在握把上 + 肘部弯曲） ====================
+
+        private static readonly WeaponKind[] AllHoldKinds =
+        {
+            WeaponKind.Shooter, WeaponKind.Roller, WeaponKind.Charger, WeaponKind.Dualies,
+            WeaponKind.Slosher, WeaponKind.Blaster, WeaponKind.Splatling
+        };
+
+        private static string ModelNameOf(WeaponKind kind)
+        {
+            switch (kind)
+            {
+                case WeaponKind.Roller: return "Swell_Roller";
+                case WeaponKind.Charger: return "Glint_Charger";
+                case WeaponKind.Dualies: return "Twinfin_Dualies";
+                case WeaponKind.Slosher: return "Tidebucket_Slosher";
+                case WeaponKind.Blaster: return "Popper_Blaster";
+                case WeaponKind.Splatling: return "Gyre_Splatling";
+                default: return "Spritzer_Shooter";
+            }
+        }
+
+        private static Transform RightGripOf(CharacterVisualController controller, WeaponKind kind)
+        {
+            Transform model = controller.WeaponRoot.transform.Find(ModelNameOf(kind));
+            Assert.IsNotNull(model, $"武器 {kind} 模型必须存在");
+            if (kind == WeaponKind.Dualies)
+            {
+                Transform rightPistol = model.Find("RightPistol");
+                Assert.IsNotNull(rightPistol, "双枪右手枪必须存在");
+                return WeaponHoldRig.FindChildByName(rightPistol, "Grip");
+            }
+            return WeaponHoldRig.FindChildByName(model, WeaponHoldTargets.RightGripName(kind));
+        }
+
+        [Test]
+        public void WeaponHoldTargets_EveryKind_ReachableAndKeepsElbowBent()
+        {
+            // 手位必须在两骨长度内，同时不能贴到最大伸展：旧滚筒手位 0.322m 已接近 0.325m 极限，
+            // 视觉上就是一条直棍"手竖着放"。这里锁 0.20~0.31m，保证肘部至少弯 30° 以上。
+            Vector3 shoulderKid = new Vector3(
+                CharacterMetrics.ShoulderLocalX,
+                WeaponHoldRig.ChestChainY + CharacterMetrics.ShoulderLocalY,
+                CharacterMetrics.ShoulderLocalZ);
+            float maxReach = CharacterMetrics.UpperArmLength + CharacterMetrics.ForearmLength;
+
+            for (int i = 0; i < AllHoldKinds.Length; i++)
+            {
+                WeaponKind kind = AllHoldKinds[i];
+                Vector3 target = WeaponHoldTargets.RightHand(kind);
+                float dist = Vector3.Distance(shoulderKid, target);
+                Assert.Greater(dist, 0.20f, $"{kind} 手位离肩 {dist:F3}m 太近，手臂会缩成一团");
+                Assert.Less(dist, maxReach - 0.015f, $"{kind} 手位离肩 {dist:F3}m 超过可弯肘范围（上限 {maxReach:F3}m）");
+                Assert.Greater(target.z, 0.09f, $"{kind} 手位必须在身体前方，不能埋在躯干里");
+            }
+        }
+
+        [Test]
+        public void EquipWeapon_HandsLandOnGrips_ForEveryKind()
+        {
+            for (int i = 0; i < AllHoldKinds.Length; i++)
+            {
+                WeaponKind kind = AllHoldKinds[i];
+                _controller.EquipWeaponKind(kind);
+
+                Transform hand = _controller.RightElbowPivot.Find("Hand");
+                Transform grip = RightGripOf(_controller, kind);
+                Assert.IsNotNull(hand, "右手必须挂在右肘枢轴下");
+                Assert.IsNotNull(grip, $"{kind} 必须能找到真实握把部件");
+                Assert.Less(Vector3.Distance(hand.position, grip.position), 0.02f,
+                    $"{kind} 右手没有落在握把上（手与握把距离 {Vector3.Distance(hand.position, grip.position):F3}m）");
+            }
+        }
+
+        [Test]
+        public void Roller_Equip_LeftHandGripsShaft_AndDualies_BothHandsOnPistols()
+        {
+            _controller.EquipWeaponKind(WeaponKind.Roller);
+            Transform roller = _controller.WeaponRoot.transform.Find("Swell_Roller");
+            Transform rollerLeftHand = _controller.LeftElbowPivot.Find("Hand");
+            Vector3 support = roller.TransformPoint(WeaponHoldTargets.LeftSupportLocal(WeaponKind.Roller));
+            Assert.Less(Vector3.Distance(rollerLeftHand.position, support), 0.02f,
+                "滚筒左手必须托在杆上（双手握杆），不能垂在身侧");
+
+            _controller.EquipWeaponKind(WeaponKind.Dualies);
+            Transform twinfin = _controller.WeaponRoot.transform.Find("Twinfin_Dualies");
+            Transform leftPistolGrip = WeaponHoldRig.FindChildByName(
+                WeaponHoldRig.FindChildByName(twinfin, "LeftPistol"), "Grip");
+            Transform dualLeftHand = _controller.LeftElbowPivot.Find("Hand");
+            Assert.IsNotNull(leftPistolGrip, "双枪左手枪握把必须存在");
+            Assert.Less(Vector3.Distance(dualLeftHand.position, leftPistolGrip.position), 0.02f,
+                "双枪左手必须落在左手枪握把上");
         }
     }
 }

@@ -39,8 +39,13 @@ namespace P1.Ink
 
         private readonly List<InkWallFace> _faces = new List<InkWallFace>(4);
         private readonly List<Mesh> _meshes = new List<Mesh>(4);
-        private readonly List<Renderer> _faceRenderers = new List<Renderer>(4);
-        private readonly List<Material> _faceMaterials = new List<Material>(4);
+        // P30-C 渲染收敛：整个表面（≤4~5 张立面）合并为 1 网格 + 1 张条带图集 + 1 材质 + 1 渲染器。
+        // 逐面渲染器方案在涂墙功能上线后会把 DrawCalls 推高约 +300（316 张激活立面各 1 次 DrawCall）。
+        private Renderer _wallRenderer;
+        private Material _wallMaterial;
+        private Texture2D _inkAtlas;
+        private readonly List<Rect> _pageRects = new List<Rect>(4);
+        private int[] _pageXOffsets = new int[4];
         private MaterialPropertyBlock _propBlock;
 
         private float[] _lastPaintTimes = new float[4];
@@ -102,22 +107,27 @@ namespace P1.Ink
             }
             _meshes.Clear();
 
-            for (int i = 0; i < _faceMaterials.Count; i++)
+            if (_wallMaterial != null)
             {
-                if (_faceMaterials[i] != null)
-                {
-                    if (Application.isPlaying) Destroy(_faceMaterials[i]);
-                    else DestroyImmediate(_faceMaterials[i]);
-                }
+                if (Application.isPlaying) Destroy(_wallMaterial);
+                else DestroyImmediate(_wallMaterial);
+                _wallMaterial = null;
             }
-            _faceMaterials.Clear();
+
+            if (_inkAtlas != null)
+            {
+                if (Application.isPlaying) Destroy(_inkAtlas);
+                else DestroyImmediate(_inkAtlas);
+                _inkAtlas = null;
+            }
+            _pageRects.Clear();
 
             for (int i = 0; i < _faces.Count; i++)
             {
                 _faces[i]?.DestroyTexture();
             }
             _faces.Clear();
-            _faceRenderers.Clear();
+            _wallRenderer = null;
         }
 
         private void RegisterColliders()
@@ -292,6 +302,7 @@ namespace P1.Ink
             }
 
             _initialized = true;
+            BuildMergedWallVisual();
 
             if (!_isRegistered)
             {
@@ -328,8 +339,8 @@ namespace P1.Ink
                 $"{name}_{faceName}");
 
             _faces.Add(face);
-            BuildFaceVisual(face);
-            face.UploadIfDirty();
+            // 视觉不再逐面构建：所有立面加完后由 BuildMergedWallVisual 统一合并
+            // （1 网格 + 1 图集 + 1 渲染器），见该方法的性能注释。
         }
 
         /// <summary>朝向盒 8 个角点的世界 AABB（供攀爬判定与诊断使用）。</summary>
@@ -358,7 +369,7 @@ namespace P1.Ink
 
         /// <summary>
         /// 按朝向盒生成 4 张竖直立面。U/V 取旋转后的局部轴，U×V = 朝外法线，
-        /// 因此旋转盒子与斜坡的墨面与网格表面共面（外扩 1cm 防 Z-Fighting 由 BuildFaceVisual 负责）。
+        /// 因此旋转盒子与斜坡的墨面与网格表面共面（外扩 1cm 防 Z-Fighting 由 BuildMergedWallVisual 负责）。
         /// </summary>
         private void AddOrientedBoxFaces(float cellSize, Color32 neutral, Color32 teamA, Color32 teamB)
         {
@@ -386,75 +397,157 @@ namespace P1.Ink
                 -right, up, orientedSizeWorld.x, height, cellSize, neutral, teamA, teamB);
         }
 
-        private void BuildFaceVisual(InkWallFace face)
+        /// <summary>
+        /// P30-C 渲染收敛：把本表面全部立面合并为 1 个网格 + 1 张条带图集 + 1 材质 + 1 渲染器。
+        /// 逐面方案每张激活立面各占 1 次 DrawCall（全场 300+ 张 → +300 DrawCalls），
+        /// 合并后每表面恒定 1 次。UV0 直接映射到图集页矩形，InkWall shader 无需任何改动；
+        /// UV1（面尺寸描边）与顶点法线保持逐顶点语义不变。
+        /// </summary>
+        private void BuildMergedWallVisual()
         {
-            var go = new GameObject($"InkFace_{face.Name}");
+            if (_faces.Count == 0)
+                return;
+
+            // 1) 图集布局：横向条带，每面一页；同表面立面等高、宽度可不同
+            int atlasWidth = 0;
+            int atlasHeight = 1;
+            for (int i = 0; i < _faces.Count; i++)
+            {
+                atlasWidth += _faces[i].Width;
+                atlasHeight = Mathf.Max(atlasHeight, _faces[i].Height);
+            }
+
+            _pageRects.Clear();
+            if (_pageXOffsets == null || _pageXOffsets.Length < _faces.Count)
+            {
+                _pageXOffsets = new int[_faces.Count];
+            }
+            int cursor = 0;
+            for (int i = 0; i < _faces.Count; i++)
+            {
+                _pageXOffsets[i] = cursor;
+                _pageRects.Add(new Rect(
+                    (float)cursor / atlasWidth,
+                    0f,
+                    (float)_faces[i].Width / atlasWidth,
+                    (float)_faces[i].Height / atlasHeight));
+                cursor += _faces[i].Width;
+            }
+
+            _inkAtlas = new Texture2D(atlasWidth, atlasHeight, TextureFormat.RGBA32, false, false)
+            {
+                name = $"InkWallAtlas_{name}",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+
+            // 2) 合并网格：每面一个四边形，顶点/法线仍写在墙体局部空间并沿法线外扩 1cm 防 Z-Fighting
+            int faceCount = _faces.Count;
+            var verts = new List<Vector3>(faceCount * 4);
+            var uv0 = new List<Vector2>(faceCount * 4);
+            var uv1 = new List<Vector2>(faceCount * 4);
+            var norms = new List<Vector3>(faceCount * 4);
+            var tris = new List<int>(faceCount * 6);
+
+            for (int i = 0; i < faceCount; i++)
+            {
+                InkWallFace face = _faces[i];
+                Vector3 outward = face.NormalWorld * 0.01f;
+                Vector3 center = face.FaceToWorld(new Vector2(face.WorldWidth * 0.5f, face.WorldHeight * 0.5f));
+                Vector3 uHalf = face.UAxis * (face.WorldWidth * 0.5f);
+                Vector3 vHalf = face.VAxis * (face.WorldHeight * 0.5f);
+
+                verts.Add(transform.InverseTransformPoint(center + outward - uHalf - vHalf));
+                verts.Add(transform.InverseTransformPoint(center + outward + uHalf - vHalf));
+                verts.Add(transform.InverseTransformPoint(center + outward + uHalf + vHalf));
+                verts.Add(transform.InverseTransformPoint(center + outward - uHalf + vHalf));
+
+                Rect page = _pageRects[i];
+                uv0.Add(new Vector2(page.x, page.y));
+                uv0.Add(new Vector2(page.x + page.width, page.y));
+                uv0.Add(new Vector2(page.x + page.width, page.y + page.height));
+                uv0.Add(new Vector2(page.x, page.y + page.height));
+
+                // UV1 = (面宽, 面高) 米：InkWall shader 用它在涂墨立面四周画掩体边界线（P17-A）
+                var faceSize = new Vector2(face.WorldWidth, face.WorldHeight);
+                Vector3 localNormal = transform.InverseTransformDirection(face.NormalWorld);
+                for (int k = 0; k < 4; k++)
+                {
+                    uv1.Add(faceSize);
+                    norms.Add(localNormal);
+                }
+
+                // Unity 正面绕序：按 U×V = 朝外法线 的顺序取 0-1-2 / 0-2-3
+                int b = i * 4;
+                tris.Add(b + 0); tris.Add(b + 1); tris.Add(b + 2);
+                tris.Add(b + 0); tris.Add(b + 2); tris.Add(b + 3);
+            }
+
+            var mesh = new Mesh { name = $"InkWallMerged_{name}" };
+            mesh.SetVertices(verts);
+            mesh.SetUVs(0, uv0);
+            mesh.SetUVs(1, uv1);
+            mesh.SetNormals(norms);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateBounds();
+
+            var go = new GameObject($"InkWallMerged_{name}");
             go.transform.SetParent(transform, false);
             go.transform.localPosition = Vector3.zero;
             go.transform.localRotation = Quaternion.identity;
             go.transform.localScale = Vector3.one;
 
-            // 顶点与法线写在墙体局部空间：子节点使用单位变换，渲染结果与墙体表面精确重合；
-            // 再沿法线外扩 1cm，避免与原墙面 Z-Fighting。
-            Vector3 outward = face.NormalWorld * 0.01f;
-            Vector3 center = face.FaceToWorld(new Vector2(face.WorldWidth * 0.5f, face.WorldHeight * 0.5f));
-            Vector3 uHalf = face.UAxis * (face.WorldWidth * 0.5f);
-            Vector3 vHalf = face.VAxis * (face.WorldHeight * 0.5f);
-
-            Vector3 v0 = transform.InverseTransformPoint(center + outward - uHalf - vHalf);
-            Vector3 v1 = transform.InverseTransformPoint(center + outward + uHalf - vHalf);
-            Vector3 v2 = transform.InverseTransformPoint(center + outward + uHalf + vHalf);
-            Vector3 v3 = transform.InverseTransformPoint(center + outward - uHalf + vHalf);
-            Vector3 localNormal = transform.InverseTransformDirection(face.NormalWorld);
-
-            var mesh = new Mesh { name = $"InkWallQuad_{face.Name}" };
-            mesh.SetVertices(new List<Vector3> { v0, v1, v2, v3 });
-            mesh.SetUVs(0, new List<Vector2>
-            {
-                new Vector2(0f, 0f),
-                new Vector2(1f, 0f),
-                new Vector2(1f, 1f),
-                new Vector2(0f, 1f)
-            });
-            // UV1 = (面宽, 面高) 米：InkWall shader 用它在涂墨立面四周画掩体边界线（P17-A）
-            var faceSize = new Vector2(face.WorldWidth, face.WorldHeight);
-            mesh.SetUVs(1, new List<Vector2> { faceSize, faceSize, faceSize, faceSize });
-            mesh.SetNormals(new List<Vector3> { localNormal, localNormal, localNormal, localNormal });
-            // Unity 正面绕序：三角形叉乘方向与法线一致（内置 Quad 的 0,3,1 即为此规则），
-            // 因此按 U×V = 朝外法线 的顺序取 0-1-2 / 0-2-3
-            mesh.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
-            mesh.RecalculateBounds();
-
             var mf = go.AddComponent<MeshFilter>();
             mf.sharedMesh = mesh;
 
             var mr = go.AddComponent<MeshRenderer>();
-            // 为每张立面实例化独立的 Material，防 OcclusionFader.SetPropertyBlock(null) 冲刷，
-            // 且允许各面拥有独立的 _WallWetness 与 _InkTex
-            Material faceMat = overlayMaterial != null
-                ? new Material(overlayMaterial) { name = $"InkWallMat_{face.Name}" }
+            // 整表面一个材质实例：持有图集贴图（OcclusionFader.SetPropertyBlock(null) 冲刷
+            // 也不会丢绑定），并在 FlushDirty 时重新写入 MPB 双保险
+            _wallMaterial = overlayMaterial != null
+                ? new Material(overlayMaterial) { name = $"InkWallMat_{name}" }
                 : null;
-            if (faceMat != null)
+            if (_wallMaterial != null)
             {
-                if (face.Texture != null)
-                {
-                    faceMat.SetTexture(InkTexProp, face.Texture);
-                }
-                faceMat.SetFloat(WallWetnessProp, 0f);
+                _wallMaterial.SetTexture(InkTexProp, _inkAtlas);
+                _wallMaterial.SetFloat(WallWetnessProp, 0f);
             }
-            mr.sharedMaterial = faceMat;
-            _faceMaterials.Add(faceMat);
+            mr.sharedMaterial = _wallMaterial;
 
             mr.shadowCastingMode = ShadowCastingMode.Off;
             mr.receiveShadows = false;
-            // 未落墨前保持禁用，0 DrawCall 开销；首次涂上墨斑后再激活
-            mr.enabled = face.HasInk;
+            // 整面未落墨前保持禁用，0 DrawCall 开销；任意立面首次涂上墨斑后再激活
+            mr.enabled = HasAnyInk();
 
-            _propBlock.SetTexture(InkTexProp, face.Texture);
+            if (_propBlock == null)
+            {
+                _propBlock = new MaterialPropertyBlock();
+            }
+            _propBlock.SetTexture(InkTexProp, _inkAtlas);
             mr.SetPropertyBlock(_propBlock);
 
             _meshes.Add(mesh);
-            _faceRenderers.Add(mr);
+            _wallRenderer = mr;
+
+            // 初始像素（全透明中性色）刷进图集，保证首次激活时图集内容已就绪
+            bool uploaded = false;
+            for (int i = 0; i < faceCount; i++)
+            {
+                uploaded |= _faces[i].UploadIfDirtyTo(_inkAtlas, _pageXOffsets[i]);
+            }
+            if (uploaded)
+            {
+                _inkAtlas.Apply(false, false);
+            }
+        }
+
+        private bool HasAnyInk()
+        {
+            for (int i = 0; i < _faces.Count; i++)
+            {
+                if (_faces[i].HasInk)
+                    return true;
+            }
+            return false;
         }
 
         // ---------------- 涂色 ----------------
@@ -480,17 +573,11 @@ namespace P1.Ink
             if (changed > 0)
             {
                 int idx = _faces.IndexOf(face);
-                if (idx >= 0)
+                if (idx >= 0 && idx < _lastPaintTimes.Length)
                 {
-                    if (idx < _lastPaintTimes.Length)
-                    {
-                        _lastPaintTimes[idx] = Time.time;
-                    }
-                    if (idx < _faceRenderers.Count && _faceRenderers[idx] != null)
-                    {
-                        _faceRenderers[idx].enabled = true;
-                    }
+                    _lastPaintTimes[idx] = Time.time;
                 }
+                EnsureWallRendererEnabled();
             }
             return changed;
         }
@@ -532,10 +619,7 @@ namespace P1.Ink
                     {
                         _lastPaintTimes[i] = Time.time;
                     }
-                    if (i < _faceRenderers.Count && _faceRenderers[i] != null)
-                    {
-                        _faceRenderers[i].enabled = true;
-                    }
+                    EnsureWallRendererEnabled();
                     changed += painted;
                 }
             }
@@ -553,79 +637,90 @@ namespace P1.Ink
                     _lastPaintTimes[i] = -1000f;
                     _currentWetness[i] = 0f;
                 }
-                if (i < _faceMaterials.Count && _faceMaterials[i] != null)
-                {
-                    _faceMaterials[i].SetFloat(WallWetnessProp, 0f);
-                }
-                if (i < _faceRenderers.Count && _faceRenderers[i] != null)
-                {
-                    _faceRenderers[i].enabled = false;
-                }
+            }
+            if (_wallMaterial != null)
+            {
+                _wallMaterial.SetFloat(WallWetnessProp, 0f);
+            }
+            if (_wallRenderer != null)
+            {
+                _wallRenderer.enabled = false;
             }
         }
 
         public void FlushDirty()
         {
+            if (_inkAtlas == null)
+                return;
+
+            bool uploaded = false;
             for (int i = 0; i < _faces.Count; i++)
             {
-                InkWallFace face = _faces[i];
-                if (!face.UploadIfDirty())
-                    continue;
-
-                // 自愈：这次上传后重新把该面的墨迹贴图绑回渲染器。
-                // BuildFaceVisual 只在创建时设过一次 MPB；历史上 OcclusionFader 恢复不透明时
-                // 会 SetPropertyBlock(null) 把这唯一的绑定抹掉，导致墙体已经涂上墨却完全看不见。
-                // 仅在真正发生上传（该面被打过墨）时重绑，空闲帧零开销。
-                RebindFaceTexture(i, face);
+                // 各面把脏像素块写入条带图集的对应页，整表面一帧最多一次 Apply
+                uploaded |= _faces[i].UploadIfDirtyTo(_inkAtlas, _pageXOffsets[i]);
             }
+
+            if (!uploaded)
+                return;
+
+            _inkAtlas.Apply(false, false);
+
+            // 自愈：这次上传后重新把图集绑回渲染器。
+            // 材质实例直接持有图集（SetPropertyBlock(null) 也不会丢），
+            // 这里再写一次 MPB 双保险，只在真正发生上传的帧执行，空闲帧零开销。
+            RebindAtlasTexture();
         }
 
-        /// <summary>把某张立面的墨迹贴图重新写进对应渲染器的 MaterialPropertyBlock。</summary>
-        private void RebindFaceTexture(int index, InkWallFace face)
+        /// <summary>把图集贴图重新写进表面渲染器的 MaterialPropertyBlock。</summary>
+        private void RebindAtlasTexture()
         {
-            if (index < 0 || index >= _faceRenderers.Count)
+            if (_wallRenderer == null || _inkAtlas == null)
                 return;
 
-            Renderer target = _faceRenderers[index];
-            if (target == null || face == null || face.Texture == null)
-                return;
-
-            // 材质实例直接持有墨迹贴图，即使 MPB 被 SetPropertyBlock(null) 也不会丢失
-            if (index < _faceMaterials.Count && _faceMaterials[index] != null)
+            if (_wallMaterial != null)
             {
-                _faceMaterials[index].SetTexture(InkTexProp, face.Texture);
+                _wallMaterial.SetTexture(InkTexProp, _inkAtlas);
             }
 
             if (_propBlock == null)
                 _propBlock = new MaterialPropertyBlock();
 
-            target.GetPropertyBlock(_propBlock);
-            _propBlock.SetTexture(InkTexProp, face.Texture);
-            target.SetPropertyBlock(_propBlock);
+            _wallRenderer.GetPropertyBlock(_propBlock);
+            _propBlock.SetTexture(InkTexProp, _inkAtlas);
+            _wallRenderer.SetPropertyBlock(_propBlock);
+        }
+
+        /// <summary>整表面渲染器尚未激活时激活（首次落墨后调用）。</summary>
+        private void EnsureWallRendererEnabled()
+        {
+            if (_wallRenderer != null && !_wallRenderer.enabled)
+            {
+                _wallRenderer.enabled = true;
+            }
         }
 
         private void LateUpdate()
         {
-            if (!_initialized || _faces.Count == 0)
+            if (!_initialized || _faces.Count == 0 || _wallMaterial == null)
                 return;
 
             float sheenSeconds = config != null ? config.inkSheenSeconds : 22f;
             float now = Time.time;
 
+            // 逐面计算湿润度（供 GetFaceWetness 诊断），材质取整表面最大值——
+            // 合并渲染后一个材质对应多张立面，取最近被涂的面的湿润度最贴近视觉直觉
+            float maxWet = 0f;
+            bool dirty = false;
             for (int i = 0; i < _faces.Count; i++)
             {
                 InkWallFace face = _faces[i];
-                Material mat = i < _faceMaterials.Count ? _faceMaterials[i] : null;
-                if (mat == null)
-                    continue;
 
-                // 无墨面直接置 0 且跳过
                 if (!face.HasInk)
                 {
                     if (_currentWetness[i] > 0f)
                     {
                         _currentWetness[i] = 0f;
-                        mat.SetFloat(WallWetnessProp, 0f);
+                        dirty = true;
                     }
                     continue;
                 }
@@ -633,12 +728,21 @@ namespace P1.Ink
                 float elapsed = now - _lastPaintTimes[i];
                 float wet = ComputeWallWetness(elapsed, sheenSeconds);
 
-                // 只有有效变化才 SetFloat，严格零 GC
+                // 只有有效变化才记录，严格零 GC
                 if (Mathf.Abs(_currentWetness[i] - wet) > 0.005f || (wet == 0f && _currentWetness[i] != 0f))
                 {
                     _currentWetness[i] = wet;
-                    mat.SetFloat(WallWetnessProp, wet);
+                    dirty = true;
                 }
+                if (wet > maxWet)
+                {
+                    maxWet = wet;
+                }
+            }
+
+            if (dirty)
+            {
+                _wallMaterial.SetFloat(WallWetnessProp, maxWet);
             }
         }
 

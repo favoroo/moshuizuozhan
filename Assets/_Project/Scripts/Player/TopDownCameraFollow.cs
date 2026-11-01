@@ -39,6 +39,21 @@ namespace P1.Player
         private bool _hasSnapped;
         private Vector3 _aimGroundPoint;
 
+        /// <summary>
+        /// 移动端「v0.1.8 新渲染路径」总开关：URP 后处理（tonemap/bloom/调色/暗角）+ 相机 FXAA。
+        ///
+        /// 背景（Android 真机回归，2026-11-01）：v0.1.7 移动端相机没有任何 UniversalAdditionalCameraData
+        /// 覆盖 —— 既无后处理也无抗锯齿，URP 直接画进后缓冲；v0.1.8 新增了相机覆盖 + 后处理 + FXAA +
+        /// 移动端全屏描边 Feature 之后，Android 切到别的 App 再切回来时 3D 画面整片消失，
+        /// 只剩相机 clear color 被后处理上色（观感「全屏灰」），HUD / 触控 / 小地图 / 对局逻辑均正常。
+        /// 这三项都属于「中间纹理 + 最终 Blit」链路，Android 恢复时重建 surface 后可能失效。
+        ///
+        /// `true`  = 保留 v0.1.8 的移动端后处理观感（先关掉移动端全屏描边 Feature 观察）；
+        /// `false` = 完全回退 v0.1.7 的移动端直绘路径（无后处理、无 AA）——灰屏热修的兜底档。
+        /// 桌面端不受影响（始终 SMAA + 后处理）。
+        /// </summary>
+        private static readonly bool MobilePostProcessingEnabled = true;
+
         // 开火镜头冲击（P16/P28）：只做「沿视轴后拉 + Roll + FOV」三种不改瞄准方向的偏移。
         // 相机朝向决定屏幕中心射线，任何 pitch/yaw 改动都会让准星漂移，所以这里绝不旋转照射轴。
         // P28：指数漏积分改为 AnimSpring1D 弹簧；后拉量由「热积累」驱动——
@@ -455,11 +470,16 @@ namespace P1.Player
             {
                 // ArenaStyleSO 的画质总开关；样式资产尚未加载时默认开启（旧观感回退只改 SO）。
                 var style = RenderEnvGlobals.CurrentStyle;
-                data.renderPostProcessing = style == null || style.postProcessingEnabled;
+                bool styleWantsPost = style == null || style.postProcessingEnabled;
+                data.renderPostProcessing = styleWantsPost &&
+                    (!Application.isMobilePlatform || MobilePostProcessingEnabled);
                 data.renderShadows = true;
                 if (Application.isMobilePlatform)
                 {
-                    data.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
+                    // 移动端抗锯齿跟随「新渲染路径」总开关：两档都不开时完全对齐 v0.1.7（无 AA）。
+                    data.antialiasing = MobilePostProcessingEnabled
+                        ? AntialiasingMode.FastApproximateAntialiasing
+                        : AntialiasingMode.None;
                     data.antialiasingQuality = AntialiasingQuality.Low;
                 }
                 else

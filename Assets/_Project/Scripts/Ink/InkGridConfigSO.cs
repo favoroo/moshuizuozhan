@@ -84,8 +84,23 @@ namespace P1.Ink
         [Tooltip("关闭后墙面不可涂、也不可潜行上爬（回到纯地面涂地）")]
         public bool enableWallInk = true;
 
-        [Tooltip("墙面墨水是否计入涂地覆盖率（参考 Splatoon：通常不计，仅地面决定胜负）")]
+        [Tooltip("保留开关：当前未实现。覆盖率始终只统计 40x56 地面网格（墙面墨迹仅可视化 + 攀爬 + 大招充能），" +
+                 "改这个值不会影响比分或结算")]
         public bool countWallInCoverage = false;
+
+        /// <summary>
+        /// 单张墙墨格面积（m²）。墙面充能/统计必须用它换算，不能借用地面格
+        /// <see cref="InkSurfaceController.CellArea"/>：墙格边长 0.1m，地面格在 400 分辨率下是 0.1x0.14m，
+        /// 混用会把墙墨面积多算约 1.4 倍。
+        /// </summary>
+        public float WallCellArea
+        {
+            get
+            {
+                float cell = Mathf.Max(0.01f, wallCellSize);
+                return cell * cell;
+            }
+        }
 
         public int GetPlatformResolution()
         {

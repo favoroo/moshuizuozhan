@@ -405,6 +405,24 @@ namespace P1.Weapons
             AddSpecialPointsRaw(paintedCells * cellArea * pointsPerM2);
         }
 
+        /// <summary>
+        /// 墙面涂墨充能：按墙面格面积（<see cref="InkGridConfigSO.WallCellArea"/>）换算，
+        /// 且<strong>不</strong>登记个人涂地统计 —— 墙面墨迹不计入涂地覆盖率/涂地王/单局 XP 的涂地项，
+        /// 只给大招充能。与 <see cref="AddSpecialPoints(int)"/> 分开是因为墙格 0.1m、地面格 0.1x0.14m，
+        /// 混用地面格面积会把墙墨多算约 1.4 倍。
+        /// </summary>
+        public void AddSpecialPointsFromWall(int paintedWallCells)
+        {
+            if (paintedWallCells <= 0)
+                return;
+
+            float wallCellArea = InkSurfaceController.Instance != null
+                ? InkSurfaceController.Instance.WallCellArea
+                : 0.01f;
+            float pointsPerM2 = config != null ? config.specialPointsPerSquareMeter : 1f;
+            AddSpecialPointsRaw(paintedWallCells * wallCellArea * pointsPerM2);
+        }
+
         /// <summary>直接按能量点充能：调试面板（F3）与测试直充用，跳过面积换算，门槛检查与就绪反馈同涂地路径。</summary>
         public void AddSpecialPointsRaw(float points)
         {
@@ -528,7 +546,8 @@ namespace P1.Weapons
                     _health.Team,
                     config,
                     AddSpecialPointsOnly,
-                    _health);
+                    _health,
+                    AddSpecialPointsFromWall);
             }
 
             if (AudioManager.Instance != null)
@@ -1181,7 +1200,7 @@ namespace P1.Weapons
             LastShotStrength01 = 1f;
             if (InkProjectilePool.Instance != null)
             {
-                InkProjectilePool.Instance.SpawnProjectile(shot, TeamId, config, gameObject, AddSpecialPoints);
+                InkProjectilePool.Instance.SpawnProjectile(shot, TeamId, config, gameObject, AddSpecialPoints, AddSpecialPointsFromWall);
             }
             EmitShotFeedback(shot.Origin, shot.Direction, shot.IsBlaster ? 1.25f : 1f);
             OnFired?.Invoke();
@@ -1192,7 +1211,7 @@ namespace P1.Weapons
             ShotsFired++;
             // 蓄力刻度参与全部表现层强度：点按（0.12）与满蓄（1）的镜头/模型/闪光/音效必须分层
             LastShotStrength01 = Mathf.Clamp01(beam.Intensity01);
-            BeamResult result = WeaponBeamSystem.Fire(beam, TeamId, gameObject, AddSpecialPoints);
+            BeamResult result = WeaponBeamSystem.Fire(beam, TeamId, gameObject, AddSpecialPoints, AddSpecialPointsFromWall);
             LastBeamResult = result;
             PlayBeamVisual(result, beam.Intensity01);
             // 枪口闪光跟实际枪口走；光束在近距可能改从胸口起点结算。
@@ -1250,7 +1269,7 @@ namespace P1.Weapons
 
         void IWeaponRuntimeHost.ApplyRoll(RollSweep sweep)
         {
-            int painted = WeaponRollSystem.Apply(sweep, TeamId, _rollHitTimes, Time.time, _health);
+            int painted = WeaponRollSystem.Apply(sweep, TeamId, _rollHitTimes, Time.time, _health, AddSpecialPointsFromWall);
             if (painted > 0)
             {
                 AddSpecialPoints(painted);

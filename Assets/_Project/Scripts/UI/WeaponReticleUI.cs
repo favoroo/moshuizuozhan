@@ -13,10 +13,11 @@ namespace P1.UI
     /// 武器专属屏幕准星控制器（Screen-space Reticle UI）：
     /// P9 第三人称起准星固定在屏幕正中心（相机中心射线即瞄准方向），不再随世界落点漂移。
     /// 借鉴 Inkwave hud.css (.iw-ret & .iw-subaim) 潮流设计：
-    /// 1. 小枪：中心点 + 扩散圆环 + 4个随 Bloom 散布角度动态扩张/收缩的刻度角；
+    /// 1. 枪形（小枪 / 双枪 / 泼桶 / 爆破枪）：中心点 + 扩散圆环 + 4个随 Bloom 散布角度动态扩张/收缩的刻度角；
     /// 2. 滚筒：宽屏扇面横向指示条；
-    /// 3. 蓄力狙：同心圆 + 左右收紧瞄准线 + 360° 动态蓄力进度环 (Charge01) + 满蓄力过冲脉冲；
+    /// 3. 蓄力环（蓄力狙 / 加特林）：同心圆 + 左右收紧瞄准线 + 360° 动态蓄力进度环 (Charge01) + 满蓄力过冲脉冲；
     /// 4. 副武器冷却微胶囊：手雷投出后显示倒计时与充能条，就绪时短促 READY。
+    /// 武器类型到形状的映射统一走 <see cref="ReticleStateMath.ShapeFor"/>，新增武器类型不必改本文件。
     /// P30 可读性重做：对齐 Inkwave 的「白芯 + 墨色硬描边」对比策略（旧版墨芯白边在亮地面只剩发丝线）；
     /// 刻度静止时收在环带内侧，开火随 Bloom 越过环带外扫，不再与环带重叠糊成一团。
     /// </summary>
@@ -37,6 +38,8 @@ namespace P1.UI
         private readonly OutlinedBar[] _shooterBars = new OutlinedBar[4];
         private Image _shooterRing;
         private Image _shooterCenterDot;
+        /// <summary>枪形上的蓄力环：只给「蓄力后扫射」的武器（加特林）显示，其它武器常隐。</summary>
+        private Image _shooterChargeRing;
 
         // 滚筒组件
         private RectTransform _rollerBarRect;
@@ -513,6 +516,20 @@ namespace P1.UI
             _shooterRing = ringGo.GetComponent<Image>();
             _shooterRing.sprite = _ringSprite;
             _shooterRing.rectTransform.sizeDelta = new Vector2(60f, 60f);
+
+            // 蓄力进度环：与蓄力狙同款 Radial360 填充，套在主环外侧（76px），
+            // 加特林蓄力时才能看到进度条；其它枪形武器 Charge01 恒为 0，这一层始终隐藏。
+            var chargeGo = new GameObject("ChargeRing", typeof(Image));
+            chargeGo.transform.SetParent(_shooterContainer, false);
+            _shooterChargeRing = chargeGo.GetComponent<Image>();
+            _shooterChargeRing.sprite = _ringSprite;
+            _shooterChargeRing.type = Image.Type.Filled;
+            _shooterChargeRing.fillMethod = Image.FillMethod.Radial360;
+            _shooterChargeRing.fillOrigin = (int)Image.Origin360.Top;
+            _shooterChargeRing.fillClockwise = true;
+            _shooterChargeRing.fillAmount = 0f;
+            _shooterChargeRing.rectTransform.sizeDelta = new Vector2(76f, 76f);
+            chargeGo.SetActive(false);
 
             // 4 个刻度 (白芯 4x12 + 墨边)：静止时收在环带内侧（r≈16，与圆点/环带各留空隙不粘连），
             // 开火随 Bloom 越过环带向外扫
@@ -1247,9 +1264,13 @@ namespace P1.UI
 
             float dt = Time.deltaTime;
 
-            float targetShooter = kind == WeaponKind.Shooter ? 1f : 0f;
-            float targetRoller = kind == WeaponKind.Roller ? 1f : 0f;
-            float targetCharger = kind == WeaponKind.Charger ? 1f : 0f;
+            // 武器类型 → 准星形状（唯一映射源 ReticleStateMath.ShapeFor）：
+            // 双枪 / 泼桶 / 爆破枪走枪形，加特林与蓄力狙共用蓄力环。
+            // 旧实现直接比较 kind == Shooter/Roller/Charger，导致这 4 把武器三个容器权重全为 0、准星整块消失。
+            ReticleShape shape = ReticleStateMath.ShapeFor(kind);
+            float targetShooter = shape == ReticleShape.Shooter ? 1f : 0f;
+            float targetRoller = shape == ReticleShape.Roller ? 1f : 0f;
+            float targetCharger = shape == ReticleShape.Charger ? 1f : 0f;
 
             _shooterWeight = Mathf.MoveTowards(_shooterWeight, targetShooter, dt * 10f);
             _rollerWeight = Mathf.MoveTowards(_rollerWeight, targetRoller, dt * 10f);
@@ -1284,8 +1305,8 @@ namespace P1.UI
                 _shooterContainer.localScale = Vector3.one * (_shooterWeight * lockScale);
 
                 // 散布 Bloom: 1.2° ~ 5.5° 映射到 16px ~ 38px 刻度距离（静止收在环带内侧，开火越过环带）；
-                // 开火再叠一层短促外扩
-                float spreadDeg = weapon.CurrentSpreadDegrees;
+                // 开火再叠一层短促外扩。0 散布武器（泼桶 / 双枪架枪）按 1.2° 下限计算，避免刻度叠在中心点上。
+                float spreadDeg = ReticleStateMath.ClampSpread(weapon.CurrentSpreadDegrees);
                 float tickOffset = 16f + (spreadDeg - 1.2f) * 5.2f + _shotPunch * 5f;
 
                 // 4 个刻度沿自身角度向外偏移
@@ -1313,11 +1334,43 @@ namespace P1.UI
                     _shooterBars[i].SetCoreColor(tint);
                     _shooterBars[i].SetBackingColor(barBacking);
                 }
+
+                UpdateShooterChargeRing(weapon, tint, alpha);
             }
             else if (_shooterContainer.gameObject.activeSelf)
             {
                 _shooterContainer.gameObject.SetActive(false);
+                if (_shooterChargeRing != null && _shooterChargeRing.gameObject.activeSelf)
+                    _shooterChargeRing.gameObject.SetActive(false);
             }
+        }
+
+        /// <summary>
+        /// 加特林这类「蓄力后扫射」的枪形武器：蓄力阶段在主环外侧再套一圈径向蓄力环。
+        /// 只认 IsCharging（扫射阶段 Charge01 会从 1 递减，此时若继续显示会与随 Bloom 外扩的刻度交叉）；
+        /// 其它枪形武器 IsCharging 恒为 false、Charge01 恒为 0，这一层完全不显示，零额外开销。
+        /// </summary>
+        private void UpdateShooterChargeRing(WeaponController weapon, Color tint, float alpha)
+        {
+            if (_shooterChargeRing == null)
+                return;
+
+            float charge01 = Mathf.Clamp01(weapon.Charge01);
+            bool show = weapon.IsCharging && charge01 > 0.02f;
+            if (_shooterChargeRing.gameObject.activeSelf != show)
+                _shooterChargeRing.gameObject.SetActive(show);
+            if (!show)
+                return;
+
+            _shooterChargeRing.fillAmount = charge01;
+
+            // 蓄力越满越白、环越亮；满蓄时轻微脉冲，给「可以松手了」的明确信号（与蓄力狙同语义）
+            Color ringColor = Color.Lerp(tint, Color.white, charge01 * 0.75f);
+            ringColor.a = alpha;
+            _shooterChargeRing.color = ringColor;
+
+            float pulse = charge01 >= 0.999f ? 1f + Mathf.PingPong(Time.time * 6f, 0.12f) : 1f;
+            _shooterChargeRing.rectTransform.localScale = Vector3.one * pulse;
         }
 
         private void UpdateRoller(WeaponController weapon, Color teamColor)

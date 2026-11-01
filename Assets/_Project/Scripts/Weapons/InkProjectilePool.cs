@@ -46,6 +46,8 @@ namespace P1.Weapons
             public float HitRadius;
             public GameObject OwnerRoot;
             public Action<int> OnCellsPainted;
+            /// <summary>墙面格数回调：墙格面积与地面格不同，且墙面不计涂地统计，必须分开上报。</summary>
+            public Action<int> OnWallCellsPainted;
             public bool HasTrailGroundPoint;
             public Vector3 LastTrailGroundPoint;
             public SlosherVolley Volley;
@@ -157,7 +159,8 @@ namespace P1.Weapons
             Team team,
             WeaponConfigSO config,
             GameObject ownerRoot,
-            Action<int> onCellsPainted)
+            Action<int> onCellsPainted,
+            Action<int> onWallCellsPainted = null)
         {
             Transform node = _pool.Count > 0 ? _pool.Dequeue() : CreateVisualNode(_active.Count + 64);
             node.gameObject.SetActive(true);
@@ -195,6 +198,18 @@ namespace P1.Weapons
             bool isLocalOwner = ownerRoot != null &&
                                 CombatantHealth.IsLocalPlayer(ownerRoot.GetComponent<CombatantHealth>());
 
+            // 复用的池化节点残留上一发的旋转与拉伸缩放（新节点则是 identity + (1,1,1) 的巨型彗星）。
+            // 从 SetActive(true) 到本组件下一次 Update 之间会先渲染一帧，上一发若以平飞/横飞收尾，
+            // 枪口就会凭空闪出一帧「横向乱飞的子弹」。出生当帧直接摆成与 Update 首帧一致的姿态。
+            float visualWidth = 0.155f * feel.ProjectileVisualScale;
+            float spawnWidth = visualWidth * WeaponFeelMath.SpawnPopScale(0f, speed);
+            node.rotation = Quaternion.LookRotation(
+                shot.Direction.sqrMagnitude > 0.0001f ? shot.Direction.normalized : Vector3.forward);
+            node.localScale = new Vector3(
+                spawnWidth,
+                spawnWidth * 0.82f,
+                spawnWidth * WeaponFeelMath.ProjectileStretch(speed));
+
             var proj = new ActiveProjectile
             {
                 Transform = node,
@@ -223,12 +238,14 @@ namespace P1.Weapons
                 HitRadius = Mathf.Max(0.01f, shot.HitRadius),
                 OwnerRoot = ownerRoot,
                 OnCellsPainted = onCellsPainted,
+                // 旧调用方（只传地面回调）保持原行为：墙面格数仍走同一个回调
+                OnWallCellsPainted = onWallCellsPainted ?? onCellsPainted,
                 Volley = shot.Volley,
                 IsBlaster = shot.IsBlaster,
                 SplashRadius = shot.SplashRadius,
                 SplashDamageMax = shot.SplashDamageMax,
                 SplashDamageMin = shot.SplashDamageMin,
-                VisualWidth = 0.155f * feel.ProjectileVisualScale,
+                VisualWidth = visualWidth,
                 RippleScale = feel.ImpactRippleScale,
                 TrailVisualScale = feel.TrailVisualScale,
                 IsLocalOwner = isLocalOwner
@@ -309,7 +326,8 @@ namespace P1.Weapons
                             p.Team,
                             p.OwnerRoot,
                             null,
-                            p.OnCellsPainted);
+                            p.OnCellsPainted,
+                            p.OnWallCellsPainted);
 
                         RecycleAt(i);
                         continue;
@@ -379,7 +397,8 @@ namespace P1.Weapons
                     p.Team,
                     p.OwnerRoot,
                     hitCombatant, // 直击目标跳过溅射
-                    p.OnCellsPainted);
+                    p.OnCellsPainted,
+                    p.OnWallCellsPainted);
             }
 
             if (hitCombatant != null)
@@ -418,7 +437,7 @@ namespace P1.Weapons
                     int wallChanged = PaintWallStretchBlob(wall, impactPos, impactNormal, incomingDir, splatRadius, p.EndSplatStretch, p.Team);
                     if (wallChanged > 0)
                     {
-                        p.OnCellsPainted?.Invoke(wallChanged);
+                        p.OnWallCellsPainted?.Invoke(wallChanged);
                     }
                 }
                 else
@@ -481,7 +500,7 @@ namespace P1.Weapons
                     int wallChanged = wall.PaintAtWorld(impactPos, impactNormal, radius, p.Team);
                     if (wallChanged > 0)
                     {
-                        p.OnCellsPainted?.Invoke(wallChanged);
+                        p.OnWallCellsPainted?.Invoke(wallChanged);
                     }
                 }
                 else

@@ -220,6 +220,25 @@
 - `MatchFlowUI` 的 `uiTheme` 在场景里可能是空引用 → 首页字体落到 TMP 全局 fallback。
   `EnsureTheme()`（运行时资源库 → 编辑器 AssetDatabase）必须跑在 `EnsureReadyVisuals` 之前。
 
+### 信息浮层（战绩 / 键位说明）
+
+「战绩」「键位说明 / 操作指南」两张次级卡是可点卡（带 `》`），点击打开详情浮层
+（`Scripts/UI/HomeInfoOverlay.cs`，度量在 `HomeInfoLayoutMath`，内容在 `HomeInfoContent`）：
+
+| 元素 | 桌面 | 移动端 | 规则 |
+|---|---|---|---|
+| 浮层面板 | ≤1120×820（居中弹窗） | 安全区 92%×90% | 纸白 + 4px 墨框 + 弹窗硬影 (8,-9)，顶部 8~10px 身份色带（战绩绿 / 键位蓝） |
+| 遮罩 | 全屏墨色 74% | 同左 | `raycastTarget = true`，点击遮罩关闭 |
+| 关闭键 | 72×72 | 88×88 | 墨底纸白「×」+ 色签硬影；桌面 Esc / 手柄 Start 同样关闭 |
+| 键位行 | 高 64、键帽宽 150 | 高 82、键帽宽 230 | 左右两栏（移动 / 战斗）+ 底部规则速记 2×2 |
+| 战绩布局 | 左身份卡（LV/段位/XP 条）+ 右 2×3 数据格 | 同左 | 数据全部来自 `PlayerProfile` 聚合字段，不扩展存档 |
+
+- 浮层跑在**独立 Overlay Canvas（sortingOrder 50）**上：必须高于武器抽屉（15）与 HUD（10），
+  否则左下「武器整备」卡会浮在遮罩之上还能被点开。
+- 浮层打开时首页开赛快捷键（Space/Enter/R）、暂停菜单 Esc、武器抽屉 1~7/Esc 全部让路；
+  `HomeInfoOverlay.TryCloseFromMenuInput()` 用「同帧已消费」标记保证一个 Esc 只关浮层，不会顺带打开暂停或抽屉。
+- 键位表是 `HomeInfoContent.Controls(mobile)` 这一份数据源，暂停菜单「操作说明」卡与首页浮层共用，禁止再抄一份。
+
 ## 绝对禁止
 
 - ❌ 渐变色 / 柔光 / 玻璃拟态

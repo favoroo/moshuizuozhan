@@ -1,5 +1,6 @@
 using P1.Core;
 using P1.Ink;
+using P1.UI;
 using P1.Weapons;
 using UnityEngine;
 
@@ -8,6 +9,7 @@ namespace P1.Player
     /// <summary>
     /// 俯视角地面动态投射准星：
     /// 在右摇杆/鼠标瞄准的地面交点处，投射微光落点光斑，真实反馈当前装备武器形态、射程与散布角度 (Spread)。
+    /// 武器类型到形态的映射统一走 <see cref="ReticleStateMath.ShapeFor"/>，与屏幕准星 WeaponReticleUI 保持一致。
     /// </summary>
     public class GroundAimReticle : MonoBehaviour
     {
@@ -196,13 +198,16 @@ namespace P1.Player
             }
 
             // 2. 武器形态平滑淡入淡出 (Cross-fade weights)
+            // 武器类型 → 准星形状统一走 ReticleStateMath.ShapeFor（与屏幕准星同一映射源）。
+            // 旧实现直接比较三种 kind，双枪/泼桶/爆破枪/加特林四个形态权重全为 0，地面光斑也不显示。
             WeaponKind targetKind = weapon.CurrentWeaponKind;
             _activeKind = targetKind;
             float dt = Time.deltaTime;
 
-            float targetShooter = targetKind == WeaponKind.Shooter ? 1f : 0f;
-            float targetRoller = targetKind == WeaponKind.Roller ? 1f : 0f;
-            float targetCharger = targetKind == WeaponKind.Charger ? 1f : 0f;
+            ReticleShape shape = ReticleStateMath.ShapeFor(targetKind);
+            float targetShooter = shape == ReticleShape.Shooter ? 1f : 0f;
+            float targetRoller = shape == ReticleShape.Roller ? 1f : 0f;
+            float targetCharger = shape == ReticleShape.Charger ? 1f : 0f;
 
             _shooterWeight = Mathf.MoveTowards(_shooterWeight, targetShooter, dt * 8f);
             _rollerWeight = Mathf.MoveTowards(_rollerWeight, targetRoller, dt * 8f);
@@ -246,7 +251,7 @@ namespace P1.Player
             if (_shooterWeight > 0.01f)
             {
                 if (!_shooterNode.gameObject.activeSelf) _shooterNode.gameObject.SetActive(true);
-                float spreadDeg = weapon.CurrentSpreadDegrees;
+                float spreadDeg = ReticleStateMath.ClampSpread(weapon.CurrentSpreadDegrees);
                 // 距离与散布半角放大系数：1.2° ~ 5.5° -> scale 0.95 ~ 1.75
                 float spreadScale = 1.0f + (spreadDeg - 1.2f) * 0.16f;
                 _shooterSpreadRing.localScale = new Vector3(spreadScale, 1f, spreadScale);

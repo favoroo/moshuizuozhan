@@ -15,7 +15,11 @@ namespace P1.Player
         public float swimMoveSpeed = 11.8f;
         [Tooltip("无墨/干地乌贼形态移速（对齐 Inkwave PLAYER.squidDrySpeed = 2.9）：没涂墨的地面也能按住潜行键保持乌贼形态，但没有潜墨加成（不加速、不隐匿）")]
         public float squidDryMoveSpeed = 2.9f;
+        [Tooltip("转身速率（Slerp 系数，越大越跟手）：人形移动朝向 / 开火朝向 / 乌贼移动朝向共用")]
         public float rotationLerpSpeed = 22f;
+        [Tooltip("开火/投弹结束后继续面向瞄准方向的保持时长（秒）。对齐 INKWAVE actor.js fireFacing 0.3~0.5：\n" +
+                 "按住扳机期间身体始终朝准星，松手后保持该朝向再切回移动朝向，避免一停火就甩头")]
+        public float aimFacingHoldSeconds = 0.4f;
 
         [Header("跳跃与重力物理")]
         [Tooltip("跳跃高度 (m)。1.35m 可顺畅跃上 1.2m 中央高台或翻越掩体")]

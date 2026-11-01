@@ -53,6 +53,7 @@ namespace P1.Core
         private static bool _tierApplied;
         private static bool _cubeStateSet;
         private static float _cubeStrengthOverride = -1f;
+        private static float _nextPumpTime;
 
         /// <summary>当前已加载的环境风格资产（惰性拾取，未找到时返回 null）。</summary>
         public static ArenaStyleSO CurrentStyle
@@ -93,6 +94,21 @@ namespace P1.Core
             _cubeStateSet = true;
             Shader.SetGlobalFloat(EnvCubeReadyId, 0f);
             Shader.SetGlobalFloat(EnvCubeMipsId, 1f);
+        }
+
+        /// <summary>
+        /// <see cref="Pump"/> 的节流版本：环境样式与平台档位在一局内是常量，
+        /// 无需每帧重推 14 个全局 uniform。默认 1Hz 刷新，样式/Cubemap 变更仍会立即生效
+        /// （变更方可直接调用 <see cref="Pump"/>）。
+        /// </summary>
+        public static void PumpThrottled(float minIntervalSeconds = 1f)
+        {
+            float now = Time.unscaledTime;
+            if (now < _nextPumpTime)
+                return;
+
+            _nextPumpTime = now + Mathf.Max(0.05f, minIntervalSeconds);
+            Pump();
         }
 
         /// <summary>

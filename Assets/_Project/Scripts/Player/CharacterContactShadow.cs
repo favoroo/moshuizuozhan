@@ -40,6 +40,9 @@ namespace P1.Player
         private Transform _actorRoot;
         private MeshRenderer _renderer;
         private MaterialPropertyBlock _propertyBlock;
+        private Vector3 _lastProbeAnchor;
+        private float _lastProbeTime;
+        private bool _probeInitialized;
 
         /// <summary>为角色根节点创建（或取回已有的）接触阴影。</summary>
         public static CharacterContactShadow Create(Transform actorRoot)
@@ -127,10 +130,24 @@ namespace P1.Player
 
             if (_actorRoot == null) _actorRoot = transform.parent != null ? transform.parent : transform;
 
+            // 静止/低速角色无需每帧重打射线：移动超过 3cm 或距上次探测 ≥33ms 才重新贴地。
+            // 快速移动仍逐帧探测；静止角色最多 30Hz，阴影位置视觉上完全一致。
+            Vector3 anchor = _actorRoot.position;
+            float probeNow = Time.unscaledTime;
+            bool moved = (anchor - _lastProbeAnchor).sqrMagnitude >= 0.0009f;
+            bool intervalElapsed = probeNow - _lastProbeTime >= 0.033f;
+            if (_probeInitialized && !moved && !intervalElapsed)
+            {
+                return;
+            }
+            _lastProbeAnchor = anchor;
+            _lastProbeTime = probeNow;
+            _probeInitialized = true;
+
             // 向下找地面：从角色身体中部往下打，跳过自身碰撞体（射线起点在胶囊内，正常也不会命中自己）
             Vector3 origin = _actorRoot.position + Vector3.up * GroundProbeUp;
             int count = Physics.RaycastNonAlloc(origin, Vector3.down, HitBuffer,
-                GroundProbeDistance, ~0, QueryTriggerInteraction.Ignore);
+                GroundProbeDistance, GameLayers.WorldMask, QueryTriggerInteraction.Ignore);
 
             float bestDistance = float.MaxValue;
             RaycastHit hit = default;

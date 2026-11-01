@@ -22,6 +22,10 @@ namespace P1.AI
         public float paintSweepDegrees = 26f;
         public float paintSweepSpeed = 1.6f;
         public float repathInterval = 0.55f;
+
+        [Tooltip("感知/决策节拍（秒）：搜寻最近敌人、视线判定与状态机的刷新间隔。越小越机敏，越大越省 CPU")]
+        [Range(0.05f, 0.5f)]
+        public float perceptionInterval = 0.15f;
         public float arriveDistance = 1.3f;
         [Tooltip("多久重新挑一次涂地目标（秒）；到达目标会立即重挑")]
         public float paintGoalRefresh = 7f;

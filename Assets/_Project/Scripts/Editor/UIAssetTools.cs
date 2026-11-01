@@ -28,98 +28,17 @@ namespace P1.Editor
         public const string TmpFolder = FontsFolder + "TMP/";
 
         /// <summary>
-        /// 预烘进图集的字符集：ASCII 可见字符 + Latin-1 + 常见排版符号。
-        /// 字体是 Google Fonts 的 latin 子集（不含 CJK），缺字由 TMP 的 fallback 处理。
+        /// TMP 字体资产统一由 MiSans 管线生成（分档采样 + 预烘字集 + 伪粗体收口），
+        /// 这里只做转调，避免两条生成路径写出不同采样参数的资产。
         /// </summary>
-        const string k_PresetCharacters =
-            " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~" +
-            "¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿×÷" +
-            "–—‘’“”…•™→←↑↓×÷°±·«»";
-
         [MenuItem("P1/素材/4. 生成 TMP 字体资产（Art/Fonts）", false, 4)]
         public static void CreateTmpFontAssets()
         {
             AssetDatabase.Refresh();
             if (!EnsureTmpEssentials()) return;
 
-            var fonts = FindFontFiles();
-            if (fonts.Count == 0)
-            {
-                Debug.LogWarning(k_LogTag + " " + FontsFolder + " 下没有找到 .ttf，先跑 python3 tools/bake_fonts.py");
-                return;
-            }
-
-            Directory.CreateDirectory(TmpFolder);
-            AssetDatabase.Refresh();
-
-            int created = 0, failed = 0;
-            foreach (var fontPath in fonts)
-            {
-                var font = AssetDatabase.LoadAssetAtPath<Font>(fontPath);
-                if (font == null)
-                {
-                    Debug.LogError(k_LogTag + " 字体加载失败: " + fontPath);
-                    failed++;
-                    continue;
-                }
-
-                string assetPath = TmpFolder + Path.GetFileNameWithoutExtension(fontPath) + " SDF.asset";
-                var existing = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(assetPath);
-                if (existing != null)
-                {
-                    // 重跑时整份替换，避免旧图集/旧材质残留成孤儿子资产
-                    AssetDatabase.DeleteAsset(assetPath);
-                }
-
-                var fontAsset = TMP_FontAsset.CreateFontAsset(
-                    font,
-                    samplingPointSize: 90,
-                    atlasPadding: 9,
-                    renderMode: GlyphRenderMode.SDFAA,
-                    atlasWidth: 1024,
-                    atlasHeight: 1024,
-                    atlasPopulationMode: AtlasPopulationMode.Dynamic,
-                    enableMultiAtlasSupport: true);
-
-                if (fontAsset == null)
-                {
-                    Debug.LogError(k_LogTag + " TMP 字体资产创建失败: " + fontPath +
-                                   "（检查 Font Importer 的 Include Font Data 是否勾选）");
-                    failed++;
-                    continue;
-                }
-
-                fontAsset.name = Path.GetFileNameWithoutExtension(assetPath);
-                fontAsset.TryAddCharacters(k_PresetCharacters, out string missing);
-                fontAsset.atlasPopulationMode = AtlasPopulationMode.Dynamic;
-
-                AssetDatabase.CreateAsset(fontAsset, assetPath);
-
-                if (fontAsset.material != null)
-                {
-                    fontAsset.material.name = fontAsset.name + " Material";
-                    AssetDatabase.AddObjectToAsset(fontAsset.material, fontAsset);
-                }
-                for (int i = 0; i < fontAsset.atlasTextures.Length; i++)
-                {
-                    var tex = fontAsset.atlasTextures[i];
-                    if (tex == null) continue;
-                    tex.name = fontAsset.name + (i == 0 ? " Atlas" : " Atlas " + i);
-                    AssetDatabase.AddObjectToAsset(tex, fontAsset);
-                }
-
-                EditorUtility.SetDirty(fontAsset);
-                AssetDatabase.SaveAssets();
-
-                Debug.LogFormat("{0} 生成 {1} | 图集字符 {2} 个{3}",
-                    k_LogTag, assetPath, fontAsset.characterTable.Count,
-                    string.IsNullOrEmpty(missing) ? "" : "，缺字: " + missing);
-                created++;
-            }
-
-            AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh();
-            Debug.LogFormat("{0} TMP 字体资产：完成 {1} 个，失败 {2} 个 → {3}", k_LogTag, created, failed, TmpFolder);
+            Debug.Log(k_LogTag + " 字体资产走 MiSans 管线（P1/画风/漫画风/0）：正文 64pt / 标题 96pt，预烘字集账本。");
+            ComicFontAssetBuilder.BuildChineseFonts();
         }
 
         /// <summary>
@@ -261,17 +180,25 @@ namespace P1.Editor
             return bad;
         }
 
+        /// <summary>
+        /// 参与 SDF 生成的字体。2026-11-01 起全站只有 MiSans 一族（正文 Semibold / 标题 Heavy），
+        /// 这里**只列这两支**：旧实现会对 Art/Fonts 下每个 .ttf 删了重建，而重建会换 GUID，
+        /// 会让主场景里 TitanOne/Rubik 的既有引用断链（退役资产要留档，不能顺手重造）。
+        /// </summary>
+        static readonly string[] ManagedFontFiles =
+        {
+            "MiSans-Semibold.ttf",
+            "MiSans-Heavy.ttf",
+        };
+
         static List<string> FindFontFiles()
         {
             var result = new List<string>();
             if (!Directory.Exists(FontsFolder)) return result;
-            foreach (var file in Directory.GetFiles(FontsFolder, "*.ttf"))
+            foreach (string name in ManagedFontFiles)
             {
-                var name = Path.GetFileName(file);
-                if (name.StartsWith(".", System.StringComparison.Ordinal)) continue;
-                result.Add(FontsFolder + name);
+                if (File.Exists(FontsFolder + name)) result.Add(FontsFolder + name);
             }
-            result.Sort(System.StringComparer.Ordinal);
             return result;
         }
 

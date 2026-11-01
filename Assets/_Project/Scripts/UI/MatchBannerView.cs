@@ -28,6 +28,9 @@ namespace P1.UI
     {
         [Header("主题与配置")]
         [SerializeField] private UIThemeSO theme;
+
+        [Tooltip("已退役：主场景里可能仍序列化着 TitanOne，代码不再读取（字体统一走主题 MiSans）")]
+        [HideInInspector]
         [SerializeField] private TMP_FontAsset titanOneFont;
 
         [Header("横幅组件")]
@@ -63,13 +66,7 @@ namespace P1.UI
             Stretch(rt);
 
             UIThemeSO resolved = UIThemeSO.Resolve(theme);
-
-#if UNITY_EDITOR
-            if (titanOneFont == null)
-            {
-                titanOneFont = UnityEditor.AssetDatabase.LoadAssetAtPath<TMP_FontAsset>("Assets/_Project/Art/Fonts/TMP/TitanOne-Regular SDF.asset");
-            }
-#endif
+            TMP_FontAsset bannerFont = resolved.GetFont(true);
 
             if (bannerRoot == null)
             {
@@ -134,7 +131,7 @@ namespace P1.UI
                 mtRect.offsetMax = Vector2.zero;
 
                 bannerMainText = mainTextGo.GetComponent<TextMeshProUGUI>();
-                if (titanOneFont != null) bannerMainText.font = titanOneFont;
+                if (bannerFont != null) bannerMainText.font = bannerFont;
                 bannerMainText.fontSize = UITypography.FontSnapped(140f);
                 bannerMainText.fontStyle = FontStyles.Bold;
                 bannerMainText.alignment = TextAlignmentOptions.Center;
@@ -152,7 +149,7 @@ namespace P1.UI
                 stRect.sizeDelta = new Vector2(0f, 36f);
 
                 bannerSubText = subTextGo.GetComponent<TextMeshProUGUI>();
-                if (titanOneFont != null) bannerSubText.font = titanOneFont;
+                if (bannerFont != null) bannerSubText.font = bannerFont;
                 bannerSubText.fontSize = UITypography.FontSnapped(24f);
                 bannerSubText.fontStyle = FontStyles.Bold;
                 bannerSubText.alignment = TextAlignmentOptions.Center;

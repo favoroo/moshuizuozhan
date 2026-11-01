@@ -50,6 +50,8 @@ namespace P1.UI
         private bool _wasSpecialReady;
         private bool _hasBoundTarget;
         private int _lastDisplayedSecs = -1;
+        private float _lastRingFill = -1f;
+        private float _lastRingUpdateTime;
 
         public Team SlotTeam => team;
         public bool IsLocalPlayer => isLocalPlayer;
@@ -261,7 +263,14 @@ namespace P1.UI
                 {
                     progressRing.gameObject.SetActive(true);
                     float fill = Mathf.Clamp01(1f - (remaining / Mathf.Max(0.1f, duration)));
-                    progressRing.Progress = fill;
+                    // 复活环 10Hz 刷新：4s 复活窗口内 40 帧足够平滑，避免每帧 SetVerticesDirty
+                    if (Mathf.Abs(fill - _lastRingFill) >= 0.02f ||
+                        Time.unscaledTime - _lastRingUpdateTime >= 0.1f)
+                    {
+                        _lastRingFill = fill;
+                        _lastRingUpdateTime = Time.unscaledTime;
+                        progressRing.Progress = fill;
+                    }
                     progressRing.ProgressColor = ComicStyle.Red;
                 }
                 else

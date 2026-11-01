@@ -19,7 +19,7 @@ namespace P1.UI
         [SerializeField] private UIThemeSO theme;
         [SerializeField] private Sprite squidSprite;
         [SerializeField] private Sprite deathSprite;
-        [SerializeField] private TMP_FontAsset fontAsset;
+        // 旧字段（TitanOne）已退役：字体统一由 UIThemeSO.ResolveFont 提供，场景里残留的序列化值不再读取。
 
         [Header("槽位引用（共 8 名选手）")]
         [SerializeField] private RosterAvatarSlot[] teamASlots = new RosterAvatarSlot[4];
@@ -275,10 +275,6 @@ namespace P1.UI
             if (deathSprite == null)
             {
                 deathSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/_Project/Art/Sprites/Icons/Marks/mark_death.png");
-            }
-            if (fontAsset == null)
-            {
-                fontAsset = UnityEditor.AssetDatabase.LoadAssetAtPath<TMP_FontAsset>("Assets/_Project/Art/Fonts/TMP/TitanOne-Regular SDF.asset");
             }
 #endif
 

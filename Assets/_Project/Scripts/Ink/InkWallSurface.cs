@@ -19,6 +19,8 @@ namespace P1.Ink
     public class InkWallSurface : MonoBehaviour
     {
         private static readonly List<InkWallSurface> Registered = new List<InkWallSurface>();
+        // FlushAllDirty 的轮转游标：保证墙面上传预算不会长期饿死队尾表面
+        private static int _flushCursor;
         private static readonly Dictionary<Collider, InkWallSurface> ColliderLookup = new Dictionary<Collider, InkWallSurface>();
 
         /// <summary>场景内全部可涂墙面（运行时注册，供手雷/大招/重开统一处理）。</summary>
@@ -648,6 +650,20 @@ namespace P1.Ink
             }
         }
 
+        /// <summary>本表面是否有脏像素块（供全局上传预算挑出需要 Apply 的表面）。</summary>
+        public bool HasDirtyFaces
+        {
+            get
+            {
+                for (int i = 0; i < _faces.Count; i++)
+                {
+                    if (_faces[i] != null && _faces[i].IsDirty)
+                        return true;
+                }
+                return false;
+            }
+        }
+
         public void FlushDirty()
         {
             if (_inkAtlas == null)
@@ -835,12 +851,38 @@ namespace P1.Ink
             }
         }
 
-        public static void FlushAllDirty()
+        /// <summary>
+        /// 全局墙面上传：只处理脏表面，并限制单帧 Apply 次数（默认 4）。
+        /// 每面墙持有独立贴图，一次齐射/滚筒可能同时弄脏十几面墙——旧实现一帧内连续 Apply 会形成尖刺；
+        /// 预算外的表面顺延到下一帧（30Hz 节流下最多滞后 ~33ms，肉眼不可见）。
+        /// 使用轮转游标，保证任何一面墙都不会因为总在队尾而长期挨饿。
+        /// </summary>
+        public static void FlushAllDirty(int maxUploadsPerFrame = 4)
         {
-            for (int i = 0; i < Registered.Count; i++)
+            int count = Registered.Count;
+            if (count == 0)
+                return;
+
+            int budget = maxUploadsPerFrame > 0 ? maxUploadsPerFrame : count;
+            int start = _flushCursor % count;
+            int uploaded = 0;
+            int scanned = 0;
+
+            for (; scanned < count; scanned++)
             {
-                Registered[i]?.FlushDirty();
+                if (uploaded >= budget)
+                    break;
+
+                int idx = (start + scanned) % count;
+                InkWallSurface wall = Registered[idx];
+                if (wall == null || !wall.HasDirtyFaces)
+                    continue;
+
+                wall.FlushDirty();
+                uploaded++;
             }
+
+            _flushCursor = (start + Mathf.Max(1, scanned)) % count;
         }
     }
 }

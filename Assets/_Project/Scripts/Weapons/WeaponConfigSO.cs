@@ -86,6 +86,10 @@ namespace P1.Weapons
         [Tooltip("横向每一枚墨印的半径（米）：0.34 时 5 枚圆印拼出平整的 1.9m 墨带")]
         public float rollPaintRadius = 0.34f;
 
+        [Tooltip("单帧最大可信滚动位移（米）：超过即视为越界回收/复活传送，本帧不涂地、不扣墨。" +
+                 "正常 60fps 潜行 11.8m/s 也只有 0.2m，1.5m 留足卡顿余量")]
+        public float rollMaxStepMeters = 1.5f;
+
         [Tooltip("挥击间隔（秒，从按下扳机算起）")]
         public float flickInterval = 0.62f;
 

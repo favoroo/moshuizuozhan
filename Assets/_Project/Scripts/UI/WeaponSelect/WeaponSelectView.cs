@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using P1.Core;
 using P1.Player;
+using P1.UI.Menus;
 using P1.Weapons;
 using TMPro;
 using UnityEngine;
@@ -18,7 +19,7 @@ namespace P1.UI.WeaponSelect
     /// - 桌面保留单列列表（卡片 592×164）；
     /// - 抽屉收起时显示左下角「武器整备」整备卡：当前武器圆形色盘 + 名称 + 黄色箭头块，
     ///   取代过去那个 176×72 的纯黄方块；
-    /// - 保留 7 键切换、Enter 确认、Esc 收放（桌面）；触摸点按卡片选中。
+    /// - 保留 7 键切换、Enter 确认、Esc 收起抽屉（归属仲裁见 MenuInputRouter：仅当抽屉已展开且没有更高优先级菜单展开时）；触摸点按卡片选中。
     /// </summary>
     [RequireComponent(typeof(Canvas))]
     public class WeaponSelectView : MonoBehaviour
@@ -47,6 +48,8 @@ namespace P1.UI.WeaponSelect
         private TextMeshProUGUI _toggleWeaponText;
         private Image _toggleIconImage;
         private UIInkShapeGraphic _toggleIconPlate;
+        private RectTransform _toggleChevronRect;
+        private TextMeshProUGUI _toggleChevronText;
         private UISpringMotion _toggleMotion;
 
         private TextMeshProUGUI _headerTitle;
@@ -517,37 +520,21 @@ namespace P1.UI.WeaponSelect
             var csf = contentGo.GetComponent<ContentSizeFitter>();
             csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-            if (_mobile)
-            {
-                // 移动端：双列大卡网格，7 张卡两屏内看完
-                float spacing = 16f;
-                float cellW = (_drawerWidth - _metrics.ScrollLeftInset - _metrics.ScrollRightInset - spacing) * 0.5f;
-                var grid = contentGo.AddComponent<GridLayoutGroup>();
-                grid.cellSize = new Vector2(cellW, _metrics.CardHeight);
-                grid.spacing = new Vector2(spacing, spacing);
-                grid.padding = new RectOffset(
-                    (int)_metrics.ScrollLeftInset,
-                    (int)_metrics.ScrollRightInset,
-                    (int)_metrics.ScrollTopInset,
-                    8);
-                grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-                grid.constraintCount = 2;
-                grid.childAlignment = TextAnchor.UpperLeft;
-            }
-            else
-            {
-                var vlg = contentGo.AddComponent<VerticalLayoutGroup>();
-                vlg.padding = new RectOffset(
-                    (int)_metrics.ScrollLeftInset,
-                    (int)_metrics.ScrollRightInset,
-                    (int)_metrics.ScrollTopInset,
-                    8);
-                vlg.spacing = 12f; // ≥10px：给卡片面板硬影 (4,-5) 留出空间，不被下一张卡盖住
-                vlg.childControlWidth = true;
-                vlg.childControlHeight = false;
-                vlg.childForceExpandWidth = true;
-                vlg.childForceExpandHeight = false;
-            }
+            // 双端统一：双列大卡网格（桌面 1216 宽抽屉 → 单元 580 = WeaponCardView 桌面卡宽；
+            // 移动端 0.82 屏宽 → 单元 759）。7 张卡 4 行，参考画布上一屏放下，无需滚动。
+            float spacing = 16f; // ≥10px：给卡片面板硬影 (4,-5) 留出空间，不被相邻卡盖住
+            float cellW = (_drawerWidth - _metrics.ScrollLeftInset - _metrics.ScrollRightInset - spacing) * 0.5f;
+            var grid = contentGo.AddComponent<GridLayoutGroup>();
+            grid.cellSize = new Vector2(cellW, _metrics.CardHeight);
+            grid.spacing = new Vector2(spacing, spacing);
+            grid.padding = new RectOffset(
+                (int)_metrics.ScrollLeftInset,
+                (int)_metrics.ScrollRightInset,
+                (int)_metrics.ScrollTopInset,
+                8);
+            grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            grid.constraintCount = 2;
+            grid.childAlignment = TextAnchor.UpperLeft;
         }
 
         /// <summary>
@@ -656,6 +643,7 @@ namespace P1.UI.WeaponSelect
             var chevGo = new GameObject("Chevron", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             chevGo.transform.SetParent(btnGo.transform, false);
             var chevRect = chevGo.GetComponent<RectTransform>();
+            _toggleChevronRect = chevRect;
             chevRect.anchorMin = new Vector2(1f, 0.5f);
             chevRect.anchorMax = new Vector2(1f, 0.5f);
             chevRect.pivot = new Vector2(1f, 0.5f);
@@ -676,6 +664,7 @@ namespace P1.UI.WeaponSelect
             chevTextRect.anchorMax = Vector2.one;
             chevTextRect.sizeDelta = Vector2.zero;
             var chevText = chevTextGo.GetComponent<TextMeshProUGUI>();
+            _toggleChevronText = chevText;
             chevText.font = theme.GetFont(true);
             chevText.fontSize = UITypography.FontSnapped(_loadoutMetrics.ChevronFont);
             chevText.fontStyle = FontStyles.Bold;
@@ -839,6 +828,76 @@ namespace P1.UI.WeaponSelect
             return new Vector2(width, slot.Height);
         }
 
+        /// <summary>
+        /// 当平台观感（桌面/移动端）或屏幕安全区动态变化时，同步整备卡在英雄卡内的位置、尺寸与文字大小。
+        /// 确保整备卡与英雄卡顶部 PLAY 标签永远保持充裕呼吸间距（绝不叠字/重叠）。
+        /// </summary>
+        public void SyncHomeLayout()
+        {
+            bool newMobile = UITypography.IsMobileLike;
+            if (_mobile != newMobile)
+            {
+                _mobile = newMobile;
+                _metrics = MenuLayoutMath.Drawer(_mobile);
+                _loadoutMetrics = MenuLayoutMath.LoadoutCard(_mobile);
+                _drawerWidth = _metrics.Width;
+            }
+            ApplySafeArea();
+            RelayoutToggleButton();
+            UpdateToggleButtonState();
+        }
+
+        private void RelayoutToggleButton()
+        {
+            if (_toggleButtonRoot == null) return;
+
+            HomeBox slot = MenuLayoutMath.Home(_mobile).HeroWeaponSlot;
+            Vector2 actualSize = ResolveLoadoutSize(slot);
+            _toggleButtonRoot.anchoredPosition = slot.AnchoredPosition;
+            _toggleButtonRoot.sizeDelta = actualSize;
+
+            float iconD = _loadoutMetrics.IconDiameter;
+            float pad = _mobile ? 22f : 18f;
+
+            if (_toggleIconPlate != null)
+            {
+                var plateRect = _toggleIconPlate.rectTransform;
+                plateRect.anchoredPosition = new Vector2(pad, 0f);
+                plateRect.sizeDelta = new Vector2(iconD, iconD);
+            }
+
+            float textLeft = pad + iconD + (_mobile ? 22f : 18f);
+            float chevron = _loadoutMetrics.ChevronSize;
+            float textRight = chevron + pad + (_mobile ? 22f : 16f);
+
+            if (_toggleButtonText != null)
+            {
+                var titleRect = _toggleButtonText.rectTransform;
+                titleRect.offsetMin = new Vector2(textLeft, _loadoutMetrics.Size.y * 0.52f);
+                titleRect.offsetMax = new Vector2(-textRight, -pad);
+                _toggleButtonText.fontSize = UITypography.FontSnapped(_loadoutMetrics.TitleFont);
+            }
+
+            if (_toggleWeaponText != null)
+            {
+                var nameRect = _toggleWeaponText.rectTransform;
+                nameRect.offsetMin = new Vector2(textLeft, pad);
+                nameRect.offsetMax = new Vector2(-textRight, -(_loadoutMetrics.Size.y * 0.44f));
+                _toggleWeaponText.fontSize = UITypography.FontSnapped(_loadoutMetrics.NameFont);
+            }
+
+            if (_toggleChevronRect != null)
+            {
+                _toggleChevronRect.anchoredPosition = new Vector2(-pad, 0f);
+                _toggleChevronRect.sizeDelta = new Vector2(chevron, chevron);
+            }
+
+            if (_toggleChevronText != null)
+            {
+                _toggleChevronText.fontSize = UITypography.FontSnapped(_loadoutMetrics.ChevronFont);
+            }
+        }
+
         private void UpdateToggleButtonState()
         {
             if (_toggleButtonRoot == null) return;
@@ -895,9 +954,17 @@ namespace P1.UI.WeaponSelect
             {
                 gameObject.SetActive(visible);
             }
-            if (!visible && _backdropGo != null)
+
+            // 遮罩必须始终跟 _isDrawerOpen 同步：
+            // 历史 bug——SetVisible(false) 把遮罩关掉却不复位 _isDrawerOpen，
+            // 「开赛时抽屉开着 → 回首页」后抽屉可见但遮罩消失，点外关闭与输入拦截全部失效。
+            if (_backdropGo != null)
             {
-                _backdropGo.SetActive(false);
+                bool backdropWanted = visible && _isDrawerOpen;
+                if (_backdropGo.activeSelf != backdropWanted)
+                {
+                    _backdropGo.SetActive(backdropWanted);
+                }
             }
 
             // 重新显示时抽屉可能还开着：重播一次卡片入场。
@@ -963,9 +1030,10 @@ namespace P1.UI.WeaponSelect
         private void Update()
         {
             Rect safe = Screen.safeArea;
-            if (safe != _lastSafeArea)
+            bool mobileLike = UITypography.IsMobileLike;
+            if (safe != _lastSafeArea || _mobile != mobileLike)
             {
-                ApplySafeArea();
+                SyncHomeLayout();
             }
 
             if (!Mathf.Approximately(_currentDrawerX, _targetDrawerX))
@@ -991,7 +1059,13 @@ namespace P1.UI.WeaponSelect
 
         private void HandleInput()
         {
-            if (_mobile) return; // 触屏设备没有键盘，避免无意义读取
+            if (_mobile)
+            {
+                // 触屏设备没有实体键盘，1~7 / 方向键 / Enter 全部跳过；但 Esc 仍要走同一套归属仲裁：
+                // 否则外接键盘设备上「归属=抽屉」时谁都不处理，首页 Esc 会彻底失效。
+                HandleMenuEsc();
+                return;
+            }
 
             Keyboard keyboard = Keyboard.current;
             if (keyboard == null)
@@ -1028,9 +1102,44 @@ namespace P1.UI.WeaponSelect
                 SelectWeapon(_selectedIndex);
             }
 
-            if (keyboard.escapeKey.wasPressedThisFrame)
+            HandleMenuEsc();
+        }
+
+        /// <summary>
+        /// Esc 归属仲裁，与 <c>PauseMenuOverlay.HandleInput</c> 共用同一套四步契约
+        /// （ResolveEscOwner → CanLayerHandle → TryConsumeEsc → ActionForOwner）：
+        /// 抽屉只在「归属是自己」时才抢帧位；归属为暂停/设置时直接让路（不占帧位，
+        /// 否则归属层会收不到这个 Esc，表现为「暂停菜单先 Update 时 Esc 在抽屉上没反应」）；
+        /// 归属为浮层 / 布局编辑时代劳关闭（动作与暂停菜单完全一致）。
+        /// 这样无论两个 Update 谁先跑，同一帧都只发生一个动作。
+        /// </summary>
+        private void HandleMenuEsc()
+        {
+            Keyboard keyboard = Keyboard.current;
+            if (keyboard == null || !keyboard.escapeKey.wasPressedThisFrame) return;
+
+            MenuEscLayer owner = MenuInputRouter.ResolveEscOwner(
+                homeInfoOpen: HomeInfoOverlay.IsOpen,
+                layoutEditing: MobileLayoutCustomizer.IsEditingAny,
+                pauseExpanded: PauseMenuOverlay.IsAnyMenuExpanded,
+                drawerExpanded: _isDrawerOpen);
+
+            if (!MenuInputRouter.CanLayerHandle(MenuEscLayer.WeaponDrawer, owner)) return;
+            if (!MenuInputRouter.TryConsumeEsc(MenuEscLayer.WeaponDrawer)) return;
+
+            switch (MenuInputRouter.ActionForOwner(owner))
             {
-                SetDrawerOpen(!_isDrawerOpen);
+                case MenuEscAction.CloseHomeInfo:
+                    HomeInfoOverlay.TryCloseFromMenuInput();
+                    return;
+                case MenuEscAction.CloseLayoutEditor:
+                    MobileLayoutCustomizer.ActiveEditor?.Close(false);
+                    return;
+                case MenuEscAction.CloseDrawer:
+                    SetDrawerOpen(false);
+                    return;
+                default:
+                    return;
             }
         }
     }

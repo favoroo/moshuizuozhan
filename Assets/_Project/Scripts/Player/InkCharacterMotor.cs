@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using P1.Core;
 using P1.Ink;
 using UnityEngine;
@@ -72,11 +73,15 @@ namespace P1.Player
 
         // 墙面潜行攀爬状态
         private readonly RaycastHit[] _wallProbeBuffer = new RaycastHit[8];
+        // 脚下探地（判断「是否真的贴地」，决定能否采样脚下墨水）
+        private readonly RaycastHit[] _groundProbeBuffer = new RaycastHit[4];
         private InkWallSurface _wallSurface;
         private Team _wallInkTeam = Team.Neutral;
         private Vector3 _wallNormal = Vector3.zero;
         private Vector3 _wallPlanePoint;
         private float _wallClimbCooldown;
+        private float _nextWallProbeTime;
+        private P1.Weapons.WeaponController _weapon;
 
         public PlayerConfigSO Config => config;
         public Team Team => _health != null ? _health.Team : Team.TeamA;
@@ -98,6 +103,13 @@ namespace P1.Player
         public bool IsInEnemyInk => FootInkTeam == Team.GetOpponent();
         public bool IsInOwnInk => FootInkTeam == Team;
         public float CurrentMoveSpeed { get; private set; }
+
+        /// <summary>
+        /// 上一帧实际发生的水平位移速度 (m/s)：由 <c>CharacterController.Move</c> 前后位移测得。
+        /// 顶墙/被掩体卡住不动时为 0，与 <see cref="PlanarVelocity"/>（积分速度状态）语义不同；
+        /// 潜墨隐匿的「移动与否」判定必须用这个值。
+        /// </summary>
+        public float ActualPlanarSpeed { get; private set; }
 
         /// <summary>
         /// 当前水平速度向量（P29 惯性状态，m/s）：由 S 曲线加减速/转向限速积分得到，
@@ -131,6 +143,9 @@ namespace P1.Player
         /// </summary>
         public float EnemyInkGrip01 => _enemyInkGrip01;
 
+        /// <summary>当前绑定的武器控制器（若存在）。</summary>
+        public P1.Weapons.WeaponController Weapon => _weapon;
+
         /// <summary>是否允许贴着己方墨墙潜行上爬（Bot 关闭，避免脱离寻路预期）。</summary>
         public bool AllowWallClimb { get; set; } = true;
 
@@ -145,6 +160,7 @@ namespace P1.Player
         {
             _cc = GetComponent<CharacterController>();
             _health = GetComponent<CombatantHealth>();
+            _weapon = GetComponent<P1.Weapons.WeaponController>();
             _currentInk = MaxInk;
 
             // P29 贴地：运行时收紧 skinWidth（场景里烘焙的 0.08 相对 1.12m 身高明显偏大，
@@ -216,6 +232,7 @@ namespace P1.Player
             _coyoteTimer = 0f;
             _verticalVelocity = -2.0f;
             _planarVelocity = Vector3.zero;
+            ActualPlanarSpeed = 0f;
             _isFiringOrThrowing = false;
             _aimFacingTimer = 0f;
             _isLockedBySpecial = false;
@@ -326,6 +343,7 @@ namespace P1.Player
                 _glideSpeed = 0f;
                 EffectiveMoveSpeed = 0f;
                 _planarVelocity = Vector3.zero;
+                ActualPlanarSpeed = 0f;
                 _wantsJump = false;
                 _prevWantsJump = false;
                 _jumpBufferTimer = 0f;
@@ -369,18 +387,11 @@ namespace P1.Player
             if (_wallClimbCooldown > 0f) _wallClimbCooldown -= dt;
 
             bool isGrounded = _cc != null && _cc.isGrounded;
-            // 处于明显跳跃升空阶段（垂直速度向上超过阈值）时判定为腾空，避免受地面敌墨减速；其余地面与贴地时刻均正常采样脚下墨水
-            bool isHighInAir = !isGrounded && _verticalVelocity > 0.5f;
 
-            // 1. 查询脚下墨水归属
-            FootInkTeam = (!isHighInAir && InkSurfaceController.Instance != null)
-                ? InkSurfaceController.Instance.InkAt(transform.position)
-                : Team.Neutral;
-
-            // 2. 墙面探测：身前是否有可潜行攀爬的立面，以及该处墨水归属
+            // 1. 墙面探测：身前是否有可潜行攀爬的立面，以及该处墨水归属
             UpdateWallContact();
 
-            // 3. 形态仲裁：乌贼形态随时可进（对齐 Inkwave，无墨地面为干地乌贼慢速蹦行）；
+            // 2. 形态仲裁：乌贼形态随时可进（对齐 Inkwave，无墨地面为干地乌贼慢速蹦行）；
             //    潜墨（IsSwimming）仍要求脚下是己方墨水，己方墨墙可攀爬潜行
             bool wantsSwimForm = _wantsToSwim && !_isFiringOrThrowing && !_isLockedBySpecial;
             if (wantsSwimForm != IsInSquidForm)
@@ -411,6 +422,18 @@ namespace P1.Player
             }
 
             IsWallClimbing = climbing;
+
+            // 3. 脚下墨水归属：只有「确认贴地」才采样脚下墨
+            //    （旧实现只排除上升段 —— !isGrounded && _verticalVelocity > 0.5 —— 于是下落/跳顶附近
+            //     仍在采样，导致跳过敌墨照样掉血减速、乌贼形态空中经过己墨还会回墨/回血/隐匿）。
+            //    贴地判定：CharacterController.isGrounded，或向下短探地命中坡面/台阶（下坡与台阶宽容）。
+            float groundDistance = ProbeGroundDistance(isGrounded);
+            bool sampleGroundInk = GroundInkSampleMath.ShouldSampleGroundInk(
+                isGrounded, _verticalVelocity, groundDistance, IsWallClimbing);
+            FootInkTeam = sampleGroundInk && InkSurfaceController.Instance != null
+                ? InkSurfaceController.Instance.InkAt(transform.position)
+                : Team.Neutral;
+
             if (IsWallClimbing)
             {
                 // 贴在己方墨墙上即视为处于己方墨水环境（HUD 与输入仲裁保持一致）
@@ -445,7 +468,35 @@ namespace P1.Player
                 _enemyInkGrip01 = Mathf.Max(0f, _enemyInkGrip01 - _enemyInkRecoveryRatePerSec * dt);
             }
 
-            if (_isLockedBySpecial)
+            bool isRollingDodge = _weapon != null && _weapon.IsRollingDodge;
+            bool isTurretLocked = _weapon != null && _weapon.IsTurretLocked;
+            float weaponSpeedMult = _weapon != null ? _weapon.MoveSpeedMultiplier : 1f;
+
+            if (isRollingDodge)
+            {
+                // 双枪战术翻滚：锁死翻滚方向，移动速度提升至翻滚速度（约 9.33m/s），不执行跳跃
+                float rollSpd = 9.33f;
+                if (_weapon.Config != null)
+                {
+                    float dur = Mathf.Max(0.05f, _weapon.Config.dualiesRollDuration);
+                    float dist = Mathf.Max(0.1f, _weapon.Config.dualiesRollDistance);
+                    rollSpd = dist / dur;
+                }
+                CurrentMoveSpeed = rollSpd;
+                Vector3 dodgeDir = _weapon.DodgeDirection;
+                if (dodgeDir.sqrMagnitude > 0.001f)
+                {
+                    _moveInputWorld = dodgeDir.normalized;
+                }
+                _wantsJump = false;
+            }
+            else if (isTurretLocked)
+            {
+                // 双枪翻滚后的站桩架枪模式（0.5s）：移速锁零，不可移动
+                CurrentMoveSpeed = 0f;
+                _planarVelocity = Vector3.zero;
+            }
+            else if (_isLockedBySpecial)
             {
                 CurrentMoveSpeed = 0f;
             }
@@ -527,11 +578,11 @@ namespace P1.Player
                 }
                 else if (_isFiringOrThrowing)
                 {
-                    CurrentMoveSpeed = fireSpd;
+                    CurrentMoveSpeed = fireSpd * weaponSpeedMult;
                 }
                 else
                 {
-                    CurrentMoveSpeed = normalSpd;
+                    CurrentMoveSpeed = normalSpd * (weaponSpeedMult < 1f ? weaponSpeedMult : 1f);
                 }
             }
 
@@ -641,7 +692,9 @@ namespace P1.Player
                     _planarVelocity = ComputePlanarVelocity(_planarVelocity, desiredVel, isGrounded, config, dt);
 
                     Vector3 step = _planarVelocity * dt + Vector3.up * (_verticalVelocity * dt);
+                    Vector3 beforeMove = transform.position;
                     _cc.Move(step);
+                    MeasureActualPlanarSpeed(beforeMove, dt);
                 }
             }
             else
@@ -650,6 +703,7 @@ namespace P1.Player
                 _prevWantsJump = false;
                 _jumpBufferTimer = 0f;
                 _planarVelocity = Vector3.zero;
+                ActualPlanarSpeed = 0f;
             }
 
             // P35 朝向解耦（对齐 INKWAVE actor.js _face，优先级与引擎一致）：
@@ -802,19 +856,22 @@ namespace P1.Player
         }
 
         /// <summary>
-        /// 每帧评估隐匿状态：处于潜行形态、非攀墙、脚下是己方墨水，且水平速度低于阈值
+        /// 每帧评估隐匿状态：处于潜行形态、非攀墙、脚下是己方墨水，且实际水平位移速度低于阈值
         /// （静止或极慢蠕动）时进入隐匿；任何移动/离墨/出水都会立刻解除。
+        /// 2026-11-01 修复：旧实现用 <c>CurrentMoveSpeed × 输入幅度</c>（速度上限 × 摇杆量），
+        /// 顶着墙不动（输入满、位移 0）会被算成全速而无法隐匿，改读实际位移速度
+        /// <see cref="ActualPlanarSpeed"/>（顶墙被卡住 = 0）。
         /// </summary>
         private void UpdateStealthState()
         {
-            float horizSpeed = CurrentMoveSpeed * _moveInputWorld.magnitude;
+            float planarSpeed = ActualPlanarSpeed;
             float threshold = config != null ? config.stealthSpeedThreshold : 1.5f;
 
             bool stealthed = IsSwimming
                              && !IsWallClimbing
                              && !_isLockedBySpecial
                              && FootInkTeam == Team
-                             && horizSpeed <= threshold;
+                             && planarSpeed <= threshold;
 
             if (stealthed != IsStealthed)
             {
@@ -858,6 +915,13 @@ namespace P1.Player
                 return;
             }
 
+            // 非攀爬态：墙面探测按 30Hz 缓存。每帧 SphereCast 会把 79 面墙与全部角色
+            // 丢进 broadphase；缓存后墙面接触最多滞后 1 帧，攀爬入口的体感不变。
+            float now = Time.unscaledTime;
+            if (now < _nextWallProbeTime)
+                return;
+            _nextWallProbeTime = now + 1f / 30f;
+
             _wallSurface = null;
             _wallInkTeam = Team.Neutral;
             _wallNormal = Vector3.zero;
@@ -868,7 +932,7 @@ namespace P1.Player
             const float probeDistance = 0.45f;
 
             int count = Physics.SphereCastNonAlloc(origin, probeRadius, dir, _wallProbeBuffer,
-                probeDistance, ~0, QueryTriggerInteraction.Ignore);
+                probeDistance, GameLayers.WorldMask, QueryTriggerInteraction.Ignore);
 
             float bestDist = float.MaxValue;
             for (int i = 0; i < count; i++)
@@ -911,7 +975,9 @@ namespace P1.Player
                 float g = config != null ? config.gravity : 24f;
                 float jumpH = config != null ? config.jumpHeight : 1.35f;
                 _verticalVelocity = Mathf.Sqrt(2f * g * jumpH);
+                Vector3 beforeKick = transform.position;
                 _cc.Move(Vector3.up * (_verticalVelocity * dt) - _wallNormal * (2.2f * dt));
+                MeasureActualPlanarSpeed(beforeKick, dt);
                 return;
             }
 
@@ -931,7 +997,60 @@ namespace P1.Player
                          + Vector3.up * (vertical * dt);
 
             _verticalVelocity = 0f;
+            Vector3 beforeClimb = transform.position;
             _cc.Move(step);
+            MeasureActualPlanarSpeed(beforeClimb, dt);
+        }
+
+        /// <summary>
+        /// 记录本帧实际发生的水平位移速度（米/秒）：由 CharacterController.Move 前后位置差测得，
+        /// 顶墙 / 被掩体卡住时自然为 0。隐匿判定必须用它，而不是"速度上限 × 输入幅度"
+        /// （后者顶着墙站着不动也算全速移动，轻推摇杆也会被算成满速比例）。
+        /// </summary>
+        private void MeasureActualPlanarSpeed(Vector3 beforeMovePosition, float dt)
+        {
+            if (dt <= 0.0001f)
+            {
+                ActualPlanarSpeed = 0f;
+                return;
+            }
+
+            Vector3 delta = transform.position - beforeMovePosition;
+            ActualPlanarSpeed = new Vector3(delta.x, 0f, delta.z).magnitude / dt;
+        }
+
+        /// <summary>
+        /// 向下短探地，返回脚底到最近可站立地面的间隙（米）；找不到返回 -1。
+        /// 只认水平面/坡面（normal.y ≥ <see cref="GroundInkSampleMath.MinWalkableNormalY"/>），
+        /// 忽略自身碰撞体与触发器，用于「走坡 / 下台阶时 isGrounded 抖一帧」的宽容贴地判定。
+        /// </summary>
+        private float ProbeGroundDistance(bool isGrounded)
+        {
+            if (isGrounded) return 0f;
+            if (_cc == null) return -1f;
+
+            Vector3 origin = transform.position + Vector3.up * GroundInkSampleMath.GroundProbeOriginLift;
+            int count = Physics.RaycastNonAlloc(
+                origin,
+                Vector3.down,
+                _groundProbeBuffer,
+                GroundInkSampleMath.GroundProbeMaxDistance,
+                GameLayers.WorldMask,
+                QueryTriggerInteraction.Ignore);
+
+            float best = -1f;
+            for (int i = 0; i < count; i++)
+            {
+                RaycastHit hit = _groundProbeBuffer[i];
+                if (hit.collider == null) continue;
+                if (hit.collider.transform.IsChildOf(transform)) continue;
+                if (hit.normal.y < GroundInkSampleMath.MinWalkableNormalY) continue;
+                if (best >= 0f && hit.distance >= best) continue;
+                best = hit.distance;
+            }
+
+            if (best < 0f) return -1f;
+            return Mathf.Max(0f, best - GroundInkSampleMath.GroundProbeOriginLift);
         }
 
         private void UpdateSwimVisuals(float dt)
@@ -982,7 +1101,36 @@ namespace P1.Player
             if (_stealthCachesBuilt) return;
 
             Transform root = visualRoot != null ? visualRoot : transform;
-            _bodyRenderers = root.GetComponentsInChildren<Renderer>(true);
+            Renderer[] all = root.GetComponentsInChildren<Renderer>(true);
+
+            // 角色刚体部件合批后，源 renderer 处于 disabled（由 MergedStatic_* 接管渲染）。
+            // 若把它们也收进隐匿缓存，正常态分支会把源部件整套 re-enable → 与合并网格双份渲染。
+            // 合并产物存在时只收启用中的 renderer（合并网格 enabled=true 自然被收进来）。
+            bool hasMergedArtifacts = false;
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] != null && all[i].gameObject.name.StartsWith("MergedStatic_"))
+                {
+                    hasMergedArtifacts = true;
+                    break;
+                }
+            }
+
+            if (hasMergedArtifacts)
+            {
+                var enabledOnly = new List<Renderer>(all.Length);
+                for (int i = 0; i < all.Length; i++)
+                {
+                    if (all[i] != null && all[i].enabled)
+                        enabledOnly.Add(all[i]);
+                }
+                _bodyRenderers = enabledOnly.ToArray();
+            }
+            else
+            {
+                _bodyRenderers = all;
+            }
+
             _bodyOriginalMats = new Material[_bodyRenderers.Length];
             for (int i = 0; i < _bodyRenderers.Length; i++)
             {
@@ -1079,6 +1227,56 @@ namespace P1.Player
             m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             m.SetFloat("_ZWrite", 0f);
             m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        }
+    }
+
+    /// <summary>
+    /// 「脚下墨水是否可采样」的纯静态判定（2026-11-01 修复）：
+    /// 旧实现只把上升段（<c>!isGrounded &amp;&amp; verticalVelocity &gt; 0.5</c>）排除在采样外，
+    /// 下落段与跳顶附近仍会读脚下墨 → 跳过敌墨照样掉血/减速，乌贼形态空中经过己墨
+    /// 还会被判定 <c>IsSwimming</c>（空中回墨、回血、隐匿）。
+    /// 现在只有确认贴地才采样：CharacterController 报贴地，或向下短探地确实命中坡面/台阶；
+    /// 攀墙时脚下不是地面，墨水归属交给墙面逻辑（InkCharacterMotor 会写为 Team）。
+    /// 纯函数、零分配，便于 EditMode 独立测试。
+    /// </summary>
+    public static class GroundInkSampleMath
+    {
+        /// <summary>贴地宽容距离（米）：向下探地命中该间隙以内即视为贴地（下坡 / 台阶 / 斜坡）。</summary>
+        public const float MaxGroundSampleDistance = 0.18f;
+
+        /// <summary>上升速度超过该值即视为起跳/腾空，不采样脚下墨。</summary>
+        public const float MaxUpwardVelocityForSample = 0.5f;
+
+        /// <summary>探地射线起点相对脚底的抬高（米）：避免从胶囊底半球内部起射线。</summary>
+        public const float GroundProbeOriginLift = 0.05f;
+
+        /// <summary>探地射线总长（米）：抬高 + 宽容距离 + 少许余量。</summary>
+        public const float GroundProbeMaxDistance = GroundProbeOriginLift + MaxGroundSampleDistance + 0.02f;
+
+        /// <summary>可站立地面的法线 Y 下限（低于此值视为墙面，不算脚下地面）。</summary>
+        public const float MinWalkableNormalY = 0.5f;
+
+        /// <param name="isGrounded">CharacterController.isGrounded。</param>
+        /// <param name="verticalVelocity">当前垂直速度（向上为正）。</param>
+        /// <param name="groundDistance">探地间隙（米，脚底到地面），未命中传负数。</param>
+        /// <param name="isWallClimbing">是否正在己方墨墙攀爬。</param>
+        public static bool ShouldSampleGroundInk(
+            bool isGrounded,
+            float verticalVelocity,
+            float groundDistance,
+            bool isWallClimbing)
+        {
+            // 攀墙：脚下不是地面，墨水归属由墙面接管
+            if (isWallClimbing) return false;
+
+            // 确认贴地
+            if (isGrounded) return true;
+
+            // 起跳 / 跳顶：腾空期间绝不采样脚下墨
+            if (verticalVelocity > MaxUpwardVelocityForSample) return false;
+
+            // 其余（下落、贴地前一帧）：只有短探地确实命中坡面/台阶才算贴地
+            return groundDistance >= 0f && groundDistance <= MaxGroundSampleDistance;
         }
     }
 }

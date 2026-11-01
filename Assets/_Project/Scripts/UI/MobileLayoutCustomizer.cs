@@ -55,6 +55,7 @@ namespace P1.UI
         private readonly List<MobileConfigurableItem> _items = new List<MobileConfigurableItem>();
         private readonly Dictionary<string, bool> _originalBlocksRaycasts = new Dictionary<string, bool>();
         private MobileLayoutConfig _workingConfig;
+        private readonly MobileLayoutEditSession _editSession = new MobileLayoutEditSession();
         private float _previousTimeScale = 1f;
 
         // 方案与辅助卡片控件
@@ -721,7 +722,11 @@ namespace P1.UI
             RefreshAuxButtons();
         }
 
-        /// <summary>应用一套 2/3/4 指方案；方案是完整布局，立即写入存档。</summary>
+        /// <summary>
+        /// 应用一套 2/3/4 指方案。
+        /// 立即 ApplyConfig = 所见即所得的预览（体验保留）；同时写入存档，
+        /// 「点 X 撤销」由 <see cref="Close"/> 恢复打开时快照实现（见 MobileLayoutEditSession）。
+        /// </summary>
         public void ApplyPreset(MobileLayoutPreset preset)
         {
             var config = _touchUI != null
@@ -783,6 +788,9 @@ namespace P1.UI
             // 任何拖动都会把 1.0 写回工作配置，导致已保存的自定义尺寸被静默覆盖。
             var saved = MobileLayoutStorage.Load();
             _workingConfig = saved != null ? saved.Clone() : GetCurrentConfig();
+            // 打开时快照：取消（点 X / Esc）要把布局与存档都还原到这一刻，
+            // 否则 ApplyPreset 的即时写盘没法撤销。
+            _editSession.Begin(_workingConfig, saved != null);
             if (saved != null)
             {
                 ApplyConfig(saved);
@@ -811,10 +819,24 @@ namespace P1.UI
             }
             else
             {
-                var saved = MobileLayoutStorage.Load();
-                if (saved != null) ApplyConfig(saved);
-                else ResetToDefault();
+                // 取消：回到「打开编辑器那一帧」的布局与存档。
+                // 旧实现只 Load() 存档，而 ApplyPreset 已把方案写进存档，
+                // 于是「切 4 指 → 点 X」撤销不掉。
+                var snapshot = _editSession.ResolveCancelSnapshot();
+                if (snapshot != null)
+                {
+                    ApplyConfig(snapshot);
+                    MobileLayoutStorage.Save(snapshot);
+                    _workingConfig = snapshot.Clone();
+                }
+                else
+                {
+                    // 打开时没有存档 = 默认布局：删档并回设备默认。
+                    ResetToDefault();
+                }
             }
+
+            _editSession.End();
 
             // 恢复所有可配置组件的原始 blocksRaycasts 状态（摇杆恢复为 false）
             for (int i = 0; i < _items.Count; i++)
@@ -997,15 +1019,30 @@ namespace P1.UI
 
         private void ApplyClampedDrag(MobileConfigurableItem item, RectTransform parentRt, Vector2 pointerDelta)
         {
-            // 【关键修复 3】直接在 anchoredPosition 空间做 Clamp。
-            // 旧实现把「父级中心局部坐标」和「锚点偏移坐标」混用，锚点在右下角的按钮会被算到屏幕外。
-            Vector2 desired = _startAnchoredPosition + pointerDelta;
+            Vector2 desired = ClampToParent(parentRt, item, _startAnchoredPosition + pointerDelta);
+
+            ApplyItemPosition(item, desired);
+
+            UpdateSelectionVisual(item);
+            UpdateWorkingConfigForItem(item);
+        }
+
+        /// <summary>
+        /// 把 anchoredPosition 钳制在父级矩形（通常是 SafeArea）内，留出 pivot 对应的半宽/半高。
+        /// 【关键修复 3】直接在 anchoredPosition 空间做 Clamp：旧实现把「父级中心局部坐标」和
+        /// 「锚点偏移坐标」混用，锚点在右下角的按钮会被算到屏幕外。
+        /// 父级尺寸退化（0/未布局）时不做钳制，避免把按键硬压到一点。
+        /// </summary>
+        private static Vector2 ClampToParent(RectTransform parentRt, MobileConfigurableItem item, Vector2 desired)
+        {
+            if (parentRt == null || item == null || item.target == null) return desired;
+
+            Rect parentRect = parentRt.rect;
+            if (parentRect.width <= 1f || parentRect.height <= 1f) return desired;
 
             Vector2 pivot = item.target.pivot;
             float w = item.target.rect.width * item.target.localScale.x;
             float h = item.target.rect.height * item.target.localScale.y;
-
-            Rect parentRect = parentRt.rect;
 
             // 锚点在父级局部空间的位置（anchorMin 通常等于 anchorMax）
             Vector2 anchorLocal = new Vector2(
@@ -1021,12 +1058,9 @@ namespace P1.UI
             if (minX > maxX) { float mid = (minX + maxX) * 0.5f; minX = mid; maxX = mid; }
             if (minY > maxY) { float mid = (minY + maxY) * 0.5f; minY = mid; maxY = mid; }
 
-            ApplyItemPosition(item, new Vector2(
+            return new Vector2(
                 Mathf.Clamp(desired.x, minX, maxX),
-                Mathf.Clamp(desired.y, minY, maxY)));
-
-            UpdateSelectionVisual(item);
-            UpdateWorkingConfigForItem(item);
+                Mathf.Clamp(desired.y, minY, maxY));
         }
 
         private void UpdateWorkingConfigForItem(MobileConfigurableItem item)
@@ -1116,9 +1150,15 @@ namespace P1.UI
                 var data = config.Find(item.id);
                 if (data != null)
                 {
-                    ApplyItemPosition(item, data.anchoredPosition);
+                    // 先尺寸后位置：钳制要用最终 localScale 算包围盒（左开火键/潜行键是 1.7 倍放大）。
                     ApplyItemScale(item, data.scale);
                     ApplyItemAlpha(item, data.alpha);
+
+                    // 预设/存档里的坐标也要过一遍 SafeArea 钳制：
+                    // 20:9 挖孔屏横屏时画布实际高度小于基准 1080，左上角左开火键 / 右上角潜行键
+                    // 会顶出安全区被裁掉（见 MobileLayoutPresets 的基准坐标）。
+                    var parentRt = item.target != null ? item.target.parent as RectTransform : null;
+                    ApplyItemPosition(item, ClampToParent(parentRt, item, data.anchoredPosition));
                 }
             }
 

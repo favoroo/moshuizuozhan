@@ -51,6 +51,13 @@ namespace P1.Environment
             {
                 AutoBindSceneFaders();
             }
+
+            // 性能：遮挡只关心静态场景；角色碰撞体在命中循环里本来就会被跳过。
+            // 旧场景序列化的是 ~0，层已建立时收窄到 World，检测结果不变、broadphase 更小。
+            if (obstacleLayerMask.value == ~0 && GameLayers.LayersConfigured)
+            {
+                obstacleLayerMask = GameLayers.WorldMask;
+            }
         }
 
         private void OnDestroy()

@@ -29,8 +29,8 @@ MonoBehaviour:
   teamBLight: {r: 0.596, g: 0.69, b: 1, a: 1}
   teamBDark: {r: 0.141, g: 0.259, b: 0.706, a: 1}
   neutralColor: {r: 0.45, g: 0.45, b: 0.45, a: 1}
-  displayFont: {fileID: 11400000, guid: d1391858ac69144aaa3d5728591770e7, type: 2}
-  bodyFont: {fileID: 11400000, guid: a2ec570fab3b14aacadea13f6f1ebfc7, type: 2}
+  displayFont: {fileID: 11400000, guid: fc229e5d33bba4abf91eaab774ce81ac, type: 2}
+  bodyFont: {fileID: 11400000, guid: 098f07be3104240bd8fff34b66914b93, type: 2}
   popSpring:
     frequency: 16
     damping: 1

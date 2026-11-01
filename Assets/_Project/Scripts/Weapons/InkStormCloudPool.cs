@@ -113,7 +113,8 @@ namespace P1.Weapons
             _propBlock = new MaterialPropertyBlock();
             InitializeResources();
 
-            for (int i = 0; i < 3; i++)
+            // 预热 6：每个风暴云由 13 个球体组成，运行时新建会形成明显尖刺
+            for (int i = 0; i < 6; i++)
             {
                 _pool.Enqueue(CreateNode(_createdCount++));
             }
@@ -171,7 +172,7 @@ namespace P1.Weapons
 
             // 贴地：风暴云必须落在真实地面上，否则雨点射线会全部打空。
             Vector3 snapOrigin = new Vector3(targetGroundPos.x, startPos.y + 8f, targetGroundPos.z);
-            if (Physics.Raycast(snapOrigin, Vector3.down, out RaycastHit groundHit, 24f, ~0, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(snapOrigin, Vector3.down, out RaycastHit groundHit, 24f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore))
             {
                 targetGroundPos.y = groundHit.point.y;
             }
@@ -366,7 +367,11 @@ namespace P1.Weapons
             if (node.CloudElapsed < node.Duration - 0.3f)
             {
                 UpdateRainPaint(node, dt, scale);
-                UpdateRainDamage(node, dt);
+                // 终场哨响后雨点照常落（表现不中断），但不再结算 DOT 伤害。
+                if (MatchManager.CombatSettlementAllowed)
+                {
+                    UpdateRainDamage(node, dt);
+                }
             }
         }
 
@@ -378,6 +383,9 @@ namespace P1.Weapons
             int drops = 0;
             bool hadHit = false;
             Vector3 lastHit = Vector3.zero;
+
+            // 终场哨响后：雨点仍在下（表现），但不再涂地、不再登记涂地统计。
+            bool settleAllowed = MatchManager.CombatSettlementAllowed;
 
             while (node.RainTimer <= 0f && drops < MaxRainDropsPerFrame)
             {
@@ -392,13 +400,13 @@ namespace P1.Weapons
                     cloudPos.y - 0.6f,
                     cloudPos.z + Mathf.Sin(angle) * distance);
 
-                if (!Physics.Raycast(from, Vector3.down, out RaycastHit hit, node.CloudHeight + 8f, ~0, QueryTriggerInteraction.Ignore))
+                if (!Physics.Raycast(from, Vector3.down, out RaycastHit hit, node.CloudHeight + 8f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore))
                     continue;
 
                 hadHit = true;
                 lastHit = hit.point;
 
-                if (InkSurfaceController.Instance != null)
+                if (settleAllowed && InkSurfaceController.Instance != null)
                 {
                     float paintRadius = Random.Range(node.RainRadiusMin, node.RainRadiusMax);
                     // 风暴云涂地计入涂地覆盖率，但不返还大招能量：雨点数量太多，返还会造成「一云接一云」的自循环。

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using P1.Core;
 using P1.Player;
+using P1.UI.WeaponSelect;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -89,6 +90,9 @@ namespace P1.UI.Menus
         private GameObject _mainViewContainer;
         private GameObject _settingsViewContainer;
         private bool _isSettingsOpen;
+        // 首页「设置」卡直开模式：只挂出设置视图，不走对局暂停语义（IsPaused 保持 false，
+        // timeScale / AudioListener / GameplayInputEnabled / PauseStateChanged 均不动）。
+        private bool _homeSettingsMode;
         private Button _returnMenuButton;
 
         // 设置项控件
@@ -167,6 +171,8 @@ namespace P1.UI.Menus
             {
                 Resume();
             }
+
+            CloseSettingsFromHome();
         }
 
         private void OnDestroy()
@@ -175,6 +181,8 @@ namespace P1.UI.Menus
             {
                 Resume();
             }
+
+            CloseSettingsFromHome();
 
             if (_matches.Count > 0)
             {
@@ -1099,19 +1107,53 @@ namespace P1.UI.Menus
 
             if (toggleRequested)
             {
-                // 首页详情浮层（战绩 / 键位说明）优先消费 Esc / Start：
-                // 关闭浮层并标记本帧已用，绝不能同一帧又打开暂停菜单。
-                if (HomeInfoOverlay.TryCloseFromMenuInput()) return;
+                // 本帧 Esc / Start 的归属由 MenuInputRouter 统一解析（纯函数，与 Update 顺序无关）：
+                // ResolveEscOwner 定归属 → CanLayerHandle 判「该不该我处理」（非归属层直接让路，
+                // 绝不抢占帧位，否则归属层会收不到这个 Esc）→ TryConsumeEsc 抢帧位 → ActionForOwner 执行。
+                MenuEscLayer owner = MenuInputRouter.ResolveEscOwner(
+                    homeInfoOpen: HomeInfoOverlay.IsOpen,
+                    layoutEditing: MobileLayoutCustomizer.IsEditingAny,
+                    pauseExpanded: IsMenuExpanded,
+                    drawerExpanded: WeaponSelectView.Instance != null && WeaponSelectView.Instance.IsDrawerOpen);
 
-                if (MobileLayoutCustomizer.IsEditingAny)
+                if (!MenuInputRouter.CanLayerHandle(MenuEscLayer.PauseMenu, owner))
                 {
-                    MobileLayoutCustomizer.ActiveEditor?.Close(false);
-                    return;
+                    return; // 归属不是暂停/设置/浮层：交给归属者（例如已展开的武器抽屉自己收）
                 }
 
-                TogglePause();
+                if (!MenuInputRouter.TryConsumeEsc(MenuEscLayer.PauseMenu))
+                {
+                    return; // 本帧已被别的菜单层消费
+                }
+
+                switch (MenuInputRouter.ActionForOwner(owner))
+                {
+                    case MenuEscAction.CloseHomeInfo:
+                        HomeInfoOverlay.TryCloseFromMenuInput();
+                        return;
+                    case MenuEscAction.CloseLayoutEditor:
+                        MobileLayoutCustomizer.ActiveEditor?.Close(false);
+                        return;
+                    case MenuEscAction.CloseDrawer:
+                        // 归属为抽屉时由这里执行收起（与 WeaponSelectView 共用同一动作映射，
+                        // 谁先 Update 都只有一个动作；旧接线先 consume 再 return 会让 Esc 在抽屉上失效）
+                        var drawer = WeaponSelectView.Instance;
+                        if (drawer != null) drawer.SetDrawerOpen(false);
+                        return;
+                    default:
+                        TogglePause();
+                        return;
+                }
             }
         }
+
+        /// <summary>
+        /// 暂停菜单或设置页是否处于展开态（供 <see cref="MenuInputRouter"/> 仲裁 Esc 归属）。
+        /// </summary>
+        public bool IsMenuExpanded => IsPaused || _isSettingsOpen;
+
+        /// <summary>静态快捷入口：暂停菜单 / 设置页是否展开（无实例时为 false）。</summary>
+        public static bool IsAnyMenuExpanded => Instance != null && Instance.IsMenuExpanded;
 
         public void TogglePause()
         {
@@ -1131,6 +1173,11 @@ namespace P1.UI.Menus
                 {
                     Resume();
                 }
+            }
+            else if (_homeSettingsMode)
+            {
+                // 首页设置模式：Esc / Start 直接收起设置弹窗（IsMenuExpanded 对输入仲裁仍报展开态）
+                CloseSettingsFromHome();
             }
             else
             {
@@ -1234,6 +1281,13 @@ namespace P1.UI.Menus
 
         public void CloseSettings()
         {
+            if (_homeSettingsMode)
+            {
+                // 首页设置模式没有「主视图」（继续游戏等对局按钮），返回键 = 整个弹窗收起
+                CloseSettingsFromHome();
+                return;
+            }
+
             _isSettingsOpen = false;
             _settingsViewContainer.SetActive(false);
             _mainViewContainer.SetActive(true);
@@ -1243,6 +1297,41 @@ namespace P1.UI.Menus
             {
                 _panelMotion.Punch(0.04f);
             }
+        }
+
+        /// <summary>
+        /// 首页「设置」卡入口：直接挂出设置视图，不带对局暂停语义
+        /// （IsPaused 保持 false，timeScale / AudioListener / GameplayInputEnabled / PauseStateChanged 均不动，
+        /// 首页 BGM 不受影响）。收起走 <see cref="CloseSettingsFromHome"/>；Esc 由
+        /// <see cref="TogglePause"/> 的首页分支处理。
+        /// </summary>
+        public void OpenSettingsFromHome()
+        {
+            if (_homeSettingsMode || MobileLayoutCustomizer.IsEditingAny)
+                return;
+
+            _homeSettingsMode = true;
+            _modalRoot.SetActive(true);
+            ApplyResponsivePanelScale();
+            OpenSettings(); // 复位主视图 → 激活设置视图 → 回读 GameSettingsService 刷滑杆
+
+            if (_panelMotion != null)
+            {
+                _panelMotion.PlayIn();
+            }
+        }
+
+        /// <summary>收起首页设置弹窗（对局暂停语义零副作用；未处于首页模式时为空操作）。</summary>
+        public void CloseSettingsFromHome()
+        {
+            if (!_homeSettingsMode)
+                return;
+
+            _homeSettingsMode = false;
+            _isSettingsOpen = false;
+            // OnDisable/OnDestroy 拆除期调用时容器可能已销毁，做判空
+            if (_settingsViewContainer != null) _settingsViewContainer.SetActive(false);
+            if (_modalRoot != null) _modalRoot.SetActive(false);
         }
 
         private void ShowMainView()

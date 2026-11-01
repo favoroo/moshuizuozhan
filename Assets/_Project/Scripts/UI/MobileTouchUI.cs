@@ -792,7 +792,9 @@ namespace P1.UI
             trt.offsetMax = Vector2.zero;
 
             var txt = textGo.GetComponent<TextMeshProUGUI>();
-            txt.text = gearSprite != null ? "操作" : "⚙️ 操作";
+            // MiSans 没有 ⚙/U+FE0F 字形：缺图标时不能拿齿轮字符顶替，否则真机走系统回退字体
+            // 会让整层 UI 当帧重排（见 tools/font_exempt_chars.txt 的豁免规则）。
+            txt.text = gearSprite != null ? "操作" : "键位";
             txt.fontSize = UITypography.FontSnapped(24f);
             txt.fontStyle = FontStyles.Bold;
             txt.alignment = TextAlignmentOptions.Center;

@@ -13,6 +13,16 @@ namespace P1.Weapons
         /// <summary>外圈衰减的「台阶」权重：刚出核心圈时伤害保留 30% 的落差（对齐 Inkwave 0.3）。</summary>
         public const float DefaultOuterFalloffWeight = 0.3f;
 
+        /// <summary>
+        /// 冲击波允许的最大垂直落差（米）：砸地 / 手雷的判定是水平圆，
+        /// 旧实现能穿过 3~4m 的集装箱夹层打到楼上一层或底下一层；
+        /// 2.5m 覆盖身高与矮台阶，又挡得住「隔一层板」的穿透。需要跨层命中的玩法可显式传更大值。
+        /// </summary>
+        public const float DefaultMaxVerticalGap = 2.5f;
+
+        /// <summary>风暴云允许的最大「云下」落差（米）：防止雨点穿过地面/集装箱底打到下一层。</summary>
+        public const float DefaultStormMaxDropBelow = 8f;
+
         public static float HorizontalDistance(Vector3 a, Vector3 b)
         {
             float dx = a.x - b.x;
@@ -91,14 +101,23 @@ namespace P1.Weapons
             float innerDamage,
             float outerDamage,
             float outerFalloffWeight = DefaultOuterFalloffWeight,
-            CombatantHealth attacker = null)
+            CombatantHealth attacker = null,
+            float maxVerticalGap = DefaultMaxVerticalGap)
         {
+            // 终场哨响后不再结算伤害。
+            if (!MatchManager.CombatSettlementAllowed)
+                return 0;
+
             int hits = 0;
             var all = CombatantHealthRegistry.All;
             for (int i = 0; i < all.Count; i++)
             {
                 CombatantHealth victim = all[i];
                 if (victim == null || !victim.IsAlive || !victim.Team.IsOpponentOf(team))
+                    continue;
+
+                // 垂直落差限制：相隔一层高台/集装箱底的目标不吃冲击波（旧实现只有水平圆判定）。
+                if (Mathf.Abs(victim.transform.position.y - center.y) > Mathf.Max(0.1f, maxVerticalGap))
                     continue;
 
                 float distance = HorizontalDistance(center, victim.transform.position);
@@ -134,14 +153,23 @@ namespace P1.Weapons
             float innerRadius,
             float innerDamage,
             float outerDamage,
-            CombatantHealth attacker = null)
+            CombatantHealth attacker = null,
+            float maxVerticalGap = DefaultMaxVerticalGap)
         {
+            // 终场哨响后不再结算伤害。
+            if (!MatchManager.CombatSettlementAllowed)
+                return 0;
+
             int hits = 0;
             var all = CombatantHealthRegistry.All;
             for (int i = 0; i < all.Count; i++)
             {
                 CombatantHealth victim = all[i];
                 if (victim == null || !victim.IsAlive || !victim.Team.IsOpponentOf(team))
+                    continue;
+
+                // 垂直落差限制：手雷在楼下爆炸不再震到楼上一层（反之亦然）。
+                if (Mathf.Abs(victim.transform.position.y - center.y) > Mathf.Max(0.1f, maxVerticalGap))
                     continue;
 
                 float distance = HorizontalDistance(center, victim.transform.position);
@@ -163,9 +191,14 @@ namespace P1.Weapons
             Team team,
             float radius,
             float tickDamage,
-            CombatantHealth attacker = null)
+            CombatantHealth attacker = null,
+            float maxDropBelow = DefaultStormMaxDropBelow)
         {
             if (tickDamage <= 0f)
+                return 0;
+
+            // 终场哨响后不再结算伤害。
+            if (!MatchManager.CombatSettlementAllowed)
                 return 0;
 
             int hits = 0;
@@ -178,6 +211,9 @@ namespace P1.Weapons
 
                 Vector3 victimPos = victim.transform.position;
                 if (victimPos.y > cloudCenter.y + 0.5f)
+                    continue;
+                // 雨水不会穿过地面/集装箱底：云下超过 8m 的目标视为在另一层。
+                if (cloudCenter.y - victimPos.y > Mathf.Max(0.5f, maxDropBelow))
                     continue;
                 if (HorizontalDistance(cloudCenter, victimPos) > radius)
                     continue;

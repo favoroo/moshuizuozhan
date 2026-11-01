@@ -3,6 +3,7 @@
     "rootNamespace": "P1.Tests",
     "references": [
         "P1.Game",
+        "P1.Editor",
         "Unity.TextMeshPro",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"

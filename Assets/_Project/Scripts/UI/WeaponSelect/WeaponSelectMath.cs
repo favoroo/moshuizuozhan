@@ -69,7 +69,7 @@ namespace P1.UI.WeaponSelect
             }
         }
 
-        /// <summary>武器英文标准名称（TitanOne 标题字体渲染）。</summary>
+        /// <summary>武器英文标准名称（标题字重 MiSans-Heavy 渲染）。</summary>
         public static string GetWeaponEnglishName(WeaponKind kind)
         {
             switch (kind)

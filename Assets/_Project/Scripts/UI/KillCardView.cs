@@ -125,8 +125,7 @@ namespace P1.UI
                 killerText.color = ComicStyle.Paper;
                 killerText.raycastTarget = false;
                 killerText.textWrappingMode = TextWrappingModes.NoWrap;
-                // 名字走 body 字体 + Truncate：display 字体（TitanOne）缺省略号字形，
-                // 用 Ellipsis 每次重建都会刷一条 TMP 警告；Truncate 不依赖字形，永不告警。
+                // 名字走 body 字体 + Truncate：不依赖省略号字形，永不触发 TMP 重建告警。
                 killerText.overflowMode = TextOverflowModes.Truncate;
             }
 
@@ -237,8 +236,8 @@ namespace P1.UI
 
             if (killerText != null)
             {
-                // 名字用 body 字体（Rubik-Bold / MiSans-Semibold：拉丁 + CJK + 省略号字形齐全）；
-                // display 字体（TitanOne）只留给 SPLAT! 这类纯拉丁大写标签。
+                // 名字用正文字重（MiSans-Semibold）：拉丁 + CJK + 省略号字形齐全；
+                // 标题字重（MiSans-Heavy）只留给 SPLAT! 这类大写标签。
                 killerText.font = resolved.ResolveFont(false, ev.KillerName);
                 killerText.text = ev.KillerName;
                 killerText.fontSize = fontSize;

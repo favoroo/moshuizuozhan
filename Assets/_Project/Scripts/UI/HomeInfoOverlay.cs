@@ -19,12 +19,14 @@ namespace P1.UI
     public class HomeInfoOverlay : MonoBehaviour
     {
         private static HomeInfoOverlay _instance;
-        private static int _menuInputFrame = -1;
 
         public static bool IsOpen => _instance != null;
 
-        /// <summary>本帧的 Esc / Start 已被浮层消费，其他菜单输入应直接返回。</summary>
-        public static bool MenuInputConsumedThisFrame => _menuInputFrame == Time.frameCount;
+        /// <summary>
+        /// 本帧的 Esc / Start 已被某个菜单层消费，其他菜单输入应直接返回。
+        /// 消费位统一放在 <see cref="MenuInputRouter"/>（首页曾出现「一个 Esc 同时开暂停 + 收放武器抽屉」）。
+        /// </summary>
+        public static bool MenuInputConsumedThisFrame => MenuInputRouter.ConsumedThisFrame;
 
         private RectTransform _host;
         private UIThemeSO _theme;
@@ -75,18 +77,18 @@ namespace P1.UI
 
         /// <summary>
         /// Esc / 手柄 Start 的统一入口：浮层打开时关闭并标记本帧已消费；
-        /// 浮层已关闭但本帧刚被消费时返回 true，调用方不得再处理同一个输入。
+        /// 浮层已关闭但本帧刚被（任何菜单层）消费时返回 true，调用方不得再处理同一个输入。
         /// </summary>
         public static bool TryCloseFromMenuInput()
         {
             if (_instance != null)
             {
                 _instance.Close();
-                _menuInputFrame = Time.frameCount;
+                MenuInputRouter.MarkConsumed(MenuEscLayer.HomeInfo);
                 return true;
             }
 
-            return _menuInputFrame == Time.frameCount;
+            return MenuInputRouter.ConsumedThisFrame;
         }
 
         private void Close()

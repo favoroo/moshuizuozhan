@@ -38,12 +38,37 @@ namespace P1.AI
         private bool _hasMoveTarget;
         private float _paintGoalTimer;
 
+        // ---- 寻路/选点失败退避 ----
+        // 导航网格存在但 A* 找不到路时，旧实现会塞一个直线 goal 让 Bot 顶着墙冲锋；
+        // 现在改为清空路径 + 按连续失败次数退避（见 BotRecoveryPolicy），并让调用方放弃该目标。
+        private int _pathFailures;
+        private float _pathRetryTimer;
+        private Vector3 _lastPathGoal;
+        private bool _hasLastPathGoal;
+        private const float PathGoalChangedDistance = 2.5f;
+        private int _paintPickFailures;
+        private float _paintPickRetryTimer;
+        private int _retreatPickFailures;
+
+        // 不可达涂地目标黑名单（固定槽位环形覆盖，避免 List 扩容产生 GC）
+        private const int PaintBlacklistSlots = 6;
+        private const float PaintBlacklistSeconds = 12f;
+        private const float PaintBlacklistRadius = 4f;
+        private readonly Vector3[] _paintBlacklistPositions = new Vector3[PaintBlacklistSlots];
+        private readonly float[] _paintBlacklistUntil = new float[PaintBlacklistSlots];
+        private int _paintBlacklistCursor;
+
         private float _thinkTimer;
         private float _reactionTimer;
         private CombatantHealth _targetEnemy;
         private Vector3 _targetVelocity;
         private Vector3 _prevTargetPos;
-        private const float PerceptionInterval = 0.15f;
+        private const float DefaultPerceptionInterval = 0.15f;
+
+        /// <summary>感知/决策节拍：优先取 BotConfigSO.perceptionInterval，旧资产缺字段时回退 0.15s。</summary>
+        private float PerceptionSeconds => config != null && config.perceptionInterval > 0.01f
+            ? config.perceptionInterval
+            : DefaultPerceptionInterval;
 
         private readonly HumanAimSpring _aim = new HumanAimSpring();
         private float _aimPhaseA;
@@ -106,6 +131,29 @@ namespace P1.AI
             RefreshPathWeights();
         }
 
+        private void OnEnable()
+        {
+            if (_health == null) _health = GetComponent<CombatantHealth>();
+            if (_health != null) _health.OnRespawned += HandleRespawned;
+        }
+
+        private void OnDisable()
+        {
+            if (_health != null) _health.OnRespawned -= HandleRespawned;
+        }
+
+        /// <summary>
+        /// 复活 / 重开比赛统一复位 AI 状态。MatchManager.ResetWorld 走的是
+        /// <see cref="CombatantHealth.ResetImmediately"/>，它会广播 OnRespawned；
+        /// 旧实现只在 State==Dead 转活时复位，第二局 Bot 会直奔上一局的路径 / 涂地点。
+        /// 幂等：重复调用只是再清一遍路径与计时，不产生任何对象。
+        /// </summary>
+        private void HandleRespawned(CombatantHealth health)
+        {
+            if (health != null && _health != null && health != _health) return;
+            RespawnReset();
+        }
+
         public void Configure(BotConfigSO botConfig)
         {
             config = botConfig;
@@ -152,6 +200,8 @@ namespace P1.AI
             if (_threatMemoryTimer > 0f) _threatMemoryTimer -= dt;
             if (_reactionTimer > 0f) _reactionTimer -= dt;
             if (_chargerPaintPause > 0f) _chargerPaintPause -= dt;
+            if (_pathRetryTimer > 0f) _pathRetryTimer -= dt;
+            if (_paintPickRetryTimer > 0f) _paintPickRetryTimer -= dt;
             _acquireAge += dt;
             _paintSweepPhase += dt;
 
@@ -160,7 +210,7 @@ namespace P1.AI
             _thinkTimer -= dt;
             if (_thinkTimer <= 0f)
             {
-                _thinkTimer = PerceptionInterval;
+                _thinkTimer = PerceptionSeconds;
                 UpdateState();
                 if (!_health.IsAlive) return;
             }
@@ -178,6 +228,7 @@ namespace P1.AI
         {
             State = BotState.Paint;
             ResetMovement();
+            RefreshPathWeights();
             _aim.Reset(transform.eulerAngles.y);
             _aimPhaseA = Random.Range(0f, 20f);
             _aimPhaseB = Random.Range(0f, 20f);
@@ -192,6 +243,28 @@ namespace P1.AI
             _moveMagnitude = 0f;
             _strafeBlend = 0f;
             _aheadNeedsPaint = true;
+
+            // 重开比赛（MatchManager.ResetWorld → CombatantHealth.ResetImmediately）也必须回到干净状态：
+            // 目标、计时、退避计数、弹药/大招重试与黑名单全部清零，避免第二局 Bot 直奔上一局的涂地点。
+            _paintGoalTimer = 0f;
+            _paintPickFailures = 0;
+            _paintPickRetryTimer = 0f;
+            _pathFailures = 0;
+            _pathRetryTimer = 0f;
+            _retreatPickFailures = 0;
+            _retreatRepathTimer = 0f;
+            _paintAheadTimer = 0f;
+            _paintSweepPhase = Random.Range(0f, 10f);
+            _chargerPaintPause = 0f;
+            _bombTimer = 0f;
+            _specialRetryTimer = 0f;
+            _strafeTimer = 0f;
+            _strafeDir = 1f;
+            _strafeAmp = 1f;
+            _refillSearchTimer = 0f;
+            _thinkTimer = 0f;
+            System.Array.Clear(_paintBlacklistUntil, 0, _paintBlacklistUntil.Length);
+            _paintBlacklistCursor = 0;
         }
 
         // ---------- 状态决策 ----------
@@ -253,7 +326,7 @@ namespace P1.AI
 
             if (enemy == null) return;
 
-            Vector3 velocity = (enemyPos - _prevTargetPos) / PerceptionInterval;
+            Vector3 velocity = (enemyPos - _prevTargetPos) / PerceptionSeconds;
             velocity.y = 0f;
             _targetVelocity = Vector3.Lerp(_targetVelocity, velocity, 0.5f);
             _prevTargetPos = enemyPos;
@@ -311,13 +384,45 @@ namespace P1.AI
         {
             Vector3 eye = transform.position + Vector3.up * 0.9f;
             Vector3 targetEye = target.transform.position + Vector3.up * 0.9f;
-            if (!Physics.Linecast(eye, targetEye, out RaycastHit hit, ~0, QueryTriggerInteraction.Ignore))
+            if (!Physics.Linecast(eye, targetEye, out RaycastHit hit, GameLayers.QueryMask, QueryTriggerInteraction.Ignore))
                 return true;
 
             return hit.collider.GetComponentInParent<CombatantHealth>() == target;
         }
 
         // ---------- 交战 ----------
+
+        /// <summary>
+        /// 追击目标：A* 成功就沿路径切入；A* 连续失败（目标被墙 / 缺口隔开）时不再沿直线硬冲，
+        /// 改为原地横向拉枪保持射程，等退避时间到再重试寻路。
+        /// </summary>
+        private Vector3 ChaseOrHold(Vector3 goal, Vector3 directDir, float dt)
+        {
+            if (FollowPath(goal))
+            {
+                Vector3 steer = CurrentSteer();
+                if (steer.sqrMagnitude > 0.001f) return steer;
+            }
+
+            // 只要这一轮 A* 失败过就不再沿直线硬冲（直冲正是「顶墙」的来源），
+            // 改为横向拉枪保持射程，等退避结束再重试路径。
+            return _pathFailures > 0 ? StrafeMove(directDir, dt) : directDir;
+        }
+
+        /// <summary>围绕目标方向横向拉枪（带换向节奏），用于保持射程而不是顶着墙推进。</summary>
+        private Vector3 StrafeMove(Vector3 dir, float dt)
+        {
+            _strafeTimer -= dt;
+            if (_strafeTimer <= 0f)
+            {
+                _strafeTimer = Random.Range(0.6f, 1.6f);
+                _strafeDir = Random.value > 0.5f ? 1f : -1f;
+                _strafeAmp = Random.Range(0.55f, 1f);
+            }
+
+            _strafeBlend = Mathf.Lerp(_strafeBlend, _strafeDir * _strafeAmp, 1f - Mathf.Exp(-5f * dt));
+            return Vector3.Cross(Vector3.up, dir) * (_strafeBlend * 0.9f);
+        }
 
         private void TickEngage(float dt)
         {
@@ -426,13 +531,13 @@ namespace P1.AI
             if (kind == WeaponKind.Roller)
             {
                 if (dist > preferred + 0.4f)
-                    move = FollowPath(enemyPos) ? CurrentSteer() : dir;
+                    move = ChaseOrHold(enemyPos, dir, dt);
                 else
                     move = dir;
             }
             else if (dist > preferred + 1.2f)
             {
-                move = FollowPath(enemyPos) ? CurrentSteer() : dir;
+                move = ChaseOrHold(enemyPos, dir, dt);
             }
             else if (dist < preferred - 1.5f)
             {
@@ -442,21 +547,20 @@ namespace P1.AI
             else
             {
                 _hasMoveTarget = false;
-                _strafeTimer -= dt;
-                if (_strafeTimer <= 0f)
-                {
-                    _strafeTimer = Random.Range(0.6f, 1.6f);
-                    _strafeDir = Random.value > 0.5f ? 1f : -1f;
-                    _strafeAmp = Random.Range(0.55f, 1f);
-                }
-
-                _strafeBlend = Mathf.Lerp(_strafeBlend, _strafeDir * _strafeAmp, 1f - Mathf.Exp(-5f * dt));
-                move = Vector3.Cross(Vector3.up, dir) * (_strafeBlend * 0.9f);
+                move = StrafeMove(dir, dt);
             }
 
             if (kind == WeaponKind.Charger && _weapon.IsCharging)
             {
                 move *= 0.3f;   // 蓄力时脚步放慢，符合蓄力狙手感
+            }
+            else if (kind == WeaponKind.Dualies && _weapon.RollsRemaining > 0 && !_weapon.IsRollingDodge && !_weapon.IsTurretLocked)
+            {
+                // 双枪 Bot：近身受迫或对枪中有概率向移动方向战术翻滚并就地架枪
+                if ((dist < preferred - 0.6f || (wantFire && Random.value < 0.04f)) && move.sqrMagnitude > 0.01f)
+                {
+                    _weapon.TryDodgeRoll(move);
+                }
             }
 
             TryUseBombOrSpecial(dist);
@@ -471,8 +575,10 @@ namespace P1.AI
             _firingLatch = wantFire;
 
             Vector3 smoothedMove = SmoothMove(move, dt);
-            // P20：与玩家一致，大招（Slam 升空）期间锁移动——否则圈留在起跳点、身体飘走，圈与伤害错位
-            _motor.SetFrameIntent(smoothedMove, aimDir, wantsSwim, _weapon.IsPerformingSpecial, wantFire);
+            // 大招（Slam 升空）期间锁移动：与玩家 PlayerController 的 6 参用法一致。
+            // 注意第 4 参是 wantsJump、第 6 参才是 lockedBySpecial —— 旧代码把 IsPerformingSpecial
+            // 传进 wantsJump，导致 Bot 放大招时真的跳一下且仍能移动，冲击圈留在起跳点与身体错位。
+            _motor.SetFrameIntent(smoothedMove, aimDir, wantsSwim, false, wantFire, _weapon.IsPerformingSpecial);
 
             if (wantFire)
             {
@@ -538,10 +644,20 @@ namespace P1.AI
             float max = config != null ? config.retreatDurationMax : 3.6f;
             _retreatTimer = Random.Range(min, Mathf.Max(min, max));
             _retreatRepathTimer = 0f;
+            _retreatPickFailures = 0;
             _firingLatch = false;
             _strafeBlend = 0f;
             ResetMovement();
-            PickRetreatPoint();
+            if (PickRetreatPoint())
+            {
+                _retreatRepathTimer = config != null ? Mathf.Max(0.2f, config.retreatRepathInterval) : 0.9f;
+            }
+            else
+            {
+                // 进撤退就没点可去：先按背离威胁方向撤离，退避结束后再选
+                _retreatPickFailures = 1;
+                _retreatRepathTimer = BotRecoveryPolicy.RetryDelay(1);
+            }
         }
 
         private void ExitRetreat()
@@ -564,6 +680,8 @@ namespace P1.AI
             _retreatTimer = 0f;
             _firingLatch = false;
             _chargerPaintPause = 0f;
+            _retreatPickFailures = 0;
+            _retreatRepathTimer = 0f;
             ResetMovement();
         }
 
@@ -592,34 +710,36 @@ namespace P1.AI
             }
 
             _retreatRepathTimer -= dt;
-            if (_retreatRepathTimer <= 0f || !_hasMoveTarget || ReachedTarget())
+            // 有目标时按「到达 / 间隔」重选；没有目标时只认退避计时（旧条件 !_hasMoveTarget 会让
+            // 选点失败后每帧重跑 28 次采样 + 半径 12 的可走性查询）。
+            if (BotRecoveryPolicy.NeedsReselect(_hasMoveTarget, ReachedTarget(), _retreatRepathTimer, _retreatRepathTimer))
             {
-                _retreatRepathTimer = config != null ? Mathf.Max(0.2f, config.retreatRepathInterval) : 0.9f;
-                PickRetreatPoint();
-            }
-
-            Vector3 steer;
-            if (_hasMoveTarget)
-            {
-                steer = transform.forward;
-                FollowPath(_moveTarget);
-                Vector3 pathSteer = CurrentSteer();
-                if (pathSteer.sqrMagnitude > 0.001f) steer = pathSteer;
-            }
-            else
-            {
-                // 没有可用撤退点：绝不能沿用 transform.forward 盲目前冲（可能正对威胁），
-                // 有可信威胁方位时朝其反方向撤离；记忆已过期则没有可信方位，保持当前朝向。
-                if (_threatMemoryTimer > 0f)
+                if (PickRetreatPoint())
                 {
-                    Vector3 away = transform.position - _threatPosition;
-                    away.y = 0f;
-                    steer = away.sqrMagnitude > 0.001f ? away.normalized : transform.forward;
+                    _retreatPickFailures = 0;
+                    _retreatRepathTimer = config != null ? Mathf.Max(0.2f, config.retreatRepathInterval) : 0.9f;
                 }
                 else
                 {
-                    steer = transform.forward;
+                    _retreatPickFailures++;
+                    _retreatRepathTimer = BotRecoveryPolicy.RetryDelay(_retreatPickFailures);
                 }
+            }
+
+            Vector3 steer;
+            if (_hasMoveTarget && FollowPath(_moveTarget))
+            {
+                steer = CurrentSteer();
+                if (steer.sqrMagnitude < 0.001f) steer = EscapeDirection();
+            }
+            else
+            {
+                if (_hasMoveTarget && BotRecoveryPolicy.ShouldAbandonTarget(_pathFailures))
+                {
+                    // 撤退点 A* 不可达：立刻放弃，改按背离威胁方向撤离，等退避计时结束再选点
+                    _hasMoveTarget = false;
+                }
+                steer = EscapeDirection();
             }
 
             // 站在己方墨里就潜下去回血（60 HP/s），否则边跑边铺一条逃生墨道
@@ -634,14 +754,34 @@ namespace P1.AI
             Vector3 aimDir = AimDirection();
 
             Vector3 move = SmoothMove(steer, dt);
-            _motor.SetFrameIntent(move, aimDir, inOwnInk, _weapon.IsPerformingSpecial, canPaintEscape);
+            // 第 4 参是 wantsJump、第 6 参才是 lockedBySpecial：大招升空期间锁移动，避免圈与身体错位
+            _motor.SetFrameIntent(move, aimDir, inOwnInk, false, canPaintEscape, _weapon.IsPerformingSpecial);
             if (canPaintEscape)
             {
-                _weapon.TryFireMainWeapon(aimDir);
+                _weapon.TryFireMainWeaponThrottled(aimDir);
             }
         }
 
-        private void PickRetreatPoint()
+        /// <summary>
+        /// 没有可用路径时的撤离朝向：优先背离威胁记忆，记忆过期则保持当前朝向。
+        /// 绝不沿用 transform.forward 盲目前冲（可能正对威胁）。
+        /// </summary>
+        private Vector3 EscapeDirection()
+        {
+            if (_threatMemoryTimer > 0f)
+            {
+                Vector3 away = transform.position - _threatPosition;
+                away.y = 0f;
+                if (away.sqrMagnitude > 0.001f) return away.normalized;
+            }
+            return transform.forward;
+        }
+
+        /// <summary>
+        /// 选一个撤退点。返回 false 表示本轮没有可用点（调用方负责退避，不要每帧重试）。
+        /// 有导航网格时会顺带做一次 A* 可达性校验：成功则直接把路径铺好，失败则该点不可用。
+        /// </summary>
+        private bool PickRetreatPoint()
         {
             Vector3 self = transform.position;
             InkGrid ink = ResolveInkGrid();
@@ -701,7 +841,8 @@ namespace P1.AI
                 }
             }
 
-            var nav = ArenaNavigator.Instance != null ? ArenaNavigator.Instance.Grid : null;
+            var arena = ArenaNavigator.Instance;
+            var nav = arena != null ? arena.Grid : null;
             if (found && nav != null && !nav.TryGetNearestWalkable(best, out best))
             {
                 found = false;
@@ -713,17 +854,48 @@ namespace P1.AI
                 found = false;
             }
 
+            if (found)
+            {
+                Vector3 goal = new Vector3(best.x, self.y, best.z);
+
+                // A* 可达性：撤退点落在墙后 / 缺口对面时，与其让 Bot 顶着墙冲，不如本轮判定无点，
+                // 由调用方退避后重选（期间按背离威胁方向撤离）。
+                if (nav != null && arena != null)
+                {
+                    if (!arena.TryFindPath(self, goal, _path, myTeam, _pathWeights))
+                    {
+                        _path.Clear();
+                        found = false;
+                    }
+                    else
+                    {
+                        _pathIndex = 0;
+                        _repathTimer = config != null ? config.repathInterval : 0.55f;
+                    }
+                }
+            }
+
             if (!found)
             {
                 _hasMoveTarget = false;
-                return;
+                _path.Clear();
+                return false;
             }
 
             _moveTarget = new Vector3(best.x, self.y, best.z);
             _hasMoveTarget = true;
-            _path.Clear();
-            _pathIndex = 0;
-            _repathTimer = 0f;
+            _pathFailures = 0;
+            _pathRetryTimer = 0f;
+            _lastPathGoal = _moveTarget;
+            _hasLastPathGoal = true;
+            if (nav == null || arena == null)
+            {
+                // 没有导航服务：保留旧的「下一帧直线推进」行为
+                _path.Clear();
+                _pathIndex = 0;
+                _repathTimer = 0f;
+            }
+            return true;
         }
 
         /// <summary>候选撤退点是否位于威胁的反方向（夹角 &lt;= 约 69°）。无威胁记忆时一律接受。</summary>
@@ -746,7 +918,7 @@ namespace P1.AI
 
             Vector3 eye = from + Vector3.up * 0.9f;
             Vector3 threatEye = _threatPosition + Vector3.up * 0.9f;
-            return !Physics.Linecast(eye, threatEye, out _, ~0, QueryTriggerInteraction.Ignore);
+            return !Physics.Linecast(eye, threatEye, out _, GameLayers.QueryMask, QueryTriggerInteraction.Ignore);
         }
 
         private static Vector3 RandomRingPoint(Vector3 center, float minRadius, float maxRadius)
@@ -766,26 +938,51 @@ namespace P1.AI
         private void TickPaint(float dt)
         {
             _paintGoalTimer -= dt;
-            if (!_hasMoveTarget || ReachedTarget() || _paintGoalTimer <= 0f)
+
+            // 有目标时按「到达 / 目标过期」重选；没有目标时只认退避冷却。
+            // 旧条件 `!_hasMoveTarget || ...` 会在选点失败（_hasMoveTarget=false）后每帧
+            // 重跑 20 个候选点采样 + 可走性查询，把 1.5s 冷却彻底架空。
+            if (BotRecoveryPolicy.NeedsReselect(_hasMoveTarget, ReachedTarget(), _paintGoalTimer, _paintPickRetryTimer))
             {
-                if (!PickPaintTarget())
+                if (PickPaintTarget())
+                {
+                    _paintPickFailures = 0;
+                    _paintPickRetryTimer = 0f;
+                }
+                else
                 {
                     _hasMoveTarget = false;
-                    _paintGoalTimer = 1.5f;
+                    _paintGoalTimer = 0f;
+                    _paintPickFailures++;
+                    _paintPickRetryTimer = BotRecoveryPolicy.RetryDelay(_paintPickFailures);
                 }
             }
 
             Vector3 steer;
             if (_hasMoveTarget)
             {
-                FollowPath(_moveTarget);
-                steer = CurrentSteer();
-                if (steer.sqrMagnitude < 0.001f) steer = transform.forward;
+                if (FollowPath(_moveTarget))
+                {
+                    steer = CurrentSteer();
+                    if (steer.sqrMagnitude < 0.001f) steer = SweepDirection();
+                }
+                else if (BotRecoveryPolicy.ShouldAbandonTarget(_pathFailures))
+                {
+                    // 目标被墙 / 缺口隔开：放弃它并进入选点退避，绝不沿直线顶着墙推进
+                    _hasMoveTarget = false;
+                    _paintGoalTimer = 0f;
+                    _paintPickRetryTimer = Mathf.Max(_paintPickRetryTimer, BotRecoveryPolicy.RetryDelay(_paintPickFailures + 1));
+                    steer = SweepDirection();
+                }
+                else
+                {
+                    // 单次寻路失败：等 A* 重试（路径已清空，期间用扫场方向慢慢转，不冲墙）
+                    steer = SweepDirection();
+                }
             }
             else
             {
-                steer = new Vector3(Mathf.Sin(_elapsed * 0.7f + _paintSweepPhase), 0f,
-                                    Mathf.Cos(_elapsed * 0.7f + _paintSweepPhase));
+                steer = SweepDirection();
             }
 
             _paintAheadTimer -= dt;
@@ -868,11 +1065,19 @@ namespace P1.AI
             }
 
             Vector3 move = SmoothMove(steer, dt);
-            _motor.SetFrameIntent(move, aimDir, wantsSwim, _weapon.IsPerformingSpecial, wantFire);
+            // 第 4 参是 wantsJump、第 6 参才是 lockedBySpecial：大招升空期间锁移动，避免圈与身体错位
+            _motor.SetFrameIntent(move, aimDir, wantsSwim, false, wantFire, _weapon.IsPerformingSpecial);
             if (wantFire)
             {
-                _weapon.TryFireMainWeapon(aimDir);
+                _weapon.TryFireMainWeaponThrottled(aimDir);
             }
+        }
+
+        /// <summary>无目标时的扫场朝向：缓慢绕圈继续涂地，避免站着不动。</summary>
+        private Vector3 SweepDirection()
+        {
+            return new Vector3(Mathf.Sin(_elapsed * 0.7f + _paintSweepPhase), 0f,
+                               Mathf.Cos(_elapsed * 0.7f + _paintSweepPhase));
         }
 
         private bool NeedsPaintAhead(Vector3 direction)
@@ -909,7 +1114,8 @@ namespace P1.AI
             if (surface == null || surface.Grid == null) return false;
 
             InkGrid ink = surface.Grid;
-            var nav = ArenaNavigator.Instance != null ? ArenaNavigator.Instance.Grid : null;
+            var arena = ArenaNavigator.Instance;
+            var nav = arena != null ? arena.Grid : null;
 
             Vector3 myPos = transform.position;
             Team myTeam = _health.Team;
@@ -931,6 +1137,9 @@ namespace P1.AI
                 Vector3 target = p;
                 if (nav != null && !nav.TryGetNearestWalkable(target, out target)) continue;
 
+                // 上一轮确认过「在墙后 / 缺口对面、A* 到不了」的区域，短期内不再选
+                if (IsPaintBlacklisted(target)) continue;
+
                 // P16-A: 过滤掉敌方出生禁入圈内 + 额外缓冲的候选目标，避免压家贴边抖动
                 float avoidBuffer = config != null ? config.spawnZoneAvoidBufferMeters : 2f;
                 if (SpawnZone.IsInEnemySpawnZone(target, myTeam, avoidBuffer)) continue;
@@ -951,15 +1160,65 @@ namespace P1.AI
                 found = true;
             }
 
-            _paintGoalTimer = config != null ? Mathf.Max(1f, config.paintGoalRefresh) : 7f;
-            if (!found) return false;
+            if (!found)
+            {
+                _paintGoalTimer = 0f;
+                return false;
+            }
 
-            _moveTarget = new Vector3(best.x, myPos.y, best.z);
+            Vector3 goal = new Vector3(best.x, myPos.y, best.z);
+
+            // 可达性校验：只对最终候选跑一次 A*（对 20 个候选各跑一次会抖动），成功即把路径铺好。
+            // 失败说明目标在墙后 / 缺口对面：拉黑这片区域并让调用方退避，避免 Bot 顶着墙冲。
+            if (nav != null && arena != null)
+            {
+                bool startResolvable = nav.TryGetNearestWalkable(myPos, out _);
+                if (startResolvable && !arena.TryFindPath(myPos, goal, _path, myTeam, _pathWeights))
+                {
+                    _path.Clear();
+                    AddPaintBlacklist(goal);
+                    _paintGoalTimer = 0f;
+                    return false;
+                }
+
+                _pathIndex = 0;
+                _repathTimer = startResolvable ? (config != null ? config.repathInterval : 0.55f) : 0f;
+                if (!startResolvable) _path.Clear();
+            }
+            else
+            {
+                // 没有导航服务：保留旧的直线推进兜底
+                _path.Clear();
+                _pathIndex = 0;
+                _repathTimer = 0f;
+            }
+
+            _moveTarget = goal;
             _hasMoveTarget = true;
-            _path.Clear();
-            _pathIndex = 0;
-            _repathTimer = 0f;
+            _paintGoalTimer = config != null ? Mathf.Max(1f, config.paintGoalRefresh) : 7f;
+            _pathFailures = 0;
+            _pathRetryTimer = 0f;
+            _lastPathGoal = goal;
+            _hasLastPathGoal = true;
             return true;
+        }
+
+        /// <summary>该点是否在「A* 确认不可达」的短期黑名单内（半径 4m 内视为同一片区域）。</summary>
+        private bool IsPaintBlacklisted(Vector3 point)
+        {
+            for (int i = 0; i < _paintBlacklistUntil.Length; i++)
+            {
+                if (_paintBlacklistUntil[i] <= _elapsed) continue;
+                if (FlatDistanceTo(_paintBlacklistPositions[i], point) <= PaintBlacklistRadius) return true;
+            }
+            return false;
+        }
+
+        private void AddPaintBlacklist(Vector3 point)
+        {
+            _paintBlacklistPositions[_paintBlacklistCursor] = point;
+            _paintBlacklistUntil[_paintBlacklistCursor] = _elapsed + PaintBlacklistSeconds;
+            _paintBlacklistCursor = (_paintBlacklistCursor + 1) % PaintBlacklistSlots;
         }
 
         // ---------- 补给 ----------
@@ -1063,35 +1322,64 @@ namespace P1.AI
 
         // ---------- 路径跟随 ----------
 
+        /// <summary>
+        /// 沿 A* 路径推进。关键约束：导航网格存在但寻路失败时，绝不能再塞入直线 goal
+        /// （旧实现会让 Bot 顶着墙冲锋且卡死检测只清路径、下一帧又对同一目标重试）。
+        /// 现在改为清空路径 + 按连续失败次数退避；只有完全没有导航服务时才保留直线兜底。
+        /// </summary>
         private bool FollowPath(Vector3 goal)
         {
+            // 退避期内不再打 A*（A* 全程 8 个 Bot 每帧重试是主要 GC/CPU 抖动源之一）
+            if (_pathRetryTimer > 0f)
+            {
+                // 目标换成别处（新敌人 / 切回涂地）时重置重试预算：
+                // 不能让上一个不可达目标的退避拖住新目标。
+                if (!_hasLastPathGoal || FlatDistanceTo(_lastPathGoal, goal) > PathGoalChangedDistance)
+                {
+                    _pathRetryTimer = 0f;
+                    _pathFailures = 0;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            _lastPathGoal = goal;
+            _hasLastPathGoal = true;
+
             _repathTimer -= Time.deltaTime;
             if (_repathTimer <= 0f || _path.Count == 0)
             {
                 _repathTimer = config != null ? config.repathInterval : 0.55f;
                 var arena = ArenaNavigator.Instance;
-                bool ok = false;
 
-                if (arena != null)
+                if (arena == null || arena.Grid == null)
                 {
-                    // 墨水加权：己方墨道 0.5 / 中性 1.0 / 敌方 3.0
-                    ok = arena.TryFindPath(transform.position, goal, _path, _health.Team, _pathWeights);
+                    // 没有导航服务（子场景 / 测试）：保留直线兜底，否则 Bot 完全不会移动
+                    _path.Clear();
+                    _path.Add(goal);
+                    _pathIndex = 0;
+                    _pathFailures = 0;
+                    return true;
                 }
 
-                if (!ok)
+                // 墨水加权：己方墨道 0.5 / 中性 1.0 / 敌方 3.0
+                if (!arena.TryFindPath(transform.position, goal, _path, _health.Team, _pathWeights))
                 {
                     _path.Clear();
-                    _path.Add(goal);   // 兜底：没有导航网格时朝目标直线推进
+                    _pathIndex = 0;
+                    _pathFailures++;
+                    _pathRetryTimer = BotRecoveryPolicy.RetryDelay(_pathFailures);
+                    _repathTimer = _pathRetryTimer;
+                    return false;
                 }
 
+                _pathFailures = 0;
                 _pathIndex = 0;
             }
 
-            if (_path.Count == 0)
-            {
-                _moveTarget = goal;
-                return false;
-            }
+            if (_path.Count == 0) return false;
 
             while (_pathIndex < _path.Count)
             {
@@ -1129,12 +1417,23 @@ namespace P1.AI
             _pathIndex = 0;
             _hasMoveTarget = false;
             _repathTimer = 0f;
+            _pathFailures = 0;
+            _pathRetryTimer = 0f;
+            _hasLastPathGoal = false;
             _stuckAnchor = transform.position;
             _stuckTimer = 0f;
         }
 
         private void UpdateStuckDetection(float dt)
         {
+            // 补给时是「故意站着不动」，不是卡死；误判会污染寻路失败计数
+            if (State == BotState.Refill)
+            {
+                _stuckTimer = 0f;
+                _stuckAnchor = transform.position;
+                return;
+            }
+
             _stuckTimer += dt;
             float interval = config != null ? config.stuckCheckInterval : 1f;
             if (_stuckTimer < interval) return;
@@ -1143,8 +1442,16 @@ namespace P1.AI
             if (Vector3.Distance(transform.position, _stuckAnchor) < threshold)
             {
                 _path.Clear();
+                _pathIndex = 0;
                 _hasMoveTarget = false;
                 _repathTimer = 0f;
+
+                // 卡死也算一次寻路失败：按同样的退避曲线拉长「再试同一处」的间隔，
+                // 并让涂地/撤退重选目标前先等一小会，避免每帧对同一面墙冲锋。
+                _pathFailures++;
+                _pathRetryTimer = BotRecoveryPolicy.RetryDelay(_pathFailures);
+                _paintPickRetryTimer = Mathf.Max(_paintPickRetryTimer, _pathRetryTimer);
+                _retreatRepathTimer = 0f;
             }
 
             _stuckTimer = 0f;
@@ -1196,6 +1503,52 @@ namespace P1.AI
                 Gizmos.color = new Color(1f, 0.35f, 0.35f, 0.9f);
                 Gizmos.DrawWireSphere(_aimPoint, 0.25f);
             }
+        }
+    }
+
+    /// <summary>
+    /// Bot 寻路 / 选点失败恢复策略。全部为纯函数，供 <see cref="BotController"/> 调用，
+    /// 并可在 EditMode 直接验算（不依赖场景对象）。
+    /// 退避曲线：0.75 → 1.5 → 3 → 6（封顶），连续失败越多次越久才重新发起同类查询。
+    /// </summary>
+    public static class BotRecoveryPolicy
+    {
+        /// <summary>失败后的最短重试间隔（秒）。</summary>
+        public const float MinRetryDelay = 0.75f;
+
+        /// <summary>失败退避上限（秒）。</summary>
+        public const float MaxRetryDelay = 6f;
+
+        /// <summary>连续寻路失败多少次后放弃当前目标（换目标 / 退回涂地 / 改为拉扯）。</summary>
+        public const int AbandonAfterFailures = 2;
+
+        /// <summary>
+        /// 连续失败 <paramref name="consecutiveFailures"/> 次后的重试间隔。
+        /// 返回 0 表示尚未失败（不启用退避，按正常重规划间隔工作）。
+        /// </summary>
+        public static float RetryDelay(int consecutiveFailures)
+        {
+            if (consecutiveFailures <= 0) return 0f;
+
+            int shift = Mathf.Clamp(consecutiveFailures - 1, 0, 4);
+            return Mathf.Min(MaxRetryDelay, MinRetryDelay * (1 << shift));
+        }
+
+        /// <summary>
+        /// 是否需要重新挑选目标。
+        /// 有目标：到达或计时过期即重选；没有目标：只认重试冷却。
+        /// 「无目标」绕过冷却正是旧实现每帧重采样 20 个候选点的根因。
+        /// </summary>
+        public static bool NeedsReselect(bool hasTarget, bool reached, float intervalTimer, float retryTimer)
+        {
+            if (hasTarget) return reached || intervalTimer <= 0f;
+            return retryTimer <= 0f;
+        }
+
+        /// <summary>连续寻路失败是否已达到「放弃当前目标」的阈值。</summary>
+        public static bool ShouldAbandonTarget(int consecutivePathFailures)
+        {
+            return consecutivePathFailures >= AbandonAfterFailures;
         }
     }
 }

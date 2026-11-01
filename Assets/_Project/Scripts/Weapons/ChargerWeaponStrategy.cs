@@ -36,6 +36,17 @@ namespace P1.Weapons
             _charge = 0f;
         }
 
+        /// <summary>
+        /// 输入被抑制（暂停 / 终场 / 死亡 / 投雷占用）：直接丢弃本次蓄力，<strong>不开火</strong>。
+        /// 旧实现在抑制帧把 triggerHeld=false 传进 <see cref="Tick"/>，会被当成「松手」自动打出一枪。
+        /// </summary>
+        public override void OnTriggerSuppressed(IWeaponRuntimeHost host)
+        {
+            _charging = false;
+            _chargeElapsed = 0f;
+            _charge = 0f;
+        }
+
         public override bool OnTriggerHeld(WeaponAim aim, float dt, IWeaponRuntimeHost host)
         {
             if (!host.IsAlive || _cooldown > 0f)

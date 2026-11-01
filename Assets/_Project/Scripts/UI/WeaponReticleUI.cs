@@ -29,6 +29,9 @@ namespace P1.UI
         private RectTransform _rectTransform;
         private CanvasGroup _canvasGroup;
 
+        /// <summary>初始化已完成（已建好子节点且已挂进画布根）：LateUpdate 的热路径据此早退。</summary>
+        private bool _initComplete;
+
         // 三种武器的主容器
         private RectTransform _shooterContainer;
         private RectTransform _rollerContainer;
@@ -175,19 +178,28 @@ namespace P1.UI
 
         public void EnsureInitialized()
         {
+            // 初始化完成标记：旧实现每帧都在 LateUpdate 里跑 GetComponentInParent<Canvas>() + 父级比对，
+            // 而这两件事只在「还没挂进画布根」时才需要。挂好之后直接早退，热路径只留一次 bool 判断。
+            if (_initComplete) return;
+
             if (_rectTransform == null) _rectTransform = GetComponent<RectTransform>();
 
             // 屏幕中心准星必须直接挂在画布根：HudSafeArea 在刘海/挖孔屏横屏时会整体内缩，
             // 挂在 SafeArea 里会让准星中心偏离相机中心射线（Android 上表现为「静止瞄准也偏」）。
             // 运行时创建顺序可能是「先 AddComponent（此时还没挂到 Canvas 下）→ 再 SetParent」，
-            // 因此这里每次初始化都校正一次父级，且放在早退之前。
+            // 因此只有确实挂到画布根之后才允许锁定初始化。
             Canvas rootCanvas = GetComponentInParent<Canvas>();
             if (rootCanvas != null && _rectTransform.parent != rootCanvas.transform)
             {
                 _rectTransform.SetParent(rootCanvas.transform, false);
             }
 
-            if (_shooterContainer != null) return;
+            if (_shooterContainer != null)
+            {
+                // 已经建好且已挂进画布根：锁定，后续帧不再查找父画布。
+                _initComplete = rootCanvas != null && _rectTransform.parent == rootCanvas.transform;
+                return;
+            }
 
             // P9：准星固定屏幕中心。显式锁定中心锚点，避免运行时被父级布局拉伸。
             _rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
@@ -198,7 +210,7 @@ namespace P1.UI
             _canvasGroup = gameObject.GetComponent<CanvasGroup>();
             if (_canvasGroup == null) _canvasGroup = gameObject.AddComponent<CanvasGroup>();
 
-            _parentCanvas = GetComponentInParent<Canvas>();
+            _parentCanvas = rootCanvas;
             if (_parentCanvas != null)
             {
                 _canvasRect = _parentCanvas.GetComponent<RectTransform>();
@@ -211,6 +223,8 @@ namespace P1.UI
             BuildSubAimBadge();
             BuildHitMarker();
             BuildDamageArcLayer();
+
+            _initComplete = rootCanvas != null && _rectTransform.parent == rootCanvas.transform;
         }
 
         private void OnEnable()

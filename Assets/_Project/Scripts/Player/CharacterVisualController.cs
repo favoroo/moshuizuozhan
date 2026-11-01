@@ -790,6 +790,45 @@ namespace P1.Player
         }
 
         /// <summary>
+        /// P21 运行时角色刚体部件合并：放在 Start 而不是 Awake——
+        /// CombatantHealth.Awake 会收集 bodyRenderers，开局 ResetImmediately 还会把它们整套 enable 一次；
+        /// 在 Awake 合并会被后者的 enable 覆盖成「源部件 + 合并网格」双份渲染。
+        /// Start 时所有 Awake/初始化已完成，再合并并同步 bodyRenderers，源部件保持禁用。
+        /// </summary>
+        private void Start()
+        {
+            var bodyMerge = CharacterVisualAssembler.MergeBodyRuntime(new CharacterVisualAssembler.BodyRigRefs
+            {
+                Spine = spineTransform,
+                Chest = chestTransform,
+                Head = headTransform,
+                Face = faceTransform,
+                LeftEye = leftEyeTransform,
+                RightEye = rightEyeTransform,
+                Backpack = chestTransform != null ? chestTransform.Find("InkTankBackpack") : null,
+                TankFill = tankLiquidFill,
+                LeftArm = leftArmTransform,
+                RightArm = rightArmTransform,
+                LeftElbow = leftElbowPivot,
+                RightElbow = rightElbowPivot,
+                LeftAnkle = leftAnklePivot,
+                RightAnkle = rightAnklePivot,
+                HairRootPivots = kidHairRootPivots,
+                SquidBody = squidBodyTransform,
+                SquidTentacles = _squidTentacles
+            });
+
+            if (bodyMerge != null && bodyMerge.Merged.Count > 0)
+            {
+                var health = GetComponentInParent<CombatantHealth>();
+                if (health != null)
+                {
+                    health.ApplyMergedBodyRenderers(bodyMerge.Sources, bodyMerge.Merged);
+                }
+            }
+        }
+
+        /// <summary>
         /// P30 接触阴影：运行时创建一次，挂在角色根节点（visualRoot 的父节点）下。
         /// 编辑模式不创建，避免把运行时生成的网格/材质引用写进场景 YAML。
         /// </summary>
@@ -2488,7 +2527,7 @@ namespace P1.Player
 
             Vector3 origin = drumAxis + Vector3.up * 1.0f;
             int count = Physics.RaycastNonAlloc(
-                origin, Vector3.down, _rollerGroundHits, 2.5f, ~0, QueryTriggerInteraction.Ignore);
+                origin, Vector3.down, _rollerGroundHits, 2.5f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore);
 
             Transform selfRoot = _motor != null ? _motor.transform : transform.root;
             float nearest = float.PositiveInfinity;
@@ -2497,8 +2536,9 @@ namespace P1.Player
                 Collider col = _rollerGroundHits[i].collider;
                 if (col == null || col.transform.IsChildOf(selfRoot))
                     continue;
-                // 其他角色（CharacterController / 角色受击体）不是地形：滚筒压上去会被顶到半空
-                if (col is CharacterController || col.GetComponentInParent<InkCharacterMotor>() != null)
+                // 其他角色不是地形：WorldMask 已排除 Combatant 层；保留 CharacterController 类型判断，
+                // 兼容「层还没建立」的旧场景/测试（此时 mask 回退 ~0）。
+                if (col is CharacterController)
                     continue;
                 float d = _rollerGroundHits[i].distance;
                 if (d < nearest)

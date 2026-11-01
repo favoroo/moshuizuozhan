@@ -52,8 +52,10 @@ namespace P1.Weapons
             CombatantHealth attacker = ownerRoot != null ? ownerRoot.GetComponent<CombatantHealth>() : null;
 
             // 2. 贯穿伤害：路径上所有敌人（到光束线段的距离在身体容差内）
+            //    终场哨响后只保留光束表现，不再结算伤害与涂地。
+            bool settleAllowed = MatchManager.CombatSettlementAllowed;
             var all = CombatantHealthRegistry.All;
-            for (int i = 0; i < all.Count; i++)
+            for (int i = 0; settleAllowed && i < all.Count; i++)
             {
                 CombatantHealth victim = all[i];
                 if (victim == null || !victim.IsAlive || !victim.Team.IsOpponentOf(team))
@@ -90,7 +92,7 @@ namespace P1.Weapons
             // 不在地面凭空铺墨线：墨线是「打在地上」的结果，射进天空的墨应该直接消失。
             bool paintsGround = hitWorld || end.y <= impactPoint.y + 2f;
 
-            if (paintsGround && InkSurfaceController.Instance != null)
+            if (paintsGround && settleAllowed && InkSurfaceController.Instance != null)
             {
                 float step = Mathf.Max(0.2f, beam.PaintStep);
                 float lineRadius = Mathf.Max(0.05f, beam.PaintRadius);
@@ -153,7 +155,7 @@ namespace P1.Weapons
                 return false;
 
             int count = Physics.RaycastNonAlloc(
-                origin, direction.normalized, RaycastBuffer, range, ~0, QueryTriggerInteraction.Ignore);
+                origin, direction.normalized, RaycastBuffer, range, GameLayers.QueryMask, QueryTriggerInteraction.Ignore);
 
             float closest = float.MaxValue;
             bool found = false;
@@ -203,7 +205,7 @@ namespace P1.Weapons
         {
             normal = Vector3.up;
             Vector3 rayOrigin = worldPos + Vector3.up * 3f;
-            int count = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, GroundBuffer, 8f, ~0, QueryTriggerInteraction.Ignore);
+            int count = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, GroundBuffer, 8f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore);
 
             float closest = float.MaxValue;
             Vector3 point = new Vector3(worldPos.x, 0f, worldPos.z);

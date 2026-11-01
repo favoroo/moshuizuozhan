@@ -118,9 +118,10 @@ namespace P1.Editor
             SetFloat(so, "chunkyShadowOffsetX", -0.04f);
             SetFloat(so, "chunkyShadowOffsetY", 0.04f);
 
-            // ---------- 字体 ----------
-            SetObject(so, "displayFont", LoadFont("TitanOne-Regular SDF"));
-            SetObject(so, "bodyFont", LoadFont("Rubik-Bold SDF"));
+            // ---------- 字体：全站唯一家族 MiSans（正文 Semibold / 标题 Heavy）----------
+            // 拉丁不再单独走 TitanOne/Rubik：四家族混排的中英笔画粗细、行高、字距都不一致。
+            SetObject(so, "displayFont", LoadFont("MiSans-Heavy SDF"));
+            SetObject(so, "bodyFont", LoadFont("MiSans-Semibold SDF"));
             SetObject(so, "displayCjkFont", LoadFont("MiSans-Heavy SDF"));
             SetObject(so, "bodyCjkFont", LoadFont("MiSans-Semibold SDF"));
 

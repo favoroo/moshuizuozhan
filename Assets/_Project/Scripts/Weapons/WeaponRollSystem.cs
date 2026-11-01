@@ -25,6 +25,10 @@ namespace P1.Weapons
             CombatantHealth attacker = null,
             Action<int> onWallPainted = null)
         {
+            // 终场哨响后不再涂地/碾压：推地墨带与碾压判定都直接停掉（统计已结算完毕）。
+            if (!MatchManager.CombatSettlementAllowed)
+                return 0;
+
             int painted = PaintBand(sweep, team, out int wallPainted);
             DealDamage(sweep, team, hitTimes, now, attacker);
             if (wallPainted > 0)

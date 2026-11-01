@@ -61,8 +61,11 @@ namespace P1.Weapons
             public bool IsLocalOwner;
         }
 
-        private readonly List<ActiveProjectile> _active = new List<ActiveProjectile>(64);
-        private readonly Queue<Transform> _pool = new Queue<Transform>(64);
+        private readonly List<ActiveProjectile> _active = new List<ActiveProjectile>(96);
+        private readonly Queue<Transform> _pool = new Queue<Transform>(96);
+        // 弹丸每帧要做命中过滤：collider→角色缓存把每弹每帧的 GetComponentInParent 降为一次性。
+        private readonly Dictionary<Collider, CombatantHealth> _combatantCache = new Dictionary<Collider, CombatantHealth>(64);
+        private const int PrewarmCount = 96;
         private Material _sharedMat;
         private MaterialPropertyBlock _propBlock;
         private readonly RaycastHit[] _hitBuffer = new RaycastHit[8];
@@ -106,7 +109,7 @@ namespace P1.Weapons
             _sharedMat = new Material(sh) { name = "InkProjectileMat" };
             _cometMesh = BuildCometMesh(16);
 
-            for (int i = 0; i < 48; i++)
+            for (int i = 0; i < PrewarmCount; i++)
             {
                 _pool.Enqueue(CreateVisualNode(i));
             }
@@ -136,6 +139,28 @@ namespace P1.Weapons
             {
                 RecycleAt(i);
             }
+            _combatantCache.Clear();
+        }
+
+        /// <summary>
+        /// collider → 角色缓存：世界碰撞体的查询结果（null）也缓存，避免弹丸反复对同一批墙面做
+        /// GetComponentInParent 的层级遍历。比赛重置时随 <see cref="ClearAllProjectiles"/> 清空。
+        /// </summary>
+        private CombatantHealth ResolveCombatant(Collider collider)
+        {
+            if (collider == null)
+                return null;
+
+            if (_combatantCache.TryGetValue(collider, out CombatantHealth cached))
+            {
+                if (cached != null)
+                    return cached;
+                _combatantCache.Remove(collider);
+            }
+
+            CombatantHealth combatant = collider.GetComponentInParent<CombatantHealth>();
+            _combatantCache[collider] = combatant;
+            return combatant;
         }
 
         public void SpawnProjectile(
@@ -259,6 +284,9 @@ namespace P1.Weapons
             float dt = Time.deltaTime;
             if (dt <= 0f) return;
 
+            // 终场哨响后：已发射的墨滴仍继续飞行（表现不中断），但不再沿途滴墨、撞击结算伤害/涂地。
+            bool settleAllowed = MatchManager.CombatSettlementAllowed;
+
             for (int i = _active.Count - 1; i >= 0; i--)
             {
                 ActiveProjectile p = _active[i];
@@ -294,7 +322,7 @@ namespace P1.Weapons
                 // 1. SphereCast 碰撞检测（敌人 / 掩体墙 / 地面斜坡）
                 if (TryCheckImpact(in p, dir, stepDist, out RaycastHit hit, out CombatantHealth hitCombatant))
                 {
-                    HandleImpact(ref p, hit, hitCombatant, dir);
+                    HandleImpact(ref p, hit, hitCombatant, dir, settleAllowed);
                     RecycleAt(i);
                     continue;
                 }
@@ -305,8 +333,8 @@ namespace P1.Weapons
                 p.RangeTraveled += new Vector2(moveVec.x, moveVec.z).magnitude;
 
                 // 2. 沿途滴墨：按 1.05m 间距向地面投射小墨点，并在两次落点间补间成连续墨道；
-                //    自由落体阶段墨滴已失去拖尾能量，不再沿途滴墨。
-                if (!p.Dropping)
+                //    自由落体阶段墨滴已失去拖尾能量，不再沿途滴墨；终场后也不再留下新墨迹。
+                if (!p.Dropping && settleAllowed)
                 {
                     UpdateTrailDrips(ref p, previousPosition, moveVec, stepDist);
                 }
@@ -372,11 +400,27 @@ namespace P1.Weapons
             }
         }
 
-        private void HandleImpact(ref ActiveProjectile p, RaycastHit hit, CombatantHealth hitCombatant, Vector3 incomingDir)
+        private void HandleImpact(
+            ref ActiveProjectile p,
+            RaycastHit hit,
+            CombatantHealth hitCombatant,
+            Vector3 incomingDir,
+            bool settleAllowed = true)
         {
             Vector3 impactPos = hit.point;
             Vector3 impactNormal = hit.normal.sqrMagnitude > 0.0001f ? hit.normal : Vector3.up;
             float splatRadius = UnityEngine.Random.Range(p.EndSplatRadiusMin, p.EndSplatRadiusMax);
+
+            // 终场哨响后不再结算伤害 / 涂地 / 统计，只保留一下撞击表现。
+            if (!settleAllowed)
+            {
+                if (VfxPool.Instance != null)
+                {
+                    VfxPool.Instance.SpawnInkImpact(
+                        impactPos, impactNormal, p.Color, splatRadius, 3, incomingDir, p.IsLocalOwner);
+                }
+                return;
+            }
 
             // 射程耗尽后的落滴：已经失去前冲动能，落地只留一枚圆形墨斑，不做方向拉伸。
             if (p.Dropping)
@@ -385,7 +429,9 @@ namespace P1.Weapons
                 return;
             }
 
-            // 爆破枪命中时发生爆裂溅射
+            // 爆破枪命中：由爆裂本身完成溅射伤害、涂地与全部 VFX/音效，
+            // 之后必须直接结束——旧实现漏了 return，会继续走通用分支二次涂墨、二次涟漪/粒子/音效。
+            // 直击目标仍要在这里单独补结算一次直伤（Explode 会跳过直击目标，避免重复受伤）。
             if (p.IsBlaster)
             {
                 WeaponBlasterSystem.Explode(
@@ -399,6 +445,21 @@ namespace P1.Weapons
                     hitCombatant, // 直击目标跳过溅射
                     p.OnCellsPainted,
                     p.OnWallCellsPainted);
+
+                if (hitCombatant != null)
+                {
+                    float directDamage = WeaponShot.ComputeDamage(
+                        p.Damage, p.FarDamage, p.FalloffStart, p.FalloffDistance, p.DistanceTraveled);
+                    if (directDamage > 0f)
+                    {
+                        CombatantHealth attacker = p.OwnerRoot != null
+                            ? p.OwnerRoot.GetComponent<CombatantHealth>()
+                            : null;
+                        hitCombatant.TakeDamage(directDamage, p.Team, impactPos, attacker);
+                    }
+                }
+
+                return;
             }
 
             if (hitCombatant != null)
@@ -704,7 +765,7 @@ namespace P1.Weapons
             bestHit = default;
             bestCombatant = null;
 
-            int count = Physics.SphereCastNonAlloc(p.Position, p.HitRadius, dir, _hitBuffer, stepDist, ~0, QueryTriggerInteraction.Ignore);
+            int count = Physics.SphereCastNonAlloc(p.Position, p.HitRadius, dir, _hitBuffer, stepDist, GameLayers.QueryMask, QueryTriggerInteraction.Ignore);
             if (count <= 0)
                 return false;
 
@@ -718,7 +779,7 @@ namespace P1.Weapons
                 if (p.OwnerRoot != null && h.collider.transform.IsChildOf(p.OwnerRoot.transform))
                     continue;
 
-                var combatant = h.collider.GetComponentInParent<CombatantHealth>();
+                var combatant = ResolveCombatant(h.collider);
                 if (combatant != null)
                 {
                     // 友方角色不挡己方子弹
@@ -764,7 +825,7 @@ namespace P1.Weapons
 
         private static bool TryProjectToGround(Vector3 worldPos, out Vector3 groundPoint)
         {
-            if (Physics.Raycast(worldPos + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 8f, ~0, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(worldPos + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 8f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore))
             {
                 groundPoint = hit.point;
                 return true;
@@ -776,7 +837,7 @@ namespace P1.Weapons
 
         private static Vector3 ProjectToGround(Vector3 worldPos, out Vector3 groundNormal)
         {
-            if (Physics.Raycast(worldPos + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 12f, ~0, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(worldPos + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 12f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore))
             {
                 groundNormal = hit.normal.sqrMagnitude > 0.0001f ? hit.normal : Vector3.up;
                 return hit.point;

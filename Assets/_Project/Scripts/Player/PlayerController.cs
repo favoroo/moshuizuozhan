@@ -20,6 +20,8 @@ namespace P1.Player
         public static PlayerController LocalPlayer { get; private set; }
 
         private const float MouseLookDegreesPerPixel = 0.12f;
+        /// <summary>投掷链路调试日志开关：默认关闭，避免 Development 构建每次操作分配字符串污染性能采样。</summary>
+        private const bool VerboseBombDebug = false;
         private const float TouchLookDegreesPerPixel = 0.18f;
         private const float GamepadLookYawPerSecond = 180f;
         private const float GamepadLookPitchPerSecond = 110f;
@@ -212,6 +214,13 @@ namespace P1.Player
 
             if (!_health.IsAlive || !gameplayActive)
             {
+                // 暂停 / 终场 / 死亡：显式告知武器「本帧输入被抑制」。
+                // 否则 WeaponController 会把「这一帧没收到扳机」误当成松手，
+                // 让蓄力狙自动开炮、加特林自动扫射、滚筒补一次挥击。
+                // 同时把真实按键状态传过去：暂停中松手后恢复不会被误当作仍按住。
+                if (_weapon != null)
+                    _weapon.SetTriggerSuppressed(true, ReadFireHeld());
+
                 TouchLookDelta = Vector2.zero;
                 _swimInput.Reset();
                 _bombArbiter.Reset();
@@ -245,7 +254,7 @@ namespace P1.Player
             bool touchBombThrow = TouchBombTriggered;
             TouchBombTriggered = false;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (touchBombThrow)
+            if (VerboseBombDebug && touchBombThrow)
             {
                 Debug.Log($"[Bomb] 触屏投掷注入: special={_weapon.IsPerformingSpecial}");
             }
@@ -292,13 +301,42 @@ namespace P1.Player
 
             // 6. 技能与开火触发（潜行中按开火会在本帧立即出枪）
             bool isFiringOrActing = false;
+
+            // 双枪战术翻滚：人形状态下在移动或开火中按下跳跃，触发战术翻滚（而非垂直跳跃）
+            if (wantsJump && !wantsSwim && _weapon != null && _weapon.CurrentWeaponKind == WeaponKind.Dualies)
+            {
+                if (!_weapon.IsRollingDodge && _weapon.RollsRemaining > 0 && (fireHeld || wantsFire || moveWorld.sqrMagnitude > 0.04f))
+                {
+                    Vector3 rollDir = moveWorld.sqrMagnitude > 0.04f
+                        ? moveWorld.normalized
+                        : (_aimDirection.sqrMagnitude > 0.01f ? new Vector3(_aimDirection.x, 0f, _aimDirection.z).normalized : transform.forward);
+                    if (_weapon.TryDodgeRoll(rollDir))
+                    {
+                        wantsJump = false;
+                        isFiringOrActing = true;
+                    }
+                }
+            }
+
+            if (_weapon != null && _weapon.IsRollingDodge)
+            {
+                wantsJump = false;
+                isFiringOrActing = true;
+            }
+
             if (specialReadyPressed)
             {
+                // 本帧主武器没有吃到扳机（放大了大招），必须显式抑制，
+                // 否则蓄力狙/加特林会把这一帧当成松手直接开火。
+                _weapon.SetTriggerSuppressed();
                 _weapon.TryActivateSpecial();
                 isFiringOrActing = true;
             }
             else if (executeBombThrow)
             {
+                // 投掷仲裁占用了本帧：同样抑制主武器，避免蓄力狙自动开炮、滚筒多挥一次。
+                _weapon.SetTriggerSuppressed();
+
                 // inkwave 弹道模型：以相机俯仰解算的初速真实抛出，准星方向即投掷方向
                 bool thrown = _weapon.TryThrowSubBombBallistic(ComputeBombThrowVelocity());
                 if (!thrown)
@@ -315,7 +353,10 @@ namespace P1.Player
                     }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    Debug.Log($"[Bomb] 投掷被拒: reason={LastSubBombDenyReason} touch={touchBombThrow} cooldownRemaining={_weapon.BombCooldownRemaining:0.00}");
+                    if (VerboseBombDebug)
+                    {
+                        Debug.Log($"[Bomb] 投掷被拒: reason={LastSubBombDenyReason} touch={touchBombThrow} cooldownRemaining={_weapon.BombCooldownRemaining:0.00}");
+                    }
 #endif
                 }
                 isFiringOrActing = true;
@@ -479,7 +520,7 @@ namespace P1.Player
 
             Vector3 hitPoint = origin + forward * maxDistance;
             int hitCount = Physics.RaycastNonAlloc(
-                origin, forward, _aimHits, maxDistance, ~0, QueryTriggerInteraction.Ignore);
+                origin, forward, _aimHits, maxDistance, GameLayers.QueryMask, QueryTriggerInteraction.Ignore);
 
             float nearest = float.PositiveInfinity;
             bool rayHitWorld = false;
@@ -655,7 +696,7 @@ namespace P1.Player
 
         private static bool HasClearShot(Vector3 origin, Vector3 target, CombatantHealth targetHealth)
         {
-            if (Physics.Linecast(origin, target, out RaycastHit hit, ~0, QueryTriggerInteraction.Ignore))
+            if (Physics.Linecast(origin, target, out RaycastHit hit, GameLayers.QueryMask, QueryTriggerInteraction.Ignore))
             {
                 CombatantHealth hitHealth = hit.collider != null
                     ? hit.collider.GetComponentInParent<CombatantHealth>()

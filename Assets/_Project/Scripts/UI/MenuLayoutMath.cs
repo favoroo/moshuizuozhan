@@ -113,6 +113,15 @@ namespace P1.UI
         /// <summary>安全区底部到卡片区底部的距离：预留左下「武器整备」整备卡 + 角签。</summary>
         public float CardBottom;
 
+        /// <summary>
+        /// 版面垂直居中后的卡片区顶部 = 上下留白的均分点。
+        /// 历史版面按 CardTop 压顶排布，而 CardBottom 预留的底部空间（桌面 200 / 移动 228）
+        /// 在「武器整备」卡搬进 Hero 卡后基本空置，底部留白远大于顶部。
+        /// <see cref="ResolveHomeBoard"/> 与 <see cref="HeroWeaponSlot"/> 必须同源使用此值，
+        /// 否则整备卡会脱离 Hero 卡。
+        /// </summary>
+        public float CenteredBoardTop => (CardTop + CardBottom) * 0.5f;
+
         /// <summary>Hero 卡与右侧 2×2 卡阵之间的横向间隔。</summary>
         public float ColumnGap;
 
@@ -192,8 +201,9 @@ namespace P1.UI
                 float height = cardSize.y;
                 float x = Margin + HeroPadding.x;
 
-                // 垂直排版：位于顶部 Tag 之下，与 CTA 左右严格对齐，垂直居中偏上留出呼吸空间
-                float topSpace = CardTop + HeroPadding.y + TagSize.y + (ShowTopButton ? 32f : 68f);
+                // 垂直排版：位于顶部 Tag 之下，与 CTA 左右严格对齐，留出充裕呼吸空间（桌面 68px，移动 48px，绝不与 PLAY 标签重叠）
+                // Y 基准用 CenteredBoardTop（与 ResolveHomeBoard 同源）：版面垂直居中后 Hero 卡顶不再等于 CardTop。
+                float topSpace = CenteredBoardTop + HeroPadding.y + TagSize.y + (ShowTopButton ? 48f : 68f);
                 return new HomeBox(x, topSpace, width, height);
             }
         }
@@ -431,7 +441,10 @@ namespace P1.UI
             {
                 return new WeaponDrawerMetrics
                 {
-                    Width = 620f,
+                    // 桌面抽屉也走双列网格（与移动端同构）：1204 = 580（WeaponCardView 桌面卡宽）×2
+                    // + 16 列间距 + 14×2 左右内缩，单元宽与卡片硬编码宽度严格一致；
+                    // 7 张卡 4 行在参考画布一屏放下，无需滚动。
+                    Width = 1204f,
                     HeaderHeight = 88f,
                     HeaderTitleFont = 28f,
                     HeaderSubtitleFont = 18f,
@@ -490,7 +503,8 @@ namespace P1.UI
         /// <summary>
         /// 首页卡片区的运行时几何（纯函数，MatchFlowUI 每次构建/重排时调用）：
         /// 高度跟着安全区高度走（20:9 手机的逻辑画布只有约 966 高，写死 1080 会把卡片压出屏幕）；
-        /// 宽度按刘海内缩自适应。
+        /// 宽度按刘海内缩自适应；整体在安全区内**垂直居中**（上下留白均分，
+        /// 见 <see cref="HomeMenuMetrics.CenteredBoardTop"/>——底部不再积压大片空白）。
         ///
         /// 防御：Android 启动/旋转瞬间 safeArea 与 Screen 可能短暂不在同一像素空间，
         /// 读出的「安全区」会比画布还大（真机 20:9 实测约大 18% 宽 / 24% 高），
@@ -511,7 +525,7 @@ namespace P1.UI
 
             return new HomeRuntimeBoard
             {
-                Top = m.CardTop,
+                Top = m.CenteredBoardTop,
                 Height = height,
                 HeroWidth = heroWidth,
                 GridX = safeW - m.Margin - m.GridWidth,

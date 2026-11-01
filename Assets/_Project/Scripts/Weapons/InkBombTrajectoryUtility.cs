@@ -35,7 +35,7 @@ namespace P1.Weapons
             Vector3 flatDir = targetGroundPos - startPos;
             flatDir.y = 0f;
             if (flatDir.sqrMagnitude > 0.05f &&
-                Physics.Raycast(rayOrigin, flatDir.normalized, out RaycastHit wallHit, flatDir.magnitude, ~0, QueryTriggerInteraction.Ignore))
+                Physics.Raycast(rayOrigin, flatDir.normalized, out RaycastHit wallHit, flatDir.magnitude, GameLayers.QueryMask, QueryTriggerInteraction.Ignore))
             {
                 if (wallHit.normal.y < 0.4f)
                 {
@@ -43,7 +43,7 @@ namespace P1.Weapons
                 }
             }
 
-            if (Physics.Raycast(new Vector3(targetGroundPos.x, 8f, targetGroundPos.z), Vector3.down, out RaycastHit groundHit, 16f, ~0, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(new Vector3(targetGroundPos.x, 8f, targetGroundPos.z), Vector3.down, out RaycastHit groundHit, 16f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore))
             {
                 targetGroundPos.y = groundHit.point.y;
             }
@@ -276,7 +276,7 @@ namespace P1.Weapons
         public static bool CastWorldSegment(Vector3 origin, Vector3 direction, float distance, Transform ignoreRoot, out RaycastHit hit)
         {
             int hitCount = Physics.RaycastNonAlloc(
-                origin, direction, s_segmentHits, distance, ~0, QueryTriggerInteraction.Ignore);
+                origin, direction, s_segmentHits, distance, GameLayers.QueryMask, QueryTriggerInteraction.Ignore);
             float nearest = float.PositiveInfinity;
             bool found = false;
             hit = default;

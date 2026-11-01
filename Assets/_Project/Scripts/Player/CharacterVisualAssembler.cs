@@ -44,6 +44,7 @@ namespace P1.Player
             _hairSeg2Mesh = null;
             _squidMesh = null;
             _mergedMeshCache.Clear();
+            _mergedBodyMeshCache.Clear();
         }
 
         #region Public Assembly Entry
@@ -135,6 +136,42 @@ namespace P1.Player
             catch (System.Exception e)
             {
                 Debug.LogWarning($"[CharacterVisualAssembler] 武器静态网格合并失败，已降级为独立部件渲染：{e}");
+            }
+
+            // 5.3 角色刚体部件合批（P21 性能）：
+            //     角色约 70 件刚体部件，按「动画枢轴 × 材质」合并后每角色减少 ~20 个 DrawCall。
+            //     眼睛/面部/头部/手臂/背包/脊柱小件各自合并；头发根梢、液面、蓄力线圈等动画件保持独立。
+            //     源部件只禁用 MeshRenderer，测试锚点与控制器绑定全部保留；失败自动降级。
+            try
+            {
+                if (EnableBodyMerge)
+                {
+                    Transform backpack = chest != null ? chest.Find("InkTankBackpack") : null;
+                    MergeBodyStaticMeshes(new BodyRigRefs
+                    {
+                        Spine = spine,
+                        Chest = chest,
+                        Head = head,
+                        Face = face,
+                        LeftEye = leftEye,
+                        RightEye = rightEye,
+                        Backpack = backpack,
+                        TankFill = tankFill,
+                        LeftArm = leftArm,
+                        RightArm = rightArm,
+                        LeftElbow = leftElbow,
+                        RightElbow = rightElbow,
+                        LeftAnkle = leftAnkle,
+                        RightAnkle = rightAnkle,
+                        HairRootPivots = hairRootPivots,
+                        SquidBody = squidBody,
+                        SquidTentacles = tentacleArray
+                    });
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[CharacterVisualAssembler] 角色刚体部件合并失败，已降级为独立部件渲染：{e}");
             }
 
             // 6. 挂载并绑定 CharacterVisualController
@@ -2085,6 +2122,26 @@ namespace P1.Player
             Renderer[] skipRenderers,
             List<MeshRenderer> results)
         {
+            CollectMergeableParts(current, skipSubtrees, skipRenderers, results, false);
+        }
+
+        /// <summary>
+        /// 深度优先收集可合并部件。武器合并不收集合并根自身（根上没有渲染器）；
+        /// 角色眼/乌贼身体等「根自身就是一个渲染器」的枢轴传 includeRootRenderer = true。
+        /// </summary>
+        private static void CollectMergeableParts(
+            Transform current,
+            Transform[] skipSubtrees,
+            Renderer[] skipRenderers,
+            List<MeshRenderer> results,
+            bool includeRootRenderer)
+        {
+            if (current == null)
+                return;
+
+            if (includeRootRenderer)
+                AddIfMergeable(current, skipRenderers, results);
+
             for (int i = 0; i < current.childCount; i++)
             {
                 Transform child = current.GetChild(i);
@@ -2092,18 +2149,23 @@ namespace P1.Player
                 if (child.name.StartsWith(MergedPartPrefix)) continue; // 防御：避免重复收集已合并对象
                 if (child.name == "Muzzle") continue;                  // 枪口锚点子树（当前无渲染器，防御性跳过）
 
-                var rend = child.GetComponent<MeshRenderer>();
-                var filter = child.GetComponent<MeshFilter>();
-                if (rend != null && filter != null && filter.sharedMesh != null && rend.sharedMaterial != null)
-                {
-                    if (skipRenderers == null || !ContainsReference(skipRenderers, rend))
-                    {
-                        results.Add(rend);
-                    }
-                }
+                AddIfMergeable(child, skipRenderers, results);
 
                 // 当前部件均为叶子，防御性支持未来嵌套部件结构
                 CollectMergeableParts(child, skipSubtrees, skipRenderers, results);
+            }
+        }
+
+        private static void AddIfMergeable(Transform node, Renderer[] skipRenderers, List<MeshRenderer> results)
+        {
+            var rend = node.GetComponent<MeshRenderer>();
+            var filter = node.GetComponent<MeshFilter>();
+            if (rend != null && filter != null && filter.sharedMesh != null && rend.sharedMaterial != null)
+            {
+                if (skipRenderers == null || !ContainsReference(skipRenderers, rend))
+                {
+                    results.Add(rend);
+                }
             }
         }
 
@@ -2119,11 +2181,22 @@ namespace P1.Player
             Transform bakeRoot,
             List<MeshRenderer> members)
         {
+            return BuildMergedGroupMeshCore(
+                "MergedWeapon_" + kind + "_R" + mergeIndex + "_G" + groupIndex,
+                bakeRoot,
+                members);
+        }
+
+        private static Mesh BuildMergedGroupMeshCore(
+            string mergedMeshName,
+            Transform bakeRoot,
+            List<MeshRenderer> members)
+        {
             // 1. 顶点属性布局一致性校验（防御：未来若混入非 Primitive 网格则整组放弃合并）
             Mesh firstMesh = members[0].GetComponent<MeshFilter>().sharedMesh;
             if (firstMesh == null || firstMesh.subMeshCount != 1)
             {
-                Debug.LogWarning($"[CharacterVisualAssembler] 武器 {kind} 材质组 {groupIndex} 首个网格无效或多 submesh，放弃合并该组");
+                Debug.LogWarning($"[CharacterVisualAssembler] 合并组 {mergedMeshName} 首个网格无效或多 submesh，放弃合并该组");
                 return null;
             }
             bool needNormals = firstMesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.Normal);
@@ -2137,7 +2210,7 @@ namespace P1.Player
                     mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.TexCoord0) != needUv ||
                     mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.Tangent) != needTangents)
                 {
-                    Debug.LogWarning($"[CharacterVisualAssembler] 武器 {kind} 材质组 {groupIndex} 顶点属性不一致，放弃合并该组（保持独立渲染）");
+                    Debug.LogWarning($"[CharacterVisualAssembler] 合并组 {mergedMeshName} 顶点属性不一致，放弃合并该组（保持独立渲染）");
                     return null;
                 }
             }
@@ -2152,7 +2225,7 @@ namespace P1.Player
                 combine[i].transform = rootWorldToLocal * members[i].transform.localToWorldMatrix;
             }
 
-            var merged = new Mesh { name = "MergedWeapon_" + kind + "_R" + mergeIndex + "_G" + groupIndex };
+            var merged = new Mesh { name = mergedMeshName };
             try
             {
                 merged.CombineMeshes(combine, true, true);
@@ -2160,7 +2233,7 @@ namespace P1.Player
             catch (System.Exception e)
             {
                 Object.DestroyImmediate(merged);
-                Debug.LogWarning($"[CharacterVisualAssembler] CombineMeshes 失败（{kind} 根 {mergeIndex} 组 {groupIndex}）：{e.Message}，该组保持独立渲染");
+                Debug.LogWarning($"[CharacterVisualAssembler] CombineMeshes 失败（{mergedMeshName}）：{e.Message}，该组保持独立渲染");
                 return null;
             }
 
@@ -2221,6 +2294,271 @@ namespace P1.Player
                 if (ReferenceEquals(array[i], r)) return true;
             }
             return false;
+        }
+
+        #endregion
+
+        #region Body Static Mesh Merge
+
+        /// <summary>
+        /// 角色刚体部件合并的根引用集合：装配期与运行时兜底共用。
+        /// 每一项都是「动画枢轴」——合并网格挂在该枢轴下，随枢轴整体旋转/缩放，
+        /// 部件之间的相对位姿被烘焙进网格，动画表现与逐件渲染完全一致。
+        /// </summary>
+        public struct BodyRigRefs
+        {
+            public Transform Spine;
+            public Transform Chest;
+            public Transform Head;
+            public Transform Face;
+            public Transform LeftEye;
+            public Transform RightEye;
+            public Transform Backpack;
+            public Transform TankFill;
+            public Transform LeftArm;
+            public Transform RightArm;
+            public Transform LeftElbow;
+            public Transform RightElbow;
+            public Transform LeftAnkle;
+            public Transform RightAnkle;
+            public Transform[] HairRootPivots;
+            public Transform SquidBody;
+            public Transform[] SquidTentacles;
+        }
+
+        /// <summary>合并结果：被禁用渲染的源部件 + 新挂载的合并渲染器，供 CombatantHealth 同步 bodyRenderers。</summary>
+        public sealed class BodyMergeResult
+        {
+            public readonly List<Renderer> Sources = new List<Renderer>();
+            public readonly List<Renderer> Merged = new List<Renderer>();
+        }
+
+        /// <summary>运行时兜底开关：出现任何显示回归时可整体关闭，不影响武器合并。</summary>
+        public static bool EnableBodyMerge = true;
+
+        /// <summary>合并诊断日志开关（仅排查用，默认关闭避免启动刷屏）。</summary>
+        public static bool VerboseBodyMergeLog = false;
+
+        /// <summary>最近一次角色合并的逐根诊断（排查「哪些樞軸没合上」用；每个角色启动刷新一次）。</summary>
+        public static string LastMergeDiagnostics { get; private set; } = string.Empty;
+        private static readonly System.Text.StringBuilder MergeDiag = new System.Text.StringBuilder(256);
+
+        /// <summary>角色合并网格缓存：几何完全确定性，跨实例/跨队伍共享（材质不参与缓存 key）。</summary>
+        private static readonly Dictionary<string, List<Mesh>> _mergedBodyMeshCache =
+            new Dictionary<string, List<Mesh>>();
+
+        /// <summary>
+        /// 对角色刚体部件执行「按动画枢轴 × 材质」合并：
+        /// - 眼睛（眼球+虹膜+瞳孔+两枚高光）、面部贴片、头部皮肤件、手臂/肘/踝、背包、脊柱小件、
+        ///   乌贼身体与眼睛各自合并成少量网格；头发根/梢、滚筒、蓄力线圈、液面等动画件保持独立；
+        /// - 源部件只禁用 MeshRenderer（GameObject 与测试锚点层级全部保留）；
+        /// - 任何一组失败都只让该组维持原状（降级而非缺件）。
+        /// </summary>
+        public static BodyMergeResult MergeBodyStaticMeshes(BodyRigRefs refs)
+        {
+            MergeDiag.Clear();
+            var result = new BodyMergeResult();
+
+            // 脊柱：T 恤 + 腰带 + 胸口墨点；Chest 子树（头/手/背包/武器）整体跳过
+            MergeBodyRoot("Kid/Spine", refs.Spine, Skips(refs.Chest), false, result);
+
+            // 头：馒头头 + 头皮帽 + 双耳；面部与六束头发各自作为独立枢轴跳过
+            var headSkips = new List<Transform>(9);
+            if (refs.Face != null) headSkips.Add(refs.Face);
+            if (refs.HairRootPivots != null)
+            {
+                for (int i = 0; i < refs.HairRootPivots.Length; i++)
+                {
+                    if (refs.HairRootPivots[i] != null) headSkips.Add(refs.HairRootPivots[i]);
+                }
+            }
+            MergeBodyRoot("Kid/Head", refs.Head, headSkips.ToArray(), false, result);
+
+            // 面部（不含眼睛）：眼罩/眉/嘴一组，腮红一组
+            MergeBodyRoot("Kid/Face", refs.Face, Skips(refs.LeftEye, refs.RightEye), false, result);
+
+            // 眼睛：眼球与虹膜/瞳孔/高光同枢轴，眨眼缩放的是眼睛自身，合并后仍然正确
+            MergeBodyRoot("Kid/Eye_L", refs.LeftEye, null, true, result);
+            MergeBodyRoot("Kid/Eye_R", refs.RightEye, null, true, result);
+
+            // 背包：罐盖/阀钮/底板/玻璃腔；液面随墨水余量缩放，跳过
+            MergeBodyRoot("Kid/Backpack", refs.Backpack, Skips(refs.TankFill), false, result);
+
+            // 手臂：肩球+短袖；肘枢轴（前臂/手/拇指/袖口）单独合并
+            MergeBodyRoot("Kid/Arm_L", refs.LeftArm, Skips(refs.LeftElbow), false, result);
+            MergeBodyRoot("Kid/Arm_R", refs.RightArm, Skips(refs.RightElbow), false, result);
+            MergeBodyRoot("Kid/Elbow_L", refs.LeftElbow, null, false, result);
+            MergeBodyRoot("Kid/Elbow_R", refs.RightElbow, null, false, result);
+
+            // 踝：鞋壳 + 白中底 + 鞋头 + 后跟片（4 件 → 3 组）
+            MergeBodyRoot("Kid/Ankle_L", refs.LeftAnkle, null, false, result);
+            MergeBodyRoot("Kid/Ankle_R", refs.RightAnkle, null, false, result);
+
+            // 乌贼形态：墨团 + 大眼（4 件 → 3 组）；拖尾触须逐根行波驱动，跳过
+            MergeBodyRoot("Squid/Body", refs.SquidBody, refs.SquidTentacles, true, result);
+
+            if (VerboseBodyMergeLog)
+            {
+                Debug.Log($"[BodyMerge] 合并完成：源部件 {result.Sources.Count} → 合并渲染器 {result.Merged.Count}");
+            }
+
+            LastMergeDiagnostics = MergeDiag.ToString();
+            return result;
+        }
+
+        /// <summary>
+        /// 运行时兜底合并（与武器合并同一策略）：已烘焙场景在首次 Start 补做一次，
+        /// 静态网格缓存跨实例共享、幂等守卫避免重复挂载。失败只告警，不拖垮角色。
+        /// </summary>
+        public static BodyMergeResult MergeBodyRuntime(BodyRigRefs refs)
+        {
+            if (!EnableBodyMerge)
+                return null;
+
+            try
+            {
+                return MergeBodyStaticMeshes(refs);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[CharacterVisualAssembler] 运行时角色部件合并失败，保持独立部件渲染：{e}");
+                return null;
+            }
+        }
+
+        private static Transform[] Skips(params Transform[] items)
+        {
+            if (items == null || items.Length == 0)
+                return null;
+
+            var list = new List<Transform>(items.Length);
+            for (int i = 0; i < items.Length; i++)
+            {
+                if (items[i] != null) list.Add(items[i]);
+            }
+            return list.Count > 0 ? list.ToArray() : null;
+        }
+
+        /// <summary>
+        /// 合并单个角色枢轴：收集 → 按 sharedMaterial 分组 → 生成/复用缓存网格 → 挂载 → 禁用源渲染。
+        /// 与 <see cref="MergeWeaponRoot"/> 同构；缓存 key 为枢轴语义名（Kid/Head 等），几何不依赖队伍色。
+        /// </summary>
+        private static void MergeBodyRoot(
+            string cacheKey,
+            Transform bakeRoot,
+            Transform[] skipSubtrees,
+            bool includeRootRenderer,
+            BodyMergeResult result)
+        {
+            if (bakeRoot == null)
+            {
+                MergeDiag.AppendLine($"{cacheKey}: root=null");
+                return;
+            }
+
+            // 幂等：该枢轴下已有合并产物（编辑器重装配 / 运行时兜底重入）直接跳过
+            for (int i = 0; i < bakeRoot.childCount; i++)
+            {
+                if (bakeRoot.GetChild(i).name.StartsWith(MergedPartPrefix))
+                {
+                    MergeDiag.AppendLine($"{cacheKey}: skip(already merged)");
+                    return;
+                }
+            }
+
+            var parts = new List<MeshRenderer>();
+            CollectMergeableParts(bakeRoot, skipSubtrees, null, parts, includeRootRenderer);
+            if (parts.Count < 2)
+            {
+                MergeDiag.AppendLine($"{cacheKey}: parts={parts.Count} <2");
+                return; // 单件没有合并收益
+            }
+
+            var groupMats = new List<Material>();
+            var groups = new List<List<MeshRenderer>>();
+            for (int i = 0; i < parts.Count; i++)
+            {
+                Material mat = parts[i].sharedMaterial;
+                if (mat == null) continue;
+                int gi = -1;
+                for (int m = 0; m < groupMats.Count; m++)
+                {
+                    if (ReferenceEquals(groupMats[m], mat)) { gi = m; break; }
+                }
+                if (gi < 0)
+                {
+                    gi = groupMats.Count;
+                    groupMats.Add(mat);
+                    groups.Add(new List<MeshRenderer>());
+                }
+                groups[gi].Add(parts[i]);
+            }
+            if (groups.Count == 0)
+            {
+                MergeDiag.AppendLine($"{cacheKey}: groups=0");
+                return;
+            }
+
+            if (VerboseBodyMergeLog)
+            {
+                Debug.Log($"[BodyMerge] {cacheKey}: {parts.Count} 件 → {groups.Count} 组");
+            }
+
+            List<Mesh> cachedGroups;
+            bool reuseCache = _mergedBodyMeshCache.TryGetValue(cacheKey, out cachedGroups)
+                              && cachedGroups != null && cachedGroups.Count == groups.Count;
+
+            var builtMeshes = new Mesh[groups.Count];
+            bool allGroupsBuilt = true;
+            for (int g = 0; g < groups.Count; g++)
+            {
+                if (reuseCache)
+                {
+                    builtMeshes[g] = cachedGroups[g];
+                    if (builtMeshes[g] == null) allGroupsBuilt = false;
+                    continue;
+                }
+                builtMeshes[g] = BuildMergedGroupMeshCore(cacheKey + "_G" + g, bakeRoot, groups[g]);
+                if (builtMeshes[g] == null) allGroupsBuilt = false;
+            }
+            // 失败组不落缓存：瞬时失败不能固化成永久跳过
+            if (!reuseCache && allGroupsBuilt)
+            {
+                _mergedBodyMeshCache[cacheKey] = new List<Mesh>(builtMeshes);
+            }
+
+            int mergedBefore = result.Merged.Count;
+            for (int g = 0; g < groups.Count; g++)
+            {
+                Mesh mergedMesh = builtMeshes[g];
+                if (mergedMesh == null) continue;
+                var members = groups[g];
+
+                var mergedGo = new GameObject(MergedPartPrefix + groupMats[g].name);
+                mergedGo.transform.SetParent(bakeRoot, false);
+                mergedGo.AddComponent<MeshFilter>().sharedMesh = mergedMesh;
+                var mergedRend = mergedGo.AddComponent<MeshRenderer>();
+                mergedRend.sharedMaterial = groupMats[g];
+
+                // 阴影行为按组内多数决定（与武器合并一致）；ApplyShadowCastingRules 按前缀跳过合并产物
+                int castCount = 0;
+                for (int i = 0; i < members.Count; i++)
+                {
+                    if (ShouldCastShadow(members[i].gameObject.name)) castCount++;
+                }
+                mergedRend.shadowCastingMode = castCount * 2 >= members.Count
+                    ? UnityEngine.Rendering.ShadowCastingMode.On
+                    : UnityEngine.Rendering.ShadowCastingMode.Off;
+
+                for (int i = 0; i < members.Count; i++)
+                {
+                    members[i].enabled = false;
+                    result.Sources.Add(members[i]);
+                }
+                result.Merged.Add(mergedRend);
+            }
+
+            MergeDiag.AppendLine($"{cacheKey}: parts={parts.Count} groups={groups.Count} merged={result.Merged.Count - mergedBefore}");
         }
 
         #endregion

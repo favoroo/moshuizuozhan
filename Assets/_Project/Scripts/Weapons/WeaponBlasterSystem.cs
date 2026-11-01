@@ -34,9 +34,12 @@ namespace P1.Weapons
             // P6-A：爆裂伤害同样携带归属者，供打击标记与击杀 Hitstop 使用
             CombatantHealth attacker = ownerRoot != null ? ownerRoot.GetComponent<CombatantHealth>() : null;
 
+            // 终场哨响后：爆裂只保留视觉/音效，不再结算溅射伤害与涂地（结算快照已经取过）。
+            bool settleAllowed = MatchManager.CombatSettlementAllowed;
+
             // 1. 范围溅射伤害（跳过已受直击的目标）
             IReadOnlyList<CombatantHealth> all = CombatantHealthRegistry.All;
-            for (int i = 0; i < all.Count; i++)
+            for (int i = 0; settleAllowed && i < all.Count; i++)
             {
                 CombatantHealth victim = all[i];
                 if (victim == null || !victim.IsAlive || !victim.Team.IsOpponentOf(attackerTeam) || victim == directHitTarget)
@@ -48,7 +51,7 @@ namespace P1.Weapons
                     continue;
 
                 // 掩体阻挡检测：若射线被实体掩体阻挡且非目标自身，则免受溅射
-                if (Physics.Linecast(burstCenter, chest, out RaycastHit hit, ~0, QueryTriggerInteraction.Ignore))
+                if (Physics.Linecast(burstCenter, chest, out RaycastHit hit, GameLayers.QueryMask, QueryTriggerInteraction.Ignore))
                 {
                     if (hit.collider != null && !hit.collider.transform.IsChildOf(victim.transform) &&
                         (ownerRoot == null || !hit.collider.transform.IsChildOf(ownerRoot.transform)))
@@ -68,7 +71,7 @@ namespace P1.Weapons
             Vector3 groundPoint = ProjectToGround(burstCenter, out Vector3 groundNormal);
             float paintRadius = Mathf.Max(0.1f, groundPaintRadius);
 
-            if (InkSurfaceController.Instance != null)
+            if (InkSurfaceController.Instance != null && settleAllowed)
             {
                 painted = InkSurfaceController.Instance.PaintSphereWithWalls(burstCenter, paintRadius, attackerTeam, out wallPainted);
                 int groundPainted = painted - wallPainted;
@@ -105,7 +108,7 @@ namespace P1.Weapons
 
         private static Vector3 ProjectToGround(Vector3 origin, out Vector3 normal)
         {
-            if (Physics.Raycast(origin + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 8f, ~0, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(origin + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 8f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore))
             {
                 normal = hit.normal;
                 return hit.point;

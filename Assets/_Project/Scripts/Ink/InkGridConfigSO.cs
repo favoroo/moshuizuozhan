@@ -58,8 +58,12 @@ namespace P1.Ink
         [Range(32, 384)]
         public int maxSplatsPerFrame = 192;
 
-        [Tooltip("图集是否生成 mipmap（远景不闪烁，代价是每 0.25s 一次 mip 重建）")]
+        [Tooltip("图集是否生成 mipmap（远景不闪烁，代价是定期一次 mip 重建）")]
         public bool atlasMipmaps = true;
+
+        [Tooltip("墨迹图集 mip 重建最小间隔（秒）：只在有新落墨时重建，间隔越大越省 GPU 尖刺")]
+        [Range(0.1f, 2f)]
+        public float atlasMipIntervalSeconds = 0.5f;
 
         [Tooltip("墨迹图集向场地四周外扩的可视边距（米）：边界墙顶、场边沿等落在 40x56 计分网格之外、" +
                  "但玩家仍能打到的表面靠它才能受墨。0 = 使用默认 1.5m；计分网格本身不变")]
@@ -69,6 +73,14 @@ namespace P1.Ink
         [Tooltip("小地图贴图刷新频率（Hz）；0 = 每帧刷新")]
         [Range(0f, 30f)]
         public float minimapRefreshHz = 12f;
+
+        [Tooltip("地面波纹 MaterialPropertyBlock 同步频率（Hz）；0 = 每帧同步")]
+        [Range(0f, 60f)]
+        public float rippleSyncHz = 30f;
+
+        [Tooltip("墙面墨迹贴图上传频率（Hz）；0 = 每帧上传")]
+        [Range(0f, 60f)]
+        public float wallFlushHz = 30f;
 
         [Header("队伍与地面配色")]
         public Color neutralGroundColor = new Color(0.22f, 0.24f, 0.28f, 0.0f);

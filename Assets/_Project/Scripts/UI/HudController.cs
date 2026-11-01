@@ -133,6 +133,9 @@ namespace P1.UI
         private TMP_Text _hpBadgeText;
         private TMP_Text _hpText;
 
+        /// <summary>HP 大数字上次写入的值：只在变化时更新文本，避免每帧插值字符串（战斗热路径零 GC）。</summary>
+        private int _lastHpTextValue = int.MinValue;
+
         // ── 底部三张状态卡（t-1 收尾波次） ──────────────────────────────────
         private const string HealthCardName = "HealthCard";
         private const string KeyHintStripName = "KeyHintStrip";
@@ -495,6 +498,14 @@ namespace P1.UI
         private void HandlePhaseVisibilityChanged(MatchManager.Phase phase)
         {
             ApplyHudPhaseVisibility();
+
+            // 倒计时阶段 = 新一局开打：复位「每局一次」的 UI 状态。
+            // 否则第二局的「最后 1 分钟」横幅（CenterTimerView._bannerShown）再也不会弹。
+            if (phase == MatchManager.Phase.Countdown)
+            {
+                if (centerTimer != null) centerTimer.ResetForMatch();
+                if (inkTankView != null) inkTankView.ResetAlertState();
+            }
         }
 
         private void ApplyHudPhaseVisibility()
@@ -1457,7 +1468,13 @@ namespace P1.UI
                 }
                 if (_hpText != null)
                 {
-                    _hpText.text = $"{Mathf.CeilToInt(health.CurrentHealth)}";
+                    // 只在数值真的变了才写文本：旧实现每帧插值建字符串（战斗热路径持续 GC）
+                    int hpValue = Mathf.CeilToInt(health.CurrentHealth);
+                    if (hpValue != _lastHpTextValue)
+                    {
+                        _lastHpTextValue = hpValue;
+                        _hpText.text = hpValue.ToString();
+                    }
                     // 纸白卡片：常态墨色大数字保证对比度；告警时才翻红
                     _hpText.color = isDanger ? ComicStyle.Red : ComicStyle.Ink;
                 }

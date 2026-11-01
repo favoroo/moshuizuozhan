@@ -25,8 +25,20 @@ namespace P1.Ink
     /// </summary>
     public sealed class InkSplatAtlas : IDisposable
     {
-        /// <summary>同一帧最多绘制的墨斑数量，超出者丢弃（与旧版一致）。</summary>
+        /// <summary>
+        /// 单帧最多绘制的墨斑数量（顶点/索引缓冲与网格容量上限）。
+        /// 超出部分不再丢弃：留在待绘制队列里由后续帧继续画（<see cref="Advance"/>）。
+        /// </summary>
         public const int MaxQuads = 384;
+
+        /// <summary>
+        /// 待绘制队列容量上限。因为每帧都会消费最多 <see cref="MaxQuads"/> 枚，正常节奏下装不下；
+        /// 只有同一帧内瞬间落墨超过此数（超大范围必杀 / 清场）才会触发丢最旧策略。
+        /// </summary>
+        public const int PendingCapacity = MaxQuads * 2;
+
+        /// <summary>队头空洞超过该值时压缩一次 List（避免每帧 RemoveRange 搬运整个队列）。</summary>
+        private const int PendingCompactionThreshold = MaxQuads;
 
         /// <summary>湿润时间戳默认回绕周期（秒），与 <see cref="InkGridConfigSO.atlasWetClockPeriod"/> 默认值一致。</summary>
         public const float DefaultWetClockPeriod = 32f;
@@ -66,8 +78,10 @@ namespace P1.Ink
         private readonly Mesh _instantQuadMesh;
         private readonly CommandBuffer _cmd = new CommandBuffer { name = "InkSplatAtlas" };
 
-        private readonly List<Splat> _pending = new List<Splat>(256);
-        // 仅作 ActiveSplatCount 诊断计数用：生长动画已改为片元侧时间戳驱动，不再按帧重绘
+        private readonly List<Splat> _pending = new List<Splat>(PendingCapacity);
+        // 有效待绘制区间 = [_pendingHead, _pending.Count)：绘制后只推进头指针，避免每帧搬运整个 List
+        private int _pendingHead;
+        // 仅作 ActiveSplatCount 诊断计数用：只记录「已真正提交绘制」且在生长窗口内的墨斑
         private readonly List<Splat> _active = new List<Splat>(256);
 
         private readonly List<Vector3> _verts = new List<Vector3>(MaxQuads * QuadVerts);
@@ -80,6 +94,7 @@ namespace P1.Ink
         private readonly float _texelMeters;
         private readonly float _growSeconds;
         private readonly float _wetClockPeriod;
+        private readonly float _mipIntervalSeconds;
 
         private readonly int _paintPassIndex;
         private readonly int _stampPassIndex;
@@ -100,6 +115,44 @@ namespace P1.Ink
         /// <summary>累计落墨次数（诊断用）。</summary>
         public int TotalSplatCount { get; private set; }
 
+        /// <summary>因队列满（单帧落墨超过 <see cref="PendingCapacity"/>）被丢弃的最旧墨斑数（诊断用）。</summary>
+        public int PendingDroppedCount { get; private set; }
+
+        /// <summary>当前仍在等待绘制（尚未提交进图集）的墨斑数：单帧预算排不下时会跨帧积压。</summary>
+        public int PendingSplatCount => _pending.Count - _pendingHead;
+
+        /// <summary>
+        /// 单帧绘制预算规划：给定待绘制数量与单帧上限，给出本帧应绘制数量与剩余数量。
+        /// 纯函数，便于 EditMode 覆盖「1000 枚 → 384 / 384 / 232 三帧画完」的分批消费行为。
+        /// </summary>
+        public static void PlanDrawBatch(int pendingCount, int perFrameBudget, out int drawCount, out int remaining)
+        {
+            int pending = pendingCount > 0 ? pendingCount : 0;
+            int budget = perFrameBudget > 0 ? perFrameBudget : 0;
+            drawCount = pending < budget ? pending : budget;
+            remaining = pending - drawCount;
+        }
+
+        /// <summary>以 <paramref name="perFrameBudget"/> 枚/帧的速度画完 <paramref name="pendingCount"/> 枚所需帧数（0 = 无需绘制）。</summary>
+        public static int FramesToDrain(int pendingCount, int perFrameBudget)
+        {
+            if (pendingCount <= 0)
+                return 0;
+            if (perFrameBudget <= 0)
+                return int.MaxValue;
+            return (pendingCount + perFrameBudget - 1) / perFrameBudget;
+        }
+
+        /// <summary>
+        /// 队列容量策略：加入一枚后若超出 <paramref name="capacity"/>，需从队头丢弃的最旧枚数（0 = 无需丢弃）。
+        /// 丢弃只发生在队列已满时，实测正常战斗节奏下不会触发（每帧都会消费 <see cref="MaxQuads"/> 枚）。
+        /// </summary>
+        public static int PendingOverflowDropCount(int countAfterAdd, int capacity)
+        {
+            int over = countAfterAdd - capacity;
+            return over > 0 ? over : 0;
+        }
+
         /// <summary>当前处于生长窗口内的墨斑数量（诊断用；动画本身由片元按时间戳驱动）。</summary>
         public int ActiveSplatCount => _active.Count;
 
@@ -118,12 +171,14 @@ namespace P1.Ink
             float growSeconds,
             float dryingSeconds,
             float dryHz = 15f,
-            float wetClockPeriod = DefaultWetClockPeriod)
+            float wetClockPeriod = DefaultWetClockPeriod,
+            float mipIntervalSeconds = 0.25f)
         {
             _mapSize = new Vector2(Mathf.Max(0.01f, mapSize.x), Mathf.Max(0.01f, mapSize.y));
             _originXZ = originXZ;
             _growSeconds = Mathf.Max(0f, growSeconds);
             _wetClockPeriod = Mathf.Clamp(wetClockPeriod, 4f, 600f);
+            _mipIntervalSeconds = Mathf.Clamp(mipIntervalSeconds, 0.1f, 5f);
 
             int size = Mathf.Clamp(resolution, 128, 8192);
 
@@ -227,6 +282,7 @@ namespace P1.Ink
             }
 
             _pending.Clear();
+            _pendingHead = 0;
             _active.Clear();
         }
 
@@ -248,6 +304,7 @@ namespace P1.Ink
                 return;
 
             _pending.Clear();
+            _pendingHead = 0;
             _active.Clear();
             _needsClear = true;
             _needsMips = true;
@@ -285,8 +342,16 @@ namespace P1.Ink
                 BirthTime = birth
             };
 
-            if (_pending.Count >= MaxQuads * 2)
-                _pending.RemoveAt(0);
+            int drop = PendingOverflowDropCount(PendingSplatCount + 1, PendingCapacity);
+            if (drop > 0)
+            {
+                // 队列满：丢最旧的若干枚（保证最新的涂地一定能显示）。
+                // 顺手把队头空洞一起删掉（一次 memmove），而不是逐枚 RemoveAt(0) 持续搬运整个队列。
+                int removeFromList = Mathf.Min(_pendingHead + drop, _pending.Count);
+                _pending.RemoveRange(0, removeFromList);
+                _pendingHead = 0;
+                PendingDroppedCount += drop;
+            }
             _pending.Add(splat);
             TotalSplatCount++;
             _lastSplatTime = birth;
@@ -305,6 +370,7 @@ namespace P1.Ink
         /// <summary>
         /// 每帧调用一次（LateUpdate）：仅当本帧有新落墨（或需要清屏 / 内容变化后重建 mip）时才提交绘制。
         /// 烘干与生长动画都在地面片元里按时间戳现算，空闲帧零 GPU 提交、零命令缓冲构建。
+        /// 单帧最多消费 <see cref="MaxQuads"/> 枚待绘制墨斑，剩余的留到后续帧继续画（不丢墨）。
         /// </summary>
         public void Advance()
         {
@@ -313,13 +379,16 @@ namespace P1.Ink
 
             float now = Time.time;
 
-            // 待绘制墨斑移入诊断计数队列（生长动画由片元按时间戳驱动，这里不再按帧重绘）
-            bool hasDraw = _pending.Count > 0;
-            if (hasDraw)
-            {
-                for (int i = 0; i < _pending.Count; i++)
-                    _active.Add(_pending[i]);
-            }
+            // 单帧预算：BuildMesh / _indices 只装得下 MaxQuads 个 quad。
+            // 旧版把 _pending 一次性搬进 _active 再 Clear，超出的墨斑既不绘制也不再排队 → 永久丢墨
+            // （玩法网格与覆盖率已经算上，玩家读作「涂了不显示」）。现在改为分批消费：剩余留到下一帧。
+            PlanDrawBatch(PendingSplatCount, MaxQuads, out int drawCount, out _);
+            bool hasDraw = drawCount > 0;
+
+            // 只把「本帧真正提交绘制」的墨斑计入诊断队列（生长动画由片元按时间戳驱动，这里不重绘）
+            int head = _pendingHead;
+            for (int i = 0; i < drawCount; i++)
+                _active.Add(_pending[head + i]);
 
             if (_active.Count > 0)
             {
@@ -350,11 +419,11 @@ namespace P1.Ink
                 // preAge = 0：时间戳即真实落墨时刻，片元据此做生长侵蚀。
                 // 同一 mesh 连续两次 DrawMesh（Paint 写 R/B/A，Stamp 写 G），记录期间不修改 mesh，
                 // 满足「record 与 execute 之间不得复用/清空同一 Mesh」的约束。
-                BuildMesh(_pending, 0f, _quadMesh);
+                BuildMesh(_pending, _pendingHead, drawCount, 0f, _quadMesh);
                 _cmd.SetRenderTarget(_atlas);
                 _cmd.DrawMesh(_quadMesh, Matrix4x4.identity, _splatMaterial, 0, _paintPassIndex);
                 _cmd.DrawMesh(_quadMesh, Matrix4x4.identity, _splatMaterial, 0, _stampPassIndex);
-                _pending.Clear();
+                ConsumePending(drawCount);
                 _needsMips = true;
             }
 
@@ -362,14 +431,39 @@ namespace P1.Ink
             {
                 _cmd.GenerateMips(_atlas);
                 _needsMips = false;
-                _nextMipTime = now + 0.25f;
+                _nextMipTime = now + _mipIntervalSeconds;
             }
 
             _cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
             Execute();
         }
 
-        /// <summary>编辑模式 / 立即出图：把待绘制墨斑以最终形态画进图集（时间戳预老化 → 片元不做生长侵蚀）。</summary>
+        /// <summary>
+        /// 把队头 <paramref name="drawCount"/> 枚已绘制墨斑移出待绘制队列：只推进头指针，
+        /// 空洞积累到 <see cref="PendingCompactionThreshold"/> 时才做一次 memmove 压缩。
+        /// </summary>
+        private void ConsumePending(int drawCount)
+        {
+            if (drawCount <= 0)
+                return;
+
+            _pendingHead += drawCount;
+            if (_pendingHead >= _pending.Count)
+            {
+                _pending.Clear();
+                _pendingHead = 0;
+            }
+            else if (_pendingHead >= PendingCompactionThreshold)
+            {
+                _pending.RemoveRange(0, _pendingHead);
+                _pendingHead = 0;
+            }
+        }
+
+        /// <summary>
+        /// 编辑模式 / 立即出图：把待绘制墨斑以最终形态画进图集（时间戳预老化 → 片元不做生长侵蚀）。
+        /// 同样受单帧 <see cref="MaxQuads"/> 上限约束，超出的留在队列里等下一次调用，不静默丢弃。
+        /// </summary>
         public void FlushImmediate()
         {
             if (_disposed || !_shaderReady)
@@ -386,16 +480,17 @@ namespace P1.Ink
                 did = true;
             }
 
-            if (_pending.Count > 0)
+            PlanDrawBatch(PendingSplatCount, MaxQuads, out int drawCount, out _);
+            if (drawCount > 0)
             {
                 // 预老化一个生长周期：编辑模式预览没有持续运行的片元时钟，直接呈现完成态
-                BuildMesh(_pending, _growSeconds * 1.6f, _instantQuadMesh);
+                BuildMesh(_pending, _pendingHead, drawCount, _growSeconds * 1.6f, _instantQuadMesh);
                 _cmd.SetRenderTarget(_atlas);
                 _cmd.DrawMesh(_instantQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _paintPassIndex);
                 _cmd.DrawMesh(_instantQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _stampPassIndex);
-                for (int i = 0; i < _pending.Count; i++)
-                    _active.Add(_pending[i]);
-                _pending.Clear();
+                for (int i = 0; i < drawCount; i++)
+                    _active.Add(_pending[_pendingHead + i]);
+                ConsumePending(drawCount);
                 _needsMips = true;
                 did = true;
             }
@@ -409,11 +504,18 @@ namespace P1.Ink
 
         private void BuildMesh(List<Splat> splats, float preAgeSeconds, Mesh targetMesh)
         {
+            BuildMesh(splats, 0, splats.Count, preAgeSeconds, targetMesh);
+        }
+
+        /// <summary>绘制 <paramref name="splats"/> 的 [<paramref name="start"/>, start+<paramref name="count"/>) 区间。</summary>
+        private void BuildMesh(List<Splat> splats, int start, int count, float preAgeSeconds, Mesh targetMesh)
+        {
             _verts.Clear();
             _uv0.Clear();
             _uv1.Clear();
 
-            for (int i = 0; i < splats.Count; i++)
+            int end = Mathf.Clamp(start + count, start, splats.Count);
+            for (int i = start; i < end; i++)
             {
                 Splat s = splats[i];
                 AddQuad(s, SplatTimestamp(s.BirthTime - preAgeSeconds));
@@ -421,8 +523,8 @@ namespace P1.Ink
 
             // 必须先 Clear：上一帧的索引缓冲可能引用比本帧更多的顶点，直接 SetVertices 会报
             // "Mesh.vertices is too small"，并且在测试里会被判为运行时错误。
-            // 同时限制 quadCount：FlushImmediate 可能一次提交 MaxQuads*2 个待绘制墨斑，
-            // 而 _indices 只为 MaxQuads 个 quad 预留，超出会索引越界。
+            // 同时限制 quadCount：_indices 只为 MaxQuads 个 quad 预留，超出会索引越界
+            //（调用方已按 MaxQuads 分批，这里的 clamp 只是防御）。
             int quadCount = Mathf.Min(_verts.Count / QuadVerts, MaxQuads);
             targetMesh.Clear();
             targetMesh.SetVertices(_verts);

@@ -183,6 +183,39 @@ namespace P1.Tests
             Assert.Less(Mathf.Abs(spring.Value), 0.001f, "1.5s 内必须回稳到 0");
         }
 
+        /// <summary>
+        /// P0 回归：后坐弹簧峰值必须与帧率无关。
+        /// 旧半隐式欧拉在 ω·dt 接近 1 时发散/漂移，30FPS 会指数发散、60FPS 峰值只剩 0.011、
+        /// 240FPS 又冲到 0.037，同样一次开火在 240Hz 显示器上后坐强 3 倍。
+        /// </summary>
+        [TestCase(30f)]
+        [TestCase(60f)]
+        [TestCase(120f)]
+        [TestCase(240f)]
+        public void SpringImpulse_PeakIsFrameRateIndependent(float framesPerSecond)
+        {
+            const float omega = 30f;
+            const float peak = 0.045f;
+            float step = 1f / framesPerSecond;
+
+            var spring = new AnimSpring1D(0f);
+            spring.Kick(AnimSpring1D.ImpulseForPeak(peak, omega, WeaponFeelMath.RecoilDampingRatio));
+
+            float maxValue = 0f;
+            int steps = Mathf.CeilToInt(1.5f / step);
+            for (int i = 0; i < steps; i++)
+            {
+                spring.Step(0f, omega, WeaponFeelMath.RecoilDampingRatio, step);
+                maxValue = Mathf.Max(maxValue, Mathf.Abs(spring.Value));
+                Assert.IsFalse(float.IsNaN(spring.Value) || float.IsInfinity(spring.Value),
+                    $"{framesPerSecond}FPS 下弹簧不得发散（旧半隐式欧拉在 30FPS 会指数爆炸）");
+            }
+
+            Assert.AreEqual(peak, maxValue, peak * 0.12f,
+                $"{framesPerSecond}FPS 的冲量峰值必须仍是设计值 {peak}（±12%）");
+            Assert.Less(Mathf.Abs(spring.Value), 0.001f, $"{framesPerSecond}FPS 下 1.5s 内必须回稳");
+        }
+
         [Test]
         public void ShotStrengthScale_MapsChargeToFeedback()
         {

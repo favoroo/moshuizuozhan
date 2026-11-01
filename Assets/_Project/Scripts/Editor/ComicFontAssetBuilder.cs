@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using P1.UI;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
@@ -9,22 +10,29 @@ using UnityEngine.TextCore.LowLevel;
 namespace P1.Editor
 {
     /// <summary>
-    /// 漫画风中文字体管线：把 Art/Fonts 下的两款中文字体（MiSans Heavy / Semibold，小米官方免费商用）
-    /// 烧成 TMP 动态字体资产，并把它们接进 TMP 的 fallback 链。
+    /// MiSans 字体管线（全站唯一字体家族）：把 Art/Fonts 下的两款中文字体
+    /// （MiSans Semibold 650 / Heavy 900，小米官方免费商用）烧成 TMP 字体资产，
+    /// 按用途分档采样、预烘源码字集，并接进 fallback 链。
     ///
-    /// 为什么必须有这个脚本：
-    /// - 项目原有的 TitanOne / Rubik 都是 Google Fonts 的 latin 子集，一个汉字都没有，
-    ///   设置页的中文全部渲染成 □（见 Docs/UI-ComicStyle.md 的根因说明）；
-    /// - TMP 字体资产 = 图集 + 材质 + 字符表复合资产，只能 API 生成，不能手改 .asset；
-    /// - fallback 链必须同时写进「每个字体资产」和「TMP Settings 全局表」，
-    ///   否则任何一处 new TextMeshProUGUI 忘记指定字体就会重新出现方块字。
+    /// 为什么是全站唯一家族（2026-11-01 收口，参照 godot/t-1）：
+    /// - 原来拉丁走 TitanOne/Rubik、中文走 MiSans，四个家族的字面度量/行高/字距都不同，
+    ///   而 ResolveFont 按「含不含全角标点」整串换字体 → 中英混排笔画粗细与行高都不一致。
+    ///   MiSans 自带完整拉丁字形（95/95），一个家族就能覆盖全站。
+    /// - 旧资产是 48pt 单档采样，却要覆盖 18~169px：放大 3.5× 时边缘发糊、笔画显胖。
+    ///   现在分两档：正文 Semibold 64pt（≤~64px 文字）、标题 Heavy 96pt（72~169px 文字）。
     ///
-    /// 中文用 48pt / padding 5 / 1024² 动态图集：只栅格化实际用到的字，
-    /// 300 来个 UI 用字约 1~2 张图集，移动端显存可控；多图集开启保证后续新增文案不炸。
+    /// 伪粗体收口（用户反馈「有些粗得不正常」的根因）：
+    /// - 六个旧资产的 m_FontWeightTable 全空，任何 FontStyles.Bold 都落到 shader 的
+    ///   _WeightBold（默认 0.75）膨胀，而基础字体本身已是 700/900 → 双重加粗、密笔汉字糊成黑块。
+    ///   现在 boldStyle：正文 0.25（≈700 观感，对应 t-1 的 inline emph），标题 0（Heavy 不再叠加）。
+    ///
+    /// 预烘字集：账本由 `python3 tools/font_charset.py` 生成，读取口径见 <see cref="FontCharsetLedger"/>。
+    /// 正文资产预烘整份字集（1268 字 ≈ 8 张 1024² 图集），标题资产只预烘基线（ASCII+符号 ≈ 2 张）：
+    /// 96pt 字形框大、每张只装 81 字，把 1200 字全烘进去要多花 14MB 显存，而大字号几乎只有拉丁/数字。
     /// </summary>
     public static class ComicFontAssetBuilder
     {
-        const string k_LogTag = "[漫画字体]";
+        const string k_LogTag = "[MiSans 字体]";
 
         public const string FontsFolder = "Assets/_Project/Art/Fonts/";
         public const string TmpFolder = FontsFolder + "TMP/";
@@ -34,15 +42,25 @@ namespace P1.Editor
         public const string DisplayCjkAsset = TmpFolder + "MiSans-Heavy SDF.asset";
         public const string BodyCjkAsset = TmpFolder + "MiSans-Semibold SDF.asset";
 
-        const string LatinDisplayAsset = TmpFolder + "TitanOne-Regular SDF.asset";
-        const string LatinBodyAsset = TmpFolder + "Rubik-Bold SDF.asset";
+        /// <summary>已退役的拉丁资产：不再被主题/代码引用，只保留文件让旧场景引用不断链。</summary>
+        static readonly string[] LegacyFontAssets =
+        {
+            TmpFolder + "TitanOne-Regular SDF.asset",
+            TmpFolder + "Rubik-Bold SDF.asset",
+        };
 
         const string TmpSettingsPath = "Assets/TextMesh Pro/Resources/TMP Settings.asset";
+        const string ThemePath = "Assets/_Project/ScriptableObjects/UITheme.asset";
 
-        /// <summary>ASCII + 常用标点：预烘进图集，避免运行时第一帧集中栅格化造成卡顿。</summary>
-        const string k_LatinPreset =
-            " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~" +
-            "·×÷°±—…“”‘’《》【】、。，；：！？（）";
+        // 采样分档（改这里要同步 tools/font_charset.py 的 ATLAS_SIZE/预算口径）
+        const int BodySamplingPointSize = 64;
+        const int BodyAtlasPadding = 6;
+        const int DisplaySamplingPointSize = 96;
+        const int DisplayAtlasPadding = 8;
+
+        // 伪粗体量：正文"轻加粗"，标题不叠加
+        const float BodyBoldStyle = 0.25f;
+        const float DisplayBoldStyle = 0f;
 
         [MenuItem("P1/画风/漫画风/0. 构建中文字体与 Fallback", false, 0)]
         public static void BuildChineseFonts()
@@ -51,27 +69,43 @@ namespace P1.Editor
             Directory.CreateDirectory(TmpFolder);
             AssetDatabase.Refresh();
 
-            var display = EnsureFontAsset(DisplayCjkTtf, DisplayCjkAsset, samplingPointSize: 48, atlasPadding: 5);
-            var body = EnsureFontAsset(BodyCjkTtf, BodyCjkAsset, samplingPointSize: 48, atlasPadding: 5);
+            if (!FontCharsetLedger.LedgersExist())
+            {
+                Debug.LogError(k_LogTag + " 缺字集账本，先跑：python3 tools/font_charset.py");
+                return;
+            }
+
+            string charset = FontCharsetLedger.LoadCharset();
+            string baseline = FontCharsetLedger.LoadBaseline();
+
+            // 标题资产先建（正文资产的 fallback 指向它）
+            var display = EnsureFontAsset(DisplayCjkTtf, DisplayCjkAsset,
+                DisplaySamplingPointSize, DisplayAtlasPadding, baseline, DisplayBoldStyle);
+            var body = EnsureFontAsset(BodyCjkTtf, BodyCjkAsset,
+                BodySamplingPointSize, BodyAtlasPadding, charset, BodyBoldStyle);
 
             if (display == null || body == null)
             {
-                Debug.LogError(k_LogTag + " 中文字体资产创建失败，无法继续配置 fallback。");
+                Debug.LogError(k_LogTag + " 字体资产创建失败，无法继续配置 fallback。");
                 return;
             }
 
             WireFallbacks(display, body);
+            WireThemeFontFields(body, display);
+            ClearLegacyFallbacks();
 
-            int missing = VerifyCoverage(display, body);
+            var report = Verify();
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            Debug.LogFormat("{0} 完成：{1} + {2}，缺字 {3} 个{4}",
+            string summary = string.Format("{0} 完成：{1} + {2}；{3}",
                 k_LogTag,
                 Path.GetFileName(DisplayCjkAsset),
                 Path.GetFileName(BodyCjkAsset),
-                missing,
-                missing == 0 ? " ✓" : " ⚠ 见上方缺字清单");
+                report.Format());
+            if (report.Ok) Debug.Log(summary + " ✓");
+            else Debug.LogError(summary + " ⚠ 缺字/漂移见上");
         }
 
         /// <summary>只做检查，不改任何资产。给 CI / 验收用。</summary>
@@ -79,20 +113,28 @@ namespace P1.Editor
         public static void VerifyOnly()
         {
             AssetDatabase.Refresh();
-            var display = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(DisplayCjkAsset);
-            var body = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(BodyCjkAsset);
-
-            if (display == null || body == null)
-            {
-                Debug.LogError(k_LogTag + " 缺中文字体资产，先跑「0. 构建中文字体与 Fallback」");
-                return;
-            }
-
-            int missing = VerifyCoverage(display, body);
-            Debug.LogFormat("{0} 自检：缺字 {1} 个{2}", k_LogTag, missing, missing == 0 ? " ✓" : " ⚠");
+            var report = Verify();
+            string line = k_LogTag + " 自检：" + report.Format();
+            if (report.Ok) Debug.Log(line + " ✓");
+            else Debug.LogError(line + " ⚠");
         }
 
-        static TMP_FontAsset EnsureFontAsset(string ttfPath, string assetPath, int samplingPointSize, int atlasPadding)
+        /// <summary>三段账验收（字集⊆预烘 / 源码⊆账本 / 豁免不上屏），菜单与测试共用。</summary>
+        public static FontCharsetLedger.Report Verify()
+        {
+            var display = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(DisplayCjkAsset);
+            var body = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(BodyCjkAsset);
+            var displayFont = AssetDatabase.LoadAssetAtPath<Font>(DisplayCjkTtf);
+            var bodyFont = AssetDatabase.LoadAssetAtPath<Font>(BodyCjkTtf);
+
+            if (display == null || body == null)
+                Debug.LogWarning(k_LogTag + " 缺字体资产，先跑「0. 构建中文字体与 Fallback」再来自检。");
+
+            return FontCharsetLedger.Analyze(body, display, bodyFont, displayFont);
+        }
+
+        static TMP_FontAsset EnsureFontAsset(string ttfPath, string assetPath,
+            int samplingPointSize, int atlasPadding, string prebake, float boldStyle)
         {
             var importer = AssetImporter.GetAtPath(ttfPath) as TrueTypeFontImporter;
             if (importer == null)
@@ -115,83 +157,103 @@ namespace P1.Editor
                 return null;
             }
 
+            // 采样点/内边距不是可写属性，改档只能重建资产（GUID 可能变，实测同帧重建会保留原 GUID，但不要依赖）。
+            // 重建后必须紧跟 WireFallbacks + WireThemeFontFields（本方法调用方已按序执行）。
             var existing = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(assetPath);
             if (existing != null)
             {
-                // 幂等：已有资产只补预烘字符与参数，不重建成孤儿图集。
-                if (existing.atlasPopulationMode != AtlasPopulationMode.Dynamic)
+                bool wrongSampling = !Mathf.Approximately(existing.faceInfo.pointSize, samplingPointSize);
+                bool wrongPadding = existing.atlasPadding != atlasPadding;
+                if (existing.atlasPopulationMode != AtlasPopulationMode.Dynamic || wrongSampling || wrongPadding)
                 {
-                    Debug.LogWarning(k_LogTag + " " + assetPath + " 不是 Dynamic，重建。");
+                    Debug.LogWarningFormat("{0} {1} 参数变更（采样 {2}→{3} / padding {4}→{5}），重建资产（GUID 可能变，主题与 fallback 随后重指）。",
+                        k_LogTag, assetPath,
+                        existing.faceInfo.pointSize, samplingPointSize,
+                        existing.atlasPadding, atlasPadding);
                     AssetDatabase.DeleteAsset(assetPath);
                     existing = null;
                 }
             }
 
-            if (existing != null)
+            if (existing == null)
             {
-                existing.TryAddCharacters(k_LatinPreset, out _);
+                existing = TMP_FontAsset.CreateFontAsset(
+                    font,
+                    samplingPointSize: samplingPointSize,
+                    atlasPadding: atlasPadding,
+                    renderMode: GlyphRenderMode.SDFAA,
+                    atlasWidth: 1024,
+                    atlasHeight: 1024,
+                    atlasPopulationMode: AtlasPopulationMode.Dynamic,
+                    enableMultiAtlasSupport: true);
+
+                if (existing == null)
+                {
+                    Debug.LogError(k_LogTag + " TMP 字体资产创建失败: " + ttfPath);
+                    return null;
+                }
+
+                existing.name = Path.GetFileNameWithoutExtension(assetPath);
+                existing.atlasPopulationMode = AtlasPopulationMode.Dynamic;
                 existing.isMultiAtlasTexturesEnabled = true;
-                EditorUtility.SetDirty(existing);
-                return existing;
+
+                AssetDatabase.CreateAsset(existing, assetPath);
+
+                if (existing.material != null)
+                {
+                    existing.material.name = existing.name + " Material";
+                    AssetDatabase.AddObjectToAsset(existing.material, existing);
+                }
             }
 
-            var fontAsset = TMP_FontAsset.CreateFontAsset(
-                font,
-                samplingPointSize: samplingPointSize,
-                atlasPadding: atlasPadding,
-                renderMode: GlyphRenderMode.SDFAA,
-                atlasWidth: 1024,
-                atlasHeight: 1024,
-                atlasPopulationMode: AtlasPopulationMode.Dynamic,
-                enableMultiAtlasSupport: true);
+            ApplyBoldStyle(existing, boldStyle);
 
-            if (fontAsset == null)
+            int prebakedBefore = existing.characterTable.Count;
+            existing.TryAddCharacters(prebake, out string missing);
+
+            for (int i = 0; i < existing.atlasTextures.Length; i++)
             {
-                Debug.LogError(k_LogTag + " TMP 字体资产创建失败: " + ttfPath);
-                return null;
-            }
-
-            fontAsset.name = Path.GetFileNameWithoutExtension(assetPath);
-            fontAsset.TryAddCharacters(k_LatinPreset, out string missing);
-            fontAsset.atlasPopulationMode = AtlasPopulationMode.Dynamic;
-            fontAsset.isMultiAtlasTexturesEnabled = true;
-
-            AssetDatabase.CreateAsset(fontAsset, assetPath);
-
-            if (fontAsset.material != null)
-            {
-                fontAsset.material.name = fontAsset.name + " Material";
-                AssetDatabase.AddObjectToAsset(fontAsset.material, fontAsset);
-            }
-
-            for (int i = 0; i < fontAsset.atlasTextures.Length; i++)
-            {
-                var tex = fontAsset.atlasTextures[i];
+                var tex = existing.atlasTextures[i];
                 if (tex == null) continue;
-                tex.name = fontAsset.name + (i == 0 ? " Atlas" : " Atlas " + i);
-                AssetDatabase.AddObjectToAsset(tex, fontAsset);
+                tex.name = existing.name + (i == 0 ? " Atlas" : " Atlas " + i);
+                if (!AssetDatabase.Contains(tex)) AssetDatabase.AddObjectToAsset(tex, existing);
             }
 
-            EditorUtility.SetDirty(fontAsset);
+            EditorUtility.SetDirty(existing);
             AssetDatabase.SaveAssets();
 
-            Debug.LogFormat("{0} 生成 {1} | 预烘 {2} 字{3}",
-                k_LogTag, assetPath, fontAsset.characterTable.Count,
-                string.IsNullOrEmpty(missing) ? "" : "，预烘缺字: " + missing);
-            return fontAsset;
+            Debug.LogFormat("{0} {1}：采样 {2}pt/padding {3}，预烘 {4}→{5} 字，图集 {6} 张{7}",
+                k_LogTag, Path.GetFileName(assetPath), samplingPointSize, atlasPadding,
+                prebakedBefore, existing.characterTable.Count, existing.atlasTextures.Length,
+                string.IsNullOrEmpty(missing) ? " ✓" : "，未预烘: " + missing);
+            return existing;
         }
 
         /// <summary>
-        /// fallback 链：拉丁显示体 → MiSans Heavy；拉丁正文体 → MiSans Semibold；
-        /// 全局表兜底两款中文字体（覆盖 new TextMeshProUGUI 未指定字体的地方）。
+        /// 伪粗体量：FontStyles.Bold 在 TMP 里全靠这个值膨胀（_WeightBold），
+        /// 资产与它的材质两处都要写，否则运行时会掉回 0.75 的默认值。
+        /// </summary>
+        static void ApplyBoldStyle(TMP_FontAsset fontAsset, float boldStyle)
+        {
+            fontAsset.normalStyle = 0f;
+            fontAsset.boldStyle = boldStyle;
+
+            if (fontAsset.material != null)
+            {
+                fontAsset.material.SetFloat(ShaderUtilities.ID_WeightNormal, 0f);
+                fontAsset.material.SetFloat(ShaderUtilities.ID_WeightBold, boldStyle);
+                EditorUtility.SetDirty(fontAsset.material);
+            }
+
+            EditorUtility.SetDirty(fontAsset);
+        }
+
+        /// <summary>
+        /// fallback 链：正文 ↔ 标题互备；全局表兜底两款 MiSans
+        /// （覆盖 new TextMeshProUGUI 未指定字体的地方）。
         /// </summary>
         static void WireFallbacks(TMP_FontAsset display, TMP_FontAsset body)
         {
-            var latinDisplay = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(LatinDisplayAsset);
-            var latinBody = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(LatinBodyAsset);
-
-            SetFallbacks(latinDisplay, new[] { display, body });
-            SetFallbacks(latinBody, new[] { body, display });
             SetFallbacks(display, new[] { body });
             SetFallbacks(body, new[] { display });
 
@@ -230,98 +292,51 @@ namespace P1.Editor
             EditorUtility.SetDirty(target);
         }
 
-        /// <summary>
-        /// 扫描 UI 源码里出现过的所有汉字，逐个问字体「运行时能不能栅格化」。
-        /// 返回缺字数；有任何缺字都打 error，避免「设置页还是方块」这种问题漏到真机。
-        /// </summary>
-        static int VerifyCoverage(TMP_FontAsset display, TMP_FontAsset body)
+        /// <summary>把主题的四个字体字段一起指向 MiSans（重建资产后 GUID 可能变，必须重指）。</summary>
+        public static bool WireThemeFontFields(TMP_FontAsset body, TMP_FontAsset display)
         {
-            var required = CollectCjkFromSources();
-            if (required.Count == 0)
+            var theme = AssetDatabase.LoadAssetAtPath<UIThemeSO>(ThemePath);
+            if (theme == null)
             {
-                Debug.LogWarning(k_LogTag + " 没在 UI 源码里扫到汉字，跳过覆盖率检查。");
-                return 0;
+                Debug.LogWarning(k_LogTag + " 找不到 " + ThemePath + "，跳过主题字体接线。");
+                return false;
             }
 
-            // 注意：不能用 TMP_FontAsset.HasCharacters 做检查——动态图集只认「已经栅格化进图集」的字，
-            // 没显示过的字一律返回 false，会假报上千个缺字。这里查源字体的 cmap 才准。
-            var displayFont = AssetDatabase.LoadAssetAtPath<Font>(DisplayCjkTtf);
-            var bodyFont = AssetDatabase.LoadAssetAtPath<Font>(BodyCjkTtf);
-            if (displayFont == null || bodyFont == null)
-            {
-                Debug.LogError(k_LogTag + " 源字体加载失败，无法做覆盖率检查。");
-                return required.Count;
-            }
+            var so = new SerializedObject(theme);
+            SetObject(so, "displayFont", display);
+            SetObject(so, "bodyFont", body);
+            SetObject(so, "displayCjkFont", display);
+            SetObject(so, "bodyCjkFont", body);
+            so.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(theme);
 
-            var missing = new StringBuilder();
-            int missingCount = 0;
-
-            foreach (var ch in required)
-            {
-                if (displayFont.HasCharacter(ch) || bodyFont.HasCharacter(ch)) continue;
-                missingCount++;
-                if (missing.Length < 120) missing.Append(ch);
-            }
-
-            var seen = required;
-
-            // 装饰符号单独查一遍：★ ▶ ◀ ↑↓ ▲ 这类字符不在中文字体的 cmap 里，
-            // 混进中文串会直接渲染成 □（实测 ◀ 被替换成 Unicode 替换符）。UI 里只用这套安全符号。
-            const string requiredSymbols = "【】「」『』《》〈〉·—…、。，；：！？（）～＋－×÷％";
-            var missingSymbols = new StringBuilder();
-            foreach (char ch in requiredSymbols)
-            {
-                if (displayFont.HasCharacter(ch) || bodyFont.HasCharacter(ch)) continue;
-                missingSymbols.Append(ch);
-            }
-
-            if (missingSymbols.Length > 0)
-            {
-                missingCount += missingSymbols.Length;
-                Debug.LogErrorFormat("{0} 装饰符号缺字：{1}", k_LogTag, missingSymbols);
-            }
-
-            if (missingCount > 0)
-            {
-                Debug.LogErrorFormat("{0} 缺字 {1} 个：{2}（检查字体文件是否为完整 CJK 版本）",
-                    k_LogTag, missingCount, missing);
-            }
-            else
-            {
-                Debug.LogFormat("{0} 覆盖率 OK：{1} 个唯一汉字全部可渲染", k_LogTag, seen.Count);
-            }
-
-            return missingCount;
+            Debug.Log(k_LogTag + " 主题四字体字段 → MiSans Heavy（标题）/ MiSans Semibold（正文）");
+            return true;
         }
 
-        static HashSet<char> CollectCjkFromSources()
+        static void SetObject(SerializedObject so, string field, Object value)
         {
-            var result = new HashSet<char>();
-            var roots = new[]
+            var prop = so.FindProperty(field);
+            if (prop == null)
             {
-                "Assets/_Project/Scripts/UI",
-                "Assets/_Project/Scripts/Core",
-                "Assets/_Project/Scripts/Player",
-                "Assets/_Project/Scripts/Weapons",
-            };
-
-            foreach (var root in roots)
-            {
-                if (!Directory.Exists(root)) continue;
-                foreach (var file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
-                {
-                    string text;
-                    try { text = File.ReadAllText(file); }
-                    catch (IOException) { continue; }
-
-                    foreach (char ch in text)
-                    {
-                        if (ch >= '\u4e00' && ch <= '\u9fff') result.Add(ch);
-                    }
-                }
+                Debug.LogWarning(k_LogTag + " UITheme 缺字段: " + field);
+                return;
             }
 
-            return result;
+            prop.objectReferenceValue = value;
+        }
+
+        /// <summary>清掉已退役拉丁资产的 fallback 表，避免指向重建后失效的 MiSans GUID。</summary>
+        static void ClearLegacyFallbacks()
+        {
+            foreach (string path in LegacyFontAssets)
+            {
+                var legacy = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(path);
+                if (legacy == null) continue;
+
+                legacy.fallbackFontAssetTable?.Clear();
+                EditorUtility.SetDirty(legacy);
+            }
         }
     }
 }

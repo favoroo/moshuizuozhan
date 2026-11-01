@@ -13,7 +13,15 @@ namespace P1.Weapons
         private float _cooldown;
         private float _windupTimer = -1f;
         private WeaponAim _pendingAim;
-        private readonly SlosherVolley _reusableVolley = new SlosherVolley();
+
+        /// <summary>每波泼洒独立租用 Volley 的环形对象池（在飞墨滴的命中记录不会被下一波清空）。</summary>
+        private readonly SlosherVolleyPool _volleyPool = new SlosherVolleyPool();
+
+        /// <summary>
+        /// 一波墨滴的最长飞行寿命（秒）：泼桶初速 15m/s、重力 22m/s²，最远 9.5m 约 2.4s 落地；
+        /// 4s 留足缓冲，保证 Volley 只在整波墨滴确实消失后才被复用。
+        /// </summary>
+        private const float VolleyFlightLifetime = 4f;
 
         public SlosherWeaponStrategy(WeaponConfigSO config) : base(config)
         {
@@ -27,7 +35,18 @@ namespace P1.Weapons
         {
             _cooldown = 0f;
             _windupTimer = -1f;
-            _reusableVolley.Clear();
+            _volleyPool.Clear();
+        }
+
+        public override bool IsTriggerEngaged => _windupTimer >= 0f;
+
+        /// <summary>
+        /// 输入被抑制（暂停 / 终场 / 死亡 / 投雷占用）：丢弃前摇中的这一桶，不生成墨滴
+        /// （墨水已在按下时扣除，不回补）。
+        /// </summary>
+        public override void OnTriggerSuppressed(IWeaponRuntimeHost host)
+        {
+            _windupTimer = -1f;
         }
 
         public override bool OnTriggerHeld(WeaponAim aim, float dt, IWeaponRuntimeHost host)
@@ -82,8 +101,9 @@ namespace P1.Weapons
             if (!host.IsAlive)
                 return;
 
-            _reusableVolley.Clear();
-            var volley = _reusableVolley;
+            // 每波泼洒独立租用一个 Volley：上一波还在飞的墨滴仍持有自己的命中记录，
+            // 既不会被 Clear 掉（旧实现的跨波复用会让同一目标吃 70 + 34 多段直击），也不需要每波 new。
+            SlosherVolley volley = _volleyPool.Rent(Time.time, VolleyFlightLifetime);
             int drops = Config != null ? Mathf.Max(1, Config.slosherDrops) : 8;
             float speed = Config != null ? Mathf.Max(1f, Config.projectileSpeed) : 15f;
             float gravity = Config != null ? Mathf.Max(0.01f, Config.projectileGravity) : 22f;

@@ -33,12 +33,9 @@ namespace P1.Core
 
         private void Update()
         {
-            // 仅在比赛 Playing 阶段执行回收；Ready/Countdown/Finished/Result 阶段禁止拉人
-            if (MatchManager.Instance != null && MatchManager.Instance.CurrentPhase != MatchManager.Phase.Playing)
-            {
-                return;
-            }
-
+            // XZ 边界越界只在比赛 Playing 阶段回收（Ready/Countdown/Finished/Result 禁止拉人）；
+            // 但「y 低于下限」的坠落回收在任何阶段都要做：哨响瞬间角色可能已经越过边界在往下掉，
+            // 旧实现直接 return 会让它无限坠落（结算摄像机也跟着追出场地）。
             GameConfigSO cfg = Config;
             float interval = cfg != null ? Mathf.Max(0.05f, cfg.outOfBoundsCheckIntervalSeconds) : 0.25f;
 
@@ -52,9 +49,19 @@ namespace P1.Core
 
         /// <summary>
         /// 扫描所有注册的战斗单位并回收越界者。
+        /// XZ 边界回收按比赛阶段门禁（见 <see cref="MatchManager.CombatAllowed"/>），
+        /// y 坠落回收不受阶段限制。
         /// </summary>
         /// <returns>本轮被回收的单位数量</returns>
         public int CheckAndRecoverAll()
+        {
+            return CheckAndRecoverAll(MatchManager.CombatAllowed);
+        }
+
+        /// <summary>
+        /// 带显式开关的扫描（false = 只回收 y 低于下限的坠落单位，不拉 XZ 越界者）。
+        /// </summary>
+        public int CheckAndRecoverAll(bool allowHorizontalRecovery)
         {
             GameConfigSO cfg = Config;
             float marginX = cfg != null ? cfg.outOfBoundsMarginX : 0.3f;
@@ -70,7 +77,7 @@ namespace P1.Core
                 if (combatant == null || !combatant.IsAlive) continue;
 
                 Vector3 pos = combatant.transform.position;
-                if (IsOutOfBounds(pos, marginX, marginZ, minY))
+                if (ShouldRecover(pos, allowHorizontalRecovery, marginX, marginZ, minY))
                 {
                     RecoverCombatant(combatant);
                     recoveredCount++;
@@ -81,14 +88,14 @@ namespace P1.Core
         }
 
         /// <summary>
-        /// 将单个越界单位传回本队出生锚点。
+        /// 将单个越界单位传回出生锚点：优先回收该单位自己的 <c>respawnAnchor</c>（多人越界各自回位，
+        /// 不再全部叠在队伍兜底出生线同一点），没有锚点时才回落到队伍出生线。
         /// </summary>
         public void RecoverCombatant(CombatantHealth combatant)
         {
             if (combatant == null) return;
 
-            Vector3 targetPos = GetSpawnPosition(combatant);
-            Quaternion targetRot = GetSpawnRotation(combatant.Team);
+            GetSpawnPose(combatant, out Vector3 targetPos, out Quaternion targetRot);
 
             InkCharacterMotor motor = combatant.Motor;
             if (motor != null)
@@ -117,32 +124,64 @@ namespace P1.Core
         }
 
         /// <summary>
-        /// 纯静态越界判定方法（可供 EditMode 独立测试）。
-        /// 越界条件：|x| > BoundaryX + marginX 或 |z| > BoundaryZ + marginZ 或 y < minY。
+        /// 纯静态越界判定（XZ 越界 + y 坠落，全部按越界处理），保留给外部/测试使用。
+        /// 阶段门禁请用 <see cref="ShouldRecover"/>。
         /// </summary>
         public static bool IsOutOfBounds(Vector3 pos, float marginX = 0.3f, float marginZ = 0.3f, float minY = -1f)
         {
+            return ShouldRecover(pos, true, marginX, marginZ, minY);
+        }
+
+        /// <summary>
+        /// 纯静态回收判定（可供 EditMode 独立测试）：
+        /// 1. y 低于 minY（坠落）→ 任何阶段都回收；
+        /// 2. XZ 超出边界 + margin → 仅在 <paramref name="allowHorizontalRecovery"/> 为真（比赛 Playing）时回收。
+        /// </summary>
+        public static bool ShouldRecover(
+            Vector3 pos,
+            bool allowHorizontalRecovery,
+            float marginX = 0.3f,
+            float marginZ = 0.3f,
+            float minY = -1f)
+        {
+            if (pos.y < minY) return true;
+            if (!allowHorizontalRecovery) return false;
+
             float limitX = ArenaLayoutV2.BoundaryX + marginX;
             float limitZ = ArenaLayoutV2.BoundaryZ + marginZ;
 
             if (Mathf.Abs(pos.x) > limitX) return true;
             if (Mathf.Abs(pos.z) > limitZ) return true;
-            if (pos.y < minY) return true;
 
             return false;
         }
 
         /// <summary>
-        /// 获取单位的出生位置。优先读公开 API（当前未暴露则使用队伍符号与出生线 X=±2.4 兜底）。
+        /// 取单位的回收出生位姿：优先该单位自己的出生锚点，否则回落到队伍出生线（保留旧兜底行为）。
+        /// </summary>
+        public static void GetSpawnPose(CombatantHealth combatant, out Vector3 position, out Quaternion rotation)
+        {
+            if (combatant != null && combatant.TryGetSpawnPose(out Vector3 anchorPos, out Quaternion anchorRot))
+            {
+                position = anchorPos;
+                rotation = anchorRot;
+                return;
+            }
+
+            Team team = combatant != null ? combatant.Team : Team.TeamA;
+            float preferredX = combatant != null ? combatant.transform.position.x : 0f;
+            position = GetFallbackSpawnPosition(team, preferredX);
+            rotation = GetSpawnRotation(team);
+        }
+
+        /// <summary>
+        /// 获取单位的出生位置。优先读单位自己的出生锚点（<see cref="CombatantHealth.TryGetSpawnPose"/>），
+        /// 无锚点（运行时临时单位）时使用队伍符号与出生线 X=±2.4 兜底。
         /// </summary>
         public static Vector3 GetSpawnPosition(CombatantHealth combatant)
         {
-            if (combatant == null)
-            {
-                return GetFallbackSpawnPosition(Team.TeamA, 0f);
-            }
-
-            return GetFallbackSpawnPosition(combatant.Team, combatant.transform.position.x);
+            GetSpawnPose(combatant, out Vector3 position, out _);
+            return position;
         }
 
         /// <summary>

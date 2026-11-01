@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using P1.Core;
 using P1.Ink;
 using P1.Player;
+using P1.Weapons;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -78,6 +79,18 @@ namespace P1.UI
         /// <summary>失败语义的灰蓝 #3D4A63：比红克制，只出现在败方色带与判定牌描边上。</summary>
         public static readonly Color DefeatSlate = ComicStyle.FromHex(0x3D4A63);
 
+        /// <summary>拔河条深槽 #0B0B0B：比舞台再深一级，队色填充才立得起来。</summary>
+        public static readonly Color BarSlotInk = ComicStyle.FromHex(0x0B0B0B);
+
+        /// <summary>读数板底色 #1E1A16：深墨中立色，靠 3px 队色描边识别阵营。</summary>
+        public static readonly Color PlateInk = ComicStyle.FromHex(0x1E1A16);
+
+        /// <summary>败方读数用的不透明灰 #6F6F6F（禁止半透明降灰，否则与硬影读成重影）。</summary>
+        public static readonly Color DimReadout = ComicStyle.FromHex(0x6F6F6F);
+
+        /// <summary>深墨读数板上的败方灰 #9C9C9C：比纸面灰更亮，深底上仍然可读。</summary>
+        public static readonly Color PlateDimReadout = ComicStyle.FromHex(0x9C9C9C);
+
         private RectTransform _contentRoot;
         private RectTransform _menuSafeArea;
         private RectTransform _homeHeroCard;
@@ -86,11 +99,9 @@ namespace P1.UI
         private Vector4 _homeGeometryKey;
         private Vector4 _homeGeometryKeyPrev;
         private bool _homeGeometryKeyValid;
-        private TextMeshProUGUI _homeAudioTitle;
-        private TextMeshProUGUI _homeAudioInfo;
+        private TextMeshProUGUI _homeSettingsInfo;
         private TextMeshProUGUI _homeRecordInfo;
         private TextMeshProUGUI _homeKeysInfo;
-        private float _audioVolumeBeforeMute = 0.6f;
         private readonly List<UISpringMotion> _homeEntrance = new List<UISpringMotion>();
         private bool _homeEntrancePending;
         private bool _resultEntrancePending;
@@ -98,8 +109,6 @@ namespace P1.UI
 
         private RectTransform _reportBand;
         private UIInkShapeGraphic _reportBandShape;
-        private RectTransform _teamCardA;
-        private RectTransform _teamCardB;
         private UISpringMotion _reportMotion;
         private readonly List<UISpringMotion> _resultEntrance = new List<UISpringMotion>();
 
@@ -118,9 +127,39 @@ namespace P1.UI
         private int _displayedMedalCount;
 
         private RectTransform _reportPanelRoot;
-        private RectTransform _winnerTagA;
-        private RectTransform _winnerTagB;
         private bool _winnerEmphasisApplied;
+
+        // v2 结算「计分场」：两块墨色读数板 + 中间拔河覆盖率条 + 顶部胜差贴纸。
+        private RectTransform _coverPlateA;
+        private RectTransform _coverPlateB;
+        private UIInkShapeGraphic _plateShapeA;
+        private UIInkShapeGraphic _plateShapeB;
+        private TextMeshProUGUI _percentTmpA;
+        private TextMeshProUGUI _percentTmpB;
+        private RectTransform _winMarkA;
+        private RectTransform _winMarkB;
+        private Image _coverFillA;
+        private Image _coverFillB;
+        private RectTransform _coverDivider;
+        private float _coverInnerW;
+        private float _coverInnerH;
+        private RectTransform _matchTagRoot;
+        private TextMeshProUGUI _matchTagText;
+        private Color _teamColorA = Color.white;
+        private Color _teamColorB = Color.white;
+
+        // 战报台账卡（双队明细 + 勋章 / LV / XP 条）布局缓存：由 BuildLedgerCard 写入，RebuildRosterRows 读取。
+        private float _ledgerColLeft;
+        private float _ledgerColRight;
+        private float _ledgerHeaderY;
+        private float _ledgerRowTopY;
+        private float _ledgerRowH;
+        private float _ledgerNameW;
+        private float _ledgerTurfX;
+        private float _ledgerKoX;
+        private float _ledgerDownX;
+        private readonly List<GameObject> _rosterRowObjects = new List<GameObject>();
+        private bool _rosterBuilt;
 
         private TextMeshProUGUI _xpLevelText;
         private TextMeshProUGUI _xpRankNameText;
@@ -193,6 +232,9 @@ namespace P1.UI
 
             if (startButton != null) startButton.onClick.AddListener(OnStartClicked);
             if (restartButton != null) restartButton.onClick.AddListener(OnStartClicked);
+
+            // 设置页改音量/震屏时同步首页设置卡读数（事件由 GameSettingsService 静态广播）
+            GameSettingsService.SettingsChanged += RefreshHomeInfo;
         }
 
         /// <summary>运行时内容根：SafeArea 容器，桌面/编辑器下等价于全屏。</summary>
@@ -335,6 +377,7 @@ namespace P1.UI
             if (legacyHint != null) legacyHint.gameObject.SetActive(false);
 
             PlayHomeEntrance();
+            P1.UI.WeaponSelect.WeaponSelectView.Instance?.SyncHomeLayout();
 
             // 记录本次构建使用的几何指纹：安全区/画布此后一旦变化（启动 settle、旋转、分屏），
             // Update 会检测到并用真实几何重建首页——启动首帧的脏 safeArea 不能永久定格版面。
@@ -405,8 +448,14 @@ namespace P1.UI
             // 首页重建会销毁并重建整棵卡片树：先收掉详情浮层，避免它挂在旧几何上。
             HomeInfoOverlay.CloseIfOpen();
 
-            // 检查更新按钮已被铺进 HomeTile_UPDATE 的 Content 里，必须先搬出来再销毁卡片。
-            if (checkUpdateButton != null) ReparentInto(checkUpdateButton.transform, _menuSafeArea);
+            // 场景遗留按钮（开赛 / 检查更新 / 自定义按键）是 readyPanel 的持久节点，
+            // 重建时必须先搬回 readyPanel 再销毁旧安全区，否则会跟着 MenuSafeArea 一起被 Destroy：
+            // StartButton 的 onClick 只在 Awake 绑一次，一旦销毁 startButton 变 null，
+            // PlaceHomeCta 直接 return —— 真机表现就是「首页开始游戏按钮凭空消失、整局开不了」。
+            // （检查更新按钮还被铺进了 HomeTile_UPDATE 的 Content，不先搬出会随卡片销毁。）
+            ReparentInto(startButton != null ? startButton.transform : null, readyPanel.transform);
+            ReparentInto(checkUpdateButton != null ? checkUpdateButton.transform : null, readyPanel.transform);
+            ReparentInto(FindMenuNode("CustomLayoutButton"), readyPanel.transform);
 
             Transform stage = readyPanel.transform.Find("GeometricMenuRoot");
             if (stage != null)
@@ -431,8 +480,8 @@ namespace P1.UI
 
             // 旧 MenuSafeArea 本体也要退役：EnsureReadyVisuals 会新建一个同名节点，
             // 老节点若只清空内容而不销毁，会永久残留为空壳（按名字查找会命中旧空容器，
-            // 表现为「首页内容不在安全区」）。场景遗留按钮（开赛 / 自定义按键）由
-            // EnsureReadyVisuals 先搬进新容器再销毁本节点。
+            // 表现为「首页内容不在安全区」）。场景遗留按钮已在上面搬回 readyPanel，
+            // 由 EnsureReadyVisuals 重新收编进新容器。
             _menuSafeArea.name += "_Old";
             Destroy(_menuSafeArea.gameObject);
 
@@ -599,19 +648,9 @@ namespace P1.UI
             StyleStartButtonGeometric(theme, UITypography.FontSnapped(m.CtaFont), mobile);
         }
 
-        /// <summary>右侧 2×2 次级卡：战绩（信息）/ 音效（可点）/ 操作指南或键位（信息）/ 检查更新（可点）。</summary>
+        /// <summary>右侧 2×2 次级卡：战绩（信息）/ 系统设置（可点）/ 操作指南或键位（信息）/ 检查更新（可点）。</summary>
         private void BuildHomeTiles(UIThemeSO theme, HomeMenuMetrics m, bool mobile)
         {
-            try
-            {
-                float volume = GameSettingsService.MasterVolume;
-                if (volume > 0.001f) _audioVolumeBeforeMute = Mathf.Clamp(volume, 0.05f, 1f);
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning("[MatchFlowUI] 读取主音量失败：" + ex.Message);
-            }
-
             BuildHomeTile(new HomeTileSpec
             {
                 Index = 0,
@@ -626,22 +665,20 @@ namespace P1.UI
             BuildHomeTile(new HomeTileSpec
             {
                 Index = 1,
-                Tag = "AUDIO",
-                Title = "音效 · " + (IsAudioMuted ? "关" : "开"),
-                Info = BuildAudioInfo(),
+                Tag = "SETTINGS",
+                Title = "系统设置",
+                Info = BuildSettingsInfo(),
                 Accent = theme.teamAColor,
                 Interactive = true,
-                ClickAction = ToggleHomeAudio,
-            }, theme, m, mobile, out _homeAudioInfo, out _homeAudioTitle);
+                ClickAction = OpenHomeSettings,
+            }, theme, m, mobile, out _homeSettingsInfo, out _);
 
             BuildHomeTile(new HomeTileSpec
             {
                 Index = 2,
                 Tag = mobile ? "GUIDE" : "KEYS",
                 Title = mobile ? "操作指南" : "键位说明",
-                Info = mobile
-                    ? "摇杆 移动 · 射击键 开火 · 跳跃键 起跳 · 大招键 释放"
-                    : "WASD 移动 · 左键 射击 · 空格 跳跃 · Q 大招",
+                Info = BuildKeysInfo(),
                 Accent = ComicStyle.Blue,
                 Interactive = true,
                 ClickAction = () => ShowHomeInfo(HomeInfoTab.Controls),
@@ -758,35 +795,80 @@ namespace P1.UI
 
             float titleSize = UITypography.FontSnapped(m.TileTitleFont);
             float titleTop = m.TilePadding.y + m.TileTagSize.y + (mobile ? 20f : 18f);
+            float rowWidth = contentWidth - m.TilePadding.x * 2f;
+            float titleHeight = titleSize * 1.25f;
+
+            // `》` 独占标题行右侧走廊：双书名号实际约 2em 宽（旧值按 1.2em 预留），
+            // 且不能再和信息行共行——移动端字号 ×1.28 后短信息也会顶到箭头下面。
+            float arrowSize = UITypography.FontSnapped(m.TileArrowFont);
+            float arrowHeight = arrowSize * 1.1f;
+            float arrowGutter = spec.Interactive ? arrowSize * 2.1f + 12f : 0f;
+
             titleText = CreateBoardText(content, "TileTitle", spec.Title, titleSize, true, ComicStyle.Ink,
                 new Vector2(m.TilePadding.x, titleTop),
-                new Vector2(contentWidth - m.TilePadding.x * 2f, titleSize * 1.25f),
+                new Vector2(rowWidth - arrowGutter, titleHeight),
                 TextAlignmentOptions.MidlineLeft, -2f, FontStyles.Bold);
 
             float infoSize = UITypography.FontSnapped(m.TileInfoFont);
             float infoHeight = infoSize * 1.7f;
-            float arrowSize = UITypography.FontSnapped(m.TileArrowFont);
-            float arrowWidth = spec.Interactive ? arrowSize * 1.2f : 0f;
             float infoTop = contentHeight - m.TilePadding.y - infoHeight;
 
             infoText = CreateBoardText(content, "TileInfo", spec.Info, infoSize, false,
                 ComicStyle.WithAlpha(ComicStyle.Ink, 0.72f),
                 new Vector2(m.TilePadding.x, infoTop),
-                new Vector2(contentWidth - m.TilePadding.x * 2f - arrowWidth, infoHeight),
+                new Vector2(rowWidth, infoHeight),
                 TextAlignmentOptions.MidlineLeft, 0.5f, FontStyles.Bold);
 
             if (spec.Interactive)
             {
                 // `》` 行进箭头：只有可点卡才放（信息卡不放箭头，避免"假可点"）
                 CreateBoardText(content, "TileArrow", "》", arrowSize, true, ComicStyle.Ink,
-                    new Vector2(m.TilePadding.x, infoTop - (arrowSize * 1.1f - infoHeight) * 0.5f),
-                    new Vector2(contentWidth - m.TilePadding.x * 2f, arrowSize * 1.1f),
+                    new Vector2(m.TilePadding.x + rowWidth - arrowGutter, titleTop + (titleHeight - arrowHeight) * 0.5f),
+                    new Vector2(arrowGutter, arrowHeight),
                     TextAlignmentOptions.MidlineRight, 0f, FontStyles.Bold);
 
                 AttachTileInteraction(go, shape, content, spec.ClickAction);
             }
 
+            // 规范禁止 Truncate：宽度只能靠版面表兜住，超宽在开发期就报出来。
+            WarnIfTextOverflows(titleText, rowWidth - arrowGutter, "次级卡标题 " + spec.Tag);
+            FitTileInfoText(infoText);
+
             return new HomeTileView { Root = root, Content = content, Shape = shape, Title = titleText, Info = infoText };
+        }
+
+        /// <summary>
+        /// 信息行自适应：战绩数字会随存档变大（「胜 128/256 · 涂地 12345㎡」），
+        /// 超出可用宽度时先逐级缩字号（桌面底线 18 / 移动端 20），缩到底仍放不下才告警。
+        /// 规范禁 Truncate，所以这里绝不截字；刷新读数（<see cref="RefreshHomeInfo"/>）也要重算。
+        /// </summary>
+        private static void FitTileInfoText(TextMeshProUGUI text)
+        {
+            if (text == null) return;
+
+            float maxWidth = text.rectTransform.sizeDelta.x;
+            float floor = UITypography.IsMobileLike ? 20f : 18f;
+            text.fontSize = UITypography.FontSnapped(MenuLayoutMath.Home(UITypography.IsMobileLike).TileInfoFont);
+
+            while (text.fontSize > floor && text.GetPreferredValues(text.text).x > maxWidth + 0.5f)
+            {
+                text.fontSize = Mathf.Max(floor, text.fontSize - 1f);
+            }
+
+            WarnIfTextOverflows(text, maxWidth, "次级卡信息");
+        }
+
+        /// <summary>开发期护栏：文字自然宽度超出盒子就告警（规范禁 Truncate，宽度必须由版面表兜住）。</summary>
+        private static void WarnIfTextOverflows(TextMeshProUGUI text, float availableWidth, string label)
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (text == null || string.IsNullOrEmpty(text.text) || availableWidth <= 0f) return;
+            float preferredWidth = text.GetPreferredValues(text.text).x;
+            if (preferredWidth > availableWidth + 0.5f)
+            {
+                Debug.LogWarning($"[MatchFlowUI] {label} 宽 {preferredWidth:0}px 超出可用 {availableWidth:0}px：请压缩文案或调版面表");
+            }
+#endif
         }
 
         /// <summary>整卡可点：自带 Button（音效）或复用的旧按钮（检查更新）都套同一套按压物理。</summary>
@@ -1055,33 +1137,35 @@ namespace P1.UI
             return tmp;
         }
 
-        /// <summary>音效是否已静音（主音量 0 视为静音）。</summary>
-        private static bool IsAudioMuted
+        /// <summary>设置卡信息行：主音量 + 震屏读数（移动端空间紧，省略尾注）。</summary>
+        private static string BuildSettingsInfo()
         {
-            get
-            {
-                try
-                {
-                    return GameSettingsService.MasterVolume <= 0.001f;
-                }
-                catch (System.Exception)
-                {
-                    return false;
-                }
-            }
-        }
-
-        private static string BuildAudioInfo()
-        {
+            int vol = -1;
+            int shake = -1;
             try
             {
-                int percent = Mathf.RoundToInt(Mathf.Clamp01(GameSettingsService.MasterVolume) * 100f);
-                return percent <= 0 ? "已静音 · 点击恢复" : $"主音量 {percent}% · 点击静音";
+                vol = Mathf.RoundToInt(Mathf.Clamp01(GameSettingsService.MasterVolume) * 100f);
+                shake = Mathf.RoundToInt(Mathf.Clamp01(GameSettingsService.ShakeScale) * 100f);
             }
-            catch (System.Exception)
+            catch (System.Exception ex)
             {
-                return "主音量 — · 点击切换";
+                Debug.LogWarning("[MatchFlowUI] 设置卡读取读数失败：" + ex.Message);
             }
+
+            if (vol < 0 || shake < 0) return "音量 · 震屏 · 灵敏度 · 点击调整";
+            return UITypography.IsMobileLike
+                ? $"音量 {vol}% · 震屏 {shake}%"
+                : $"音量 {vol}% · 震屏 {shake}% · 点击调整";
+        }
+
+        /// <summary>
+        /// 设置卡：直开系统设置页。复用暂停菜单的设置视图（首页模式），
+        /// 不带对局暂停语义——不动 timeScale / AudioListener，也不弹「继续游戏」等对局按钮。
+        /// </summary>
+        private void OpenHomeSettings()
+        {
+            var pause = Menus.PauseMenuOverlay.CreateInstance();
+            if (pause != null) pause.OpenSettingsFromHome();
         }
 
         private static string BuildRecordInfo()
@@ -1091,7 +1175,7 @@ namespace P1.UI
                 PlayerProfile profile = PlayerProfile.Current;
                 if (profile != null)
                 {
-                    return $"LV.{profile.Level} · 胜场 {profile.Wins} / {profile.Matches} 局 · 总涂地 {profile.TotalTurf:0}㎡";
+                    return $"LV.{profile.Level} · 胜场 {profile.Wins}/{profile.Matches} · 涂地 {profile.TotalTurf:0}㎡";
                 }
             }
             catch (System.Exception ex)
@@ -1099,45 +1183,40 @@ namespace P1.UI
                 Debug.LogWarning("[MatchFlowUI] 战绩卡读取档案失败：" + ex.Message);
             }
 
-            return "LV.1 · 胜场 0 / 0 局 · 总涂地 0㎡";
+            return "LV.1 · 胜场 0/0 · 涂地 0㎡";
         }
 
-        /// <summary>首页读数（战绩 / 音效）刷新：回到主菜单时数值会变。</summary>
+        /// <summary>
+        /// 键位卡信息行。移动端字号 ×1.28（18→23），信息行可用宽度只有 ~384px，
+        /// 长句必须压成「动作 + 按键」四段短词，否则会顶出卡面。
+        /// </summary>
+        private static string BuildKeysInfo()
+        {
+            return UITypography.IsMobileLike
+                ? "摇杆移动 · 射击 · 跳跃 · 大招"
+                : "WASD 移动 · 左键 射击 · 空格 跳跃 · Q 大招";
+        }
+
+        /// <summary>首页读数（战绩 / 设置 / 键位）刷新：回到主菜单或设置项变化时数值会变。</summary>
         private void RefreshHomeInfo()
         {
-            if (_homeRecordInfo != null) _homeRecordInfo.text = BuildRecordInfo();
-            if (_homeAudioInfo != null) _homeAudioInfo.text = BuildAudioInfo();
-            if (_homeAudioTitle != null) _homeAudioTitle.text = IsAudioMuted ? "音效 · 关" : "音效 · 开";
+            if (_homeRecordInfo != null)
+            {
+                _homeRecordInfo.text = BuildRecordInfo();
+                FitTileInfoText(_homeRecordInfo);
+            }
+
+            if (_homeSettingsInfo != null)
+            {
+                _homeSettingsInfo.text = BuildSettingsInfo();
+                FitTileInfoText(_homeSettingsInfo);
+            }
+
             if (_homeKeysInfo != null)
             {
-                _homeKeysInfo.text = UITypography.IsMobileLike
-                    ? "摇杆 移动 · 射击键 开火 · 跳跃键 起跳 · 大招键 释放"
-                    : "WASD 移动 · 左键 射击 · 空格 跳跃 · Q 大招";
+                _homeKeysInfo.text = BuildKeysInfo();
+                FitTileInfoText(_homeKeysInfo);
             }
-        }
-
-        /// <summary>音效卡：一键静音 / 恢复（写 GameSettingsService，与设置面板共用同一份存档）。</summary>
-        private void ToggleHomeAudio()
-        {
-            try
-            {
-                float current = GameSettingsService.MasterVolume;
-                if (current > 0.001f)
-                {
-                    _audioVolumeBeforeMute = Mathf.Clamp(current, 0.05f, 1f);
-                    GameSettingsService.MasterVolume = 0f;
-                }
-                else
-                {
-                    GameSettingsService.MasterVolume = _audioVolumeBeforeMute;
-                }
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning("[MatchFlowUI] 音效开关失败：" + ex.Message);
-            }
-
-            RefreshHomeInfo();
         }
 
         private void PlayHomeEntrance()
@@ -1145,12 +1224,12 @@ namespace P1.UI
             PlayStaggered(_homeEntrance);
         }
 
-        /// <summary>结算卡入场：两块比分卡先到，判定牌/战报卡各自在揭晓时再 pop-in。</summary>
+        /// <summary>结算入场：两块读数板先到，判定牌 / 台账卡在掷点揭晓时各自 pop-in。</summary>
         private void PlayResultEntrance()
         {
             _resultEntrance.Clear();
-            if (_teamCardA != null) _resultEntrance.Add(_teamCardA.GetComponent<UISpringMotion>());
-            if (_teamCardB != null) _resultEntrance.Add(_teamCardB.GetComponent<UISpringMotion>());
+            if (_coverPlateA != null) _resultEntrance.Add(_coverPlateA.GetComponent<UISpringMotion>());
+            if (_coverPlateB != null) _resultEntrance.Add(_coverPlateB.GetComponent<UISpringMotion>());
             PlayStaggered(_resultEntrance);
         }
 
@@ -1410,6 +1489,7 @@ namespace P1.UI
             if (startButton != null) startButton.onClick.RemoveListener(OnStartClicked);
             if (restartButton != null) restartButton.onClick.RemoveListener(OnStartClicked);
             if (checkUpdateButton != null) checkUpdateButton.onClick.RemoveListener(OnCheckUpdateClicked);
+            GameSettingsService.SettingsChanged -= RefreshHomeInfo;
         }
 
         public void SetTheme(UIThemeSO themeAsset)
@@ -1436,12 +1516,15 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 结算页（几何大胆风 · 大数字即设计）：
-        /// 1. 顶部 Hero 级 VICTORY / DEFEAT 判定大牌（移动端 ≥120），不再另起一行解说文字；
-        /// 2. 双方覆盖率百分比做成超大数字（桌面 104，移动端 138）分列左右队伍卡片；
-        /// 3. 卡面只保留「我方 / 敌方」两个词与队色涂地条；
-        /// 4. 战报单据 = 勋章 + LV + 经验条，一块白卡收拢，不再套灰框/子标签；
-        /// 5. 关键 CTA「再来一局」Red 底白字直角大按钮 + 次级「返回」白底墨字。
+        /// 结算页 v2（几何大胆风 · 深色舞台上的计分场，参考 INKWAVE 结算的信息结构）：
+        /// 1. 顶部 Hero 级 VICTORY / DEFEAT 判定大牌（移动端 ≥120），桌面右上角一枚金色「胜差」贴纸；
+        /// 2. 中部两块「墨色读数板」（我方 / 敌方）：队色描边 + 超大百分比，中间一条双向生长的
+        ///    拔河覆盖率条，白色分界线标出占比落点；掷点定格后胜方点亮「胜」签、败方读数转不透明灰；
+        /// 3. 底部一张战报台账卡：双队 4v4 明细表（武器图标 / 姓名 / TURF / K.O. / DOWN），
+        ///    本地玩家行队色高亮、队内 TURF 王挂 MVP；卡底一条勋章 chips + LV / 段位 + 经验条 + 本局 XP；
+        /// 4. 关键 CTA「再来一局」黄底墨字直角大按钮 + 次级「返回」纸白墨框；升级提示是卡片顶边的黄页签。
+        ///    重影修复：百分比改纯平 TMP（display Heavy），不再给 Legacy Text 挂 uGUI Shadow——
+        ///    Shadow 复制的是不透明字形副本，配上半透明字色就会读成「灰字黑重影」。
         /// </summary>
         private void EnsureResultVisuals()
         {
@@ -1479,11 +1562,37 @@ namespace P1.UI
                 ComicStyle.WithAlpha(ComicStyle.Red, 0.16f));
             CreateStarField(rootRt, mobile ? 24 : 34, 0x2E5A0901u);
 
-            // 判定牌下方的横规：深舞台上用低透明纸白，给 Hero 大牌一个落地基线。
-            float ruleY = mobile ? 262f : 264f;
-            CreateGeometricSquare(rootRt, "ResultRule", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0f, ruleY), new Vector2(mobile ? 720f : 660f, ComicStyle.Border), 0f,
-                ComicStyle.WithAlpha(ComicStyle.Paper, 0.18f));
+            // 胜差贴纸（桌面右上角，INKWAVE 的 PHOTO FINISH / LANDSLIDE 同款信息位）：
+            // 只做桌面，移动端屏幕更窄，胜差交给「败方读数转灰 + 胜签」表达。
+            if (!mobile)
+            {
+                var tagGo = new GameObject("MatchTag", typeof(RectTransform), typeof(CanvasRenderer),
+                    typeof(UIInkShapeGraphic));
+                tagGo.transform.SetParent(rootRt, false);
+                _matchTagRoot = (RectTransform)tagGo.transform;
+                _matchTagRoot.anchorMin = new Vector2(0.5f, 0.5f);
+                _matchTagRoot.anchorMax = new Vector2(0.5f, 0.5f);
+                _matchTagRoot.pivot = new Vector2(0.5f, 0.5f);
+                _matchTagRoot.anchoredPosition = new Vector2(486f, 332f);
+                _matchTagRoot.sizeDelta = new Vector2(292f, 36f);
+
+                var tagShape = tagGo.GetComponent<UIInkShapeGraphic>();
+                tagShape.Shape = UIInkShape.SharpRect;
+                tagShape.CornerRadius = ComicStyle.CornerSharp;
+                tagShape.BorderWidth = ComicStyle.BorderThin;
+                tagShape.BorderColor = ComicStyle.Ink;
+                tagShape.color = ComicStyle.Yellow;
+                tagShape.HardShadow = false;
+                tagShape.Halftone = false;
+                tagShape.raycastTarget = false;
+                resolved.ApplyHardShadow(tagShape, UIHardShadowLevel.Tag);
+
+                _matchTagText = CreateTmpText(tagGo.transform, "Label", "", UITypography.FontSnapped(18f),
+                    isDisplay: true, ComicStyle.Ink, Vector2.zero, new Vector2(292f, 36f), 1.5f,
+                    TextAlignmentOptions.Center);
+
+                tagGo.SetActive(false);
+            }
 
             // 1. 顶部 Hero 级 VICTORY / DEFEAT 判定大牌
             if (victoryBadgeRoot == null)
@@ -1538,140 +1647,77 @@ namespace P1.UI
             victoryBadgeRoot.sizeDelta = new Vector2(mobile ? 720f : 660f, mobile ? 132f : 118f);
             victoryBadgeRoot.gameObject.SetActive(false);
 
-            // 2. 左右分列队伍比分卡：队色标题条（谁）→ 超大百分比（多少）→ 队色涂地条（占比）。
-            //    卡面只留「我方 / 敌方」两个词，不再写 TEAM A · 我方队伍 这类重复标签。
-            float cardOffsetX = mobile ? 316f : 300f;
-            float cardCenterY = mobile ? 88f : 86f;
-            Vector2 cardSize = mobile ? new Vector2(520f, 250f) : new Vector2(470f, 232f);
-            float tagHeight = mobile ? 54f : 50f;
-            float barSlotH = mobile ? 22f : 20f;
-            float barSlotY = -cardSize.y * 0.5f + barSlotH * 0.5f + (mobile ? 18f : 16f);
+            // 2. 计分场：两块墨色读数板（我方 / 敌方）+ 中间拔河覆盖率条。
+            //    读数板 = 深墨底 + 队色描边，比两张纯白卡更沉、更有层级；
+            //    中间双向条把「谁涂得多」变成一条一眼可读的拉扯，胜方挂金「胜」签。
+            _teamColorA = resolved.GetTeamColor(Team.TeamA);
+            _teamColorB = resolved.GetTeamColor(Team.TeamB);
 
-            // 2.1 队伍 A 比分卡（我方）
-            GameObject teamAGo = CreateTeamScoreCard(rootRt, "TeamACard", resolved, Team.TeamA, "我方",
-                new Vector2(-cardOffsetX, cardCenterY), cardSize, tagHeight);
+            float plateW = mobile ? 300f : 290f;
+            float plateH = mobile ? 164f : 150f;
+            float plateX = mobile ? 452f : 470f;
+            float plateY = mobile ? 182f : 190f;
+            float percentBase = mobile ? 62f : 76f;
 
-            // 2.2 队伍 B 比分卡（敌方）
-            GameObject teamBGo = CreateTeamScoreCard(rootRt, "TeamBCard", resolved, Team.TeamB, "敌方",
-                new Vector2(cardOffsetX, cardCenterY), cardSize, tagHeight);
+            _coverPlateA = CreateCoveragePlate(rootRt, "CoverPlateA", resolved, Team.TeamA, "我方",
+                new Vector2(-plateX, plateY), new Vector2(plateW, plateH), percentBase,
+                out _plateShapeA, out _percentTmpA, out _winMarkA);
+            _coverPlateB = CreateCoveragePlate(rootRt, "CoverPlateB", resolved, Team.TeamB, "敌方",
+                new Vector2(plateX, plateY), new Vector2(plateW, plateH), percentBase,
+                out _plateShapeB, out _percentTmpB, out _winMarkB);
 
-            _teamCardA = (RectTransform)teamAGo.transform;
-            _teamCardB = (RectTransform)teamBGo.transform;
+            // 旧版 Legacy 百分比文本必须彻底退场：TMP 新读数一旦叠在它们上面，
+            // 灰底字形会从板边漏出来，被误读成「重影」。
+            if (resultPercentA != null) resultPercentA.gameObject.SetActive(false);
+            if (resultPercentB != null) resultPercentB.gameObject.SetActive(false);
+            if (resultBarA != null) resultBarA.gameObject.SetActive(false);
+            if (resultBarB != null) resultBarB.gameObject.SetActive(false);
 
-            // 2.3 胜方标记：贴在本方标题条右侧的黄底墨字「胜」，掷点结束后才点亮。
-            float winnerTagW = mobile ? 56f : 52f;
-            float winnerTagH = mobile ? 34f : 30f;
-            _winnerTagA = CreateWinnerTag(teamAGo.transform, true, cardSize, tagHeight,
-                new Vector2(winnerTagW, winnerTagH));
-            _winnerTagB = CreateWinnerTag(teamBGo.transform, false, cardSize, tagHeight,
-                new Vector2(winnerTagW, winnerTagH));
+            // 3. 拔河覆盖率条：两段队色从左右两端向中间生长，白色分界线预告占比落点。
+            float barW = mobile ? 560f : 620f;
+            float barH = mobile ? 40f : 36f;
+            var slotGo = new GameObject("CoverBarSlot", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(UIInkShapeGraphic));
+            slotGo.transform.SetParent(rootRt, false);
+            var slotRt = (RectTransform)slotGo.transform;
+            slotRt.anchorMin = new Vector2(0.5f, 0.5f);
+            slotRt.anchorMax = new Vector2(0.5f, 0.5f);
+            slotRt.pivot = new Vector2(0.5f, 0.5f);
+            slotRt.anchoredPosition = new Vector2(0f, plateY);
+            slotRt.sizeDelta = new Vector2(barW, barH);
 
-            // 3. 双方覆盖率百分比：卡面绝对主角（桌面 104 / 移动端 138）
-            float bigNumberSize = UITypography.FontSnapped(mobile ? 108f : 104f);
+            var slotShape = slotGo.GetComponent<UIInkShapeGraphic>();
+            slotShape.Shape = UIInkShape.SharpRect;
+            slotShape.CornerRadius = ComicStyle.CornerSharp;
+            slotShape.BorderWidth = ComicStyle.BorderThin;
+            slotShape.BorderColor = ComicStyle.Paper;
+            slotShape.color = BarSlotInk;
+            slotShape.HardShadow = false;
+            slotShape.Halftone = false;
+            slotShape.raycastTarget = false;
+            resolved.ApplyHardShadow(slotShape, UIHardShadowLevel.Panel);
 
-            if (resultPercentA != null)
-            {
-                resultPercentA.transform.SetParent(teamAGo.transform, false);
-                var pRtA = resultPercentA.rectTransform;
-                pRtA.anchorMin = new Vector2(0.5f, 0.5f);
-                pRtA.anchorMax = new Vector2(0.5f, 0.5f);
-                pRtA.anchoredPosition = new Vector2(0f, -6f);
-                pRtA.sizeDelta = new Vector2(cardSize.x - 32f, mobile ? 150f : 136f);
-                resultPercentA.fontSize = Mathf.RoundToInt(bigNumberSize);
-                resultPercentA.fontStyle = FontStyle.Bold;
-                resultPercentA.alignment = TextAnchor.MiddleCenter;
-                resultPercentA.color = ComicStyle.Ink;
-                resultPercentA.horizontalOverflow = HorizontalWrapMode.Overflow;
-                resultPercentA.verticalOverflow = VerticalWrapMode.Overflow;
-                // Legacy Text 接不了 UIChunkyText（它只认 TMP_Text），用同形状不透明偏移影子
-                // 得到完全等价的「像素硬影 (4,-4)」：零模糊、alpha 恒为 1。
-                EnsureHardTextShadow(resultPercentA, resolved);
-            }
+            _coverInnerW = barW - 14f; // 3px 白框 + 4px 内边距，左右各 7px
+            _coverInnerH = barH - 14f;
 
-            if (resultPercentB != null)
-            {
-                resultPercentB.transform.SetParent(teamBGo.transform, false);
-                var pRtB = resultPercentB.rectTransform;
-                pRtB.anchorMin = new Vector2(0.5f, 0.5f);
-                pRtB.anchorMax = new Vector2(0.5f, 0.5f);
-                pRtB.anchoredPosition = new Vector2(0f, -6f);
-                pRtB.sizeDelta = new Vector2(cardSize.x - 32f, mobile ? 150f : 136f);
-                resultPercentB.fontSize = Mathf.RoundToInt(bigNumberSize);
-                resultPercentB.fontStyle = FontStyle.Bold;
-                resultPercentB.alignment = TextAnchor.MiddleCenter;
-                resultPercentB.color = ComicStyle.Ink;
-                resultPercentB.horizontalOverflow = HorizontalWrapMode.Overflow;
-                resultPercentB.verticalOverflow = VerticalWrapMode.Overflow;
-                // Legacy Text 接不了 UIChunkyText（它只认 TMP_Text），用同形状不透明偏移影子
-                // 得到完全等价的「像素硬影 (4,-4)」：零模糊、alpha 恒为 1。
-                EnsureHardTextShadow(resultPercentB, resolved);
-            }
+            _coverFillA = CreateCoverFill(slotRt, "FillA", _teamColorA, fromLeft: true);
+            _coverFillB = CreateCoverFill(slotRt, "FillB", _teamColorB, fromLeft: false);
 
-            // 4. 直角粗墨水柱（放入各自卡片底部）
+            var divGo = new GameObject("CoverDivider", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            divGo.transform.SetParent(slotRt, false);
+            _coverDivider = (RectTransform)divGo.transform;
+            _coverDivider.anchorMin = new Vector2(0.5f, 0.5f);
+            _coverDivider.anchorMax = new Vector2(0.5f, 0.5f);
+            _coverDivider.pivot = new Vector2(0f, 0.5f);
+            _coverDivider.sizeDelta = new Vector2(3f, _coverInnerH);
+            _coverDivider.anchoredPosition = Vector2.zero;
+            var divImg = divGo.GetComponent<Image>();
+            UIFlatSprite.MakeFlat(divImg);
+            divImg.color = ComicStyle.Paper;
+            divImg.raycastTarget = false;
+            divGo.SetActive(false);
 
-            if (resultBarA != null)
-            {
-                var barSlotGo = new GameObject("BarSlotA", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-                barSlotGo.transform.SetParent(teamAGo.transform, false);
-                var bsRt = (RectTransform)barSlotGo.transform;
-                bsRt.anchorMin = new Vector2(0.5f, 0.5f);
-                bsRt.anchorMax = new Vector2(0.5f, 0.5f);
-                bsRt.anchoredPosition = new Vector2(0f, barSlotY);
-                bsRt.sizeDelta = new Vector2(cardSize.x - 48f, barSlotH);
-
-                var bsShape = barSlotGo.GetComponent<UIInkShapeGraphic>();
-                bsShape.Shape = UIInkShape.SharpRect;
-                bsShape.CornerRadius = ComicStyle.CornerSharp;
-                bsShape.BorderWidth = ComicStyle.BorderThin;
-                bsShape.BorderColor = ComicStyle.Ink;
-                bsShape.color = ComicStyle.PaperAlt;
-                bsShape.HardShadow = false;
-
-                resultBarA.transform.SetParent(barSlotGo.transform, false);
-                var barRt = resultBarA.rectTransform;
-                barRt.anchorMin = Vector2.zero;
-                barRt.anchorMax = Vector2.one;
-                barRt.offsetMin = new Vector2(2f, 2f);
-                barRt.offsetMax = new Vector2(-2f, -2f);
-                // 纯平直角填充：内置 UISprite 在 20~30px 高度会露出圆角端帽，
-                // 实机就是「两头尖尖 + 边缘发灰的渐变」；换 1×1 纯白精灵才是纯色直条。
-                UIFlatSprite.MakeFlat(resultBarA, filled: true);
-                resultBarA.raycastTarget = false;
-                resultBarA.color = resolved.GetTeamColor(Team.TeamA);
-            }
-
-            if (resultBarB != null)
-            {
-                var barSlotGo = new GameObject("BarSlotB", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-                barSlotGo.transform.SetParent(teamBGo.transform, false);
-                var bsRt = (RectTransform)barSlotGo.transform;
-                bsRt.anchorMin = new Vector2(0.5f, 0.5f);
-                bsRt.anchorMax = new Vector2(0.5f, 0.5f);
-                bsRt.anchoredPosition = new Vector2(0f, barSlotY);
-                bsRt.sizeDelta = new Vector2(cardSize.x - 48f, barSlotH);
-
-                var bsShape = barSlotGo.GetComponent<UIInkShapeGraphic>();
-                bsShape.Shape = UIInkShape.SharpRect;
-                bsShape.CornerRadius = ComicStyle.CornerSharp;
-                bsShape.BorderWidth = ComicStyle.BorderThin;
-                bsShape.BorderColor = ComicStyle.Ink;
-                bsShape.color = ComicStyle.PaperAlt;
-                bsShape.HardShadow = false;
-
-                resultBarB.transform.SetParent(barSlotGo.transform, false);
-                var barRt = resultBarB.rectTransform;
-                barRt.anchorMin = Vector2.zero;
-                barRt.anchorMax = Vector2.one;
-                barRt.offsetMin = new Vector2(2f, 2f);
-                barRt.offsetMax = new Vector2(-2f, -2f);
-                // 同上：直角纯色填充，禁止圆角端帽 / 渐变边缘。
-                UIFlatSprite.MakeFlat(resultBarB, filled: true);
-                resultBarB.raycastTarget = false;
-                resultBarB.color = resolved.GetTeamColor(Team.TeamB);
-            }
-
-            // 4b. 隐藏旧场景里的柱条容器（ResultBarA/B 的黑底条）；
-            //     真正的 Fill 已被搬进新的 BarSlot，不隐藏会在卡片中央留下两条遮挡条。
+            // 旧场景柱条容器隐藏（其子 Image 已单独 Deactivate，容器也不应参与射线）。
             HideLegacyResultBar(resultPanel.transform, "ResultBarA");
             HideLegacyResultBar(resultPanel.transform, "ResultBarB");
 
@@ -1683,8 +1729,8 @@ namespace P1.UI
                 verdictText.gameObject.SetActive(false);
             }
 
-            // 5b. 战报单据（勋章 + LV + 经验条合为一块白卡）
-            BuildReportPanel(rootRt, resolved, mobile);
+            // 5b. 战报台账卡（双队明细 + 勋章 + LV + 经验条合为一块白卡）
+            BuildLedgerCard(rootRt, resolved, mobile);
 
             // 6. 再来一局 CTA（主行动黄 + 墨字 + Button 硬影）+ 次级「返回」（纸白 + 墨框）
             float btnY = mobile ? -400f : -390f;
@@ -1744,7 +1790,7 @@ namespace P1.UI
                 jelly.EnableThemeHardShadow();
             }
 
-            // 7. 次级「返回」按钮（纸白底 + 3px 墨框 + Button 硬影，复用现有重开路径）
+            // 7. 次级「返回」按钮（纸白底 + 3px 墨框 + Button 硬影）
             Transform backBtnTrans = resultPanel.transform.Find("ResultBackButton");
             if (backBtnTrans == null)
             {
@@ -1769,7 +1815,7 @@ namespace P1.UI
 
                 var bBtn = backGo.GetComponent<Button>();
                 bBtn.targetGraphic = bImg;
-                bBtn.onClick.AddListener(OnStartClicked);
+                bBtn.onClick.AddListener(OnResultBackClicked);
 
                 var bLabel = CreateOrReplaceTmpLabel((RectTransform)backGo.transform, "Label", "返回",
                     UITypography.FontSnapped(26f), false, ComicStyle.Ink, TextAlignmentOptions.Center);
@@ -1793,6 +1839,16 @@ namespace P1.UI
 
                     CreateOrReplaceTmpLabel(bRt, "Label", "返回",
                         UITypography.FontSnapped(26f), false, ComicStyle.Ink, TextAlignmentOptions.Center);
+                }
+
+                // 每次都重置监听：这个按钮曾被误绑到 OnStartClicked（→ StartMatch → RestartMatch），
+                // 于是「返回」实际是「再来一局」。场景里若已存在同名按钮也靠这里补绑/纠正。
+                var backBtn = backBtnTrans.GetComponent<Button>();
+                if (backBtn != null)
+                {
+                    backBtn.onClick.RemoveListener(OnStartClicked);
+                    backBtn.onClick.RemoveListener(OnResultBackClicked);
+                    backBtn.onClick.AddListener(OnResultBackClicked);
                 }
             }
 
@@ -1852,160 +1908,185 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// Legacy Text 的像素硬影：<see cref="UIChunkyText"/> 只认 TMP_Text，
-        /// uGUI 的 <see cref="Shadow"/> 在只有 effectDistance、没有 blur 时就是「同形状不透明偏移副本」，
-        /// 与 TMP 的 chunky 像素硬影 (4,-4) 完全等价（零模糊、alpha 恒为 1）。
+        /// 覆盖率读数板：深墨底 + 3px 队色描边 + 顶部「我方 / 敌方」小标 + 超大百分比（display Heavy）。
+        /// 百分比一律纯平 TMP（不挂 Shadow / Outline）：v1 给 Legacy Text 挂 uGUI Shadow 做硬影，
+        /// 再配上半透明降灰，屏幕上就是「灰字 + 不透明黑色副本」的重影。
         /// </summary>
-        private static void EnsureHardTextShadow(Text label, UIThemeSO theme)
+        private RectTransform CreateCoveragePlate(RectTransform parent, string name, UIThemeSO resolved,
+            Team team, string label, Vector2 position, Vector2 size, float percentSize,
+            out UIInkShapeGraphic shape, out TextMeshProUGUI percent, out RectTransform winMark)
         {
-            if (label == null) return;
-
-            var shadow = label.GetComponent<Shadow>();
-            if (shadow == null) shadow = label.gameObject.AddComponent<Shadow>();
-
-            UIThemeSO resolved = UIThemeSO.Resolve(theme);
-            shadow.effectColor = resolved.HardShadowOpaqueColor;
-            shadow.effectDistance = resolved.chunkyShadowOffsetPixels;
-            shadow.useGraphicAlpha = false;
-        }
-
-        /// <summary>
-        /// 比分卡外壳：白底墨框直角卡 + 顶部队色标题条。
-        /// 标题条只写「我方 / 敌方」两个词，避免 TEAM A · 我方队伍 这种同义重复。
-        /// </summary>
-        private GameObject CreateTeamScoreCard(RectTransform parent, string name, UIThemeSO resolved,
-            Team team, string label, Vector2 position, Vector2 size, float headerHeight)
-        {
-            var cardGo = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer),
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer),
                 typeof(UIInkShapeGraphic), typeof(UISpringMotion));
-            cardGo.transform.SetParent(parent, false);
-            var cardRt = (RectTransform)cardGo.transform;
-            cardRt.anchorMin = new Vector2(0.5f, 0.5f);
-            cardRt.anchorMax = new Vector2(0.5f, 0.5f);
-            cardRt.pivot = new Vector2(0.5f, 0.5f);
-            cardRt.anchoredPosition = position;
-            cardRt.sizeDelta = size;
+            go.transform.SetParent(parent, false);
+            var rt = (RectTransform)go.transform;
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = position;
+            rt.sizeDelta = size;
 
-            var cardShape = cardGo.GetComponent<UIInkShapeGraphic>();
-            cardShape.Shape = UIInkShape.SharpRect;
-            cardShape.CornerRadius = ComicStyle.CornerSharp;
-            cardShape.BorderWidth = ComicStyle.BorderHeavy;
-            cardShape.BorderColor = ComicStyle.Ink;
-            cardShape.color = ComicStyle.Paper;
-            cardShape.HardShadow = false;
-            // 纸白卡浮在深舞台上：面板硬影 (4,-5) 才有"离地"的层次
-            resolved.ApplyHardShadow(cardShape, UIHardShadowLevel.Panel);
+            Color teamColor = resolved.GetTeamColor(team);
 
-            var cardMotion = cardGo.GetComponent<UISpringMotion>();
-            cardMotion.SetTheme(resolved);
-
-            var headerGo = new GameObject("Header", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-            headerGo.transform.SetParent(cardGo.transform, false);
-            var headerRt = (RectTransform)headerGo.transform;
-            headerRt.anchorMin = new Vector2(0f, 1f);
-            headerRt.anchorMax = new Vector2(1f, 1f);
-            headerRt.pivot = new Vector2(0.5f, 1f);
-            headerRt.anchoredPosition = Vector2.zero;
-            headerRt.sizeDelta = new Vector2(0f, headerHeight);
-
-            var headerShape = headerGo.GetComponent<UIInkShapeGraphic>();
-            headerShape.Shape = UIInkShape.SharpRect;
-            headerShape.CornerRadius = ComicStyle.CornerSharp;
-            // 标题条自带墨色粗框：卡片边框被子物体盖住时，边框不能在标题处断开。
-            headerShape.BorderWidth = ComicStyle.BorderHeavy;
-            headerShape.BorderColor = ComicStyle.Ink;
-            headerShape.color = resolved.GetTeamColor(team);
-            headerShape.HardShadow = false;
-            headerShape.raycastTarget = false;
-
-            var labelTmp = CreateTmpText(headerGo.transform, "Label", label,
-                UITypography.FontSnapped(24f), isDisplay: true, ComicStyle.Ink, Vector2.zero,
-                new Vector2(size.x, headerHeight), 4f, TextAlignmentOptions.Center);
-            labelTmp.fontStyle = FontStyles.Bold;
-
-            return cardGo;
-        }
-
-        /// <summary>
-        /// 结算页「胜方」标记：黄底墨字直角小牌「胜」，贴在本方标题条右侧。
-        /// 建好即隐藏，等覆盖率掷点结束由 <see cref="ApplyWinnerEmphasis"/> 点亮。
-        /// </summary>
-        private RectTransform CreateWinnerTag(Transform card, bool isTeamA,
-            Vector2 cardSize, float headerHeight, Vector2 tagSize)
-        {
-            var go = new GameObject(isTeamA ? "WinnerTagA" : "WinnerTagB",
-                typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-            go.transform.SetParent(card, false);
-            var rect = (RectTransform)go.transform;
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = new Vector2(
-                cardSize.x * 0.5f - ComicStyle.BorderHeavy - 10f - tagSize.x * 0.5f,
-                cardSize.y * 0.5f - headerHeight * 0.5f);
-            rect.sizeDelta = tagSize;
-
-            var shape = go.GetComponent<UIInkShapeGraphic>();
+            shape = go.GetComponent<UIInkShapeGraphic>();
             shape.Shape = UIInkShape.SharpRect;
             shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = ComicStyle.BorderThin;
-            shape.BorderColor = ComicStyle.Ink;
-            shape.color = ComicStyle.Yellow;
+            shape.BorderColor = teamColor;
+            shape.color = PlateInk;
             shape.HardShadow = false;
             shape.Halftone = false;
             shape.raycastTarget = false;
+            resolved.ApplyHardShadow(shape, UIHardShadowLevel.Panel);
 
-            var label = CreateTmpText(go.transform, "Label", "胜", UITypography.FontSnapped(20f),
-                isDisplay: true, ComicStyle.Ink, Vector2.zero, tagSize, 0f, TextAlignmentOptions.Center);
-            label.fontStyle = FontStyles.Bold;
+            var motion = go.GetComponent<UISpringMotion>();
+            motion.SetTheme(resolved);
 
-            go.SetActive(false);
-            return rect;
+            var labelTmp = CreateTmpText(go.transform, "Label", label, UITypography.FontSnapped(20f),
+                isDisplay: true, ComicStyle.WithAlpha(ComicStyle.Paper, 0.72f),
+                new Vector2(0f, size.y * 0.5f - 26f), new Vector2(size.x - 24f, 28f), 3f,
+                TextAlignmentOptions.Center);
+            labelTmp.fontStyle = FontStyles.Bold;
+
+            percent = CreateTmpText(go.transform, "Percent", "0.0%", UITypography.FontSnapped(percentSize),
+                isDisplay: true, teamColor, new Vector2(0f, -6f), new Vector2(size.x - 16f, size.y * 0.62f),
+                1f, TextAlignmentOptions.Center);
+            percent.fontStyle = FontStyles.Bold;
+            percent.overflowMode = TextOverflowModes.Overflow;
+
+            // 胜签：黄底墨字「胜」，挂在板面右上角，掷点结束后才点亮。
+            var markGo = new GameObject("WinMark", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(UIInkShapeGraphic));
+            markGo.transform.SetParent(go.transform, false);
+            winMark = (RectTransform)markGo.transform;
+            winMark.anchorMin = new Vector2(1f, 1f);
+            winMark.anchorMax = new Vector2(1f, 1f);
+            winMark.pivot = new Vector2(1f, 1f);
+            winMark.anchoredPosition = new Vector2(-10f, -10f);
+            winMark.sizeDelta = new Vector2(52f, 30f);
+
+            var markShape = markGo.GetComponent<UIInkShapeGraphic>();
+            markShape.Shape = UIInkShape.SharpRect;
+            markShape.CornerRadius = ComicStyle.CornerSharp;
+            markShape.BorderWidth = ComicStyle.BorderThin;
+            markShape.BorderColor = ComicStyle.Ink;
+            markShape.color = ComicStyle.Yellow;
+            markShape.HardShadow = false;
+            markShape.Halftone = false;
+            markShape.raycastTarget = false;
+
+            var markLabel = CreateTmpText(markGo.transform, "Label", "胜", UITypography.FontSnapped(20f),
+                isDisplay: true, ComicStyle.Ink, Vector2.zero, new Vector2(52f, 30f), 0f,
+                TextAlignmentOptions.Center);
+            markLabel.fontStyle = FontStyles.Bold;
+
+            markGo.SetActive(false);
+            return rt;
+        }
+
+        /// <summary>拔河条填充：1×1 纯白精灵 + 队色，锚在槽内左/右端，宽度由 UpdateResultNumbers 逐帧写入。</summary>
+        private static Image CreateCoverFill(RectTransform slot, string name, Color color, bool fromLeft)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(slot, false);
+            var rt = (RectTransform)go.transform;
+            rt.anchorMin = new Vector2(fromLeft ? 0f : 1f, 0f);
+            rt.anchorMax = new Vector2(fromLeft ? 0f : 1f, 1f);
+            rt.pivot = new Vector2(fromLeft ? 0f : 1f, 0.5f);
+            rt.anchoredPosition = new Vector2(fromLeft ? 7f : -7f, 0f);
+            rt.sizeDelta = new Vector2(0f, -14f);
+
+            var img = go.GetComponent<Image>();
+            UIFlatSprite.MakeFlat(img);
+            img.color = color;
+            img.raycastTarget = false;
+            return img;
+        }
+
+        /// <summary>参战者显示名（与 KillFeedEvent.FormatCombatantName 同一套规则）。</summary>
+        private static string FormatCombatantLabel(CombatantHealth ch, bool isLocal)
+        {
+            if (isLocal) return "YOU";
+            if (ch == null) return "PLAYER";
+
+            string raw = ch.gameObject.name;
+            if (raw.StartsWith("BotA_")) return "ALLY " + raw.Substring(5);
+            if (raw.StartsWith("BotB_")) return "ENEMY " + raw.Substring(5);
+            if (raw.StartsWith("Bot")) return raw.ToUpperInvariant();
+            return "PLAYER";
+        }
+
+        /// <summary>武器图标名（UIIconLibrary / P1RuntimeAssets 的 key，与 KillFeedView 一致）。</summary>
+        private static string WeaponIconName(WeaponKind kind)
+        {
+            switch (kind)
+            {
+                case WeaponKind.Roller: return "weapon_roller";
+                case WeaponKind.Charger: return "weapon_charger";
+                case WeaponKind.Dualies: return "weapon_dualies";
+                case WeaponKind.Slosher: return "weapon_slosher";
+                case WeaponKind.Blaster: return "weapon_blaster";
+                case WeaponKind.Splatling: return "weapon_splatling";
+                default: return "weapon_shooter";
+            }
         }
 
         /// <summary>
-        /// 掷点结束后强调胜方：胜方挂 WINNER 牌，败方比分数字降为 45% 墨色，
-        /// 让观众一眼读出差值，而不是两张完全等价的卡片。
+        /// 掷点定格后强调胜方：胜方板角点亮黄「胜」签，败方读数转不透明灰（#6F6F6F）。
+        /// 这里绝不使用半透明降灰：半透明字形 + 任何描边/副本都会读成「重影」。
         /// </summary>
-        private void ApplyWinnerEmphasis(bool playerWon)
+        private void ApplyWinnerEmphasis(MatchManager match, bool playerWon)
         {
             if (_winnerEmphasisApplied) return;
             _winnerEmphasisApplied = true;
 
-            if (_winnerTagA != null) _winnerTagA.gameObject.SetActive(playerWon);
-            if (_winnerTagB != null) _winnerTagB.gameObject.SetActive(!playerWon);
+            if (_winMarkA != null) _winMarkA.gameObject.SetActive(playerWon);
+            if (_winMarkB != null) _winMarkB.gameObject.SetActive(!playerWon);
 
-            Color dim = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.6f);
-            if (resultPercentA != null) resultPercentA.color = playerWon ? ComicStyle.Ink : dim;
-            if (resultPercentB != null) resultPercentB.color = playerWon ? dim : ComicStyle.Ink;
+            if (_percentTmpA != null) _percentTmpA.color = playerWon ? _teamColorA : PlateDimReadout;
+            if (_percentTmpB != null) _percentTmpB.color = playerWon ? PlateDimReadout : _teamColorB;
+
+            // 桌面胜差贴纸：PHOTO FINISH / LANDSLIDE / MARGIN，数据直接来自终场覆盖率。
+            if (_matchTagRoot != null && _matchTagText != null && match != null)
+            {
+                float margin = Mathf.Abs(match.FinalCoverageA - match.FinalCoverageB);
+                _matchTagText.text = BuildMatchTagText(playerWon, margin);
+                _matchTagRoot.gameObject.SetActive(true);
+            }
+        }
+
+        private static string BuildMatchTagText(bool playerWon, float margin)
+        {
+            if (margin <= 3f)
+            {
+                return (playerWon ? "PHOTO FINISH · " : "CLOSE LOSS · ") + margin.ToString("F1") + "%";
+            }
+
+            if (margin >= 15f)
+            {
+                return (playerWon ? "LANDSLIDE +" : "BLOWOUT -") + margin.ToString("F1") + "%";
+            }
+
+            return (playerWon ? "MARGIN +" : "MARGIN -") + margin.ToString("F1") + "%";
         }
 
         /// <summary>
-        /// 战报单据（结算页下半屏唯一主体）：白底墨框直角卡 + 左侧墨色竖栏，内部三行：
-        /// 1) 勋章 chips（左）+ 本局经验（右）；
-        /// 2) 大号 LV 等级 + 段位名；
-        /// 3) 全宽经验条。
-        ///
-        /// 去掉了 MATCH REPORT / YOUR MEDALS / 1232 / 1850 XP 这些标签与嵌套灰框：
-        /// 勋章色块、巨大 LV 与经验条本身就说明一切，少一层框就少一层"后台表格"感。
-        /// 升级提示也不再浮在内容上，而是变成卡片顶边的一枚黄色页签。
+        /// 战报台账卡（结算页下半屏唯一主体）：
+        /// 上半 = 双队 4v4 明细（武器图标 / 姓名 / TURF / K.O. / DOWN，YOU 行队色高亮、队内涂地王挂金条），
+        /// 中间一条 2px 分隔规，下半 = 勋章 chips + LV / 段位 + 经验条 + 本局 XP。
+        /// 纸白 + 3px 墨框 + 面板硬影 + 顶部 5px 身份色带：全页唯一的「纸上数据」。
+        /// 明细行不在这里建：每局揭晓时由 <see cref="RebuildRosterRows"/> 按实时统计重建。
         /// </summary>
-        private void BuildReportPanel(RectTransform parent, UIThemeSO resolved, bool mobile)
+        private void BuildLedgerCard(RectTransform parent, UIThemeSO resolved, bool mobile)
         {
             if (_reportPanelRoot != null) return;
 
-            float frameW = mobile ? 900f : 840f;
-            float frameH = mobile ? 216f : 200f;
-            float frameY = mobile ? -204f : -196f;
             const float bandH = 5f; // 顶部身份色带（规范：5px，不承载文字）
-            float padX = mobile ? 22f : 20f;
+            float frameW = mobile ? 1180f : 1240f;
+            float frameH = mobile ? 404f : 372f;
+            float frameY = mobile ? -110f : -79f;
+            float padX = mobile ? 27f : 25f;
             float inset = ComicStyle.BorderThin + padX;
-            float contentLeft = -frameW * 0.5f + inset;
-            float contentRight = frameW * 0.5f - (mobile ? 26f : 22f);
-            float rowY = mobile ? 58f : 54f;
-            float levelY = mobile ? -4f : -2f;
-            float trackY = -frameH * 0.5f + (mobile ? 40f : 36f);
-            float trackW = contentRight - contentLeft;
 
             var frameGo = new GameObject("ReportPanel", typeof(RectTransform), typeof(CanvasRenderer),
                 typeof(UIInkShapeGraphic), typeof(UISpringMotion));
@@ -2033,7 +2114,8 @@ namespace P1.UI
             _reportMotion.SetTheme(resolved);
 
             // 顶部身份色带（胜利金 / 失败灰蓝，揭晓时才定色）
-            var bandGo = new GameObject("ReportBand", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            var bandGo = new GameObject("ReportBand", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(UIInkShapeGraphic));
             bandGo.transform.SetParent(frameGo.transform, false);
             _reportBand = (RectTransform)bandGo.transform;
             _reportBand.anchorMin = new Vector2(0f, 1f);
@@ -2051,26 +2133,106 @@ namespace P1.UI
             _reportBandShape.Halftone = false;
             _reportBandShape.raycastTarget = false;
 
-            // 1) 勋章行：chips 由 PopulateMedals 在掷点结束后填入；右侧固定本局经验。
+            // ---------- 布局缓存（RebuildRosterRows 用同一套坐标） ----------
+            float half = frameH * 0.5f;
+            _ledgerColLeft = -frameW * 0.5f + inset;
+            _ledgerColRight = frameW * 0.5f - inset;
+            _ledgerHeaderY = half - (mobile ? 44f : 40f);
+            _ledgerRowTopY = _ledgerHeaderY - (mobile ? 42f : 38f);
+            _ledgerRowH = mobile ? 48f : 44f;
+            _ledgerNameW = mobile ? 130f : 140f;
+            _ledgerTurfX = mobile ? 345f : 345f;
+            _ledgerKoX = mobile ? 215f : 215f;
+            _ledgerDownX = mobile ? 105f : 105f;
+
+            // 两支队伍的表头
+            CreateRosterHeader(frameGo.transform, resolved, Team.TeamA, "我方", -1f, mobile);
+            CreateRosterHeader(frameGo.transform, resolved, Team.TeamB, "敌方", 1f, mobile);
+
+            // 中缝竖规：两队明细之间的 2px 硬线
+            float rowsBottom = _ledgerRowTopY - _ledgerRowH * 4f;
+            CreateGeometricSquare(frameGo.transform, "LedgerDivider", new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f), new Vector2(0f, (_ledgerHeaderY + rowsBottom) * 0.5f + 4f),
+                new Vector2(2f, _ledgerHeaderY - rowsBottom - 4f), 0f, ComicStyle.PaperAlt);
+
+            // 明细区与成长区之间的分隔规
+            float ruleY = mobile ? -80f : -72f;
+            CreateGeometricSquare(frameGo.transform, "LedgerRule", new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f), new Vector2(0f, ruleY),
+                new Vector2(frameW - inset * 2f, 2f), 0f, ComicStyle.PaperAlt);
+
+            // ---------- 成长区：勋章 chips + LV/段位 + XP ----------
+            float stripY = mobile ? -112f : -104f;
+
             var medalsGo = new GameObject("MedalsRow", typeof(RectTransform));
             medalsGo.transform.SetParent(frameGo.transform, false);
             var medalsRt = (RectTransform)medalsGo.transform;
             medalsRt.anchorMin = new Vector2(0.5f, 0.5f);
             medalsRt.anchorMax = new Vector2(0.5f, 0.5f);
             medalsRt.pivot = new Vector2(0f, 0.5f);
-            medalsRt.anchoredPosition = new Vector2(contentLeft, rowY);
-            medalsRt.sizeDelta = new Vector2(trackW - (mobile ? 170f : 150f), mobile ? 36f : 32f);
+            float gainW = mobile ? 210f : 200f;
+            float trackW = mobile ? 330f : 350f;
+            float medalsLeft = mobile ? -334f : -370f;
+            medalsRt.anchoredPosition = new Vector2(medalsLeft, stripY);
+            // 勋章行从 LV 右侧一路铺到经验条左端（留 12px 呼吸位），宽度由两侧锚点相减得到。
+            float xpTrackLeft = frameW * 0.5f - inset - trackW;
+            float medalsW = xpTrackLeft - 12f - medalsLeft;
+            medalsRt.sizeDelta = new Vector2(Mathf.Max(200f, medalsW), mobile ? 38f : 34f);
             _medalsContainer = medalsRt;
 
-            var gainGo = new GameObject("XpGainText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            var levelGo = new GameObject("LevelText", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(TextMeshProUGUI));
+            levelGo.transform.SetParent(frameGo.transform, false);
+            var levelRt = (RectTransform)levelGo.transform;
+            levelRt.anchorMin = new Vector2(0.5f, 0.5f);
+            levelRt.anchorMax = new Vector2(0.5f, 0.5f);
+            levelRt.pivot = new Vector2(0f, 0.5f);
+            levelRt.anchoredPosition = new Vector2(_ledgerColLeft, stripY);
+            levelRt.sizeDelta = new Vector2(mobile ? 210f : 200f, mobile ? 60f : 56f);
+
+            _xpLevelText = levelGo.GetComponent<TextMeshProUGUI>();
+            _xpLevelText.text = "LV. 1";
+            _xpLevelText.font = resolved.ResolveFont(true, "LV. 1");
+            _xpLevelText.fontSize = UITypography.FontSnapped(40f);
+            _xpLevelText.fontStyle = FontStyles.Bold;
+            _xpLevelText.alignment = TextAlignmentOptions.MidlineLeft;
+            _xpLevelText.color = ComicStyle.Ink;
+            _xpLevelText.raycastTarget = false;
+            _xpLevelText.textWrappingMode = TextWrappingModes.NoWrap;
+            _xpLevelText.overflowMode = TextOverflowModes.Overflow;
+
+            var rankGo = new GameObject("RankText", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(TextMeshProUGUI));
+            rankGo.transform.SetParent(frameGo.transform, false);
+            var rankRt = (RectTransform)rankGo.transform;
+            rankRt.anchorMin = new Vector2(0.5f, 0.5f);
+            rankRt.anchorMax = new Vector2(0.5f, 0.5f);
+            rankRt.pivot = new Vector2(0f, 0.5f);
+            rankRt.anchoredPosition = new Vector2(_ledgerColLeft, stripY - (mobile ? 40f : 38f));
+            rankRt.sizeDelta = new Vector2(mobile ? 320f : 300f, 24f);
+
+            _xpRankNameText = rankGo.GetComponent<TextMeshProUGUI>();
+            _xpRankNameText.text = "FRESH RECRUIT";
+            _xpRankNameText.font = resolved.ResolveFont(true, "FRESH RECRUIT");
+            _xpRankNameText.fontSize = UITypography.FontSnapped(18f);
+            _xpRankNameText.fontStyle = FontStyles.Bold;
+            _xpRankNameText.characterSpacing = 1.5f;
+            _xpRankNameText.alignment = TextAlignmentOptions.MidlineLeft;
+            _xpRankNameText.color = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.75f);
+            _xpRankNameText.raycastTarget = false;
+            _xpRankNameText.textWrappingMode = TextWrappingModes.NoWrap;
+            _xpRankNameText.overflowMode = TextOverflowModes.Overflow;
+
+            var gainGo = new GameObject("XpGainText", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(TextMeshProUGUI));
             gainGo.transform.SetParent(frameGo.transform, false);
             var gainRt = (RectTransform)gainGo.transform;
             // 必须用中心锚点 + 中心系坐标：右边缘锚点会把 +XP 再往右推一个 contentRight。
             gainRt.anchorMin = new Vector2(0.5f, 0.5f);
             gainRt.anchorMax = new Vector2(0.5f, 0.5f);
             gainRt.pivot = new Vector2(1f, 0.5f);
-            gainRt.anchoredPosition = new Vector2(contentRight, rowY);
-            gainRt.sizeDelta = new Vector2(mobile ? 190f : 170f, 30f);
+            gainRt.anchoredPosition = new Vector2(_ledgerColRight, stripY + 14f);
+            gainRt.sizeDelta = new Vector2(gainW, 28f);
 
             _xpGainText = gainGo.GetComponent<TextMeshProUGUI>();
             _xpGainText.text = "+0 XP";
@@ -2083,56 +2245,15 @@ namespace P1.UI
             _xpGainText.textWrappingMode = TextWrappingModes.NoWrap;
             _xpGainText.overflowMode = TextOverflowModes.Overflow;
 
-            // 2) 等级主角：LV. 3 大字 + 段位名一行小字。
-            var levelGo = new GameObject("LevelText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
-            levelGo.transform.SetParent(frameGo.transform, false);
-            var levelRt = (RectTransform)levelGo.transform;
-            levelRt.anchorMin = new Vector2(0.5f, 0.5f);
-            levelRt.anchorMax = new Vector2(0.5f, 0.5f);
-            levelRt.pivot = new Vector2(0f, 0.5f);
-            levelRt.anchoredPosition = new Vector2(contentLeft, levelY);
-            levelRt.sizeDelta = new Vector2(mobile ? 200f : 180f, mobile ? 62f : 58f);
-
-            _xpLevelText = levelGo.GetComponent<TextMeshProUGUI>();
-            _xpLevelText.text = "LV. 1";
-            _xpLevelText.font = resolved.ResolveFont(true, "LV. 1");
-            _xpLevelText.fontSize = UITypography.FontSnapped(52f);
-            _xpLevelText.fontStyle = FontStyles.Bold;
-            _xpLevelText.alignment = TextAlignmentOptions.MidlineLeft;
-            _xpLevelText.color = ComicStyle.Ink;
-            _xpLevelText.raycastTarget = false;
-            _xpLevelText.textWrappingMode = TextWrappingModes.NoWrap;
-            _xpLevelText.overflowMode = TextOverflowModes.Overflow;
-
-            var rankGo = new GameObject("RankText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
-            rankGo.transform.SetParent(frameGo.transform, false);
-            var rankRt = (RectTransform)rankGo.transform;
-            rankRt.anchorMin = new Vector2(0.5f, 0.5f);
-            rankRt.anchorMax = new Vector2(0.5f, 0.5f);
-            rankRt.pivot = new Vector2(0f, 0.5f);
-            rankRt.anchoredPosition = new Vector2(contentLeft + (mobile ? 200f : 190f), levelY - 2f);
-            rankRt.sizeDelta = new Vector2(mobile ? 360f : 330f, 26f);
-
-            _xpRankNameText = rankGo.GetComponent<TextMeshProUGUI>();
-            _xpRankNameText.text = "FRESH RECRUIT";
-            _xpRankNameText.font = resolved.ResolveFont(true, "FRESH RECRUIT");
-            _xpRankNameText.fontSize = UITypography.FontSnapped(16f);
-            _xpRankNameText.fontStyle = FontStyles.Bold;
-            _xpRankNameText.characterSpacing = 1.5f;
-            _xpRankNameText.alignment = TextAlignmentOptions.MidlineLeft;
-            _xpRankNameText.color = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.75f);
-            _xpRankNameText.raycastTarget = false;
-            _xpRankNameText.textWrappingMode = TextWrappingModes.NoWrap;
-            _xpRankNameText.overflowMode = TextOverflowModes.Overflow;
-
-            // 3) 经验条：纯色直角，无数字标签，长度本身就是进度。
-            var trackGo = new GameObject("XpTrack", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            // 经验条：纯色直角，无数字标签，长度本身就是进度。
+            var trackGo = new GameObject("XpTrack", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(UIInkShapeGraphic));
             trackGo.transform.SetParent(frameGo.transform, false);
             var trackRt = (RectTransform)trackGo.transform;
             trackRt.anchorMin = new Vector2(0.5f, 0.5f);
             trackRt.anchorMax = new Vector2(0.5f, 0.5f);
-            trackRt.pivot = new Vector2(0f, 0.5f);
-            trackRt.anchoredPosition = new Vector2(contentLeft, trackY);
+            trackRt.pivot = new Vector2(1f, 0.5f);
+            trackRt.anchoredPosition = new Vector2(_ledgerColRight, stripY - 16f);
             trackRt.sizeDelta = new Vector2(trackW, mobile ? 14f : 12f);
 
             var trackShape = trackGo.GetComponent<UIInkShapeGraphic>();
@@ -2159,7 +2280,8 @@ namespace P1.UI
             _xpBarFill.raycastTarget = false;
 
             // 升级页签：骑在卡片上边框上，不再盖住勋章与等级文字。
-            var luGo = new GameObject("LevelUpBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(UISpringMotion));
+            var luGo = new GameObject("LevelUpBadge", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(UIInkShapeGraphic), typeof(UISpringMotion));
             luGo.transform.SetParent(frameGo.transform, false);
             _levelUpBadgeRoot = (RectTransform)luGo.transform;
             _levelUpBadgeRoot.anchorMin = new Vector2(0f, 1f);
@@ -2180,7 +2302,8 @@ namespace P1.UI
             _levelUpMotion = luGo.GetComponent<UISpringMotion>();
             _levelUpMotion.SetTheme(resolved);
 
-            var luTxtGo = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            var luTxtGo = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(TextMeshProUGUI));
             luTxtGo.transform.SetParent(_levelUpBadgeRoot, false);
             Stretch(luTxtGo.GetComponent<RectTransform>());
 
@@ -2197,6 +2320,208 @@ namespace P1.UI
 
             _levelUpBadgeRoot.gameObject.SetActive(false);
             _reportPanelRoot.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// 台账表头：队色小方块 + 「我方 / 敌方」+ TURF / K.O. / DOWN 列头。
+        /// sign = -1 左列（数字右对齐到中缝），+1 右列（数字左对齐到中缝）。
+        /// </summary>
+        private void CreateRosterHeader(Transform parent, UIThemeSO resolved, Team team, string label,
+            float sign, bool mobile)
+        {
+            float colEdge = sign < 0f ? _ledgerColLeft : _ledgerColRight;
+            float chipX = colEdge - sign * 14f;
+
+            // 队色小方块紧贴外侧边；队名从方块右侧 6px 起排（中心锚点要按半个盒宽回退）。
+            CreateGeometricSquare(parent, "TeamChip" + team, new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f), new Vector2(chipX, _ledgerHeaderY),
+                new Vector2(18f, 18f), 0f, resolved.GetTeamColor(team));
+
+            const float labelW = 90f;
+            var labelTmp = CreateTmpText(parent, "TeamLabel" + team, label, UITypography.FontSnapped(20f),
+                isDisplay: true, ComicStyle.Ink,
+                new Vector2(colEdge - sign * (14f + 9f + 6f + labelW * 0.5f), _ledgerHeaderY),
+                new Vector2(labelW, 26f), 2f,
+                sign < 0f ? TextAlignmentOptions.MidlineLeft : TextAlignmentOptions.MidlineRight);
+            labelTmp.fontStyle = FontStyles.Bold;
+
+            Color headColor = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.55f);
+            CreateTmpText(parent, "HeadTurf" + team, "TURF", UITypography.FontSnapped(18f),
+                isDisplay: false, headColor, new Vector2(sign * _ledgerTurfX, _ledgerHeaderY),
+                new Vector2(110f, 24f), 1f,
+                sign < 0f ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
+            CreateTmpText(parent, "HeadKo" + team, "K.O.", UITypography.FontSnapped(18f),
+                isDisplay: false, headColor, new Vector2(sign * _ledgerKoX, _ledgerHeaderY),
+                new Vector2(80f, 24f), 1f,
+                sign < 0f ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
+            CreateTmpText(parent, "HeadDown" + team, "DOWN", UITypography.FontSnapped(18f),
+                isDisplay: false, headColor, new Vector2(sign * _ledgerDownX, _ledgerHeaderY),
+                new Vector2(80f, 24f), 1f,
+                sign < 0f ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
+        }
+
+        /// <summary>
+        /// 按实时统计重建双队明细行：队伍分列、队内按涂地降序；本地玩家行队色高亮，
+        /// 队内涂地王（非本地）加金色外条。每局揭晓时调用一次。
+        /// </summary>
+        private void RebuildRosterRows(UIThemeSO resolved)
+        {
+            for (int i = 0; i < _rosterRowObjects.Count; i++)
+            {
+                if (_rosterRowObjects[i] != null) Destroy(_rosterRowObjects[i]);
+            }
+            _rosterRowObjects.Clear();
+            _rosterBuilt = true;
+
+            if (_reportPanelRoot == null) return;
+
+            CombatantHealth localHealth = null;
+            if (PlayerController.LocalPlayer != null) localHealth = PlayerController.LocalPlayer.Health;
+
+            var entries = new List<RosterEntry>(8);
+            var all = CombatantHealthRegistry.All;
+            for (int i = 0; i < all.Count; i++)
+            {
+                CombatantHealth ch = all[i];
+                if (ch == null) continue;
+
+                CombatantMatchStats stats = default;
+                MatchStatsService.TryGet(ch, out stats);
+
+                var weapon = ch.GetComponent<WeaponController>();
+                entries.Add(new RosterEntry
+                {
+                    Health = ch,
+                    Stats = stats,
+                    IsLocal = ch == localHealth,
+                    Kind = weapon != null ? weapon.CurrentWeaponKind : WeaponKind.Shooter,
+                    Label = FormatCombatantLabel(ch, ch == localHealth),
+                    Team = ch.Team
+                });
+            }
+
+            entries.Sort((x, y) => y.Stats.TurfSquareMeters.CompareTo(x.Stats.TurfSquareMeters));
+
+            int rowA = 0;
+            int rowB = 0;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                RosterEntry entry = entries[i];
+                bool teamA = entry.Team == Team.TeamA;
+                int slot = teamA ? rowA++ : rowB++;
+                if (slot >= 4) continue; // 台账只收 4v4，超出不绘制
+                CreateRosterRow(resolved, entry, slot, teamA);
+            }
+        }
+
+        private void CreateRosterRow(UIThemeSO resolved, RosterEntry entry, int slot, bool teamA)
+        {
+            float sign = teamA ? -1f : 1f;
+            float colEdge = teamA ? _ledgerColLeft : _ledgerColRight;
+            float rowY = _ledgerRowTopY - _ledgerRowH * slot - _ledgerRowH * 0.5f;
+            float colAbs = Mathf.Abs(colEdge);
+            float rowW = colAbs - 15f;
+            float halfW = rowW * 0.5f;
+            float rowCenterX = sign * (colAbs - halfW);
+
+            // 行内坐标：先按「距外侧边」定列，再换算到以行中心为原点的局部坐标（左右镜像同一套公式）。
+            float Local(float dist) => sign * (halfW - dist);
+            float iconX = Local(24f);
+            float nameX = Local(46f + _ledgerNameW * 0.5f);
+            float turfX = Local(colAbs - _ledgerTurfX);
+            float koX = Local(colAbs - _ledgerKoX);
+            float downX = Local(colAbs - _ledgerDownX);
+
+            var rowGo = new GameObject(teamA ? "RowA" : "RowB" + (slot + 1), typeof(RectTransform));
+            rowGo.transform.SetParent(_reportPanelRoot, false);
+            var rowRt = (RectTransform)rowGo.transform;
+            rowRt.anchorMin = new Vector2(0.5f, 0.5f);
+            rowRt.anchorMax = new Vector2(0.5f, 0.5f);
+            rowRt.pivot = new Vector2(0.5f, 0.5f);
+            rowRt.anchoredPosition = new Vector2(rowCenterX, rowY);
+            rowRt.sizeDelta = new Vector2(rowW, _ledgerRowH);
+            _rosterRowObjects.Add(rowGo);
+
+            bool mvp = slot == 0 && entry.Stats.TurfSquareMeters > 0.5f;
+            if (entry.IsLocal || mvp)
+            {
+                var plateGo = new GameObject("Plate", typeof(RectTransform), typeof(CanvasRenderer),
+                    typeof(UIInkShapeGraphic));
+                plateGo.transform.SetParent(rowGo.transform, false);
+                var plateRt = (RectTransform)plateGo.transform;
+                Stretch(plateRt);
+                plateRt.offsetMin = new Vector2(2f, 2f);
+                plateRt.offsetMax = new Vector2(-2f, -2f);
+
+                var plate = plateGo.GetComponent<UIInkShapeGraphic>();
+                plate.Shape = UIInkShape.SharpRect;
+                plate.CornerRadius = ComicStyle.CornerSharp;
+                plate.BorderWidth = 2f;
+                plate.BorderColor = entry.IsLocal ? resolved.GetTeamColor(entry.Team) : ComicStyle.Yellow;
+                plate.color = entry.IsLocal
+                    ? ComicStyle.WithAlpha(resolved.GetTeamColor(entry.Team), 0.12f)
+                    : ComicStyle.WithAlpha(ComicStyle.Yellow, 0.16f);
+                plate.HardShadow = false;
+                plate.Halftone = false;
+                plate.raycastTarget = false;
+            }
+
+            // 武器图标：取不到就隐藏（规范：绝不画空白 Image）。
+            var iconGo = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            iconGo.transform.SetParent(rowGo.transform, false);
+            var iconRt = (RectTransform)iconGo.transform;
+            iconRt.anchorMin = new Vector2(0.5f, 0.5f);
+            iconRt.anchorMax = new Vector2(0.5f, 0.5f);
+            iconRt.anchoredPosition = new Vector2(iconX, 0f);
+            iconRt.sizeDelta = new Vector2(26f, 26f);
+            var icon = iconGo.GetComponent<Image>();
+            Sprite iconSprite = UIIconLibrary.Get(WeaponIconName(entry.Kind));
+            if (iconSprite != null)
+            {
+                icon.sprite = iconSprite;
+                icon.color = ComicStyle.Ink;
+                icon.preserveAspect = true;
+            }
+            else
+            {
+                iconGo.SetActive(false);
+            }
+            icon.raycastTarget = false;
+
+            // 姓名：左列左对齐、右列右对齐（镜像）。
+            CreateTmpText(rowGo.transform, "Name", entry.Label, UITypography.FontSnapped(20f),
+                isDisplay: true, ComicStyle.Ink,
+                new Vector2(nameX, 0f),
+                new Vector2(_ledgerNameW, _ledgerRowH), 0.5f,
+                teamA ? TextAlignmentOptions.MidlineLeft : TextAlignmentOptions.MidlineRight)
+                .fontStyle = FontStyles.Bold;
+
+            // 三项统计：TURF / K.O. / DOWN，数字统一按「距离外侧边」定位，保证左右镜像对齐。
+            CreateTmpText(rowGo.transform, "Turf", Mathf.RoundToInt(entry.Stats.TurfSquareMeters).ToString(),
+                UITypography.FontSnapped(22f), isDisplay: true, ComicStyle.Ink,
+                new Vector2(turfX, 0f), new Vector2(110f, _ledgerRowH), 0f,
+                teamA ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
+
+            CreateTmpText(rowGo.transform, "Ko", entry.Stats.Kills.ToString(),
+                UITypography.FontSnapped(22f), isDisplay: true, ComicStyle.Ink,
+                new Vector2(koX, 0f), new Vector2(80f, _ledgerRowH), 0f,
+                teamA ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
+
+            CreateTmpText(rowGo.transform, "Down", entry.Stats.Deaths.ToString(),
+                UITypography.FontSnapped(22f), isDisplay: true, DimReadout,
+                new Vector2(downX, 0f), new Vector2(80f, _ledgerRowH), 0f,
+                teamA ? TextAlignmentOptions.MidlineRight : TextAlignmentOptions.MidlineLeft);
+        }
+
+        /// <summary>台账明细行数据（避免每行多次 GetComponent / 名称拼接）。</summary>
+        private struct RosterEntry
+        {
+            public CombatantHealth Health;
+            public CombatantMatchStats Stats;
+            public bool IsLocal;
+            public WeaponKind Kind;
+            public string Label;
+            public Team Team;
         }
 
         public void EnsureUpdateUI()
@@ -2307,7 +2632,40 @@ namespace P1.UI
 
         private void OnStartClicked()
         {
-            MatchManager.Instance?.StartMatch();
+            TryStartMatch();
+        }
+
+        /// <summary>
+        /// 结算页次级「返回」：回主菜单（Ready）。
+        /// 绝不能走 OnStartClicked——那条路是 StartMatch → RestartMatch，会把「返回」变成「再来一局」。
+        /// </summary>
+        private void OnResultBackClicked()
+        {
+            var match = MatchManager.Instance;
+            if (match != null) match.ReturnToMenu();
+        }
+
+        /// <summary>
+        /// 开赛统一入口：移动端正在编辑按键布局（<see cref="MobileLayoutCustomizer.IsEditingAny"/>）
+        /// 或首页详情浮层打开时不允许开赛。
+        /// 布局编辑会把 Time.timeScale 置 0，此时若还能被 Space/Enter/R 开赛，倒计时会冻在编辑层背后。
+        /// </summary>
+        private bool CanStartMatch()
+        {
+            if (HomeInfoOverlay.IsOpen) return false;
+            if (MobileLayoutCustomizer.IsEditingAny) return false;
+            return true;
+        }
+
+        private void TryStartMatch()
+        {
+            if (!CanStartMatch()) return;
+
+            var match = MatchManager.Instance;
+            if (match == null) return;
+            if (match.CurrentPhase != MatchManager.Phase.Ready && match.CurrentPhase != MatchManager.Phase.Result) return;
+
+            match.StartMatch();
         }
 
         private void Update()
@@ -2330,15 +2688,16 @@ namespace P1.UI
             var match = MatchManager.Instance;
             if (match == null) return;
 
-            // 快捷键开赛与重开：首页信息浮层打开时让路，否则 Space/Enter 会隔着遮罩直接把比赛开了
+            // 快捷键开赛与重开：首页信息浮层 / 移动端按键布局编辑打开时让路，
+            // 否则 Space/Enter 会隔着遮罩直接把比赛开了（布局编辑把 timeScale 置 0，倒计时会冻住）。
             if (!Application.isMobilePlatform && !MobileTouchUI.IsTouchSimulationActive &&
-                !HomeInfoOverlay.IsOpen &&
+                !HomeInfoOverlay.IsOpen && !MobileLayoutCustomizer.IsEditingAny &&
                 (match.CurrentPhase == MatchManager.Phase.Ready || match.CurrentPhase == MatchManager.Phase.Result))
             {
                 var kb = UnityEngine.InputSystem.Keyboard.current;
                 if (kb != null && (kb.spaceKey.wasPressedThisFrame || kb.enterKey.wasPressedThisFrame || kb.rKey.wasPressedThisFrame))
                 {
-                    match.StartMatch();
+                    TryStartMatch();
                 }
             }
 
@@ -2451,20 +2810,24 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 收起结算页「掷点后才出现」的那一层（战报单据 / 勋章行 / 成长条 / 胜方牌），
+        /// 收起结算页「掷点后才出现」的那一层（台账卡 / 勋章行 / 成长条 / 胜签 / 胜差贴纸），
         /// 让下一局的结算从干净的落后状态重新播放。
         /// </summary>
         private void HideResultRevealVisuals()
         {
             if (_reportPanelRoot != null) _reportPanelRoot.gameObject.SetActive(false);
             if (_levelUpBadgeRoot != null) _levelUpBadgeRoot.gameObject.SetActive(false);
-            if (_winnerTagA != null) _winnerTagA.gameObject.SetActive(false);
-            if (_winnerTagB != null) _winnerTagB.gameObject.SetActive(false);
+            if (_winMarkA != null) _winMarkA.gameObject.SetActive(false);
+            if (_winMarkB != null) _winMarkB.gameObject.SetActive(false);
+            if (_matchTagRoot != null) _matchTagRoot.gameObject.SetActive(false);
             _winnerEmphasisApplied = false;
+            _rosterBuilt = false;
 
             // 败方数字的降灰要在下一局恢复，否则第二次结算会沿用上一局的胜负配色。
-            if (resultPercentA != null) resultPercentA.color = ComicStyle.Ink;
-            if (resultPercentB != null) resultPercentB.color = ComicStyle.Ink;
+            if (_percentTmpA != null) _percentTmpA.color = _teamColorA;
+            if (_percentTmpB != null) _percentTmpB.color = _teamColorB;
+
+            UpdateCoverReadout(0f, 0f, 0f);
         }
 
         private void ApplyPhase(MatchManager match)
@@ -2534,33 +2897,27 @@ namespace P1.UI
             float a = match.FinalCoverageA * eased;
             float b = match.FinalCoverageB * eased;
 
-            if (resultPercentA != null) resultPercentA.text = $"{a:F1}%";
-            if (resultPercentB != null) resultPercentB.text = $"{b:F1}%";
-            if (resultBarA != null) resultBarA.fillAmount = Mathf.Clamp01(a / 100f);
-            if (resultBarB != null) resultBarB.fillAmount = Mathf.Clamp01(b / 100f);
+            UpdateCoverReadout(a, b, eased);
 
             if (verdictText != null)
             {
-                // 胜负结论已由顶部大牌 + 两个巨大百分比承担，这里不再写第二句解说。
+                // 胜负结论已由顶部大牌 + 两块读数板承担，这里不再写第二句解说。
                 verdictText.text = string.Empty;
                 verdictText.gameObject.SetActive(false);
             }
 
             if (rollProgress >= 1f)
             {
-                if (resultPercentA != null) resultPercentA.text = $"{match.FinalCoverageA:F1}%";
-                if (resultPercentB != null) resultPercentB.text = $"{match.FinalCoverageB:F1}%";
-                if (resultBarA != null) resultBarA.fillAmount = Mathf.Clamp01(match.FinalCoverageA / 100f);
-                if (resultBarB != null) resultBarB.fillAmount = Mathf.Clamp01(match.FinalCoverageB / 100f);
                 _numbersSettled = true;
+                UpdateCoverReadout(match.FinalCoverageA, match.FinalCoverageB, 1f);
 
-                // 掷点定格后点亮胜方：顶部判定大牌 + 胜方「胜」页签，败方数字降灰。
+                // 掷点定格后点亮胜方：顶部判定大牌 + 胜方「胜」签，败方读数转不透明灰。
                 if (!_badgePlayed)
                 {
                     _badgePlayed = true;
                     TriggerVictoryBadge(match.PlayerWon);
                 }
-                ApplyWinnerEmphasis(match.PlayerWon);
+                ApplyWinnerEmphasis(match, match.PlayerWon);
 
                 if (!s_SettledThisMatch)
                 {
@@ -2568,6 +2925,37 @@ namespace P1.UI
                     SettlePlayerProfileAndAwards(match);
                 }
                 UpdatePostRollVisuals(match);
+            }
+        }
+
+        /// <summary>
+        /// 读数与拔河条同步：百分比按实时值显示；条宽按「A : B 占比 × 掷点进度」从两端向中缝生长，
+        /// 白色分界线预告占比落点（A/(A+B)），掷点结束两段正好在中缝汇合。
+        /// </summary>
+        private void UpdateCoverReadout(float a, float b, float eased)
+        {
+            if (_percentTmpA != null) _percentTmpA.text = $"{a:F1}%";
+            if (_percentTmpB != null) _percentTmpB.text = $"{b:F1}%";
+
+            if (_coverInnerW <= 0f) return;
+
+            float sum = a + b;
+            float shareA = sum > 0.001f ? a / sum : 0.5f;
+
+            if (_coverFillA != null)
+            {
+                _coverFillA.rectTransform.sizeDelta = new Vector2(_coverInnerW * shareA * eased, -14f);
+            }
+
+            if (_coverFillB != null)
+            {
+                _coverFillB.rectTransform.sizeDelta = new Vector2(_coverInnerW * (1f - shareA) * eased, -14f);
+            }
+
+            if (_coverDivider != null)
+            {
+                _coverDivider.gameObject.SetActive(eased > 0.01f);
+                _coverDivider.anchoredPosition = new Vector2(-_coverInnerW * 0.5f + _coverInnerW * shareA, 0f);
             }
         }
 
@@ -2765,6 +3153,9 @@ namespace P1.UI
         {
             if (_reportPanelRoot != null && !_reportPanelRoot.gameObject.activeSelf)
             {
+                // 台账明细按本局统计重建（对象数 ≤ 8×5；每局一次，不在逐帧路径上）。
+                if (!_rosterBuilt) RebuildRosterRows(UIThemeSO.Resolve(uiTheme));
+
                 _reportPanelRoot.gameObject.SetActive(true);
 
                 // 顶部身份色带：胜利金 / 失败灰蓝（状态色只占一条，信息层保持纸白可读）

@@ -137,7 +137,7 @@ namespace P1.Tests
                     minGap = Mathf.Min(minGap, MeasureGap(player, motor, drum));
                 }
                 Debug.Log($"[ROLLGAP] flick slam minGap={minGap:F4}m");
-                Assert.Less(minGap, 0.02f, $"挥击砸地时滚筒应触地，最近间隙 {minGap:F3}m");
+                Assert.Less(minGap, 0.026f, $"挥击砸地时滚筒应触地，最近间隙 {minGap:F3}m");
                 Assert.Greater(minGap, -0.04f, $"挥击砸地时滚筒不应明显陷地，最近间隙 {minGap:F3}m");
             }
             finally

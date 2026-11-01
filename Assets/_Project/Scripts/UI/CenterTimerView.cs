@@ -18,7 +18,7 @@ namespace P1.UI
     {
         [Header("主题与配置")]
         [SerializeField] private UIThemeSO theme;
-        [SerializeField] private TMP_FontAsset titanOneFont;
+        // 旧字段（TitanOne）已退役：字体统一由 UIThemeSO.ResolveFont 提供，场景里残留的序列化值不再读取。
 
         [Header("中央墨滴计时球")]
         [SerializeField] private RectTransform timerBlobRoot;
@@ -40,6 +40,12 @@ namespace P1.UI
         [SerializeField] private UIInkShapeGraphic bannerBgGraphic;
         [SerializeField] private TMP_Text bannerText;
         [SerializeField] private UISpringMotion bannerMotion;
+
+        // 比分条填充条的四边内缩（四周露出等宽墨黑边框）：左右 1.5% / 上下 12%，在 520×56 底座上约 8px / 7px。
+        // ApplyScoreBarVisuals 每帧重写 x 锚点时必须保留这套内缩，否则会像历史 bug 那样
+        // A 队顶边、B 队底边直接贴到面板边缘，四边框忽有忽无。
+        internal const float FillInsetX = 0.015f;
+        internal const float FillInsetY = 0.12f;
 
         // 弹簧插值
         private UISpringFloat _springPercentA;
@@ -113,6 +119,9 @@ namespace P1.UI
 
         private void Update()
         {
+            if (!UICanvasVisibility.IsVisible(this, ref _visibilityCanvasChain))
+                return;
+
             float dt = Time.unscaledDeltaTime;
             UpdateBannerTimer(dt);
 
@@ -135,6 +144,8 @@ namespace P1.UI
 
         private float _targetPercentA;
         private float _targetPercentB;
+        private Canvas[] _visibilityCanvasChain;
+        private float _lastAppliedRatioA = -1f;
 
         /// <summary>
         /// 更新双方占领百分比（带平滑弹簧推演）。
@@ -246,6 +257,29 @@ namespace P1.UI
             }
         }
 
+        /// <summary>本局「最后 1 分钟」横幅是否已经弹过（供测试/诊断）。</summary>
+        public bool BannerShown => _bannerShown;
+
+        /// <summary>
+        /// 新一局开始（Countdown / 计时重新从整局时长开始）时复位每局一次的状态。
+        /// 历史 bug——_bannerShown 置 true 后全文件无重置，第二局「最后 1 分钟」横幅再也不弹。
+        /// </summary>
+        public void ResetForMatch()
+        {
+            _bannerShown = false;
+            _bannerTimer = 0f;
+            _lastRemainingSeconds = -1f;
+            _lastMinutes = -1;
+            _lastSeconds = -1;
+            _lastTimerTextReady = false;
+
+            if (finalMinuteBannerRoot != null)
+            {
+                if (bannerMotion != null) bannerMotion.PlayOut();
+                else finalMinuteBannerRoot.gameObject.SetActive(false);
+            }
+        }
+
         private void UpdateBannerTimer(float dt)
         {
             if (!_bannerShown || _bannerTimer <= 0f) return;
@@ -280,13 +314,16 @@ namespace P1.UI
                 percentTextB.text = $"{valB:F1}%";
             }
 
-            // 进度条宽度比例
+            // 进度条宽度比例（只动左右分界，上下/外侧四边内缩保持不变，露出等宽墨黑边框）
             float ratioA = TopRosterMath.CalculateScoreSplitRatio(valA, valB);
 
-            if (fillBarA != null && fillBarB != null)
+            if (fillBarA != null && fillBarB != null && Mathf.Abs(ratioA - _lastAppliedRatioA) >= 0.0005f)
             {
-                fillBarA.anchorMax = new Vector2(ratioA, 1f);
-                fillBarB.anchorMin = new Vector2(ratioA, 0f);
+                _lastAppliedRatioA = ratioA;
+                fillBarA.anchorMin = new Vector2(FillInsetX, FillInsetY);
+                fillBarA.anchorMax = new Vector2(ratioA, 1f - FillInsetY);
+                fillBarB.anchorMin = new Vector2(ratioA, FillInsetY);
+                fillBarB.anchorMax = new Vector2(1f - FillInsetX, 1f - FillInsetY);
             }
         }
 
@@ -313,13 +350,6 @@ namespace P1.UI
         private void BuildHierarchy()
         {
             UIThemeSO resolvedTheme = UIThemeSO.Resolve(theme);
-
-#if UNITY_EDITOR
-            if (titanOneFont == null)
-            {
-                titanOneFont = UnityEditor.AssetDatabase.LoadAssetAtPath<TMP_FontAsset>("Assets/_Project/Art/Fonts/TMP/TitanOne-Regular SDF.asset");
-            }
-#endif
 
             RectTransform rootRect = GetComponent<RectTransform>();
             if (rootRect == null) rootRect = gameObject.AddComponent<RectTransform>();
@@ -365,23 +395,23 @@ namespace P1.UI
                 // 面板档硬影 (4,-5)
                 resolvedTheme.ApplyHardShadow(bgBarGraphic, UIHardShadowLevel.Panel);
 
-                // Team A 填充条（左）
+                // Team A 填充条（左）——四边内缩走 FillInsetX/FillInsetY，与 ApplyScoreBarVisuals 同源
                 var barAGo = new GameObject("FillBarA", typeof(RectTransform), typeof(Image));
                 barAGo.transform.SetParent(scoreBarRoot, false);
                 fillBarA = barAGo.GetComponent<RectTransform>();
-                fillBarA.anchorMin = new Vector2(0.015f, 0.12f);
-                fillBarA.anchorMax = new Vector2(0.5f, 0.88f);
+                fillBarA.anchorMin = new Vector2(FillInsetX, FillInsetY);
+                fillBarA.anchorMax = new Vector2(0.5f, 1f - FillInsetY);
                 fillBarA.sizeDelta = Vector2.zero;
 
                 fillImageA = barAGo.GetComponent<Image>();
                 fillImageA.color = resolvedTheme.GetTeamColor(Team.TeamA);
 
-                // Team B 填充条（右）
+                // Team B 填充条（右）——同上，四边内缩同源
                 var barBGo = new GameObject("FillBarB", typeof(RectTransform), typeof(Image));
                 barBGo.transform.SetParent(scoreBarRoot, false);
                 fillBarB = barBGo.GetComponent<RectTransform>();
-                fillBarB.anchorMin = new Vector2(0.5f, 0.12f);
-                fillBarB.anchorMax = new Vector2(0.985f, 0.88f);
+                fillBarB.anchorMin = new Vector2(0.5f, FillInsetY);
+                fillBarB.anchorMax = new Vector2(1f - FillInsetX, 1f - FillInsetY);
                 fillBarB.sizeDelta = Vector2.zero;
 
                 fillImageB = barBGo.GetComponent<Image>();

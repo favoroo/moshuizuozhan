@@ -26,6 +26,9 @@ namespace P1.UI
 
         [Header("主题与字体")]
         [SerializeField] private UIThemeSO theme;
+
+        [Tooltip("已退役：主场景里可能仍序列化着 TitanOne，代码不再读取（字体统一走主题 MiSans）")]
+        [HideInInspector]
         [SerializeField] private TMP_FontAsset calloutFont;
 
         [Header("组件引用")]
@@ -431,12 +434,7 @@ namespace P1.UI
             canvasGroup.blocksRaycasts = false;
             canvasGroup.interactable = false;
 
-#if UNITY_EDITOR
-            if (calloutFont == null)
-            {
-                calloutFont = UnityEditor.AssetDatabase.LoadAssetAtPath<TMP_FontAsset>("Assets/_Project/Art/Fonts/TMP/TitanOne-Regular SDF.asset");
-            }
-#endif
+            TMP_FontAsset resolvedCalloutFont = UIThemeSO.Resolve(theme).GetFont(true);
 
             // 1. 直角纯色墨溅底板（UIInkShapeGraphic 纯网格直角色块）
             if (bgGraphic == null)
@@ -499,7 +497,7 @@ namespace P1.UI
                 mainText.fontStyle = FontStyles.Bold;
                 mainText.fontSize = UITypography.FontSnapped(38f);
                 mainText.color = ComicStyle.Paper;
-                if (calloutFont != null) mainText.font = calloutFont;
+                if (resolvedCalloutFont != null) mainText.font = resolvedCalloutFont;
             }
 
             // 3. 副标题文字（SubText）
@@ -533,7 +531,7 @@ namespace P1.UI
                 subText.fontStyle = FontStyles.Bold;
                 subText.fontSize = UITypography.FontSnapped(18f);
                 subText.color = ComicStyle.PaperAlt;
-                if (calloutFont != null) subText.font = calloutFont;
+                if (resolvedCalloutFont != null) subText.font = resolvedCalloutFont;
                 subText.gameObject.SetActive(false);
             }
         }

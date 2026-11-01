@@ -59,6 +59,8 @@ namespace P1.UI
         private float _lastFlashFlushTime = -10f;
         private int _activeFlashCount;
         private int _lastFlashUpdateFrame = -1;
+        private Canvas[] _visibilityCanvasChain;
+        private bool _hiddenFlashCleared;
 
         private InkSurfaceController _subscribedSurface;
         private MatchManager _subscribedMatch;
@@ -450,6 +452,18 @@ namespace P1.UI
             UpdateInkSubscription();
             UpdateMatchSubscription();
             CheckMatchPhaseStatus();
+
+            // HUD 隐藏期间不驱动墨渍闪烁：清一次残留，避免重新显示时闪现旧墨点。
+            if (!UICanvasVisibility.IsVisible(this, ref _visibilityCanvasChain))
+            {
+                if (!_hiddenFlashCleared)
+                {
+                    _hiddenFlashCleared = true;
+                    ClearAllFlashes();
+                }
+                return;
+            }
+            _hiddenFlashCleared = false;
 
             // 如果本帧尚未由 UpdateMinimap 驱动（例如独立测试或非 HudController 托管环境），在此处补全更新
             if (_lastFlashUpdateFrame != Time.frameCount)

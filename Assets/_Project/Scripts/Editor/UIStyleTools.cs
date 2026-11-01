@@ -26,9 +26,11 @@ namespace P1.Editor
 
         public const string DemoScenePath = "Assets/_Project/Scenes/UIDemo.unity";
 
-        private const string DisplayFontPath = "Assets/_Project/Art/Fonts/TMP/TitanOne-Regular SDF.asset";
+        // 全站唯一字体家族 MiSans（正文 Semibold 650 / 标题 Heavy 900）：拉丁也走 MiSans，
+        // 避免四家族混排导致中英笔画粗细与行高不一致。
+        private const string DisplayFontPath = "Assets/_Project/Art/Fonts/TMP/MiSans-Heavy SDF.asset";
 
-        private const string BodyFontPath = "Assets/_Project/Art/Fonts/TMP/Rubik-Bold SDF.asset";
+        private const string BodyFontPath = "Assets/_Project/Art/Fonts/TMP/MiSans-Semibold SDF.asset";
 
         private const string IconRoot = "Assets/_Project/Art/Sprites/Icons/";
 
@@ -204,6 +206,19 @@ namespace P1.Editor
             if (theme.bodyFont == null)
             {
                 theme.bodyFont = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(BodyFontPath);
+                changed = true;
+            }
+
+            // 中文两字段与拉丁同源（MiSans 一族），旧档里为 null 时一并补齐。
+            if (theme.displayCjkFont == null)
+            {
+                theme.displayCjkFont = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(DisplayFontPath);
+                changed = true;
+            }
+
+            if (theme.bodyCjkFont == null)
+            {
+                theme.bodyCjkFont = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(BodyFontPath);
                 changed = true;
             }
 

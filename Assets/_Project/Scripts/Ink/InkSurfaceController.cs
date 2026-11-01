@@ -50,6 +50,9 @@ namespace P1.Ink
         private InkSplatAtlas _atlas;
         private MaterialPropertyBlock _surfaceBlock;
         private float _nextMinimapFlushTime;
+        private float _nextRippleSyncTime;
+        private float _nextWallFlushTime;
+        private Color32[] _uploadScratch;
 
         // 8组动态波纹环形缓冲区与脏检查缓存
         private readonly Vector4[] _ripplePositions = new Vector4[MaxRipples];
@@ -247,7 +250,8 @@ namespace P1.Ink
             Vector2 atlasOrigin = _grid.OriginXZ - new Vector2(margin, margin);
 
             _atlas = new InkSplatAtlas(atlasSize, atlasOrigin, atlasRes, mipmaps, growSeconds, dryingSeconds,
-                wetClockPeriod: wetClockPeriod);
+                wetClockPeriod: wetClockPeriod,
+                mipIntervalSeconds: config != null ? config.atlasMipIntervalSeconds : 0.5f);
 
             // 图集内容不进序列化：重建后立刻清空一次，避免首帧读到未初始化显存
             _atlas.Clear();
@@ -493,11 +497,17 @@ namespace P1.Ink
             // 墨迹图集：仅在有新落墨 / 清屏 / mip 待更新时提交（烘干与生长由片元按时间戳现算）
             _atlas?.Advance();
 
-            // 每帧同步动态波纹与时间给材质属性块
+            // 每帧同步动态波纹与时间给材质属性块（波纹 MPB 写入按 config.rippleSyncHz 节流）
             UpdateDynamicMaterialProperties();
 
-            // 墙面贴图每帧最多上传一次（与地面同一节流点）
-            InkWallSurface.FlushAllDirty();
+            // 墙面贴图上传按 config.wallFlushHz 节流：墙面墨迹延迟 ≤1 帧，肉眼不可见
+            float wallHz = config != null ? config.wallFlushHz : 30f;
+            float now = Time.unscaledTime;
+            if (wallHz <= 0.01f || now >= _nextWallFlushTime)
+            {
+                InkWallSurface.FlushAllDirty();
+                _nextWallFlushTime = wallHz > 0.01f ? now + 1f / wallHz : 0f;
+            }
         }
 
         public void FlushTexture()
@@ -506,7 +516,37 @@ namespace P1.Ink
                 return;
 
             long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
-            _inkTexture.SetPixels32(_grid.GetPixelBuffer());
+
+            // 小地图只需更新脏矩形：战斗时常见几十到几百格变化，避免 400×400 全量拷贝 + 整图重传。
+            Color32[] pixels = _grid.GetPixelBuffer();
+            int width = _grid.Width;
+            int height = _grid.Height;
+            int minX = _grid.DirtyMinX;
+            int minY = _grid.DirtyMinY;
+            int maxX = _grid.DirtyMaxX;
+            int maxY = _grid.DirtyMaxY;
+            int rectW = maxX - minX + 1;
+            int rectH = maxY - minY + 1;
+
+            if (rectW > 0 && rectH > 0 && (long)rectW * rectH * 4L <= (long)width * height)
+            {
+                int need = rectW * rectH;
+                if (_uploadScratch == null || _uploadScratch.Length < need)
+                {
+                    _uploadScratch = new Color32[need];
+                }
+
+                for (int y = 0; y < rectH; y++)
+                {
+                    Array.Copy(pixels, (minY + y) * width + minX, _uploadScratch, y * rectW, rectW);
+                }
+                _inkTexture.SetPixels32(minX, minY, rectW, rectH, _uploadScratch);
+            }
+            else
+            {
+                _inkTexture.SetPixels32(pixels);
+            }
+
             _inkTexture.Apply(false, false);
             _grid.ClearDirtyFlag();
             long endTicks = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -534,7 +574,8 @@ namespace P1.Ink
             Shader.SetGlobalFloat(WetDryingSecondsProp, config != null ? config.inkDryingSeconds : 6f);
             Shader.SetGlobalFloat(SheenSecondsProp, config != null ? config.inkSheenSeconds : 22f);
             // 环境镜面全局 + 平台画质档位（P18）：地面/顶面/墙面/墨体共享同一套湿润反光参数。
-            RenderEnvGlobals.Pump();
+            // 这些值只随 ArenaStyleSO / 平台档位变化，按 1Hz 节流即可（旧版每帧推 14 个全局 uniform）。
+            RenderEnvGlobals.PumpThrottled();
             Shader.SetGlobalFloat(GrowSecondsProp, config != null ? config.splatGrowSeconds : 0.12f);
             Shader.SetGlobalFloat(GrowShrinkMetersProp, config != null ? config.atlasGrowShrinkMeters : 0.4f);
             Shader.SetGlobalFloat(GrowActiveProp, _atlas != null && _atlas.HasGrowingSplats() ? 1f : 0f);
@@ -563,6 +604,17 @@ namespace P1.Ink
 
             if (!AreRipplesDirty())
                 return;
+
+            // 波纹只在真正变化时写 MPB，并按 rippleSyncHz 节流：34 个墨面 Renderer 的
+            // Get/SetPropertyBlock 从「每个涟漪帧」降到 ≤30 次/秒，视觉上不可察觉。
+            float rippleHz = config != null ? config.rippleSyncHz : 30f;
+            if (rippleHz > 0.01f)
+            {
+                float now = Time.unscaledTime;
+                if (now < _nextRippleSyncTime)
+                    return;
+                _nextRippleSyncTime = now + 1f / rippleHz;
+            }
 
             SyncRippleCache();
 

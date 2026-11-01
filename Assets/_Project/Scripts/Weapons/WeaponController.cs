@@ -26,6 +26,13 @@ namespace P1.Weapons
 
         private InkCharacterMotor _motor;
         private CombatantHealth _health;
+        // 每发子弹/光束都会把它们传给弹丸池与滚涂系统：缓存方法组委托，避免每发两次分配。
+        private System.Action<int> _addSpecialPointsDelegate;
+        private System.Action<int> _addSpecialPointsFromWallDelegate;
+        private System.Action<int> _addSpecialPointsOnlyDelegate;
+        private static readonly RaycastHit[] GroundResolveHits = new RaycastHit[16];
+        private float _cachedAimGroundY;
+        private float _nextAimGroundYSampleTime;
         private PlayerController _playerController;
 
         private MainWeaponStrategy _strategy;
@@ -33,6 +40,18 @@ namespace P1.Weapons
         private bool _hasAim;
         private bool _triggerHeldThisFrame;
         private bool _triggerHeldLastFrame;
+
+        /// <summary>本帧主武器扳机被主动抑制（暂停 / 终场 / 死亡 / 副武器投掷仲裁占用）。</summary>
+        private bool _triggerSuppressedThisFrame;
+
+        /// <summary>抑制期间物理扳机是否仍被按住：恢复后据此判断要不要当成「新按下」。</summary>
+        private bool _triggerHeldWhileSuppressed;
+
+        /// <summary>上一帧是否处于抑制段（用于识别抑制段的第一帧）。</summary>
+        private bool _triggerSuppressedLastFrame;
+
+        /// <summary>本次抑制段开始时武器是否正被按住（蓄力/扫射/推地/挥击前摇）。</summary>
+        private bool _suppressionEngaged;
         private readonly Dictionary<CombatantHealth, float> _rollHitTimes = new Dictionary<CombatantHealth, float>();
 
         private float _bombCooldown;
@@ -151,6 +170,9 @@ namespace P1.Weapons
         /// <summary>双枪是否处于翻滚后的站桩架枪状态（移速锁定、射速提升 20%、散布清零）。</summary>
         public bool IsTurretLocked => _strategy != null && _strategy.IsTurretLocked;
 
+        /// <summary>双枪当前战术翻滚的方向向量。</summary>
+        public Vector3 DodgeDirection => _strategy != null ? _strategy.DodgeDirection : transform.forward;
+
         /// <summary>加特林是否正在释放高密度暴风雨弹幕。</summary>
         public bool IsStreaming => _strategy is SplatlingWeaponStrategy s && s.IsStreaming;
 
@@ -199,6 +221,9 @@ namespace P1.Weapons
             _motor = GetComponent<InkCharacterMotor>();
             _health = GetComponent<CombatantHealth>();
             _playerController = GetComponent<PlayerController>();
+            _addSpecialPointsDelegate = AddSpecialPoints;
+            _addSpecialPointsFromWallDelegate = AddSpecialPointsFromWall;
+            _addSpecialPointsOnlyDelegate = AddSpecialPointsOnly;
             _propBlock = new MaterialPropertyBlock();
             _beamBlock = new MaterialPropertyBlock();
 
@@ -271,8 +296,9 @@ namespace P1.Weapons
             config = weaponConfig;
             _lastCameraPunchFrame = -1;
             LastShotStrength01 = 1f;
+            // RebuildStrategy 内部已经 invoke 过一次 OnWeaponEquipped，这里不再重复派发
+            // （旧实现每次换装触发两次，视觉/音效订阅方会做两遍换装动作）。
             RebuildStrategy();
-            OnWeaponEquipped?.Invoke(weaponConfig);
         }
 
         /// <summary>配置多武器 loadout；startIndex 为初始装备下标。</summary>
@@ -307,6 +333,9 @@ namespace P1.Weapons
             RefreshWeaponFeel();
             _triggerHeldThisFrame = false;
             _triggerHeldLastFrame = false;
+            _triggerSuppressedThisFrame = false;
+            _triggerSuppressedLastFrame = false;
+            _suppressionEngaged = false;
             _hasAim = false;
             _lastAim = WeaponAim.FromDirection(transform.forward);
             _rollHitTimes.Clear();
@@ -342,6 +371,9 @@ namespace P1.Weapons
             _wasSpecialReady = false;
             _triggerHeldThisFrame = false;
             _triggerHeldLastFrame = false;
+            _triggerSuppressedThisFrame = false;
+            _triggerSuppressedLastFrame = false;
+            _suppressionEngaged = false;
             _hasAim = false;
             _rollHitTimes.Clear();
             _lastMuzzleFlashTime = -99f;
@@ -442,9 +474,65 @@ namespace P1.Weapons
             }
         }
 
+        /// <summary>
+        /// 声明本帧主武器输入被抑制（暂停 / 终场 / 死亡 / 副武器投掷仲裁占用）。
+        /// 抑制帧会取消蓄力、扫射、推地与挥击前摇，<strong>但不会把抑制当成松手而开火</strong>，
+        /// 并把「上一帧按住」按 <paramref name="triggerStillHeld"/> 记账：恢复后仍按住的扳机
+        /// 不会被误判成新按下（滚筒不多挥一次），暂停中真的松手也不会被吞掉。
+        /// 标志每帧独立、帧末自动清零；Bot 不调用即完全不受影响。
+        /// </summary>
+        /// <param name="suppressed">是否抑制本帧主武器输入。</param>
+        /// <param name="triggerStillHeld">
+        /// 抑制期间物理扳机是否仍被按住（默认 true，保守地视为按住）。
+        /// 关闭输入的一方（PlayerController）传入真实按键状态可得到最精确的边沿恢复。
+        /// </param>
+        public void SetTriggerSuppressed(bool suppressed = true, bool triggerStillHeld = true)
+        {
+            _triggerSuppressedThisFrame = suppressed;
+            _triggerHeldWhileSuppressed = triggerStillHeld;
+        }
+
+        /// <summary>本帧主武器输入是否已被 <see cref="SetTriggerSuppressed"/> 抑制。</summary>
+        public bool TriggerSuppressed => _triggerSuppressedThisFrame;
+
         public bool TryFireMainWeapon(Vector3 aimDirection)
         {
             return TryFireMainWeapon(aimDirection, ResolveAimGroundPoint(aimDirection));
+        }
+
+        /// <summary>
+        /// Bot 专用开火入口：横向瞄准点每帧按当前朝向重算（保持弹道方向正确），
+        /// 只把「地面高度」射线按 <paramref name="groundResolveIntervalSeconds"/> 节流采样。
+        /// 7 个 Bot 每帧各打一次全场景地面射线（~420 次/秒）没必要——地面高度变化远慢于朝向，
+        /// 0.1s 的 Y 值滞后对落点的影响小于 1cm。
+        /// </summary>
+        public bool TryFireMainWeaponThrottled(Vector3 aimDirection, float groundResolveIntervalSeconds = 0.1f)
+        {
+            // 有玩家控制器时直接走原路径（玩家有真实地面准星点，不需要节流）
+            if (_playerController != null)
+                return TryFireMainWeapon(aimDirection);
+
+            float interval = Mathf.Clamp(groundResolveIntervalSeconds, 0.02f, 1f);
+            float now = Time.time;
+
+            Vector3 flatAim = new Vector3(aimDirection.x, 0f, aimDirection.z);
+            if (flatAim.sqrMagnitude < 0.0001f)
+                flatAim = transform.forward;
+            flatAim.Normalize();
+
+            float maxRange = config != null ? config.maxRange : 12f;
+            Vector3 point = transform.position + flatAim * maxRange;
+
+            if (now >= _nextAimGroundYSampleTime)
+            {
+                _nextAimGroundYSampleTime = now + interval;
+                _cachedAimGroundY = Physics.Raycast(point + Vector3.up * 5f, Vector3.down, out RaycastHit hit, 12f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore)
+                    ? hit.point.y
+                    : transform.position.y;
+            }
+
+            point.y = _cachedAimGroundY;
+            return TryFireMainWeapon(aimDirection, point);
         }
 
         /// <summary>
@@ -454,6 +542,10 @@ namespace P1.Weapons
         public bool TryFireMainWeapon(Vector3 aimDirection, Vector3 aimGroundPoint)
         {
             if (_health == null || !_health.IsAlive || IsPerformingSpecial)
+                return false;
+
+            // 终场哨响 / 本帧输入被抑制时不得再产生新的射击（已发射的弹丸仍按各自规则飞行）。
+            if (!MatchManager.CombatSettlementAllowed || _triggerSuppressedThisFrame)
                 return false;
 
             if (_strategy == null)
@@ -496,7 +588,7 @@ namespace P1.Weapons
 
             float maxRange = config != null ? config.maxRange : 12f;
             Vector3 point = transform.position + flatAim * maxRange;
-            if (Physics.Raycast(point + Vector3.up * 5f, Vector3.down, out RaycastHit hit, 12f, ~0, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(point + Vector3.up * 5f, Vector3.down, out RaycastHit hit, 12f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore))
             {
                 point.y = hit.point.y;
             }
@@ -526,6 +618,10 @@ namespace P1.Weapons
             if (!_health.IsAlive || IsPerformingSpecial || _bombCooldown > 0f)
                 return false;
 
+            // 终场后不再接受新的副武器投掷（终场前已投出的手雷仍按各自引信走完）。
+            if (!MatchManager.CombatSettlementAllowed)
+                return false;
+
             // 手雷与墨水脱钩（设计变更）：只受冷却限制，不再挂 70 墨。
             // 仅当配置显式要求耗墨（bombInkCost > 0）才扣墨，杜绝「喷几枪就丢不出雷 + 静默失败」。
             float bombCost = config != null ? config.bombInkCost : 0f;
@@ -545,9 +641,9 @@ namespace P1.Weapons
                     throwVelocity,
                     _health.Team,
                     config,
-                    AddSpecialPointsOnly,
+                    _addSpecialPointsOnlyDelegate,
                     _health,
-                    AddSpecialPointsFromWall);
+                    _addSpecialPointsFromWallDelegate);
             }
 
             if (AudioManager.Instance != null)
@@ -582,6 +678,10 @@ namespace P1.Weapons
         public bool TryActivateSpecial(Vector3 targetGroundPoint)
         {
             if (_health == null || !_health.IsAlive || !IsSpecialReady || IsPerformingSpecial)
+                return false;
+
+            // 终场哨响后不再开新的大招（正在演出中的 Slam/Storm 由 Update 里的门禁收尾）。
+            if (!MatchManager.CombatSettlementAllowed)
                 return false;
 
             _activeSpecialKind = config != null ? config.specialKind : SpecialKind.Slam;
@@ -673,23 +773,30 @@ namespace P1.Weapons
             Vector3 origin = new Vector3(position.x, position.y + 6f, position.z);
             if (self == null)
             {
-                if (Physics.Raycast(origin, Vector3.down, out RaycastHit legacyHit, 20f, ~0, QueryTriggerInteraction.Ignore))
+                if (Physics.Raycast(origin, Vector3.down, out RaycastHit legacyHit, 20f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore))
                 {
                     return new Vector3(position.x, legacyHit.point.y, position.z);
                 }
                 return position;
             }
 
-            // RaycastAll 保证按距离近→远排序（NonAlloc 不排序）；仅起跳/落地各一次，非热路径。
-            RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, 20f, ~0, QueryTriggerInteraction.Ignore);
-            for (int i = 0; i < hits.Length; i++)
+            // NonAlloc + 手动取最近命中（原 RaycastAll 每次起跳/落地都会分配一个 RaycastHit[]）。
+            int count = Physics.RaycastNonAlloc(origin, Vector3.down, GroundResolveHits, 20f, GameLayers.WorldMask, QueryTriggerInteraction.Ignore);
+            float nearest = float.MaxValue;
+            float nearestY = 0f;
+            bool found = false;
+            for (int i = 0; i < count; i++)
             {
-                RaycastHit hit = hits[i];
+                RaycastHit hit = GroundResolveHits[i];
                 if (hit.collider == null || hit.collider.transform.IsChildOf(self.transform))
                     continue; // 跳过施法者自身（CharacterController/视觉体），落到真实地面
-                return new Vector3(position.x, hit.point.y, position.z);
+                if (hit.distance >= nearest)
+                    continue;
+                nearest = hit.distance;
+                nearestY = hit.point.y;
+                found = true;
             }
-            return position;
+            return found ? new Vector3(position.x, nearestY, position.z) : position;
         }
 
         private void Update()
@@ -714,7 +821,16 @@ namespace P1.Weapons
 
             if (_isPerformingSpecial)
             {
-                UpdateSpecialSlam(dt);
+                // 终场哨响时还在空中的 Slam：直接收尾（落地冲击不再结算伤害/涂地），
+                // 避免结算画面里角色仍吊在半空——表现层只是复位，不清场。
+                if (!MatchManager.CombatSettlementAllowed)
+                {
+                    CancelSpecialImmediate();
+                }
+                else
+                {
+                    UpdateSpecialSlam(dt);
+                }
             }
         }
 
@@ -741,12 +857,53 @@ namespace P1.Weapons
 
             if (_strategy != null)
             {
-                _strategy.Tick(dt, _triggerHeldThisFrame, _lastAim, this);
+                if (_triggerSuppressedThisFrame)
+                {
+                    // 抑制段第一帧先记住「原本是否真的按着扳机」：只有蓄力/扫射/推地/前摇中的武器
+                    // 才需要在恢复后继续视为按住，否则暂停前的 UI 点击也会吞掉恢复后的第一次按下。
+                    if (!_triggerSuppressedLastFrame)
+                        _suppressionEngaged = _strategy.IsTriggerEngaged;
+
+                    // 本帧输入被抑制（暂停 / 终场 / 死亡 / 副武器投掷仲裁占用）：
+                    // 先取消蓄力、扫射、推地与挥击前摇，再以「未按下」推进 Tick——
+                    // 绝不能把「输入被禁用」当成松手，否则蓄力狙会自动开炮、加特林自动扫射。
+                    _strategy.OnTriggerSuppressed(this);
+                    _strategy.Tick(dt, false, _lastAim, this);
+
+                    // 如实记账「上一帧扳机状态」：抑制期间玩家仍按着扳机 → 恢复后不误判成新按下
+                    // （滚筒不会多挥一次、蓄力狙不会补射）；暂停中真的松手 → 恢复后第一次按下照常生效。
+                    _triggerHeldLastFrame = _suppressionEngaged && _triggerHeldWhileSuppressed;
+                    _triggerSuppressedLastFrame = true;
+                }
+                else
+                {
+                    _strategy.Tick(dt, _triggerHeldThisFrame, _lastAim, this);
+                    _triggerHeldLastFrame = _triggerHeldThisFrame;
+                    _triggerSuppressedLastFrame = false;
+                    _suppressionEngaged = false;
+                }
+            }
+            else
+            {
+                _triggerHeldLastFrame = _triggerHeldThisFrame;
+                _triggerSuppressedLastFrame = false;
+                _suppressionEngaged = false;
             }
 
             UpdateChargerLaser();
             UpdateBeamVisual(dt);
 
+            _triggerHeldThisFrame = false;
+            _triggerSuppressedThisFrame = false;
+        }
+
+        /// <summary>内部与 EditMode 测试驱动：以指定 dt 执行一帧策略推进。</summary>
+        public void LateUpdateForTesting(float dt)
+        {
+            if (_strategy != null)
+            {
+                _strategy.Tick(dt, _triggerHeldThisFrame, _lastAim, this);
+            }
             _triggerHeldLastFrame = _triggerHeldThisFrame;
             _triggerHeldThisFrame = false;
         }
@@ -830,7 +987,11 @@ namespace P1.Weapons
             //    卫星墨斑半径收进伤害半径内，玩家按墨迹读范围不再被 5.95m 的外溢墨斑误导。
             InkSurfaceController surface = InkSurfaceController.Instance;
             float effectivePaintRadius = Mathf.Max(paintRadius, damageRadius);
-            if (surface != null)
+
+            // 终场哨响后落地的冲击波只保留表现（粒子/音效/震屏），不再涂地、不再统计、不再造成击杀。
+            bool settleable = MatchManager.CombatSettlementAllowed;
+
+            if (settleable && surface != null)
             {
                 int groundChanged = surface.PaintCircle(_specialGroundCenter, effectivePaintRadius, myTeam);
                 if (InkWallSurface.ActiveCount > 0)
@@ -854,8 +1015,11 @@ namespace P1.Weapons
             }
 
             // 2. 冲击波伤害：核心 3.2m 内 180 秒杀，外圈平滑衰减到 55
-            SpecialCombat.ApplySlamDamage(
-                _specialGroundCenter, myTeam, damageRadius, innerRadius, innerDamage, outerDamage, falloffWeight, _health);
+            if (settleable)
+            {
+                SpecialCombat.ApplySlamDamage(
+                    _specialGroundCenter, myTeam, damageRadius, innerRadius, innerDamage, outerDamage, falloffWeight, _health);
+            }
 
             // 3. 强力视觉与震屏反馈
             if (VfxPool.Instance != null)
@@ -1145,7 +1309,7 @@ namespace P1.Weapons
         private bool IsMuzzleBlocked(Vector3 muzzle)
         {
             int count = Physics.OverlapSphereNonAlloc(
-                muzzle, 0.06f, _muzzleOverlaps, ~0, QueryTriggerInteraction.Ignore);
+                muzzle, 0.06f, _muzzleOverlaps, GameLayers.QueryMask, QueryTriggerInteraction.Ignore);
             for (int i = 0; i < count; i++)
             {
                 Collider col = _muzzleOverlaps[i];
@@ -1158,7 +1322,7 @@ namespace P1.Weapons
 
         private Team TeamId => _health != null ? _health.Team : Team.TeamA;
 
-        private static void DestroySafe(Object target)
+        private static void DestroySafe(UnityEngine.Object target)
         {
             if (target == null)
                 return;
@@ -1196,11 +1360,15 @@ namespace P1.Weapons
 
         void IWeaponRuntimeHost.SpawnShot(WeaponShot shot)
         {
+            // 终场后不再生成新的墨弹（前摇/状态机可能在哨响后才走完）。
+            if (!MatchManager.CombatSettlementAllowed)
+                return;
+
             ShotsFired++;
             LastShotStrength01 = 1f;
             if (InkProjectilePool.Instance != null)
             {
-                InkProjectilePool.Instance.SpawnProjectile(shot, TeamId, config, gameObject, AddSpecialPoints, AddSpecialPointsFromWall);
+                InkProjectilePool.Instance.SpawnProjectile(shot, TeamId, config, gameObject, _addSpecialPointsDelegate, _addSpecialPointsFromWallDelegate);
             }
             EmitShotFeedback(shot.Origin, shot.Direction, shot.IsBlaster ? 1.25f : 1f);
             OnFired?.Invoke();
@@ -1208,10 +1376,13 @@ namespace P1.Weapons
 
         void IWeaponRuntimeHost.FireBeam(WeaponBeam beam)
         {
+            if (!MatchManager.CombatSettlementAllowed)
+                return;
+
             ShotsFired++;
             // 蓄力刻度参与全部表现层强度：点按（0.12）与满蓄（1）的镜头/模型/闪光/音效必须分层
             LastShotStrength01 = Mathf.Clamp01(beam.Intensity01);
-            BeamResult result = WeaponBeamSystem.Fire(beam, TeamId, gameObject, AddSpecialPoints, AddSpecialPointsFromWall);
+            BeamResult result = WeaponBeamSystem.Fire(beam, TeamId, gameObject, _addSpecialPointsDelegate, _addSpecialPointsFromWallDelegate);
             LastBeamResult = result;
             PlayBeamVisual(result, beam.Intensity01);
             // 枪口闪光跟实际枪口走；光束在近距可能改从胸口起点结算。
@@ -1269,7 +1440,10 @@ namespace P1.Weapons
 
         void IWeaponRuntimeHost.ApplyRoll(RollSweep sweep)
         {
-            int painted = WeaponRollSystem.Apply(sweep, TeamId, _rollHitTimes, Time.time, _health, AddSpecialPointsFromWall);
+            if (!MatchManager.CombatSettlementAllowed)
+                return;
+
+            int painted = WeaponRollSystem.Apply(sweep, TeamId, _rollHitTimes, Time.time, _health, _addSpecialPointsFromWallDelegate);
             if (painted > 0)
             {
                 AddSpecialPoints(painted);
@@ -1280,7 +1454,7 @@ namespace P1.Weapons
 
         void IWeaponRuntimeHost.PaintGround(Vector3 worldPos, float radius)
         {
-            if (InkSurfaceController.Instance == null)
+            if (InkSurfaceController.Instance == null || !MatchManager.CombatSettlementAllowed)
                 return;
 
             int changed = InkSurfaceController.Instance.PaintCircle(worldPos, radius, TeamId);

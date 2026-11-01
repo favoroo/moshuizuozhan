@@ -34,6 +34,18 @@ namespace P1.Ink
         public int TeamBCount => _teamBCount;
         public bool IsDirty { get; private set; }
 
+        // 脏矩形：小地图贴图只上传真正变化过的格子，避免 12Hz 全量 400×400 拷贝。
+        // 语义与 IsDirty 同步：IsDirty=false 时 max < min（空矩形）。
+        private int _dirtyMinX = int.MaxValue;
+        private int _dirtyMinY = int.MaxValue;
+        private int _dirtyMaxX = int.MinValue;
+        private int _dirtyMaxY = int.MinValue;
+
+        public int DirtyMinX => _dirtyMinX;
+        public int DirtyMinY => _dirtyMinY;
+        public int DirtyMaxX => _dirtyMaxX;
+        public int DirtyMaxY => _dirtyMaxY;
+
         public InkGrid(
             int width,
             int height,
@@ -92,7 +104,7 @@ namespace P1.Ink
                 _pixels[i] = _blocked[i] ? _blockedColor : _neutralColor;
             }
 
-            IsDirty = true;
+            MarkDirtyRect(0, 0, Width - 1, Height - 1);
         }
 
         /// <summary>
@@ -155,7 +167,7 @@ namespace P1.Ink
                 _pixels[idx] = _neutralColor;
             }
 
-            IsDirty = true;
+            MarkDirtyCell(idx % Width, idx / Width);
         }
 
         /// <summary>
@@ -334,7 +346,7 @@ namespace P1.Ink
 
             if (changed > 0)
             {
-                IsDirty = true;
+                MarkDirtyRect(minX, minY, maxX, maxY);
             }
 
             return changed;
@@ -398,6 +410,33 @@ namespace P1.Ink
         public void ClearDirtyFlag()
         {
             IsDirty = false;
+            _dirtyMinX = int.MaxValue;
+            _dirtyMinY = int.MaxValue;
+            _dirtyMaxX = int.MinValue;
+            _dirtyMaxY = int.MinValue;
+        }
+
+        /// <summary>把单格变化并入脏矩形。</summary>
+        private void MarkDirtyCell(int x, int y)
+        {
+            MarkDirtyRect(x, y, x, y);
+        }
+
+        /// <summary>把一块矩形变化并入脏矩形（自动裁剪到网格范围，供小地图局部上传）。</summary>
+        private void MarkDirtyRect(int minX, int minY, int maxX, int maxY)
+        {
+            if (minX < 0) minX = 0;
+            if (minY < 0) minY = 0;
+            if (maxX >= Width) maxX = Width - 1;
+            if (maxY >= Height) maxY = Height - 1;
+            if (maxX < minX || maxY < minY)
+                return;
+
+            IsDirty = true;
+            if (minX < _dirtyMinX) _dirtyMinX = minX;
+            if (minY < _dirtyMinY) _dirtyMinY = minY;
+            if (maxX > _dirtyMaxX) _dirtyMaxX = maxX;
+            if (maxY > _dirtyMaxY) _dirtyMaxY = maxY;
         }
 
         public bool TryWorldToCell(Vector2 worldXZ, out int x, out int y)
@@ -457,7 +496,7 @@ namespace P1.Ink
                 }
             }
 
-            IsDirty = true;
+            MarkDirtyRect(0, 0, Width - 1, Height - 1);
         }
     }
 }

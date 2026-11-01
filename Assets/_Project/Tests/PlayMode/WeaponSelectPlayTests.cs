@@ -243,6 +243,19 @@ namespace P1.Tests
 
             view.SelectWeapon(0, silent: true);
             yield return null;
+
+            // 确认整备卡严格处于 HeroTag 之下，绝不发生叠字与边框重叠
+            var flow = Object.FindAnyObjectByType<MatchFlowUI>();
+            var heroTag = flow?.transform.Find("ReadyPanel/MenuSafeArea/HomeHeroCard/HeroTag") as RectTransform;
+            if (heroTag != null)
+            {
+                Vector3[] tagCorners = new Vector3[4];
+                Vector3[] toggleCorners = new Vector3[4];
+                heroTag.GetWorldCorners(tagCorners);
+                toggleRect.GetWorldCorners(toggleCorners);
+                Assert.Greater(tagCorners[0].y, toggleCorners[1].y,
+                    "整备卡顶部必须在 HeroTag 底部下方（不得重叠），世界坐标: HeroTag 底 " + tagCorners[0].y + " vs 整备卡 顶 " + toggleCorners[1].y);
+            }
         }
 
         [UnityTest]
@@ -273,7 +286,7 @@ namespace P1.Tests
             var hero = safe.Find("HomeHeroCard");
             Assert.IsNotNull(hero, "首页必须有左侧 Hero 大卡");
             Assert.IsNotNull(safe.Find("HomeTile_RECORD"), "首页必须有战绩卡");
-            Assert.IsNotNull(safe.Find("HomeTile_AUDIO"), "首页必须有音效卡");
+            Assert.IsNotNull(safe.Find("HomeTile_SETTINGS"), "首页必须有系统设置卡");
             Assert.IsNotNull(safe.Find("HomeTile_UPDATE"), "首页必须有检查更新卡");
 
             // CTA 宽度取版面表设计值，但在非 16:9 的 Game View 里会被 Hero 卡内宽夹住——
@@ -285,6 +298,95 @@ namespace P1.Tests
 
             ScreenCapture.CaptureScreenshot(System.IO.Path.GetFullPath("Logs/menu_redesign_screenshot.png"));
             yield return new WaitForSeconds(0.5f);
+        }
+
+        [UnityTest]
+        [Category("UI")]
+        public IEnumerator MatchFlowUI_HomeTileArrow_KeepsOutOfInfoLine()
+        {
+            yield return null;
+            var flow = Object.FindAnyObjectByType<MatchFlowUI>();
+            Assert.IsNotNull(flow, "场景中应有 MatchFlowUI");
+
+            var safe = flow.transform.Find("ReadyPanel/MenuSafeArea");
+            Assert.IsNotNull(safe, "首页内容必须在安全区内");
+
+            // 旧实现把 `》`（双书名号 ≈2em 宽）按 1.2em 预留、还放在信息行上，
+            // 移动端字号 ×1.28 后必然压字叠字 —— 现在箭头独占标题行右侧走廊。
+            var tileNames = new[] { "HomeTile_RECORD", "HomeTile_SETTINGS", "HomeTile_UPDATE" };
+            Transform content = null;
+            RectTransform arrow = null;
+            TextMeshProUGUI info = null;
+            RectTransform infoRect = null;
+
+            for (int i = 0; i < tileNames.Length; i++)
+            {
+                Transform tile = safe.Find(tileNames[i]);
+                Assert.IsNotNull(tile, "首页必须有 " + tileNames[i]);
+
+                content = tile.Find("Content");
+                Assert.IsNotNull(content, tileNames[i] + " 应有 Content 容器");
+
+                arrow = content.Find("TileArrow") as RectTransform;
+                info = content.Find("TileInfo")?.GetComponent<TextMeshProUGUI>();
+                Assert.IsNotNull(arrow, tileNames[i] + " 的可点卡应有 `》` 箭头");
+                Assert.IsNotNull(info, tileNames[i] + " 应有信息行");
+                infoRect = info.rectTransform;
+
+                // 1) 箭头整段位于信息行上方（两者竖向不重叠）。
+                float arrowBottom = arrow.anchoredPosition.y - arrow.rect.height;
+                float infoTop = infoRect.anchoredPosition.y;
+                Assert.Greater(arrowBottom, infoTop,
+                    tileNames[i] + " 的 `》` 不得压在信息行上（箭头下沿 " + arrowBottom.ToString("0.0") + " 应高于信息行上沿 " + infoTop.ToString("0.0") + "）");
+
+                // 2) 信息行拿整行宽度：不再为箭头让宽（让宽就是叠字的根因）。
+                float titleWidth = ((RectTransform)content.Find("TileTitle")).sizeDelta.x;
+                Assert.Greater(infoRect.sizeDelta.x, titleWidth, tileNames[i] + " 信息行宽度应大于标题行（标题行要让出箭头走廊）");
+
+                // 3) 文案必须整行放得下（规范禁 Truncate，靠字号自适应兜底）。
+                Assert.LessOrEqual(info.preferredWidth, infoRect.sizeDelta.x + 0.5f,
+                    tileNames[i] + " 信息行文案溢出（宽 " + info.preferredWidth.ToString("0") + " / 可用 " + infoRect.sizeDelta.x.ToString("0") + "）");
+                Assert.IsFalse(string.IsNullOrEmpty(info.text), tileNames[i] + " 信息行不能为空");
+            }
+        }
+
+        [UnityTest]
+        [Category("UI")]
+        public IEnumerator MatchFlowUI_HomeGeometryRebuild_KeepsStartCtaAlive()
+        {
+            yield return null;
+            var flow = Object.FindAnyObjectByType<MatchFlowUI>();
+            Assert.IsNotNull(flow, "场景中应有 MatchFlowUI");
+
+            var ready = flow.transform.Find("ReadyPanel");
+            Assert.IsNotNull(ready);
+            Transform safeBefore = ready.Find("MenuSafeArea");
+            Assert.IsNotNull(safeBefore);
+            Assert.IsNotNull(safeBefore.Find("StartButton"), "重建前开始按钮应在安全区内");
+
+            // 真机（Android）启动/旋转后安全区 settle 会触发私有的 RebuildHomeVisuals，
+            // 这里直接反射调用复现：旧实现把挂在安全区里的场景 StartButton 一起 Destroy，
+            // startButton 变 null 后首页再也建不出 CTA —— 玩家卡在首页开不了局。
+            var rebuild = typeof(MatchFlowUI).GetMethod("RebuildHomeVisuals",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.IsNotNull(rebuild, "MatchFlowUI 应保留几何重建入口（否则本测试失去意义）");
+            rebuild.Invoke(flow, null);
+            yield return null;
+
+            Transform safeAfter = ready.Find("MenuSafeArea");
+            Assert.IsNotNull(safeAfter, "重建后应存在新的安全区容器");
+            Assert.AreNotSame(safeBefore, safeAfter, "重建应换用新的安全区容器");
+
+            Transform startAfter = safeAfter.Find("StartButton");
+            Assert.IsNotNull(startAfter, "首页几何重建后开始按钮必须存活，否则首页 CTA 与开赛入口全部消失");
+
+            var home = MenuLayoutMath.Home(UITypography.IsMobileLike);
+            var startRect = (RectTransform)startAfter;
+            Assert.AreEqual(home.CtaSize.y, startRect.sizeDelta.y, 0.5f, "重建后 CTA 仍应按版面表摆位");
+
+            var hero = safeAfter.Find("HomeHeroCard");
+            Assert.IsNotNull(hero, "重建后首页卡片树应完整重建");
+            Assert.IsNotNull(safeAfter.Find("HomeTile_UPDATE"), "重建后 2×2 卡阵应完整重建");
         }
 
         [UnityTest]

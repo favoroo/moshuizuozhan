@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using P1.Core;
 using P1.Ink;
 using P1.UI;
@@ -94,6 +95,29 @@ namespace P1.Player
         /// <summary>最近一次伤害来源的武器/技能描述（击杀卡片使用）。</summary>
         public string LastWeaponCause => _lastWeaponCause;
 
+        /// <summary>该单位配置的出生锚点（未配置时为 null，越界回收等外部系统只读使用）。</summary>
+        public Transform RespawnAnchor => respawnAnchor;
+
+        /// <summary>
+        /// 读取该单位自己的出生位姿（越界回收优先用它，让多人同时越界各自回到自己的出生点，
+        /// 而不是全部叠在队伍兜底出生线上）。
+        /// 只认显式配置的 <see cref="respawnAnchor"/>；运行时临时拼装的单位（EditMode / PlayMode 测试、
+        /// 练习木桩）没有锚点，返回 false 由调用方走队伍兜底，避免把"创建时所在位置"当成出生点。
+        /// </summary>
+        public bool TryGetSpawnPose(out Vector3 position, out Quaternion rotation)
+        {
+            if (respawnAnchor != null)
+            {
+                position = respawnAnchor.position;
+                rotation = respawnAnchor.rotation;
+                return true;
+            }
+
+            position = default;
+            rotation = default;
+            return false;
+        }
+
         public event Action<CombatantHealth, Team> OnKilled;
         public event Action<CombatantHealth> OnRespawned;
 
@@ -117,6 +141,18 @@ namespace P1.Player
         {
             _cc = GetComponent<CharacterController>();
             _colliders = GetComponentsInChildren<Collider>(true);
+
+            // 角色层自标记：即使启动扫描（PhysicsLayerBootstrap）先于本组件执行，也不会漏掉角色胶囊。
+            if (GameLayers.CombatantLayer >= 0)
+            {
+                gameObject.layer = GameLayers.CombatantLayer;
+                for (int i = 0; i < _colliders.Length; i++)
+                {
+                    if (_colliders[i] != null)
+                        _colliders[i].gameObject.layer = GameLayers.CombatantLayer;
+                }
+            }
+
             _propBlock = new MaterialPropertyBlock();
             _initialSpawnPos = transform.position;
             _initialSpawnRot = transform.rotation;
@@ -124,7 +160,34 @@ namespace P1.Player
 
             if (bodyRenderers == null || bodyRenderers.Length == 0)
             {
-                bodyRenderers = GetComponentsInChildren<Renderer>(true);
+                Renderer[] all = GetComponentsInChildren<Renderer>(true);
+
+                // 场景烘焙的角色可能已做刚体部件合并（源 renderer 被禁用、MergedStatic_* 接管渲染）：
+                // 此时只收集仍启用的 renderer，避免死亡/复活的 SetVisualsAndCollidersActive 把源部件重新打开。
+                bool hasMergedArtifacts = false;
+                for (int i = 0; i < all.Length; i++)
+                {
+                    if (all[i] != null && all[i].gameObject.name.StartsWith("MergedStatic_"))
+                    {
+                        hasMergedArtifacts = true;
+                        break;
+                    }
+                }
+
+                if (!hasMergedArtifacts)
+                {
+                    bodyRenderers = all;
+                }
+                else
+                {
+                    var enabledOnly = new List<Renderer>(all.Length);
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        if (all[i] != null && all[i].enabled)
+                            enabledOnly.Add(all[i]);
+                    }
+                    bodyRenderers = enabledOnly.ToArray();
+                }
             }
         }
 
@@ -450,18 +513,40 @@ namespace P1.Player
 
             if (!IsAlive)
             {
-                _respawnTimer -= Time.deltaTime;
-                if (_respawnTimer <= 0f)
+                // 复活计时只在「比赛允许战斗」时推进（2026-11-01 修复）：
+                // 旧实现在终场定格 / 结算界面里照样倒计时，结算后角色还会在出生点复活、
+                // 播出生保护 VFX/音效，并让相机因瞬移触发 SnapImmediately 硬切。
+                if (IsRespawnClockRunning())
                 {
-                    ResetImmediately();
-                    GrantSpawnProtection(SpawnProtectionDuration);
-                    PlaySpawnProtectionVfx();
-                    if (AudioManager.Instance != null && team == Team.TeamA)
+                    _respawnTimer -= Time.deltaTime;
+                    if (_respawnTimer <= 0f)
                     {
-                        AudioManager.Instance.PlayRespawn();
+                        ResetImmediately();
+                        GrantSpawnProtection(SpawnProtectionDuration);
+                        PlaySpawnProtectionVfx();
+                        if (AudioManager.Instance != null && team == Team.TeamA)
+                        {
+                            AudioManager.Instance.PlayRespawn();
+                        }
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 复活倒计时是否推进：Playing（比赛进行中）推进；Countdown（3-2-1）、Finished（终场定格）、
+        /// Result（结算）冻结。
+        /// Ready（主菜单 / 只加载场景尚未开赛的回归用例）与「场景内没有 MatchManager」
+        /// （EditMode 与独立 PlayMode 测试）沿用旧行为：这些场景没有战斗，复活没有副作用。
+        /// </summary>
+        private static bool IsRespawnClockRunning()
+        {
+            MatchManager match = MatchManager.Instance;
+            if (match == null)
+                return true;
+
+            MatchManager.Phase phase = match.CurrentPhase;
+            return phase == MatchManager.Phase.Playing || phase == MatchManager.Phase.Ready;
         }
 
         /// <summary>复活瞬间在脚下放一圈队色扩散环，和身体闪白一起提示"出生保护中"。</summary>
@@ -473,6 +558,43 @@ namespace P1.Player
             Color color = InkSurfaceController.Instance.GetTeamColor(team);
             VfxPool.Instance.SpawnShockwaveRing(
                 transform.position + Vector3.up * 0.12f, color, 0.45f, 1.8f, 0.42f);
+        }
+
+        /// <summary>
+        /// 角色刚体部件运行时合并后同步 bodyRenderers：移除被合并的源 renderer、加入合并 renderer，
+        /// 保证死亡/复活显隐与受击白闪继续作用于实际渲染的网格。
+        /// </summary>
+        public void ApplyMergedBodyRenderers(IReadOnlyList<Renderer> mergedSources, IReadOnlyList<Renderer> mergedRenderers)
+        {
+            if (mergedSources == null || mergedRenderers == null || mergedRenderers.Count == 0)
+                return;
+
+            var sourceSet = new HashSet<Renderer>();
+            for (int i = 0; i < mergedSources.Count; i++)
+            {
+                if (mergedSources[i] != null)
+                    sourceSet.Add(mergedSources[i]);
+            }
+
+            Renderer[] current = bodyRenderers;
+            var list = new List<Renderer>((current != null ? current.Length : 0) + mergedRenderers.Count);
+            if (current != null)
+            {
+                for (int i = 0; i < current.Length; i++)
+                {
+                    Renderer r = current[i];
+                    if (r != null && !sourceSet.Contains(r))
+                        list.Add(r);
+                }
+            }
+
+            for (int i = 0; i < mergedRenderers.Count; i++)
+            {
+                if (mergedRenderers[i] != null)
+                    list.Add(mergedRenderers[i]);
+            }
+
+            bodyRenderers = list.ToArray();
         }
 
         private void SetVisualsAndCollidersActive(bool active)

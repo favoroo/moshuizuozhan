@@ -348,7 +348,7 @@ namespace P1.Tests
                 Application.logMessageReceived -= OnLog;
             }
 
-            // display 字体（TitanOne）没有省略号字形：名字必须走 body 字体 + Truncate，
+            // 名字必须走正文字重 + Truncate：长名字截断不依赖省略号字形，
             // 否则 TMP 每次重建都会刷一条「Ellipsis not available」警告（旧 bug）
             var killer = card.transform.Find("KillerText").GetComponent<TMPro.TMP_Text>();
             var victim = card.transform.Find("VictimText").GetComponent<TMPro.TMP_Text>();
@@ -356,8 +356,8 @@ namespace P1.Tests
             Assert.AreEqual(TMPro.TextOverflowModes.Truncate, killer.overflowMode);
             Assert.AreEqual(TMPro.TextOverflowModes.Truncate, victim.overflowMode);
             Assert.IsNotNull(killer.font);
-            Assert.IsFalse(killer.font.name.Contains("TitanOne"), "击杀者名字不得再用 display 字体");
-            Assert.IsFalse(victim.font.name.Contains("TitanOne"), "受害者名字不得再用 display 字体");
+            StringAssert.Contains("MiSans-Semibold", killer.font.name, "击杀者名字应用正文字重（MiSans-Semibold）");
+            StringAssert.Contains("MiSans-Semibold", victim.font.name, "受害者名字应用正文字重（MiSans-Semibold）");
             Assert.AreEqual(0, ellipsisWarnings, "长名字截断不得再刷 TMP Ellipsis 警告");
 
             Object.Destroy(root);

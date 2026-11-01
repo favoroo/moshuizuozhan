@@ -185,6 +185,9 @@ namespace P1.Weapons
         /// <summary>双枪战术翻滚中（期间无法正常开火，位移并沿途滴墨）。</summary>
         public virtual bool IsRollingDodge => false;
 
+        /// <summary>双枪翻滚方向（世界平移向量，模长为 1）。</summary>
+        public virtual Vector3 DodgeDirection => Vector3.forward;
+
         /// <summary>双枪翻滚后的原地架枪状态（移速锁定、射速提升 20%、散布清零）。</summary>
         public virtual bool IsTurretLocked => false;
 
@@ -193,6 +196,20 @@ namespace P1.Weapons
 
         /// <summary>双枪当前剩余可用翻滚次数（最多 2 次）。</summary>
         public virtual int RollsRemaining => 0;
+
+        /// <summary>
+        /// 是否处于「扳机仍被有效按住」的持续形态（蓄力 / 扫射 / 推地 / 挥击前摇）。
+        /// <see cref="WeaponController"/> 在输入被抑制的帧据此决定恢复后要不要把仍按住的扳机当成新按下。
+        /// </summary>
+        public virtual bool IsTriggerEngaged => IsCharging || IsRolling || IsFlicking;
+
+        /// <summary>
+        /// 本帧输入被主动抑制（暂停 / 终场 / 死亡 / 副武器投掷仲裁占用）：取消蓄力、扫射、推地与挥击前摇，
+        /// <strong>绝不</strong>把这次抑制当作「松开扳机」去开火。默认无事可做。
+        /// </summary>
+        public virtual void OnTriggerSuppressed(IWeaponRuntimeHost host)
+        {
+        }
 
         /// <summary>尝试触发双枪战术翻滚。</summary>
         public virtual bool TryPerformDodgeRoll(Vector3 moveDirection, IWeaponRuntimeHost host) => false;

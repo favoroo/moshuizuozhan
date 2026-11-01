@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using P1.Core;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -114,7 +115,7 @@ namespace P1.UI
         // Toast 控件
         private Canvas _toastCanvas;
         private RectTransform _toastPanel;
-        private Text _toastText;
+        private TextMeshProUGUI _toastText;
         private CanvasGroup _toastGroup;
         private Coroutine _toastCoroutine;
 
@@ -931,7 +932,7 @@ namespace P1.UI
             _toastGroup.alpha = 0f;
             _toastGroup.blocksRaycasts = false;
 
-            var textGo = new GameObject("ToastText", typeof(RectTransform), typeof(Text));
+            var textGo = new GameObject("ToastText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
             textGo.transform.SetParent(panelGo.transform, false);
 
             var textRt = textGo.GetComponent<RectTransform>();
@@ -940,22 +941,49 @@ namespace P1.UI
             textRt.offsetMin = new Vector2(24f, 8f);
             textRt.offsetMax = new Vector2(-24f, -8f);
 
-            _toastText = textGo.GetComponent<Text>();
-            _toastText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            _toastText.fontSize = 24;
-            _toastText.fontStyle = FontStyle.Bold;
-            _toastText.alignment = TextAnchor.MiddleCenter;
+            // 旧实现用 LegacyRuntime.ttf（LiberationSans，无 CJK 字形）：中文 Toast 在真机上是 □□。
+            // 改用 TMP + 主题字体解析（内部按文本内容选 MiSans CJK 档，独立包走 P1RuntimeAssets.uiTheme）。
+            _toastText = textGo.GetComponent<TextMeshProUGUI>();
+            _toastText.fontSize = UITypography.FontSnapped(24f);
+            _toastText.fontStyle = FontStyles.Bold;
+            _toastText.alignment = TextAlignmentOptions.Center;
             _toastText.color = Color.white;
-            _toastText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _toastText.textWrappingMode = TextWrappingModes.Normal;
+            _toastText.overflowMode = TextOverflowModes.Overflow;
+            _toastText.raycastTarget = false;
+            ApplyToastFont(_toastText.text);
+        }
+
+        /// <summary>按文案内容选字体：含汉字走 MiSans（主题 CJK 档），纯拉丁/数字保留标题字。</summary>
+        private void ApplyToastFont(string message)
+        {
+            if (_toastText == null) return;
+
+            TMP_FontAsset font = UIThemeSO.Resolve(null).ResolveFont(false, message);
+            if (font != null && _toastText.font != font)
+            {
+                _toastText.font = font;
+            }
         }
 
         private IEnumerator AnimateToast(string message, Color accentColor, float duration)
         {
             _toastText.text = message;
             _toastText.color = accentColor;
-
-            // 动态根据文字宽度调整
-            float estimatedWidth = Mathf.Clamp(message.Length * 24f + 80f, 320f, 1000f);
+            // TMP：按文案切字体（中文 → MiSans），并用排版实测宽度定底板宽度；
+            // 旧的「字数 × 24」估算对全宽汉字偏窄，中文文案会被挤成两行。
+            ApplyToastFont(message);
+            // 量「不换行的自然宽度」：Wrap 状态下 preferredWidth 只给最长一行的宽度，
+            // 会随底板当前宽度变化，量不到真实需要的宽度。
+            _toastText.textWrappingMode = TextWrappingModes.NoWrap;
+            _toastText.ForceMeshUpdate();
+            float measured = _toastText.preferredWidth;
+            _toastText.textWrappingMode = TextWrappingModes.Normal;
+            if (measured < 1f || float.IsNaN(measured))
+            {
+                measured = message.Length * 24f;
+            }
+            float estimatedWidth = Mathf.Clamp(measured + 80f, 320f, 1200f);
             _toastPanel.sizeDelta = new Vector2(estimatedWidth, 64f);
 
             float elapsed = 0f;

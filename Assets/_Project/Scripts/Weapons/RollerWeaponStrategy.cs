@@ -36,6 +36,20 @@ namespace P1.Weapons
             _lastRollPosition = Vector3.zero;
         }
 
+        public override bool IsTriggerEngaged => _isRolling || _flickWindup >= 0f;
+
+        /// <summary>
+        /// 输入被抑制（暂停 / 终场 / 死亡 / 投雷占用）：停止推地，并丢弃尚未落地的挥击前摇
+        /// （被抑制的帧不得生成墨滴；墨水已在按下时扣除，不回补）。
+        /// </summary>
+        public override void OnTriggerSuppressed(IWeaponRuntimeHost host)
+        {
+            _isRolling = false;
+            _flickWindup = -1f;
+            if (host != null)
+                _lastRollPosition = host.Position;
+        }
+
         public override bool OnTriggerHeld(WeaponAim aim, float dt, IWeaponRuntimeHost host)
         {
             if (!host.IsAlive)
@@ -57,6 +71,13 @@ namespace P1.Weapons
                 }
 
                 _flickWindup = Config != null ? Mathf.Max(0f, Config.flickWindup) : 0.22f;
+
+                // 挥击节奏：两次挥击（按下沿）至少间隔 flickInterval，面板显示 1.6 次/秒也就名副其实。
+                // 旧实现只在墨水不足时设冷却，连点可以打到 ~4 次/秒。
+                // 取 max(flickInterval, windup)：前摇比间隔还长时也不会出现「前摇没走完又能按」的错觉。
+                float flickInterval = Config != null ? Mathf.Max(0f, Config.flickInterval) : 0.62f;
+                _cooldown = Mathf.Max(flickInterval, _flickWindup);
+
                 if (_flickWindup <= 0f)
                 {
                     _flickWindup = -1f;
@@ -114,6 +135,16 @@ namespace P1.Weapons
             Vector3 delta = current - _lastRollPosition;
             delta.y = 0f;
             float moved = delta.magnitude;
+
+            // 越界回收 / 复活 / 传送：单帧位移远超正常移动速度时，这一段不是真实滚动。
+            // 旧实现会把整段传送距离当成推地长度，一帧画出横贯全图的墨带、扣掉大量墨水并卡顿。
+            float maxStep = Config != null ? Mathf.Max(0.2f, Config.rollMaxStepMeters) : 1.5f;
+            if (moved > maxStep)
+            {
+                _lastRollPosition = current;
+                _isRolling = false;
+                return;
+            }
 
             if (moved > 0.0005f)
             {

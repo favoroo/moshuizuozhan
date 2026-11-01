@@ -48,12 +48,26 @@ namespace P1.Core
         public static bool CombatAllowed =>
             Instance == null || Instance.CurrentPhase == Phase.Playing;
 
+        /// <summary>
+        /// 终场冻结门禁：伤害 / 涂地 / 爆炸 / 涂地统计的结算入口统一读它。
+        /// 与 <see cref="CombatAllowed"/> 的差别是「只锁终场之后」——
+        /// 赛前 Ready / Countdown 仍允许开火（训练场与运行时验收会直接对枪验证弹道，
+        /// 此时阶段尚未进入 Playing），一旦吹哨进入 Finished / Result，任何后续墨迹与击杀都会
+        /// 污染已取好的结算快照，必须停结算（表现可以继续）。
+        /// 无 MatchManager（纯逻辑测试 / 编辑器工具）时恒为 true。
+        /// </summary>
+        public static bool CombatSettlementAllowed =>
+            Instance == null ||
+            (Instance.CurrentPhase != Phase.Finished && Instance.CurrentPhase != Phase.Result);
+
         public static bool InputAllowed =>
             Instance == null || Instance.CurrentPhase == Phase.Playing;
 
         private void Awake()
         {
             Instance = this;
+            // 物理层过滤：场景碰撞体只在启动时分类一次，之后弹丸/角色/Bot 的查询只扫 World|Combatant
+            PhysicsLayerBootstrap.EnsureSceneLayers();
             _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
             EnsureRuntimeGuards();
         }

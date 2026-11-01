@@ -81,7 +81,8 @@ namespace P1.Weapons
             _sharedMat = new Material(sh) { name = "InkBombSharedMat" };
             _ringMesh = VfxPool.BuildRingMesh(36, 0.90f, 1.0f);
 
-            for (int i = 0; i < 8; i++)
+            // 预热 12：4v4 多枚手雷同时在场时避免释放瞬间 new GameObject 造成帧尖刺
+            for (int i = 0; i < 12; i++)
             {
                 _pool.Enqueue(CreateBombNode(i));
             }
@@ -286,7 +287,7 @@ namespace P1.Weapons
         private bool CastBombSegment(Vector3 origin, Vector3 direction, float distance, in ActiveBomb b, out RaycastHit hit)
         {
             int hitCount = Physics.RaycastNonAlloc(
-                origin, direction, _flightHits, distance, ~0, QueryTriggerInteraction.Ignore);
+                origin, direction, _flightHits, distance, GameLayers.QueryMask, QueryTriggerInteraction.Ignore);
             float nearest = float.PositiveInfinity;
             bool found = false;
             hit = default;
@@ -313,6 +314,13 @@ namespace P1.Weapons
 
         private void DetonateBomb(in ActiveBomb b)
         {
+            // 终场哨响后：引信照常走完（表现不中断），但不再涂地、不再结算伤害与涂地统计。
+            if (!MatchManager.CombatSettlementAllowed)
+            {
+                SpawnDetonationFeedback(b);
+                return;
+            }
+
             // 1. 2.7m 涂地（同时覆盖附近可涂墙面，仅地面格登记个人涂地统计）
             if (InkSurfaceController.Instance != null)
             {
@@ -343,6 +351,12 @@ namespace P1.Weapons
                 b.LandingPos, b.Team, b.DamageRadius, b.InnerKillRadius, b.InnerDamage, b.OuterDamage, b.Attacker);
 
             // 3. 粒子、双层冲击波、音效与震屏
+            SpawnDetonationFeedback(b);
+        }
+
+        /// <summary>手雷爆裂的表现层（粒子 / 双层冲击波 / 音效 / 震屏）：终场冻结时仍然保留。</summary>
+        private void SpawnDetonationFeedback(in ActiveBomb b)
+        {
             if (VfxPool.Instance != null)
             {
                 VfxPool.Instance.SpawnInkImpact(b.LandingPos, Vector3.up, b.Color, 0.85f, 12);

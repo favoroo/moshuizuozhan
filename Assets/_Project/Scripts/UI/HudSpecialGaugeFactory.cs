@@ -117,7 +117,7 @@ namespace P1.UI
         public const float CardReadoutFontSize = 36f;
 
         /// <summary>
-        /// 移动端读数上限：TitanOne 的「100%」≈ 2.88em，46px 会宽到 132px 压住轨道，
+        /// 移动端读数上限：标题字重（MiSans-Heavy）的「100%」≈ 2.6em，46px 会压住轨道，
         /// 因此移动端按 clamp 收到 38（仍大于桌面 36，不会出现「手机字更小」）。
         /// </summary>
         public const float MobileReadoutMaxFontSize = 38f;

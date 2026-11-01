@@ -84,6 +84,29 @@ namespace P1.Weapons
             _bloom = 0f;
         }
 
+        public override bool IsTriggerEngaged => _isCharging || _isStreaming;
+
+        /// <summary>
+        /// 输入被抑制（暂停 / 终场 / 死亡 / 投雷占用）：中断蓄力与扫射，<strong>不再倾泻弹幕</strong>。
+        /// 旧实现在抑制帧收到 triggerHeld=false，会把蓄力直接转成整轮扫射。
+        /// </summary>
+        public override void OnTriggerSuppressed(IWeaponRuntimeHost host)
+        {
+            _isCharging = false;
+            _chargeElapsed = 0f;
+            _charge = 0f;
+
+            if (_isStreaming)
+            {
+                _isStreaming = false;
+                _burstDuration = 0f;
+                _burstTimer = 0f;
+                _shotTimer = 0f;
+                // 与自然打完一轮一致的重置间隔，避免恢复后立刻补一轮
+                _cooldown = Mathf.Max(_cooldown, 0.22f);
+            }
+        }
+
         public override bool OnTriggerHeld(WeaponAim aim, float dt, IWeaponRuntimeHost host)
         {
             if (!host.IsAlive || _cooldown > 0f)

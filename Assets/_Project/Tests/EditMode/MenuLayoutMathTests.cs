@@ -113,7 +113,28 @@ namespace P1.Tests
                 Assert.IsTrue(hero.Contains(slot.Center.x, slot.Center.y), tag + " 武器整备卡槽中心必须落在 Hero 卡内");
                 Assert.IsFalse(slot.Overlaps(cta), tag + " 武器整备卡槽与开始游戏按钮不得重叠");
                 Assert.GreaterOrEqual(cta.Y, slot.Bottom, tag + " 开始游戏按钮必须在武器整备卡槽下方");
+                Assert.GreaterOrEqual(slot.Y, home.HeroTag.Bottom + 20f, tag + " 武器整备卡槽必须在 HeroTag 下方且留出充裕呼吸间距");
+                Assert.IsFalse(slot.Overlaps(home.HeroTag), tag + " 武器整备卡槽与 HeroTag 标签不得重叠");
             }
+        }
+
+        [Test]
+        public void Drawer_DesktopTwoColumnFitsAllSevenWeaponsWithoutScroll()
+        {
+            WeaponDrawerMetrics d = MenuLayoutMath.Drawer(false);
+            float spacing = 16f;
+            float cellW = (d.Width - d.ScrollLeftInset - d.ScrollRightInset - spacing) * 0.5f;
+
+            // 桌面抽屉与移动端同构走双列网格；单元宽必须与 WeaponCardView 的桌面卡宽 580 严格一致
+            Assert.AreEqual(1204f, d.Width, 0.5f, "桌面抽屉宽 = 580×2 + 16 列间距 + 14×2 左右内缩");
+            Assert.AreEqual(580f, cellW, 0.5f, "桌面网格单元宽必须等于 WeaponCardView 桌面卡宽 580");
+
+            // 7 张卡 4 行，参考画布上一屏放下（无需滚动）
+            int rows = Mathf.CeilToInt(7 / 2f);
+            float contentH = d.ScrollTopInset + rows * d.CardHeight + (rows - 1) * spacing + 8f;
+            float viewportH = MenuLayoutMath.RefHeight - d.HeaderHeight - 14f - 8f - d.ScrollBottomInset;
+            Assert.LessOrEqual(contentH, viewportH,
+                "桌面双列 7 卡 4 行应在一屏内看完，无需滚动");
         }
 
         [Test]
@@ -184,6 +205,8 @@ namespace P1.Tests
                 "钳制后 2×2 卡阵右缘不得超出画布（右列必须可见）");
             Assert.LessOrEqual(board.Top + board.Height, canvas.y + 0.01f,
                 "钳制后卡片区底缘不得超出画布（CTA / 下排卡必须可见）");
+            Assert.AreEqual((mobile.CardTop + mobile.CardBottom) * 0.5f, board.Top, 0.5f,
+                "移动端卡片区顶部应为上下留白的均分点（垂直居中）");
             Assert.Less(board.Height, 700f, "卡片区高度必须按画布高收放，而不是按脏安全区撑爆");
             Assert.AreEqual(966f - mobile.CardTop - mobile.CardBottom, board.Height, 0.5f,
                 "高度应等于画布高 - 上下留白");
@@ -203,6 +226,12 @@ namespace P1.Tests
             Assert.AreEqual(desktop.HeroBox.x, board.HeroWidth, 0.5f);
             Assert.AreEqual((desktop.GridWidth - desktop.TileGap) * 0.5f, board.TileWidth, 0.5f);
             Assert.AreEqual((board.Height - desktop.TileGap) * 0.5f, board.TileHeight, 0.5f);
+
+            // 垂直居中：上下留白均分（历史版面压顶，底部积压 200px 空白）
+            Assert.AreEqual((desktop.CardTop + desktop.CardBottom) * 0.5f, board.Top, 0.5f,
+                "桌面卡片区顶部应为上下留白的均分点（垂直居中）");
+            Assert.AreEqual(canvas.y, board.Top * 2f + board.Height, 0.5f,
+                "上留白 + 卡片区 + 下留白应恰好占满参考画布高");
         }
 
         [Test]

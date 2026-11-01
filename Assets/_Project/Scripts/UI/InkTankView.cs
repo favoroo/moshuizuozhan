@@ -49,6 +49,9 @@ namespace P1.UI
         private float _blinkPhase;
         private float _nextWarningTime;
         private int _displayedPercent = -1;
+        private Canvas _rootCanvas;
+        private bool _hostSuppressed;
+        private bool _suppressEntryAlert;
 
         private void Awake()
         {
@@ -133,7 +136,14 @@ namespace P1.UI
         /// <summary>每帧由 HudController 喂入当前墨水（绝对值 + 上限）。</summary>
         public void SetInk(float currentInk, float maxInk)
         {
-            _ink01 = maxInk > 0.01f ? Mathf.Clamp01(currentInk / maxInk) : 0f;
+            float next = maxInk > 0.01f ? Mathf.Clamp01(currentInk / maxInk) : 0f;
+            if (Mathf.Abs(next - _ink01) > 0.001f)
+            {
+                // 真实数据已经到位：离场残留值造成的一次性抑制到此为止
+                _suppressEntryAlert = false;
+            }
+
+            _ink01 = next;
 
             if (barFill != null) barFill.fillAmount = _ink01;
             ApplyPercent();
@@ -193,6 +203,16 @@ namespace P1.UI
         {
             HudGaugeStyleSO resolved = HudGaugeStyleSO.Resolve(style);
 
+            // 宿主画布不可见（首页 / 结算页：HudController 把 _hudCanvas.enabled=false）时直接跳过。
+            // 历史 bug——只关画布不停 Update，_ink01 停在离场时的低墨值，结算/首页每 1.15s 继续蜂鸣。
+            if (!IsHostCanvasVisible())
+            {
+                SuppressAlerts();
+                return;
+            }
+
+            _hostSuppressed = false;
+
             bool lowNow = HudGaugeMath.IsLowInk(_ink01, resolved.lowInkThreshold01, _low, resolved.lowInkHysteresis);
             if (lowNow != _low)
             {
@@ -201,7 +221,9 @@ namespace P1.UI
                 {
                     _blinkPhase = 0f;
                     _nextWarningTime = Time.unscaledTime + resolved.warningRepeatInterval;
-                    TriggerWarning(resolved);
+                    // 离场残留的墨水值造成的「回来第一帧就响」不算告警：延迟一个间隔再提醒
+                    if (_suppressEntryAlert) _suppressEntryAlert = false;
+                    else TriggerWarning(resolved);
                 }
             }
 
@@ -212,6 +234,59 @@ namespace P1.UI
             }
 
             UpdateWarningVisuals(resolved);
+        }
+
+        /// <summary>
+        /// 宿主 HUD 画布是否可见：本视图挂在 HUD canvas 子树里，
+        /// HudController 隐藏 HUD 时只关画布（不停 GameObject），所以必须自查根画布开关。
+        /// 注意 <see cref="EnsureSubCanvas"/> 会给本节点自己加一层子画布，
+        /// 因此解析必须「沿父级链找上级画布」，不能只看自己的 rootCanvas——
+        /// 否则本组件恰好挂在画布根节点上时会解析到自己、被误判为不可见。
+        /// </summary>
+        public bool IsHostCanvasVisible()
+        {
+            if (!isActiveAndEnabled) return false;
+
+            // 尚未解析，或只解析到自己的子画布（运行时「先 AddComponent 后 SetParent」的中间态、
+            // 或本节点本身就是画布根）时重新解析；拿到真正的上级画布后即缓存。
+            if (_rootCanvas == null || _rootCanvas.transform == transform)
+            {
+                Canvas own = GetComponent<Canvas>();
+                Canvas root = own != null ? own.rootCanvas : null;
+                if (root == null || root.transform == transform)
+                {
+                    Canvas parentCanvas = transform.parent != null
+                        ? transform.parent.GetComponentInParent<Canvas>()
+                        : null;
+                    if (parentCanvas != null) root = parentCanvas.rootCanvas;
+                }
+
+                if (root == null) return true; // 完全没有画布（纯逻辑/测试）时不做门禁，保持历史行为
+                _rootCanvas = root;
+            }
+
+            return _rootCanvas.enabled && _rootCanvas.gameObject.activeInHierarchy;
+        }
+
+        /// <summary>
+        /// 进入不可见态：清掉告警状态与红闪视觉，并让「回到战斗后的首次进入告警」延后一个间隔。
+        /// 公开入口供 HudController 在隐藏 HUD / 开新一局时主动调用（幂等）。
+        /// </summary>
+        public void ResetAlertState(bool suppressEntryAlert = true)
+        {
+            _low = false;
+            _blinkPhase = 0f;
+            _nextWarningTime = 0f;
+            _suppressEntryAlert = suppressEntryAlert;
+            UpdateWarningVisuals(HudGaugeStyleSO.Resolve(style));
+        }
+
+        private void SuppressAlerts()
+        {
+            if (_hostSuppressed) return;
+
+            _hostSuppressed = true;
+            ResetAlertState(true);
         }
 
         private void TriggerWarning(HudGaugeStyleSO resolved)

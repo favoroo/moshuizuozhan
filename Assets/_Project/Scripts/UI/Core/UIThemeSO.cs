@@ -437,14 +437,14 @@ namespace P1.UI
             }
 
             // ② Resources（若字体资产被移入 Resources 目录）
-            if (_globalDisplayFont == null) _globalDisplayFont = LoadResourceFont("TitanOne-Regular SDF", "Rubik-Black SDF");
-            if (_globalBodyFont == null) _globalBodyFont = LoadResourceFont("Rubik-Bold SDF", "TitanOne-Regular SDF");
+            if (_globalDisplayFont == null) _globalDisplayFont = LoadResourceFont("MiSans-Heavy SDF", "MiSans-Semibold SDF");
+            if (_globalBodyFont == null) _globalBodyFont = LoadResourceFont("MiSans-Semibold SDF", "MiSans-Heavy SDF");
             if (_globalDisplayCjkFont == null) _globalDisplayCjkFont = LoadResourceFont("MiSans-Heavy SDF", "MiSans-Semibold SDF");
             if (_globalBodyCjkFont == null) _globalBodyCjkFont = LoadResourceFont("MiSans-Semibold SDF", "MiSans-Heavy SDF");
 
             // ③ 编辑器 AssetDatabase（工程内的常规路径）
-            if (_globalDisplayFont == null) _globalDisplayFont = LoadEditorFont("TitanOne-Regular SDF", "Rubik-Black SDF");
-            if (_globalBodyFont == null) _globalBodyFont = LoadEditorFont("Rubik-Bold SDF", "TitanOne-Regular SDF");
+            if (_globalDisplayFont == null) _globalDisplayFont = LoadEditorFont("MiSans-Heavy SDF", "MiSans-Semibold SDF");
+            if (_globalBodyFont == null) _globalBodyFont = LoadEditorFont("MiSans-Semibold SDF", "MiSans-Heavy SDF");
             if (_globalDisplayCjkFont == null) _globalDisplayCjkFont = LoadEditorFont("MiSans-Heavy SDF", "MiSans-Semibold SDF");
             if (_globalBodyCjkFont == null) _globalBodyCjkFont = LoadEditorFont("MiSans-Semibold SDF", "MiSans-Heavy SDF");
 
@@ -570,7 +570,7 @@ namespace P1.UI
             return ResolveGlobalFont(display, false);
         }
 
-        /// <summary>中文字体：标题走 MiSans-Heavy，正文走 MiSans-Semibold（缺档时全局兜底）。</summary>
+        /// <summary>中文字重：标题走 MiSans-Heavy，正文走 MiSans-Semibold（缺档时全局兜底）。</summary>
         public TMP_FontAsset GetCjkFont(bool display)
         {
             if (display && displayCjkFont != null) return displayCjkFont;
@@ -580,8 +580,9 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 按文本内容自动选字体：含汉字就用 CJK 字体（保证描边材质对中文同样生效），
-        /// 纯拉丁/数字仍走 TitanOne / Rubik，保留漫画数字的味道。
+        /// 按字重取字体：display=true 取标题字重（MiSans Heavy），否则正文字重（MiSans Semibold）。
+        /// 2026-11-01 起全站只有 MiSans 一族（Latin 与 CJK 同源），所以这里不再按文本内容切家族；
+        /// CJK 分支保留是为了兼容旧主题资产（字段被单独改过时仍能取到中文字体）。
         /// 保证永不返回 null（最后一级为 TMP 全局默认字体）。
         /// </summary>
         public TMP_FontAsset ResolveFont(bool display, string text)

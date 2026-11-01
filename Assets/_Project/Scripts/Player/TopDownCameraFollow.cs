@@ -425,6 +425,10 @@ namespace P1.Player
             // 沿视轴后拉：相机原点在中心射线上滑动，射线本身不变 → 弹道落点严格不变
             position -= forward * _shotDistanceSpring.Value;
 
+            // 二次夹紧：震屏位移、右肩偏移与开火后拉都发生在死角解算之后，
+            // 贴墙 + 高 trauma 时可能把相机推出几何体（看到墙外/黑面）。这里沿枢轴→相机方向再查一次。
+            position = ClampFinalCameraPosition(_pivot, position);
+
             transform.position = position;
             transform.rotation = lookRotation * Quaternion.Euler(0f, 0f, _shakeRoll + _shotRollSpring.Value);
 
@@ -452,6 +456,30 @@ namespace P1.Player
 
             if (_cam != null)
                 _cam.fieldOfView = Mathf.Clamp(_smoothedFov + _shotFovSpring.Value, 25f, 90f);
+        }
+
+        /// <summary>
+        /// 最终位置二次夹紧（P16-C 补强）：<see cref="ResolveBoomDistance"/> 与
+        /// <see cref="ApplyGroundClearance"/> 都在震屏/右肩/开火后拉之前解算，
+        /// 贴墙同时叠加高 trauma 时相机可能穿出墙面。这里沿「枢轴 → 最终相机位置」再做一次
+        /// 球体扫掠，被挡住就把相机拉回枢轴方向（不低于吊臂最小距离的一半）。
+        /// 只改渲染位置，不影响 <see cref="GetAimCameraPosition"/> 的瞄准射线。
+        /// </summary>
+        private Vector3 ClampFinalCameraPosition(Vector3 pivot, Vector3 position)
+        {
+            Vector3 offset = position - pivot;
+            float length = offset.magnitude;
+            if (length < 0.05f)
+                return position;
+
+            Vector3 direction = offset / length;
+            float allowed = ResolveBoomDistance(pivot, -direction, length);
+            float minimumKeep = GetMinDistance() * 0.5f;
+            float clamped = Mathf.Max(minimumKeep, allowed);
+            if (clamped >= length)
+                return position;
+
+            return pivot + direction * clamped;
         }
 
         private void ApplyCameraSettings()
@@ -545,7 +573,7 @@ namespace P1.Player
             Vector3 direction = -forward;
 
             int count = Physics.SphereCastNonAlloc(
-                origin, radius, direction, _castHits, desiredDistance, ~0, QueryTriggerInteraction.Ignore);
+                origin, radius, direction, _castHits, desiredDistance, GameLayers.WorldMask, QueryTriggerInteraction.Ignore);
 
             float allowed = desiredDistance;
             for (int i = 0; i < count; i++)
@@ -593,7 +621,7 @@ namespace P1.Player
         {
             result = default;
             int count = Physics.RaycastNonAlloc(
-                origin, direction, _castHits, maxDistance, ~0, QueryTriggerInteraction.Ignore);
+                origin, direction, _castHits, maxDistance, GameLayers.WorldMask, QueryTriggerInteraction.Ignore);
 
             float best = float.PositiveInfinity;
             for (int i = 0; i < count; i++)

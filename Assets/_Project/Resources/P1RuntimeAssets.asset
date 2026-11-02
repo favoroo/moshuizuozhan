@@ -30,6 +30,9 @@ MonoBehaviour:
   - {fileID: 21300000, guid: 29bba3f40d78d439ea8a2c8c12caa804, type: 3}
   - {fileID: 21300000, guid: a5047039acdd840f5beacec071a7ebe5, type: 3}
   uiIconNames:
+  - brand_app_icon
+  - brand_splat
+  - brand_squid
   - glyph_back
   - glyph_bolt
   - glyph_booyah
@@ -88,6 +91,7 @@ MonoBehaviour:
   - rule_turf
   - special_slam
   - special_storm
+  - splash_logo
   - sub_bomb
   - weapon_blaster
   - weapon_charger
@@ -97,6 +101,9 @@ MonoBehaviour:
   - weapon_slosher
   - weapon_splatling
   uiIcons:
+  - {fileID: 21300000, guid: de21c147d3f334d5985fc2d51d5a0a62, type: 3}
+  - {fileID: 21300000, guid: 0445c13bc1a9e4a01a6bf96340644149, type: 3}
+  - {fileID: 21300000, guid: 0b9abbac3669340389d08e0e464159e3, type: 3}
   - {fileID: 21300000, guid: a204ce398d4324ec9a79d62a828dbf4b, type: 3}
   - {fileID: 21300000, guid: 7b28a031994b34ecf957be52338cc46c, type: 3}
   - {fileID: 21300000, guid: 943b3f00cd9024603b7c5e6fbd2fe183, type: 3}
@@ -155,6 +162,7 @@ MonoBehaviour:
   - {fileID: 21300000, guid: dca8a5d02e4244b2899ca854979bbd68, type: 3}
   - {fileID: 21300000, guid: 194ef78fb40114841ac6bc85fded200b, type: 3}
   - {fileID: 21300000, guid: 22563bc37c1c048ae91448c6d45e8ec3, type: 3}
+  - {fileID: 21300000, guid: e3d4c6ce7d58b4694a6f18f27bfcea4a, type: 3}
   - {fileID: 21300000, guid: 43949f63f7b0c4461b2d0f309b5337ed, type: 3}
   - {fileID: 21300000, guid: 29bba3f40d78d439ea8a2c8c12caa804, type: 3}
   - {fileID: 21300000, guid: 35b164a7c79454ce4b8eaec0342fc0f8, type: 3}

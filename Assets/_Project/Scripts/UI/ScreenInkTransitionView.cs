@@ -11,6 +11,7 @@ namespace P1.UI
     /// 全屏墨水漫灌与复活虹膜撕裂转场视图（P1/UI/ScreenInkTransitionView）。
     /// 
     /// 参考 INKWAVE `src/fx/screenfx.js` 的 splatted flood 与 iris reveal 状态机：
+    /// - 开赛：己方墨快速涌满全屏 → 短暂停顿 → 虹膜撕开露出战场（替代 3-2-1 数字倒数的唯一入场演出）；
     /// - 阵亡：敌墨由四周快速漫灌（~0.55s），具有粘稠前缘与顶部垂滴，压住画面；
     /// - 复活：己方墨水从中心撕开有机虹膜破口（~0.86s），外沿强发光，平滑放行底层 HUD 与场景；
     /// - 受击反馈：冲击形变（Punch 临界阻尼弹簧）与边缘色差（Chroma 径向分离）。
@@ -28,7 +29,8 @@ namespace P1.UI
             None,
             FloodIn,
             Reveal,
-            FadeOut
+            FadeOut,
+            MatchIntro
         }
 
         private const string ShaderName = "P1/UI/ScreenInkTransition";
@@ -56,6 +58,8 @@ namespace P1.UI
         private float _floodValue;
         private float _floodDripValue;
         private float _holeValue;
+        private float _revealDelay = 0.10f;
+        private float _revealDuration = 0.72f;
 
         private float _punch;
         private float _punchV;
@@ -69,7 +73,7 @@ namespace P1.UI
         private CombatantHealth _subscribedLocalHealth;
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-        private float _debugPreviewUntil;
+        private bool _previewPaused;
 #endif
 
         public TransitionMode CurrentMode => _mode;
@@ -142,6 +146,11 @@ namespace P1.UI
             if (phase == MatchManager.Phase.Ready)
             {
                 ResetImmediately();
+            }
+            else if (phase == MatchManager.Phase.Countdown)
+            {
+                // 开局只播这一次入场动画：己方墨涌满 → 虹膜撕开露出战场。
+                TriggerMatchIntro(ResolveOwnColor());
             }
             else if (phase == MatchManager.Phase.Finished)
             {
@@ -263,6 +272,35 @@ namespace P1.UI
         }
 
         /// <summary>
+        /// 触发开赛入场墨幕：己方墨快速涌满全屏，短暂停顿后从中心撕开虹膜露出战场。
+        /// 它是替代 3-2-1 数字倒数的唯一开赛演出，时长与 <see cref="ScreenInkTransitionMath.MatchIntroTotalDuration"/> 对齐。
+        /// </summary>
+        public void TriggerMatchIntro(Color ownColor)
+        {
+            if (!_built) EnsureBuilt();
+            if (!_built || overlayImage == null || _material == null) return;
+
+            transform.SetAsLastSibling(); // 压住 HUD 与场景
+            _mode = TransitionMode.MatchIntro;
+            _modeTimer = 0f;
+            _floodValue = 1f; // 第一帧就压满：菜单刚关掉时不能闪出战场
+            _floodDripValue = ScreenInkTransitionMath.MatchIntroFloodDrip;
+            _holeValue = 0.0001f;
+
+            _currentInkColor = ToLinear(ownColor);
+            Color rim = Color.Lerp(ownColor, Color.white, 0.55f) * 1.6f;
+            _currentRimColor = ToLinear(rim);
+
+            _material.SetColor(InkColorProp, _currentInkColor);
+            _material.SetColor(HoleRimColorProp, _currentRimColor);
+            _material.SetFloat(FloodProp, 1f);
+            _material.SetFloat(FloodDripProp, _floodDripValue);
+            _material.SetFloat(HoleProp, _holeValue);
+
+            if (!overlayImage.enabled) overlayImage.enabled = true;
+        }
+
+        /// <summary>
         /// 触发复活己方墨水虹膜撕裂开屏。
         /// </summary>
         public void TriggerRespawnReveal(Color ownColor)
@@ -275,6 +313,8 @@ namespace P1.UI
             _floodValue = 1f;
             _floodDripValue = 0.05f;
             _holeValue = 0.0001f;
+            _revealDelay = 0.10f;
+            _revealDuration = 0.72f;
 
             _currentInkColor = ToLinear(ownColor);
             Color rim = Color.Lerp(ownColor, Color.white, 0.55f) * 1.6f;
@@ -367,6 +407,11 @@ namespace P1.UI
             if (!_built) EnsureBuilt();
             if (!_built || overlayImage == null || _material == null) return;
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            // 编辑器取景定格：画面停在 SetPreviewPose 指定的时刻，不推进状态机。
+            if (_previewPaused) return;
+#endif
+
             if (parentCanvas == null) parentCanvas = GetComponentInParent<Canvas>();
             if (parentCanvas != null && !parentCanvas.enabled)
             {
@@ -399,9 +444,22 @@ namespace P1.UI
                 {
                     _floodValue = 1f;
                     _floodDripValue = 0.05f;
-                    _holeValue = ScreenInkTransitionMath.CalculateIrisHole(_modeTimer);
+                    _holeValue = ScreenInkTransitionMath.CalculateIrisHole(_modeTimer, _revealDelay, _revealDuration);
 
-                    if (_modeTimer > 0.86f)
+                    if (_modeTimer > _revealDelay + _revealDuration + 0.04f)
+                    {
+                        _mode = TransitionMode.None;
+                        _floodValue = 0f;
+                        _holeValue = 0f;
+                    }
+                }
+                else if (_mode == TransitionMode.MatchIntro)
+                {
+                    _floodValue = 1f;
+                    _floodDripValue = ScreenInkTransitionMath.MatchIntroFloodDrip;
+                    _holeValue = ScreenInkTransitionMath.CalculateMatchIntroHole(_modeTimer);
+
+                    if (_modeTimer >= ScreenInkTransitionMath.MatchIntroTotalDuration)
                     {
                         _mode = TransitionMode.None;
                         _floodValue = 0f;
@@ -490,6 +548,36 @@ namespace P1.UI
         public void DebugPreviewRespawn()
         {
             TriggerRespawnReveal(ResolveOwnColor());
+        }
+
+        /// <summary>
+        /// 编辑器/自动化取景：把开赛墨幕定格在 <paramref name="time"/> 秒（不推进时间）。
+        /// 正式运行时不会调用；用于截图自查与 UI 回归时精确复现某一帧。
+        /// 需要 HUD 画布已启用（开赛后调用即可）。
+        /// </summary>
+        public void SetPreviewPose(float time)
+        {
+            if (!_built) EnsureBuilt();
+            if (!_built || overlayImage == null || _material == null) return;
+
+            _previewPaused = true;
+            TriggerMatchIntro(ResolveOwnColor());
+
+            _modeTimer = Mathf.Clamp(time, 0f, ScreenInkTransitionMath.MatchIntroTotalDuration);
+            _floodValue = 1f;
+            _floodDripValue = ScreenInkTransitionMath.MatchIntroFloodDrip;
+            _holeValue = ScreenInkTransitionMath.CalculateMatchIntroHole(_modeTimer);
+
+            _material.SetFloat(FloodProp, _floodValue);
+            _material.SetFloat(FloodDripProp, _floodDripValue);
+            _material.SetFloat(HoleProp, _holeValue);
+            if (!overlayImage.enabled) overlayImage.enabled = true;
+        }
+
+        /// <summary>解除取景定格，从当前时刻继续播放开赛墨幕。</summary>
+        public void ResumeFromPreview()
+        {
+            _previewPaused = false;
         }
 #endif
     }

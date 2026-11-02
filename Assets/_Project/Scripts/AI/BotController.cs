@@ -27,6 +27,15 @@ namespace P1.AI
 
         [SerializeField] private BotConfigSO config;
 
+        /// <summary>场景里序列化的原始配置（BotConfig.asset）；难度缩放以它为基准。</summary>
+        private BotConfigSO _baseConfig;
+
+        /// <summary>按当前难度缩放出来的运行时副本；普通档为 null（直接复用原始资产）。</summary>
+        private BotConfigSO _scaledConfig;
+
+        /// <summary>已经应用的难度档位（int.MinValue 表示尚未应用）。</summary>
+        private int _appliedDifficulty = int.MinValue;
+
         private InkCharacterMotor _motor;
         private WeaponController _weapon;
         private CombatantHealth _health;
@@ -118,6 +127,12 @@ namespace P1.AI
             _weapon != null ? _weapon.Config : null,
             config);
 
+        /// <summary>
+        /// 当前生效的 Bot 配置：普通难度就是 BotConfig.asset 本身；
+        /// 轻松/硬核是启动或切换难度时克隆并缩放出来的运行时副本。
+        /// </summary>
+        public BotConfigSO ActiveConfig => config;
+
         private void Awake()
         {
             _motor = GetComponent<InkCharacterMotor>();
@@ -128,6 +143,9 @@ namespace P1.AI
             _aimPhaseA = Random.Range(0f, 20f);
             _aimPhaseB = Random.Range(0f, 20f);
             _aim.Reset(transform.eulerAngles.y);
+
+            if (_baseConfig == null) _baseConfig = config;
+            ApplyDifficulty(GameSettingsService.BotDifficulty);
             RefreshPathWeights();
         }
 
@@ -135,11 +153,55 @@ namespace P1.AI
         {
             if (_health == null) _health = GetComponent<CombatantHealth>();
             if (_health != null) _health.OnRespawned += HandleRespawned;
+
+            // 难度在选择面板/设置里被改过（本组件当时可能停用或尚未 Awake），重新对齐一次。
+            ApplyDifficulty(GameSettingsService.BotDifficulty);
+            GameSettingsService.BotDifficultyChanged += HandleBotDifficultyChanged;
         }
 
         private void OnDisable()
         {
             if (_health != null) _health.OnRespawned -= HandleRespawned;
+            GameSettingsService.BotDifficultyChanged -= HandleBotDifficultyChanged;
+        }
+
+        private void OnDestroy()
+        {
+            GameSettingsService.BotDifficultyChanged -= HandleBotDifficultyChanged;
+            DestroyScaledConfig();
+        }
+
+        private void HandleBotDifficultyChanged(int level)
+        {
+            ApplyDifficulty(level);
+        }
+
+        /// <summary>
+        /// 按难度重建生效配置。普通档直接指向原始资产（零分配），
+        /// 其余档位克隆一份并按 <see cref="BotDifficultyMath"/> 的倍率缩放。
+        /// 幂等：同一档位重复调用只做一次工作。
+        /// </summary>
+        private void ApplyDifficulty(int level)
+        {
+            int normalized = BotDifficultyMath.Normalize(level);
+            if (_appliedDifficulty == normalized) return;
+            _appliedDifficulty = normalized;
+
+            DestroyScaledConfig();
+
+            BotConfigSO source = _baseConfig != null ? _baseConfig : config;
+            _scaledConfig = BotDifficultyMath.CreateRuntimeConfig(source, normalized);
+            config = _scaledConfig != null ? _scaledConfig : source;
+        }
+
+        private void DestroyScaledConfig()
+        {
+            if (_scaledConfig == null || _scaledConfig == _baseConfig) return;
+            if (Application.isPlaying)
+                Destroy(_scaledConfig);
+            else
+                DestroyImmediate(_scaledConfig);
+            _scaledConfig = null;
         }
 
         /// <summary>
@@ -156,7 +218,15 @@ namespace P1.AI
 
         public void Configure(BotConfigSO botConfig)
         {
+            _baseConfig = botConfig;
             config = botConfig;
+            _appliedDifficulty = int.MinValue;
+
+            // 编辑期（ProjectScaffolder 装配场景）绝不能把运行时克隆写进序列化字段：
+            // 只在 Play 模式按难度重建，构建场景时保持原始资产引用。
+            if (Application.isPlaying)
+                ApplyDifficulty(GameSettingsService.BotDifficulty);
+
             RefreshPathWeights();
         }
 

@@ -209,6 +209,11 @@ namespace P1.Editor
             PlayerSettings.defaultScreenWidth = 1920;
             PlayerSettings.defaultScreenHeight = 1080;
             PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
+
+            if (!BrandAssetInstaller.ApplyBrandAssets(out string brandReport))
+            {
+                Debug.LogWarning("[P1][Brand] 桌面出包未接线图标：\n" + brandReport);
+            }
         }
 
         public static void ApplyAndroidPlayerSettings()
@@ -225,6 +230,7 @@ namespace P1.Editor
             PlayerSettings.bundleVersion = GameVersion.APP_VERSION;
             int[] v = GameVersion.ParseVersion(GameVersion.APP_VERSION);
             PlayerSettings.Android.bundleVersionCode = v[0] * 10000 + v[1] * 100 + v[2];
+            AssetDatabase.SaveAssets();
             PlayerSettings.SetApplicationIdentifier(target, "com.p1studio.inkturfdemo");
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
             PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevel34;
@@ -236,6 +242,11 @@ namespace P1.Editor
                 GraphicsDeviceType.Vulkan,
                 GraphicsDeviceType.OpenGLES3
             });
+
+            if (!BrandAssetInstaller.ApplyBrandAssets(out string brandReport))
+            {
+                Debug.LogWarning("[P1][Brand] Android 出包未接线图标：\n" + brandReport);
+            }
         }
     }
 }

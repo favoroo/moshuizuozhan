@@ -228,6 +228,85 @@ namespace P1.Tests
         }
 
         [Test]
+        public void BuildApkFileName_ScopesCacheByVersion()
+        {
+            // 每个版本一个缓存文件：旧版本的包不能再冒充新版本
+            Assert.AreEqual("moshuizuozhan_update_0.1.11.apk", UpdateManager.BuildApkFileName("0.1.11"));
+            Assert.AreEqual("moshuizuozhan_update_0.1.11.apk", UpdateManager.BuildApkFileName("v0.1.11"));
+            Assert.AreEqual("moshuizuozhan_update_0.1.11-beta.1.apk", UpdateManager.BuildApkFileName("v0.1.11-beta.1"));
+
+            // 空版本 / 纯路径字符退回旧固定名；版本号里的分隔符不得带进文件名
+            Assert.AreEqual(UpdateManager.ApkFileName, UpdateManager.BuildApkFileName(""));
+            Assert.AreEqual(UpdateManager.ApkFileName, UpdateManager.BuildApkFileName("../../"));
+            StringAssert.DoesNotContain("/", UpdateManager.BuildApkFileName("../v0.1.11/../../x"));
+        }
+
+        [Test]
+        public void IsCachedApkValidFor_RequiresVersionManifestAndSize()
+        {
+            string dir = Path.Combine(Application.temporaryCachePath, "p1_update_cache_tests");
+            Directory.CreateDirectory(dir);
+            string apkPath = Path.Combine(dir, UpdateManager.BuildApkFileName("0.1.11"));
+            byte[] payload = new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x00, 0x00 };
+
+            try
+            {
+                File.WriteAllBytes(apkPath, payload);
+
+                // 旧版下载器留下的固定名缓存没有清单：来源不明，必须重下
+                Assert.IsFalse(UpdateManager.IsCachedApkValidFor(apkPath, "0.1.11", 0));
+
+                Assert.IsTrue(UpdateManager.TryWriteApkCacheManifest(apkPath, "0.1.11", "v0.1.11", payload.Length));
+
+                Assert.IsTrue(UpdateManager.IsCachedApkValidFor(apkPath, "0.1.11", payload.Length));
+                Assert.IsTrue(UpdateManager.IsCachedApkValidFor(apkPath, "v0.1.11", 0));
+
+                // 上一个版本的缓存绝不能当成本次更新
+                Assert.IsFalse(UpdateManager.IsCachedApkValidFor(apkPath, "0.1.12", 0));
+
+                // 远端体积与缓存不符（同版本重传 / 坏包）
+                Assert.IsFalse(UpdateManager.IsCachedApkValidFor(apkPath, "0.1.11", payload.Length + 1));
+
+                // 文件被截断：清单记录 6 字节，实际只剩 ZIP 头
+                File.WriteAllBytes(apkPath, new byte[] { 0x50, 0x4B, 0x03, 0x04 });
+                Assert.IsFalse(UpdateManager.IsCachedApkValidFor(apkPath, "0.1.11", 0));
+            }
+            finally
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            }
+        }
+
+        [Test]
+        public void InstallApk_RejectsCacheFromAnotherVersion()
+        {
+            string dir = Path.Combine(Application.temporaryCachePath, "p1_update_install_tests");
+            Directory.CreateDirectory(dir);
+            string apkPath = Path.Combine(dir, UpdateManager.BuildApkFileName("0.1.10"));
+
+            try
+            {
+                File.WriteAllBytes(apkPath, new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x00, 0x00 });
+                Assert.IsTrue(UpdateManager.TryWriteApkCacheManifest(apkPath, "0.1.10", "v0.1.10", 6));
+
+                // 弹窗要装的是 v0.1.11，缓存是 v0.1.10：必须在调起安装器前拦下并给出可读原因
+                Assert.IsFalse(UpdateManager.ValidateCacheVersionForInstall(apkPath, "0.1.11", out string mismatchReason));
+                StringAssert.Contains("0.1.10", mismatchReason);
+                Assert.IsTrue(UpdateManager.ValidateCacheVersionForInstall(apkPath, "0.1.10", out _));
+
+                // 没有清单的旧包同样拒绝
+                string legacyPath = Path.Combine(dir, UpdateManager.ApkFileName);
+                File.WriteAllBytes(legacyPath, new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x00, 0x00 });
+                Assert.IsFalse(UpdateManager.ValidateCacheVersionForInstall(legacyPath, "0.1.11", out string legacyReason));
+                StringAssert.Contains("重新下载", legacyReason);
+            }
+            finally
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            }
+        }
+
+        [Test]
         public void MatchFlowUI_EnsureUpdateUI_BuildsComponents()
         {
             var go = new GameObject("TestMatchFlowUI", typeof(RectTransform), typeof(MatchFlowUI));

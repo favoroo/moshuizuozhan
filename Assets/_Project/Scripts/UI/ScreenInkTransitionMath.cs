@@ -4,13 +4,28 @@ namespace P1.UI
 {
     /// <summary>
     /// 屏幕墨水漫灌转场与受击冲击的纯数学工具类（无 GameObject 依赖，EditMode 可独立断言）。
-    /// 包含：死亡敌墨漫灌序列、复活己墨虹膜撕裂扩展、弹簧阻尼形变振荡与径向色相分离衰减。
+    /// 包含：死亡敌墨漫灌序列、复活己墨虹膜撕裂扩展、开赛墨幕入场、弹簧阻尼形变振荡与径向色相分离衰减。
     /// </summary>
     public static class ScreenInkTransitionMath
     {
         public const float PunchOmega = 16f;
         public const float DefaultChromaDecay = 3.2f;
         public const float MaxIrisHole = 1.32f;
+
+        // ---- 开赛墨幕（替代 3-2-1 数字倒数的入场动画）----
+        // 时间轴（秒）：第一帧直接压满己方墨（不做渐入，避免菜单关闭瞬间闪一下战场）
+        // → 极短停留 → 虹膜破口撕开露出战场。
+        // 总时长必须与 MatchManager.introSeconds 对齐：破口全部打开的那一刻正好解锁操作。
+        public const float MatchIntroRevealDelay = 0.22f;
+        public const float MatchIntroRevealDuration = 0.60f;
+        public const float MatchIntroTotalDuration = 0.86f;
+        public const float MatchIntroFloodDrip = 0.05f;
+
+        /// <summary>开赛墨幕的破口：复用虹膜撕裂曲线，延迟更短、打开更快，收尾对齐 <see cref="MatchIntroTotalDuration"/>。</summary>
+        public static float CalculateMatchIntroHole(float t)
+        {
+            return CalculateIrisHole(t, MatchIntroRevealDelay, MatchIntroRevealDuration);
+        }
 
         public static float EaseInOut(float t)
         {

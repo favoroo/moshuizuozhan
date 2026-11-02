@@ -120,6 +120,17 @@ namespace P1.UI
         {
             if (info == null || !ReferenceEquals(info, _currentInfo)) return;
             RefreshSizeText(info);
+
+            // 体积补齐后发现缓存包与远端大小不符（同版本重传 / 上次的坏包）：
+            // 撤销「已就绪」，让主按钮回到下载态，别把一个不完整的包送进安装器。
+            if (_isCompleted && !UpdateManager.Instance.HasReadyApk(info))
+            {
+                _isCompleted = false;
+                _completedApkPath = "";
+                if (_progressBox != null) _progressBox.SetActive(false);
+                if (_actionBtn != null) _actionBtn.interactable = info.hasApk;
+                if (_actionBtnText != null) _actionBtnText.text = info.hasApk ? "立 即 更 新" : "无内置安装包";
+            }
         }
 
         private void RefreshSizeText(UpdateInfo info)
@@ -148,11 +159,12 @@ namespace P1.UI
             if (_actionBtn != null) _actionBtn.interactable = canInstallInApp;
             if (_actionBtnText != null) _actionBtnText.text = canInstallInApp ? "立 即 更 新" : "无内置安装包";
 
-            // 上一次已经下好、且文件仍是完整 APK：直接给安装入口，不必重下几十 MB
-            if (canInstallInApp && UpdateManager.Instance.HasReadyApk())
+            // 上一次已经下好、且缓存包确实属于「这个待安装版本」：直接给安装入口，不必重下几十 MB。
+            // 旧实现只问「有没有 APK 文件」，会把上个版本的残留包当成本次更新（点安装必然失败）。
+            if (canInstallInApp && UpdateManager.Instance.HasReadyApk(info))
             {
                 _isCompleted = true;
-                _completedApkPath = UpdateManager.Instance.GetApkSavePath();
+                _completedApkPath = UpdateManager.Instance.GetApkSavePath(info);
 
                 if (_progressBox != null) _progressBox.SetActive(true);
                 if (_progressBarFill != null) _progressBarFill.fillAmount = 1f;
@@ -228,9 +240,12 @@ namespace P1.UI
         /// <summary>
         /// 调起安装并把失败原因如实显示出来（失败时旧实现是一声不响，玩家只看到"点了没反应"）。
         /// </summary>
-        private void TryInstall(string filePath)
+        private void TryInstall(string filePath, bool verifyVersion = true)
         {
-            if (UpdateManager.Instance.InstallApk(filePath, out string reason))
+            // 传入当前弹窗的版本号：安装器启动前再核对一次，避免旧包被误装。
+            // 本次刚下载完的包已经过传输校验，清单写入失败时也允许直接安装。
+            string expectedVersion = verifyVersion ? _currentInfo?.version : null;
+            if (UpdateManager.Instance.InstallApk(filePath, expectedVersion, out string reason))
             {
                 if (_progressSpeedText != null) _progressSpeedText.text = "已调起系统安装器";
                 return;
@@ -290,7 +305,7 @@ namespace P1.UI
             if (_actionBtn != null) _actionBtn.interactable = true;
             if (_actionBtnText != null) _actionBtnText.text = "立 即 安 装";
 
-            TryInstall(filePath);
+            TryInstall(filePath, verifyVersion: false);
         }
 
         private void HandleDownloadFailed(string error)

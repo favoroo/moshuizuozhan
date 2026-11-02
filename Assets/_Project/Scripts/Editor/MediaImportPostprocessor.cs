@@ -14,6 +14,7 @@ namespace P1.Editor
 
         public const string SpritesFolder = Root + "Art/Sprites/";
         public const string TexturesFolder = Root + "Art/Textures/";
+        public const string BrandFolder = Root + "Art/Brand/";
         public const string MusicFolder = Root + "Audio/Music/";
         public const string SfxFolder = Root + "Audio/SFX/";
         public const string VoiceFolder = Root + "Audio/Voice/";
@@ -26,6 +27,7 @@ namespace P1.Editor
             WorldTexture,
             NormalMap,     // 文件名以 _N 结尾：法线贴图（线性 + Normal 类型，P18 画风重做）
             MaskMap,       // 文件名以 _RMO / _Mask 结尾：线性通道打包掩码（P18 画风重做）
+            BrandTexture,  // App 图标/自适应图标：必须 Default（PlayerSettings 只吃 Texture2D，Sprite 导入会钳到 512）
         }
 
         /// <summary>
@@ -88,6 +90,9 @@ namespace P1.Editor
                 return TextureKind.WorldTexture;
             }
 
+            if (assetPath.StartsWith(BrandFolder, System.StringComparison.Ordinal))
+                return TextureKind.BrandTexture;
+
             if (assetPath.StartsWith(SpritesFolder, System.StringComparison.Ordinal))
             {
                 // 像素风豁免：Art/Sprites/Pixel/... 用最近邻，避免像素被平滑糊掉
@@ -142,6 +147,24 @@ namespace P1.Editor
                 s.npotScale = TextureImporterNPOTScale.None;   // 2048/1024/512 均为 POT，保持原尺寸
                 s.sRGBTexture = false;
                 s.alphaIsTransparency = false;
+                importer.maxTextureSize = 2048;
+                importer.textureCompression = TextureImporterCompression.CompressedHQ;
+                importer.SetTextureSettings(s);
+                return;
+            }
+
+            if (kind == TextureKind.BrandTexture)
+            {
+                // App 图标 / 自适应图标：Default 纹理，不压 mip、不压尺寸。
+                // PlayerSettings.SetIconsForTargetGroup 只接受 Texture2D；
+                // 若按 Sprite 导入会被 maxTextureSize=512 钳掉，1024 主图标就废了。
+                s.textureType = TextureImporterType.Default;
+                s.mipmapEnabled = false;
+                s.wrapMode = TextureWrapMode.Clamp;
+                s.filterMode = FilterMode.Bilinear;
+                s.npotScale = TextureImporterNPOTScale.None;
+                s.sRGBTexture = true;
+                s.alphaIsTransparency = true;
                 importer.maxTextureSize = 2048;
                 importer.textureCompression = TextureImporterCompression.CompressedHQ;
                 importer.SetTextureSettings(s);

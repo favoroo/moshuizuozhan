@@ -9,10 +9,12 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import hashlib
+import http.client
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -106,10 +108,15 @@ def http_json(url: str, method: str = 'GET', headers: dict = None,
 
     显式跟随 3xx 重定向：Gitee 上传接口偶发返回 308（Location 指向实际存储节点），
     Python 3.9 的 urlopen 默认不跟随后续重定向，直接按 HTTPError 处理会误判为失败。
+    针对网络抖动、代理断连（Broken Pipe / RemoteDisconnected）增加容错重试。
     """
-    req = urllib.request.Request(url, method=method,
-                                 headers=headers or {}, data=data)
+    req_headers = {'Connection': 'close'}
+    if headers:
+        req_headers.update(headers)
+
     for attempt in range(3):
+        req = urllib.request.Request(url, method=method,
+                                     headers=req_headers, data=data)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 body = r.read()
@@ -123,11 +130,16 @@ def http_json(url: str, method: str = 'GET', headers: dict = None,
             # 3xx 且带 Location：按重定向重新请求（保留 method/headers/data）
             if 300 <= e.code < 400 and e.headers.get('Location'):
                 url = urllib.parse.urljoin(url, e.headers['Location'])
-                req = urllib.request.Request(url, method=method,
-                                             headers=headers or {}, data=data)
                 if attempt < 2:
                     continue
             return e.code, parsed
+        except (urllib.error.URLError, http.client.RemoteDisconnected,
+                http.client.HTTPException, ConnectionResetError,
+                BrokenPipeError, TimeoutError, OSError) as e:
+            if attempt == 2:
+                log(f'HTTP 请求多次网络失败: {method} {url[:60]} -> {e}')
+                return 0, None
+            time.sleep(1 + attempt)
         except Exception:
             if attempt == 2:
                 raise
@@ -210,6 +222,34 @@ def bump_version_string(ver: str) -> str:
     return f'{x}.{y}.{z + 1}'
 
 
+def sync_player_settings(target_ver: str) -> None:
+    """同步 ProjectSettings.asset 中的 bundleVersion 与 AndroidBundleVersionCode。"""
+    code = expected_version_code(target_ver)
+    synced = False
+    if editor_is_running():
+        try:
+            r = run([UNITY_CLI, 'command', '--timeout', '20', 'script.eval',
+                     '--code',
+                     f'UnityEditor.PlayerSettings.bundleVersion="{target_ver}"; '
+                     f'UnityEditor.PlayerSettings.Android.bundleVersionCode={code}; '
+                     f'UnityEditor.AssetDatabase.SaveAssets(); '
+                     f'UnityEditor.EditorApplication.ExecuteMenuItem("File/Save Project");'],
+                    timeout=30)
+            if r.returncode == 0 and 'error' not in (r.stderr or '').lower():
+                log(f'已通过编辑器同步 PlayerSettings -> {target_ver} ({code})')
+                synced = True
+        except Exception:
+            pass
+    if not synced:
+        ps_path = REPO_ROOT / 'ProjectSettings' / 'ProjectSettings.asset'
+        if ps_path.exists():
+            text = ps_path.read_text(encoding='utf-8')
+            text = re.sub(r'(bundleVersion:\s*)\S+', f'\\g<1>{target_ver}', text)
+            text = re.sub(r'(AndroidBundleVersionCode:\s*)\d+', f'\\g<1>{code}', text)
+            ps_path.write_text(text, encoding='utf-8')
+            log(f'已同步 {ps_path.name} -> {target_ver} ({code})')
+
+
 def write_version(new_ver: str) -> None:
     content = VERSION_CS.read_text(encoding='utf-8')
     new_content = re.sub(
@@ -219,6 +259,7 @@ def write_version(new_ver: str) -> None:
     )
     VERSION_CS.write_text(new_content, encoding='utf-8')
     log(f'已写回 {VERSION_CS.name} -> {new_ver}')
+    sync_player_settings(new_ver)
 
 
 def cmd_bump(args) -> None:
@@ -360,6 +401,23 @@ def editor_is_running() -> bool:
     return 'ready' in out and str(REPO_ROOT) in out
 
 
+def editor_recompile_status(timeout: int = 10) -> tuple[str, bool]:
+    """查询编辑器编译状态：返回 (status, compilationFailed)。"""
+    try:
+        r = run([UNITY_CLI, 'command', '--timeout', str(timeout),
+                 'script.recompile_status'], timeout=timeout + 5)
+        out = (r.stdout or '') + (r.stderr or '')
+        if "Pipeline server isn't reachable" in out or r.returncode != 0:
+            return 'unreachable', False
+        m_st = re.search(r'"status"\s*:\s*"([^"]+)"', out)
+        m_fail = re.search(r'"compilationFailed"\s*:\s*(true|false|True|False)', out)
+        status = m_st.group(1) if m_st else 'unknown'
+        failed = m_fail.group(1).lower() == 'true' if m_fail else False
+        return status, failed
+    except Exception:
+        return 'unreachable', False
+
+
 def editor_loaded_version(timeout: int = 20) -> str | None:
     """查询 GUI 编辑器当前加载的 GameVersion.APP_VERSION。
 
@@ -376,20 +434,30 @@ def editor_loaded_version(timeout: int = 20) -> str | None:
         return None
 
 
-def ensure_editor_version(target_ver: str, timeout: int = 60) -> None:
+def ensure_editor_version(target_ver: str, timeout: int = 90) -> None:
     """构建前确认编辑器已加载目标版本；必要时触发 Refresh 并等待重载完成。"""
     if not editor_is_running():
         return
     deadline = time.time() + timeout
     triggered = False
     while time.time() < deadline:
+        st, failed = editor_recompile_status(timeout=5)
+        if failed:
+            die('编辑器当前存在编译错误，无法构建。请先修复编译错误。')
+        if st in ('compiling', 'reloading', 'unreachable'):
+            log(f'… 编辑器正在重载/编译（{st}），等待 3s...')
+            time.sleep(3)
+            continue
+
         loaded = editor_loaded_version()
         if loaded == target_ver:
             log(f'编辑器已加载目标版本 {target_ver}')
             return
         if loaded is None:
-            log('⚠ 无法读取编辑器版本（Pipeline 未就绪），跳过版本预检')
-            return
+            log('… 无法读取编辑器版本（Pipeline 暂未就绪），等待 3s...')
+            time.sleep(3)
+            continue
+
         if not triggered:
             log(f'编辑器仍加载旧版本 {loaded}（期望 {target_ver}），触发资源刷新等待重载...')
             try:
@@ -405,25 +473,53 @@ def ensure_editor_version(target_ver: str, timeout: int = 60) -> None:
 
 
 def wait_for_editor_build(log_path: Path, log_offset: int, timeout: int = 1200) -> bool:
-    """轮询编辑器日志的新增内容，等待菜单构建结束。
+    """轮询编辑器日志的新增内容，等待菜单构建结束，并输出关键进度阶段。
 
     不能用 APK 的修改时间判断：Unity 增量构建在无改动时会直接复用缓存，
     只把上一次的 APK 原样保留（mtime 不变）并仍然报告构建成功。
     """
     deadline = time.time() + timeout
+    last_pos = log_offset
+    milestones_seen = set()
+    last_log_time = time.time()
+
+    milestone_patterns = [
+        (r'\[P6-C\]\[Build\] 开始执行 Android 移动端 APK 构建', 'Android 构建开始'),
+        (r'Writing asset files', '正在打包资产资源 (Writing asset files)'),
+        (r'ProducePlayerScriptAssemblies', '正在编译脚本程序集 (ProducePlayerScriptAssemblies)'),
+        (r'Building scenes', '正在构建场景 (Building scenes)'),
+        (r'il2cppOutput|Link_Android_arm64|libil2cpp\.so', '正在进行 IL2CPP C++ 编译与链接'),
+        (r'Building Gradle project', '正在执行 Gradle 最终 APK 打包 (Building Gradle project)'),
+    ]
+
     while time.time() < deadline:
         if log_path.exists():
+            chunk = ''
             try:
                 with open(log_path, 'rb') as f:
-                    f.seek(log_offset)
-                    tail = f.read().decode('utf-8', errors='ignore')
+                    f.seek(last_pos)
+                    chunk = f.read().decode('utf-8', errors='ignore')
+                    last_pos = f.tell()
             except OSError:
-                tail = ''
-            if 'Android 构建失败' in tail or 'Android build failed' in tail:
-                log('编辑器日志显示构建失败')
-                return False
-            if '[P6-C][Build] Android APK 构建成功' in tail:
-                return True
+                chunk = ''
+
+            if chunk:
+                last_log_time = time.time()
+                for pattern, desc in milestone_patterns:
+                    if desc not in milestones_seen and re.search(pattern, chunk):
+                        milestones_seen.add(desc)
+                        log(f'  [构建进度] {desc}')
+
+                if 'Android 构建失败' in chunk or 'Android build failed' in chunk or 'BuildFailedException' in chunk:
+                    log('编辑器日志显示构建失败')
+                    return False
+                if '[P6-C][Build] Android APK 构建成功' in chunk:
+                    return True
+
+        if time.time() - last_log_time > 20:
+            log(f'  … Unity 编辑器构建进行中 ({(time.time() - (deadline - timeout)):.0f}s)')
+            last_log_time = time.time()
+
         time.sleep(2)
     return False
 
@@ -488,18 +584,37 @@ def cmd_build(args) -> None:
             log(f'菜单: {ANDROID_BUILD_MENU}')
             editor_log = REPO_ROOT / 'Logs' / 'Editor.log'
             log_offset = editor_log.stat().st_size if editor_log.exists() else 0
-            try:
-                with heartbeat('Unity 编辑器内构建'):
-                    r = run([UNITY_CLI, 'command', '--timeout', str(args.build_timeout),
-                             'editor', 'invoke_menu', '--path', ANDROID_BUILD_MENU],
-                            timeout=args.build_timeout + 60)
-                out = (r.stdout or '') + (r.stderr or '')
-                if 'No command named' in out or 'Command Not Found' in out:
-                    die(f'Pipeline 不可用，无法在编辑器内构建:\n{out[-1000:]}')
-                if r.returncode != 0 or 'Executed menu item' not in out:
-                    log(f'Pipeline 调用返回异常，继续等待编辑器日志:\n{out[-1000:]}')
-            except subprocess.TimeoutExpired:
-                log('Pipeline 调用超时，继续等待编辑器日志...')
+            # 触发菜单调用，带重试与就绪保护
+            menu_succeeded = False
+            for menu_attempt in range(3):
+                try:
+                    with heartbeat('Unity 编辑器内构建'):
+                        r = run([UNITY_CLI, 'command', '--timeout', str(args.build_timeout),
+                                 'editor', 'invoke_menu', '--path', ANDROID_BUILD_MENU],
+                                timeout=args.build_timeout + 60)
+                    out = (r.stdout or '') + (r.stderr or '')
+                    if 'No command named' in out or 'Command Not Found' in out:
+                        die(f'Pipeline 不可用，无法在编辑器内构建:\n{out[-1000:]}')
+                    if 'Executed menu item' in out or r.returncode == 0:
+                        menu_succeeded = True
+                        break
+                    if "Pipeline server isn't reachable" in out:
+                        log(f'Pipeline 暂未就绪，等待 5s 后重试菜单 ({menu_attempt + 1}/3)...')
+                        time.sleep(5)
+                        continue
+                    # 其他返回异常（如同步阻塞导致的超时），检查日志是否已开始构建
+                    log(f'Pipeline 调用返回异常，检查构建是否已启动:\n{out[-1000:]}')
+                    menu_succeeded = True
+                    break
+                except subprocess.TimeoutExpired:
+                    log('Pipeline 调用超时，检查编辑器日志...')
+                    menu_succeeded = True
+                    break
+
+            if not menu_succeeded:
+                die(f'无法触发构建菜单 {ANDROID_BUILD_MENU}，Pipeline 持续不可达。\n'
+                    '  请检查 Unity 编辑器状态后重试。')
+
             if not wait_for_editor_build(editor_log, log_offset, timeout=args.build_timeout):
                 die('编辑器内构建未在超时内完成。\n'
                     f'  请查看 {editor_log}，或手动执行菜单 {ANDROID_BUILD_MENU} 后重跑 build。')
@@ -806,6 +921,42 @@ def create_release(tag: str, name: str, notes: str, tokens: dict) -> dict:
     return results
 
 
+def upload_gh_asset_curl(upload_url: str, apk_path: Path, token: str, timeout: int = 900) -> bool:
+    if not shutil.which('curl'):
+        return False
+    cmd = [
+        'curl', '-sS', '--fail',
+        '--max-time', str(timeout),
+        '--retry', '3',
+        '--retry-delay', '5',
+        '-X', 'POST',
+        '-H', f'Authorization: Bearer {token}',
+        '-H', 'Content-Type: application/vnd.android.package-archive',
+        '--data-binary', f'@{apk_path}',
+        upload_url
+    ]
+    r = run(cmd)
+    return r.returncode == 0
+
+
+def upload_gitee_asset_curl(attach_url: str, apk_name: str, apk_path: Path, token: str, timeout: int = 900) -> bool:
+    if not shutil.which('curl'):
+        return False
+    cmd = [
+        'curl', '-sS', '--fail',
+        '--max-time', str(timeout),
+        '--retry', '3',
+        '--retry-delay', '5',
+        '-X', 'POST',
+        '-H', f'Authorization: token {token}',
+        '-F', f'name={apk_name}',
+        '-F', f'file=@{apk_path}',
+        attach_url
+    ]
+    r = run(cmd)
+    return r.returncode == 0
+
+
 def upload_apks(release_ids: dict, apk_path: Path, apk_name: str, tokens: dict) -> None:
     file_bytes = apk_path.read_bytes()
 
@@ -826,16 +977,26 @@ def upload_apks(release_ids: dict, apk_path: Path, apk_name: str, tokens: dict) 
                               headers=gh_headers(tokens['gh']))
                     break
 
-            st, d = http_json(
-                f'https://uploads.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}'
-                f'/releases/{release_ids["gh"]}/assets?'
-                f'{urllib.parse.urlencode({"name": apk_name})}',
-                'POST',
-                headers={**gh_headers(tokens['gh']), 'Content-Type': 'application/octet-stream'},
-                data=file_bytes, timeout=600)
-            if st == 201 and d:
-                log(f"GitHub 上传完成: {d['name']} ({d['size']} 字节)")
+            upload_url = (f'https://uploads.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}'
+                          f'/releases/{release_ids["gh"]}/assets?'
+                          f'{urllib.parse.urlencode({"name": apk_name})}')
+
+            # 优先使用 curl 高速流式上传
+            if upload_gh_asset_curl(upload_url, apk_path, tokens['gh']):
+                log(f'GitHub 上传完成 (curl): {apk_name} ({len(file_bytes)} 字节)')
                 return
+
+            try:
+                st, d = http_json(
+                    upload_url,
+                    'POST',
+                    headers={**gh_headers(tokens['gh']), 'Content-Type': 'application/octet-stream'},
+                    data=file_bytes, timeout=600)
+                if st == 201 and d:
+                    log(f"GitHub 上传完成 (urllib): {d['name']} ({d['size']} 字节)")
+                    return
+            except Exception as e:
+                st, d = 0, str(e)
             if attempt == 2:
                 raise RuntimeError(f'GitHub 上传 APK 失败({st}): {d}')
             wait = 5 * (attempt + 1)
@@ -860,18 +1021,28 @@ def upload_apks(release_ids: dict, apk_path: Path, apk_name: str, tokens: dict) 
                               f'?access_token={tokens["gitee"]}', method='DELETE')
                     break
 
-            body, ctype = multipart_body({'name': apk_name}, 'file', apk_name, file_bytes)
-            st, d = http_json(
-                f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files',
-                'POST', headers={'Authorization': f"token {tokens['gitee']}",
-                                 'Content-Type': ctype},
-                data=body, timeout=600)
-            if st in (200, 201) and d:
-                log(f'Gitee 上传完成: {apk_name}')
+            attach_url = f'{GITEE_API}/releases/{release_ids["gitee"]}/attach_files'
+
+            # 优先使用 curl 进行 multipart 表单上传
+            if upload_gitee_asset_curl(attach_url, apk_name, apk_path, tokens['gitee']):
+                log(f'Gitee 上传完成 (curl): {apk_name}')
                 return
-            if st == 400 and 'already exists' in str(d):
-                log('Gitee 附件已存在（接口返回），跳过重复上传')
-                return
+
+            try:
+                body, ctype = multipart_body({'name': apk_name}, 'file', apk_name, file_bytes)
+                st, d = http_json(
+                    attach_url,
+                    'POST', headers={'Authorization': f"token {tokens['gitee']}",
+                                     'Content-Type': ctype},
+                    data=body, timeout=600)
+                if st in (200, 201) and d:
+                    log(f'Gitee 上传完成 (urllib): {apk_name}')
+                    return
+                if st == 400 and 'already exists' in str(d):
+                    log('Gitee 附件已存在（接口返回），跳过重复上传')
+                    return
+            except Exception as e:
+                st, d = 0, str(e)
             if attempt == 2:
                 raise RuntimeError(f'Gitee 上传 APK 失败({st}): {d}')
             wait = 5 * (attempt + 1)

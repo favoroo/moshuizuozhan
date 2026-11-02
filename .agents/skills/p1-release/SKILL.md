@@ -33,37 +33,39 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
 
 | 项 | 规范 |
 |----|------|
-| 构建命令 | 调用 `python3 .agents/skills/p1-release/release.py build --version X.Y.Z`。**默认自动判断**：检测到 GUI 编辑器占用工程锁时改走 Pipeline 触发菜单 `P1/构建/9` 出包；编辑器关闭时走 batchmode。`--batchmode` 可强制批处理，`--force` 忽略已有产物强制重建。 |
+| 构建命令 | 调用 `python3 -u .agents/skills/p1-release/release.py build --version X.Y.Z`。**默认自动判断**：检测到 GUI 编辑器占用工程锁时改走 Pipeline 触发菜单 `P1/构建/9` 出包；编辑器关闭时走 batchmode。`--batchmode` 可强制批处理，`--force` 忽略已有产物强制重建。推荐带 `-u` 参数避免输出缓冲。 |
 | 产物校验 | `build` 用 aapt2 读取 APK 包内 `versionName/versionCode`，**旧包一律拒绝复用**并重新构建；无 Android build-tools 时退化为「文件名 + 时间戳」校验并告警。`publish` 会再次校验包内版本、重算 SHA-256、核对 `ProjectSettings.asset` 版本。 |
 | APK 命名 | `moshuizuozhan-v<version>-arm64-v8a.apk`（如 `moshuizuozhan-v0.1.0-arm64-v8a.apk`），**两端文件名完全一致** |
 | 产物目录 | `build/` |
 | Tag 命名 | `v<version>`（如 `v0.1.0`），使用 annotated tag |
-| 版本号递增 | **每次发布/打包 APK，版本号必须递增 +1**，禁止同版本覆盖发布。由 `release.py bump` 自动判断：读 `Assets/_Project/Scripts/Core/GameVersion.cs` 当前版本 X → 查 tag `vX` → 不存在直接用 X；已存在则 +1 到 X+1 并写回。 |
+| 版本号递增 | **每次发布/打包 APK，版本号必须递增 +1**，禁止同版本覆盖发布。由 `release.py bump` 自动判断：读 `Assets/_Project/Scripts/Core/GameVersion.cs` 当前版本 X → 查 tag `vX` → 不存在直接用 X；已存在则 +1 到 X+1 并写回。`bump --write` 会自动同步更新 `ProjectSettings.asset`（`bundleVersion` 与 `AndroidBundleVersionCode`）。 |
 | 版本来源 | `Assets/_Project/Scripts/Core/GameVersion.cs` 的 `APP_VERSION` 与 Unity `PlayerSettings.bundleVersion` 保持严格一致；`publish` 读取 `ProjectSettings.asset` 校验两者，不一致直接拒绝 |
 | 两端一致性 | GitHub 与 Gitee 必须使用相同 Tag、相同 APK 文件名、同为正式 Release（非 draft / prerelease） |
 | 更新服务 | `Assets/_Project/Scripts/UI/UpdateManager.cs` 优先读 Gitee `/releases/latest`，备选 GitHub，并配合国内加速代理 |
 | 附件保留策略 | **发布后自动清理双端老 APK 附件**：GitHub 保留最近 10 个（`--keep-gh`）、Gitee 保留最近 3 个（`--keep-gitee`），控制仓库体积与 Gitee 1GB 附件配额 |
+| 上传优化 | **原生 curl 高速流式上传**：发布时优先使用系统原生 `curl` 进行 65MB 级大包上传（支持原生连接池、HTTP/2 与分块重试，约 30 秒完成），避免 Python `urllib` 在代理环境下的 Broken Pipe / Socket Reset 异常。 |
 
 ### 1. 一键脚本编排
 
-脚本：`.agents/skills/p1-release/release.py`（纯 Python 标准库）。
+脚本：`.agents/skills/p1-release/release.py`（纯 Python 标准库 + 优先 curl 上传）。
 
 ```text
-⓪ 发布前门禁（编辑器开着时）:
+⓪ 发布前门禁（若有新 UI 汉字文案，需先确保已跑完 0->1->11 字体三连菜单）:
+   ./tools/run_tests.sh fast               # EditMode + PlayMode UI 快速回归
    U="$HOME/.unity/bin/unity"
    "$U" command script.recompile_status    # 编译是否成功（compilationFailed: false）
    "$U" command console.get --tail 50 --level error
    编辑器关闭时改用 batchmode:
    "$UNITY" -batchmode -nographics -quit -projectPath "$PWD" -logFile Logs/compilecheck.log
    grep -E "error CS|Compilation failed" Logs/compilecheck.log || echo "COMPILE OK"
-① 自动算版本号并写回:  python3 .agents/skills/p1-release/release.py bump --write
-   —— 读 GameVersion.cs → 查 tag → 不存在直接用当前版本(预升未发布);已存在则 +1 写回 GameVersion.cs
-② 执行构建:           python3 .agents/skills/p1-release/release.py build --version X.Y.Z
-   —— 编辑器开着会自动走 Pipeline 菜单构建；产物必须通过包内版本校验
+① 自动算版本号并写回:  python3 -u .agents/skills/p1-release/release.py bump --write
+   —— 读 GameVersion.cs → 查 tag → 不存在直接用当前版本(预升未发布);已存在则 +1 写回 GameVersion.cs 并同步 ProjectSettings
+② 执行构建:           python3 -u .agents/skills/p1-release/release.py build --version X.Y.Z
+   —— 编辑器开着会自动走 Pipeline 菜单构建（带重载状态感知与构建进度日志）；产物必须通过包内版本校验
 ③ 提交改动:           git add -A && git commit -m "<type>(<scope>): 发布墨水作战 vX.Y.Z"
    —— 纯修复版本用 fix(ui)/fix(gameplay)，含新内容用 feat(release)
 ④ 撰写 Release 说明存为临时文件，执行发布:
-   python3 .agents/skills/p1-release/release.py publish --version X.Y.Z --notes-file /tmp/notes.md
+   python3 -u .agents/skills/p1-release/release.py publish --version X.Y.Z --notes-file /tmp/notes.md
    —— 写法见 §3；publish 会校验分段/条数/字数/禁用词，不合规直接拒绝。
 ⑤ 向用户汇报发布验证清单（含两端 URL、APK 附件状态与 SHA-256）
 ```
@@ -133,11 +135,14 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
 | 现象 | 原因 | 处理 |
 |----|----|----|
 | `unity build` 日志出现 `ExitDontLaunchBugReporter ... return code 1` | GUI 编辑器占用 `Temp/UnityLockfile`，batchmode 起不来 | `build` 现在会自动检测并改走 Pipeline；若仍失败，确认 Unity 版本与项目一致，或在编辑器内用菜单 `P1/构建/9` 出包后再跑 `build` 复用（会自动校验版本） |
-| 构建期间 `unity command ...` 全部 504 | 编辑器主线程被同步构建占满 | 正常现象，等待构建结束；不要 kill 编辑器 |
+| Pipeline 构建死等 20 分钟（假构建） | 改了版本后编辑器在 Domain Reload，Pipeline 暂时断开导致菜单调用未实际生效，脚本盲目等待日志 | 已修复：`ensure_editor_version` 先验 `script.recompile_status`，重载中自动等待，菜单调用失败自动重试，持续未就绪立即报错终止，绝不空等 |
+| 构建期间 `unity command ...` 全部 504 | 编辑器主线程被同步构建占满 | 正常现象，等待构建结束；已接入实时构建进度里程碑（资产打包、IL2CPP、Gradle）与心跳日志 |
 | `未找到与目标版本一致的 APK 产物`（但构建明明"成功"了） | 改了 `GameVersion.cs` 后编辑器还没 Domain Reload，菜单构建读到的是**旧常量**，于是打出一个旧版本的包 | 已由 `build` 的编辑器版本预检拦截（会先触发 Refresh 并等待加载目标版本）。若仍出现，手动跑一次 `script.eval` 读 `GameVersion.APP_VERSION` 确认，再 `AssetDatabase.Refresh()` 后重建 |
 | `APK 版本不符: 包内 X ... 期望 Y` | 同上，或构建中途失败留下了旧包 | 用 `build --force` 重建 |
+| GitHub 上传报 `BrokenPipeError` / `RemoteDisconnected` | Python 原生 `urllib` 一次性上传 65MB 大文件在代理网络下容易断连超时 | 已修复：优先改走系统原生 `curl` 高速流式上传（约 30 秒完成），带 3 次自动重试；`urllib` 退化分支也补充了连接关闭与套接字重连 |
 | Gitee 上传报 `失败(308)` / `Gitee 上传 APK 失败(308): None` | Gitee 附件上传偶发返回 308 重定向，Python 3.9 的 `urlopen` 默认不跟随 | 已修复：`http_json` 显式跟随 3xx 并保留 method/body。若仍失败，脚本会退避重试 3 次；重试前会先查附件避免重复上传 |
 | `Gitee 老版本附件清理跳过: 'id'` | Gitee `release.assets` 只有 `name/url`，没有附件 id，旧代码直接读 `asset["id"]` 抛 KeyError | 已修复：改为查 `/attach_files` 拿到真实附件 id 再删 |
+| `FontCoverageTests` 报错「基线/字集账本有字未预烘」 | 新增了带汉字的 UI 文案（如改键卡、新技能），字体资产图集未包含新字 | 按顺序执行三个菜单修复：`P1/画风/漫画风/0. 构建中文字体与 Fallback` -> `P1/画风/几何风/1. 应用几何主题` -> `P1/构建/11. 生成运行时资源库` |
 | `git push` 报 `SSL_ERROR_SYSCALL` / `RPC failed` | GitHub 直连网络抖动 | 已内置重试（3 次退避）。仍失败时先确认网络/代理，再单独 `git push origin main vX.Y.Z` |
 | 发布过程长时间无输出，像卡死 | 大提交推送（几十 MB）与 55 MB APK 上传，实测可达 5–10 分钟 | 现在每 15–20 秒打印 `… 仍在进行 (Ns)` 心跳；看到心跳说明在传，不是挂死 |
 | `未找到 aapt2/aapt` 警告 | 未安装 Android build-tools 或 SDK 路径未识别 | 安装 build-tools 或设置 `ANDROID_HOME`；脚本会退化用文件名 + 时间戳校验 |

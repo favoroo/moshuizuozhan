@@ -23,6 +23,7 @@ namespace P1.Core
         private static bool _fixedJoystick = GameSettingsMath.DefaultFixedJoystick;
         private static bool _fireButtonRotatesCamera = GameSettingsMath.DefaultFireButtonRotatesCamera;
         private static int _aimAssistLevel = GameSettingsMath.DefaultAimAssistLevel;
+        private static int _botDifficulty = GameSettingsMath.DefaultBotDifficulty;
 
         public static event Action<float> MasterVolumeChanged;
         public static event Action<float> ShakeScaleChanged;
@@ -33,6 +34,7 @@ namespace P1.Core
         public static event Action<bool> FixedJoystickChanged;
         public static event Action<bool> FireButtonRotatesCameraChanged;
         public static event Action<int> AimAssistLevelChanged;
+        public static event Action<int> BotDifficultyChanged;
         public static event Action SettingsChanged;
 
         /// <summary>
@@ -240,6 +242,31 @@ namespace P1.Core
             }
         }
 
+        /// <summary>
+        /// Bot 难度档位：0 轻松 / 1 普通 / 2 硬核（默认普通）。
+        /// BotController 订阅 <see cref="BotDifficultyChanged"/> 后即时重建难度缩放配置。
+        /// </summary>
+        public static int BotDifficulty
+        {
+            get
+            {
+                EnsureInitialized();
+                return _botDifficulty;
+            }
+            set
+            {
+                EnsureInitialized();
+                int normalized = GameSettingsMath.NormalizeBotDifficulty(value);
+                if (_botDifficulty == normalized)
+                    return;
+
+                _botDifficulty = normalized;
+                SaveBotDifficulty();
+                BotDifficultyChanged?.Invoke(_botDifficulty);
+                SettingsChanged?.Invoke();
+            }
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void AutoInitialize()
         {
@@ -274,6 +301,7 @@ namespace P1.Core
             _fixedJoystick = GameSettingsMath.DefaultFixedJoystick;
             _fireButtonRotatesCamera = GameSettingsMath.DefaultFireButtonRotatesCamera;
             _aimAssistLevel = GameSettingsMath.DefaultAimAssistLevel;
+            _botDifficulty = GameSettingsMath.DefaultBotDifficulty;
 
             SaveAll();
             ApplyAll();
@@ -287,6 +315,7 @@ namespace P1.Core
             FixedJoystickChanged?.Invoke(_fixedJoystick);
             FireButtonRotatesCameraChanged?.Invoke(_fireButtonRotatesCamera);
             AimAssistLevelChanged?.Invoke(_aimAssistLevel);
+            BotDifficultyChanged?.Invoke(_botDifficulty);
             SettingsChanged?.Invoke();
         }
 
@@ -310,6 +339,8 @@ namespace P1.Core
             _fireButtonRotatesCamera = PlayerPrefs.GetInt(GameSettingsMath.KeyFireButtonRotatesCamera, 1) != 0;
             _aimAssistLevel = GameSettingsMath.NormalizeAimAssistLevel(
                 PlayerPrefs.GetInt(GameSettingsMath.KeyAimAssistLevel, GameSettingsMath.DefaultAimAssistLevel));
+            _botDifficulty = GameSettingsMath.NormalizeBotDifficulty(
+                PlayerPrefs.GetInt(GameSettingsMath.KeyBotDifficulty, GameSettingsMath.DefaultBotDifficulty));
         }
 
         private static void SaveVolume()
@@ -366,6 +397,12 @@ namespace P1.Core
             PlayerPrefs.Save();
         }
 
+        private static void SaveBotDifficulty()
+        {
+            PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficulty, _botDifficulty);
+            PlayerPrefs.Save();
+        }
+
         private static void SaveAll()
         {
             PlayerPrefs.SetFloat(GameSettingsMath.KeyMasterVolume, _masterVolume);
@@ -377,6 +414,7 @@ namespace P1.Core
             PlayerPrefs.SetInt(GameSettingsMath.KeyFixedJoystick, _fixedJoystick ? 1 : 0);
             PlayerPrefs.SetInt(GameSettingsMath.KeyFireButtonRotatesCamera, _fireButtonRotatesCamera ? 1 : 0);
             PlayerPrefs.SetInt(GameSettingsMath.KeyAimAssistLevel, _aimAssistLevel);
+            PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficulty, _botDifficulty);
             PlayerPrefs.Save();
         }
 

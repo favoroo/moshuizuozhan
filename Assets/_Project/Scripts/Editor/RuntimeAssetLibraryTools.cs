@@ -54,6 +54,8 @@ namespace P1.Editor
             "glyph_close",
             "rule_swim",
             "rule_climb",
+            "brand_app_icon",
+            "brand_splat",
         };
 
         [MenuItem("P1/构建/11. 生成运行时资源库 (P1RuntimeAssets)", false, 83)]

@@ -17,10 +17,10 @@ namespace P1.UI
     /// <summary>
     /// 全屏比赛流程横幅视图（Match Banner View，P4-D）：
     /// 借鉴 Inkwave .iw-bn 街头潮流横幅：
-    /// 1. 3-2-1 弹性过冲大字 + 环形冲击光圈；
-    /// 2. READY / GO 墨滴炸开倾斜巨幅横幅；
-    /// 3. 1:00 决战横幅（ONE MINUTE LEFT!）；
-    /// 4. FINISH 终局定格炸墨横幅。
+    /// 1. GO 墨滴炸开巨幅横幅（开赛墨幕撕开后打出）；
+    /// 2. 1:00 决战横幅（ONE MINUTE LEFT!）；
+    /// 3. FINISH 终局定格炸墨横幅。
+    /// 旧 3-2-1 数字倒数已退役：<see cref="ShowCountdown"/> 保留仅为旧场景 / 单测兼容，正式流程不再调用。
     /// </summary>
     [AddComponentMenu("P1/UI/Match Banner View")]
     [RequireComponent(typeof(RectTransform))]
@@ -181,6 +181,7 @@ namespace P1.UI
             }
         }
 
+        /// <summary>已退役：旧 3-2-1 数字倒数横幅。正式流程不再调用，保留给旧场景与单测兼容。</summary>
         public void ShowCountdown(int number)
         {
             if (number == _lastCountdownNumber && _currentType == MatchBannerType.Countdown) return;

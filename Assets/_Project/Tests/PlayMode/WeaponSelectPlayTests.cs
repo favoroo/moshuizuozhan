@@ -295,6 +295,19 @@ namespace P1.Tests
             float expectedCtaWidth = Mathf.Min(home.CtaSize.x, heroRect.sizeDelta.x - home.HeroPadding.x * 2f);
             Assert.AreEqual(expectedCtaWidth, startRect.sizeDelta.x, 0.5f, "开始按钮宽度应来自版面表（Hero 卡内宽内）");
             Assert.LessOrEqual(startRect.sizeDelta.x, heroRect.sizeDelta.x, "CTA 不得超出 Hero 卡");
+            Assert.AreEqual(heroRect.anchoredPosition.x + home.HeroPadding.x, startRect.anchoredPosition.x, 0.5f,
+                "CTA 左缘必须跟随 Hero 卡实际左缘（宽屏 Hero 居中后仍贴合内边距）");
+
+            // Hero 与右侧 2×2 的列间距必须恒为版面表 ColumnGap（宽屏多余宽度均分到左右外边距）。
+            // 用 RectTransform 布局坐标（anchoredPosition / sizeDelta）而不是世界角点：
+            // 入场 UISpringMotion 只改 localScale，世界角点会把「入场缩放进行到一半」的 Hero 卡
+            // 误算进间距（曾因此误报 24 vs 32）；布局坐标不受缩放动画影响。
+            var firstTile = (RectTransform)safe.Find("HomeTile_RECORD");
+            Assert.IsNotNull(firstTile, "首页必须有战绩卡");
+            float heroRight = heroRect.anchoredPosition.x + heroRect.sizeDelta.x;
+            float columnGap = firstTile.anchoredPosition.x - heroRight;
+            Assert.AreEqual(home.ColumnGap, columnGap, 0.5f,
+                "Hero 与 2×2 卡阵之间的列间距应恒等于 ColumnGap（实际 " + columnGap.ToString("0.0") + "）");
 
             ScreenCapture.CaptureScreenshot(System.IO.Path.GetFullPath("Logs/menu_redesign_screenshot.png"));
             yield return new WaitForSeconds(0.5f);
@@ -347,6 +360,15 @@ namespace P1.Tests
                 Assert.LessOrEqual(info.preferredWidth, infoRect.sizeDelta.x + 0.5f,
                     tileNames[i] + " 信息行文案溢出（宽 " + info.preferredWidth.ToString("0") + " / 可用 " + infoRect.sizeDelta.x.ToString("0") + "）");
                 Assert.IsFalse(string.IsNullOrEmpty(info.text), tileNames[i] + " 信息行不能为空");
+
+                // 4) 角签黑底必须包住标签文本（SETTINGS 自然宽度远大于 RECORD，固定宽会画出黑底）。
+                var tagRect = content.Find("TileTag") as RectTransform;
+                var tagText = tagRect != null ? tagRect.Find("Text")?.GetComponent<TextMeshProUGUI>() : null;
+                Assert.IsNotNull(tagRect, tileNames[i] + " 应有角签");
+                Assert.IsNotNull(tagText, tileNames[i] + " 角签应有文字");
+                Assert.LessOrEqual(tagText.preferredWidth, tagRect.sizeDelta.x - 20f + 0.5f,
+                    tileNames[i] + " 角签文字溢出黑底（宽 " + tagText.preferredWidth.ToString("0") +
+                    " / 可用 " + (tagRect.sizeDelta.x - 20f).ToString("0") + "）");
             }
         }
 

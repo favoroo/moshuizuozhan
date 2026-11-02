@@ -61,6 +61,23 @@ namespace P1.Tests
         }
 
         [UnityTest]
+        public IEnumerator Match_StartPlaysSingleIntroWithoutNumberTicks()
+        {
+            yield return LoadScene();
+
+            var match = MatchManager.Instance;
+            int numberTicks = 0;
+            match.CountdownTicked += _ => numberTicks++;
+            match.StartMatch();
+
+            Assert.AreEqual(MatchManager.Phase.Countdown, match.CurrentPhase, "开赛应先进入入场演出阶段");
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Playing, 2f);
+
+            Assert.AreEqual(0, numberTicks, "开赛已取消 3-2-1 数字倒数，CountdownTicked 不应再触发");
+            Assert.IsTrue(MatchManager.CombatAllowed);
+        }
+
+        [UnityTest]
         public IEnumerator Match_TimeUp_FinishesThenShowsResult()
         {
             yield return LoadScene();

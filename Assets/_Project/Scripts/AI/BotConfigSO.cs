@@ -5,6 +5,10 @@ namespace P1.AI
     [CreateAssetMenu(fileName = "BotConfig", menuName = "P1/Bot Config")]
     public class BotConfigSO : ScriptableObject
     {
+        /// <summary>感知/决策节拍的合法区间（难度缩放后按此收口，与 Inspector 的 Range 同源）。</summary>
+        public const float MinPerceptionInterval = 0.05f;
+        public const float MaxPerceptionInterval = 0.5f;
+
         [Header("感知与交战")]
         public float sightRange = 8.5f;
         [Tooltip("最终交火距离的兜底值（武器配置缺失时使用）；正常由下方武器适配参数按射程推导")]
@@ -24,7 +28,7 @@ namespace P1.AI
         public float repathInterval = 0.55f;
 
         [Tooltip("感知/决策节拍（秒）：搜寻最近敌人、视线判定与状态机的刷新间隔。越小越机敏，越大越省 CPU")]
-        [Range(0.05f, 0.5f)]
+        [Range(MinPerceptionInterval, MaxPerceptionInterval)]
         public float perceptionInterval = 0.15f;
         public float arriveDistance = 1.3f;
         [Tooltip("多久重新挑一次涂地目标（秒）；到达目标会立即重挑")]

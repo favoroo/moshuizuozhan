@@ -57,6 +57,21 @@ namespace P1.UI
     }
 
     /// <summary>
+    /// 已下载安装包的旁挂清单：记录这个 APK 到底属于哪个版本、多大。
+    /// 旧实现只按固定文件名判断「已下载」，重启后无法区分缓存包是不是本次更新，
+    /// 于是旧版本的包会被当成新版本的安装包直接调起安装器（Android 报「应用未安装」）。
+    /// </summary>
+    [Serializable]
+    internal class ApkCacheManifest
+    {
+        public string version = "";
+        public string tagName = "";
+        public long size = 0;
+        public long remoteSize = 0;
+        public string downloadedAtUtc = "";
+    }
+
+    /// <summary>
     /// 应用内更新管理器（单例）。
     /// 对标 Godot 项目的 UpdateManager.gd：
     /// 1. 国内 Gitee 优先、GitHub 备选、代理镜像兜底；
@@ -92,7 +107,12 @@ namespace P1.UI
         public event Action<string> OnDownloadCompleted;
         public event Action<string> OnDownloadFailed;
 
+        /// <summary>旧版固定文件名，仅保留给旧调用方 / 兼容测试；新逻辑一律按版本号分文件缓存。</summary>
         public const string ApkFileName = "moshuizuozhan_update.apk";
+
+        private const string ApkFileStem = "moshuizuozhan_update";
+        private const string ApkFilePrefix = ApkFileStem + "_";
+        private const string ApkCacheManifestSuffix = ".json";
 
         /// <summary>Android 上安装包要走 FileProvider 共享，authority 必须与 AndroidManifest 里的声明一致。</summary>
         public const string FileProviderAuthoritySuffix = ".fileprovider";
@@ -107,6 +127,7 @@ namespace P1.UI
         private Coroutine _checkCoroutine;
         private Coroutine _downloadCoroutine;
         private UnityWebRequest _downloadRequest;
+        private UpdateInfo _downloadingInfo; // 取消时按版本定位要删除的缓存文件
 
         // 下载代际号：取消/重启时 +1，让在跑的协程安静收尾（不再发事件、不再碰文件），
         // 从而避免「旧协程收尾时把新下载的半截包删掉」这类竞态。
@@ -240,6 +261,14 @@ namespace P1.UI
             }
 
             PendingUpdate = info;
+
+            // 发现新版本的同时清掉上一个版本的缓存包（含旧版固定文件名），
+            // 否则它会一直占空间，还容易被误认为「本次更新已下载」。
+            if (!IsDownloading)
+            {
+                CleanupStaleApkCaches(GetApkSavePath(info));
+            }
+
             OnUpdateAvailable?.Invoke(info);
 
             // Gitee 的 API 不给体积：后台补一次 HEAD，拿到 Content-Length 后刷新弹窗上的「大小」。
@@ -406,17 +435,163 @@ namespace P1.UI
             }
         }
 
+        /// <summary>旧版固定路径。新逻辑请用 <see cref="GetApkSavePath(UpdateInfo)"/>。</summary>
         public string GetApkSavePath()
         {
             return Path.Combine(Application.persistentDataPath, ApkFileName);
         }
 
         /// <summary>
-        /// 落盘的包是否已经可以直接安装（用于"上次已下载完"的场景）。
+        /// 按待安装版本给出缓存路径：v0.1.10 与 v0.1.11 各自一个文件，
+        /// 避免旧版本残留包被当成本次更新。
+        /// </summary>
+        public string GetApkSavePath(UpdateInfo info)
+        {
+            return Path.Combine(Application.persistentDataPath, BuildApkFileName(info != null ? info.version : ""));
+        }
+
+        /// <summary>
+        /// 生成按版本区分的安装包文件名。版本号会过滤掉路径分隔符等非法字符。
+        /// 版本为空时退回旧固定名（仅兜底，正常 Release 解析必带版本号）。
+        /// </summary>
+        public static string BuildApkFileName(string version)
+        {
+            string safe = SanitizeVersionForFileName(version);
+            return string.IsNullOrEmpty(safe) ? ApkFileName : ApkFilePrefix + safe + ".apk";
+        }
+
+        /// <summary>把版本号收敛成可安全拼进文件名的 token。</summary>
+        public static string SanitizeVersionForFileName(string version)
+        {
+            if (string.IsNullOrEmpty(version)) return "";
+
+            string trimmed = version.Trim().TrimStart('v', 'V');
+            var sb = new System.Text.StringBuilder(trimmed.Length);
+            foreach (char c in trimmed)
+            {
+                if (char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_') sb.Append(c);
+            }
+            return sb.ToString().Trim('.', '-', '_');
+        }
+
+        private static string NormalizeVersion(string version)
+        {
+            return string.IsNullOrEmpty(version) ? "" : version.Trim().TrimStart('v', 'V');
+        }
+
+        /// <summary>
+        /// 落盘的包是否可以直接安装。无参旧版本只校验旧固定路径的内容，
+        /// 新界面必须使用 <see cref="HasReadyApk(UpdateInfo)"/> 做版本匹配。
         /// </summary>
         public bool HasReadyApk()
         {
             return IsApkPayload(GetApkSavePath());
+        }
+
+        /// <summary>
+        /// 缓存包是否就是本次待安装版本、且内容完整。
+        /// 校验项：APK 魔数、旁挂清单里的版本号、实际文件大小与清单/远端大小一致。
+        /// 旧版本留下的包（含旧固定文件名）一律不算「已就绪」。
+        /// </summary>
+        public bool HasReadyApk(UpdateInfo info)
+        {
+            if (info == null || !info.hasApk || string.IsNullOrEmpty(info.version)) return false;
+            return IsCachedApkValidFor(GetApkSavePath(info), info.version, info.fileSize);
+        }
+
+        /// <summary>
+        /// 校验指定路径的缓存安装包是否属于 <paramref name="expectedVersion"/> 且完整。
+        /// 没有旁挂清单的文件（旧版下载器留下的）视为来源不明，必须重新下载。
+        /// </summary>
+        public static bool IsCachedApkValidFor(string apkPath, string expectedVersion, long expectedSize)
+        {
+            try
+            {
+                if (!IsApkPayload(apkPath)) return false;
+
+                long length = new FileInfo(apkPath).Length;
+                if (expectedSize > 0 && length != expectedSize) return false;
+
+                ApkCacheManifest manifest = ReadApkCacheManifest(apkPath);
+                if (manifest == null) return false;
+
+                if (!string.Equals(NormalizeVersion(manifest.version), NormalizeVersion(expectedVersion),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                if (manifest.size > 0 && manifest.size != length) return false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UpdateManager] 校验缓存安装包失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>读取缓存包的旁挂清单；缺失或损坏返回 null。</summary>
+        private static ApkCacheManifest ReadApkCacheManifest(string apkPath)
+        {
+            try
+            {
+                string manifestPath = apkPath + ApkCacheManifestSuffix;
+                if (!File.Exists(manifestPath)) return null;
+                ApkCacheManifest manifest = JsonUtility.FromJson<ApkCacheManifest>(File.ReadAllText(manifestPath));
+                return manifest != null && !string.IsNullOrEmpty(manifest.version) ? manifest : null;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UpdateManager] 读取安装包清单失败: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>下载校验通过后写清单，供下次启动判断缓存包归属与完整性。</summary>
+        public static bool TryWriteApkCacheManifest(string apkPath, string version, string tagName, long remoteSize)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(apkPath) || !File.Exists(apkPath)) return false;
+
+                var manifest = new ApkCacheManifest
+                {
+                    version = NormalizeVersion(version),
+                    tagName = tagName ?? "",
+                    size = new FileInfo(apkPath).Length,
+                    remoteSize = remoteSize,
+                    downloadedAtUtc = DateTime.UtcNow.ToString("o")
+                };
+                File.WriteAllText(apkPath + ApkCacheManifestSuffix, JsonUtility.ToJson(manifest));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UpdateManager] 写入安装包清单失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 清理不属于 <paramref name="keepApkPath"/> 的旧安装包缓存（含旧版固定文件名）。
+        /// 这些包对当前待安装版本没有用处，留着既占空间又会被误点安装。
+        /// </summary>
+        private void CleanupStaleApkCaches(string keepApkPath)
+        {
+            try
+            {
+                foreach (string path in Directory.GetFiles(Application.persistentDataPath, ApkFileStem + "*"))
+                {
+                    if (string.Equals(path, keepApkPath, StringComparison.Ordinal)) continue;
+                    if (string.Equals(path, keepApkPath + ApkCacheManifestSuffix, StringComparison.Ordinal)) continue;
+                    TryDeleteFile(path);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UpdateManager] 清理旧安装包缓存失败: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -473,6 +648,7 @@ namespace P1.UI
             if (IsDownloading) return;
             if (info == null) return;
 
+            _downloadingInfo = info;
             if (_downloadCoroutine != null) StopCoroutine(_downloadCoroutine);
             int generation = ++_downloadGeneration;
             _downloadCoroutine = StartCoroutine(DoDownloadAsync(info, generation));
@@ -487,6 +663,7 @@ namespace P1.UI
             if (!info.hasApk)
             {
                 IsDownloading = false;
+                _downloadingInfo = null;
                 OnDownloadFailed?.Invoke("该版本未附带安装包附件，请使用「浏览器下载」");
                 yield break;
             }
@@ -497,11 +674,13 @@ namespace P1.UI
             if (candidates.Count == 0)
             {
                 IsDownloading = false;
+                _downloadingInfo = null;
                 OnDownloadFailed?.Invoke("没有可用的下载地址，请使用「浏览器下载」");
                 yield break;
             }
 
-            string savePath = GetApkSavePath();
+            string savePath = GetApkSavePath(info);
+            CleanupStaleApkCaches(savePath);
             bool succeeded = false;
             string lastErr = "";
 
@@ -590,8 +769,16 @@ namespace P1.UI
                             long finalSize = new FileInfo(savePath).Length;
                             Debug.Log($"[UpdateManager] 下载完成并通过校验: {finalSize} 字节 -> {savePath}");
 
+                            // 写旁挂清单：下次启动靠它确认这个包属于哪个版本、是否完整，
+                            // 写失败不阻断本次安装（只是下次不会复用缓存）。
+                            if (!TryWriteApkCacheManifest(savePath, info.version, info.tagName, info.fileSize))
+                            {
+                                Debug.LogWarning("[UpdateManager] 安装包清单写入失败，下次检查更新会重新下载");
+                            }
+
                             // 先落状态再通知：否则 Hide() 会看到 IsDownloading==true 而误取消一次已完成的下载
                             IsDownloading = false;
+                            _downloadingInfo = null;
                             _downloadCoroutine = null;
 
                             OnDownloadProgress?.Invoke(finalSize, finalSize, 100f, smoothSpeed, 0f);
@@ -610,11 +797,13 @@ namespace P1.UI
                 }
 
                 TryDeleteFile(savePath);
+                TryDeleteFile(savePath + ApkCacheManifestSuffix);
             }
 
             if (IsStale()) yield break;
 
             IsDownloading = false;
+            _downloadingInfo = null;
             _downloadCoroutine = null;
 
             if (!succeeded)
@@ -688,7 +877,27 @@ namespace P1.UI
                 }
             }
 
-            TryDeleteFile(GetApkSavePath());
+            string apkPath = _downloadingInfo != null ? GetApkSavePath(_downloadingInfo) : GetApkSavePath();
+            TryDeleteFile(apkPath);
+            TryDeleteFile(apkPath + ApkCacheManifestSuffix);
+            _downloadingInfo = null;
+        }
+
+        /// <summary>
+        /// 安装前核对缓存包版本。expectedVersion 为空时跳过（兼容旧调用）。
+        /// 返回 false 时 reason 是可直接展示的文案。
+        /// </summary>
+        public static bool ValidateCacheVersionForInstall(string filePath, string expectedVersion, out string reason)
+        {
+            reason = "";
+            if (string.IsNullOrEmpty(expectedVersion)) return true;
+            if (IsCachedApkValidFor(filePath, expectedVersion, 0)) return true;
+
+            ApkCacheManifest manifest = ReadApkCacheManifest(filePath);
+            reason = manifest == null || string.IsNullOrEmpty(manifest.version)
+                ? "安装包来源不明或已损坏，请重新下载"
+                : $"安装包版本 {manifest.version} 与目标版本 {NormalizeVersion(expectedVersion)} 不符，请重新下载";
+            return false;
         }
 
         /// <summary>
@@ -696,7 +905,7 @@ namespace P1.UI
         /// </summary>
         public bool InstallApk(string filePath)
         {
-            return InstallApk(filePath, out _);
+            return InstallApk(filePath, null, out _);
         }
 
         /// <summary>
@@ -704,6 +913,16 @@ namespace P1.UI
         /// （旧实现在异常分支里 return true，等于对 UI 撒谎）。
         /// </summary>
         public bool InstallApk(string filePath, out string reason)
+        {
+            return InstallApk(filePath, null, out reason);
+        }
+
+        /// <summary>
+        /// 调起安装，并先确认这个包确实属于 <paramref name="expectedVersion"/>。
+        /// 这一步专门挡住「上次下载的旧版本包被当成新版本直接安装」：
+        /// Android 对降级安装只会回一句「应用未安装」，玩家完全看不出原因。
+        /// </summary>
+        public bool InstallApk(string filePath, string expectedVersion, out string reason)
         {
             reason = "";
 
@@ -717,6 +936,12 @@ namespace P1.UI
             if (!IsApkPayload(filePath))
             {
                 reason = "安装包内容无效，请重新下载或用「浏览器下载」";
+                Debug.LogWarning($"[UpdateManager] 安装失败：{reason} ({filePath})");
+                return false;
+            }
+
+            if (!ValidateCacheVersionForInstall(filePath, expectedVersion, out reason))
+            {
                 Debug.LogWarning($"[UpdateManager] 安装失败：{reason} ({filePath})");
                 return false;
             }

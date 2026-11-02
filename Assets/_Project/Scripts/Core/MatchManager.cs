@@ -6,8 +6,10 @@ using UnityEngine;
 namespace P1.Core
 {
     /// <summary>
-    /// 比赛流程状态机：Ready → Countdown(3-2-1 GO) → Playing(120s) → FinishFreeze → Result → Restart。
+    /// 比赛流程状态机：Ready → Countdown(开赛墨幕动画) → Playing(120s) → FinishFreeze → Result → Restart。
     /// 负责计时、结算取数、清场重开，并向 UI 广播阶段变化。
+    /// Countdown 已不再做 3-2-1 数字倒数，而是只播一次入场演出（墨幕涌满 → 虹膜撕开露出战场），
+    /// 演完立刻进入 Playing；阶段名保留是为了 WeaponSelect / HUD 复位 / 移动端触控等既有订阅方不必改动。
     /// </summary>
     [DefaultExecutionOrder(-30)]
     public class MatchManager : MonoBehaviour
@@ -17,14 +19,20 @@ namespace P1.Core
         public enum Phase { Ready, Countdown, Playing, Finished, Result }
 
         [SerializeField] private GameConfigSO gameConfig;
+
+        [Tooltip("已退役：旧版 3-2-1 数字倒计时时长，仅在 introSeconds < 0 时作为兜底")]
         [SerializeField] private float countdownSeconds = 3f;
+
+        [Tooltip("开赛入场演出时长（秒）：默认 0.86，与 ScreenInkTransitionMath.MatchIntroTotalDuration 对齐。" +
+                 "不要改短于 0.86（墨幕动画固定 0.86s，短于它会在动画未结束时解锁操作）；<0 = 回退旧 3-2-1 倒计时")]
+        [SerializeField] private float introSeconds = 0.86f;
+
         [SerializeField] private float finishFreezeSeconds = 1.6f;
         [SerializeField] private float resultRollSeconds = 1.4f;
 
         private float _remaining;
         private float _countdown;
         private float _freeze;
-        private int _lastCountdownShown = -1;
         private float _finalA;
         private float _finalB;
 
@@ -42,6 +50,8 @@ namespace P1.Core
         private SpawnZone _spawnZoneB;
 
         public event Action<Phase> PhaseChanged;
+
+        /// <summary>已退役：3-2-1 数字倒数取消后不再触发；事件保留仅为 AudioManager 等旧订阅方兼容。</summary>
         public event Action<int> CountdownTicked;
 
         /// <summary>只有 Playing 阶段允许移动、开火与涂地推进比赛。</summary>
@@ -130,17 +140,9 @@ namespace P1.Core
             switch (CurrentPhase)
             {
                 case Phase.Countdown:
+                    // 开场演出窗口：没有 3-2-1 数字、没有逐秒提示音，
+                    // 视觉由 ScreenInkTransitionView 的墨幕撕开承担，时间一到直接开打。
                     _countdown -= dt;
-                    int shown = Mathf.CeilToInt(Mathf.Max(0f, _countdown));
-                    if (shown != _lastCountdownShown)
-                    {
-                        _lastCountdownShown = shown;
-                        CountdownTicked?.Invoke(shown);
-                        if (AudioManager.Instance != null && shown > 0)
-                        {
-                            AudioManager.Instance.PlayOne(AudioManager.Instance.countdownTickClip, 0.7f, 0.98f, 1.02f);
-                        }
-                    }
                     if (_countdown <= 0f)
                     {
                         BeginPlaying();
@@ -176,8 +178,8 @@ namespace P1.Core
         {
             ResetWorld();
             _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
-            _countdown = countdownSeconds;
-            _lastCountdownShown = -1;
+            // 开赛演出：默认走新的墨幕入场（0.86s，与动画同长）；负值才回退旧的 3-2-1 倒计时。
+            _countdown = introSeconds >= 0f ? introSeconds : countdownSeconds;
             _finalA = 0f;
             _finalB = 0f;
             SetPhase(Phase.Countdown);
@@ -199,7 +201,6 @@ namespace P1.Core
             ResetWorld();
             _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
             _countdown = 0f;
-            _lastCountdownShown = -1;
             _freeze = 0f;
             _finalA = 0f;
             _finalB = 0f;

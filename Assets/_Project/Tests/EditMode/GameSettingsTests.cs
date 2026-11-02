@@ -92,7 +92,8 @@ namespace P1.Tests
                 GameSettingsMath.KeyInvertLookY,
                 GameSettingsMath.KeyFixedJoystick,
                 GameSettingsMath.KeyFireButtonRotatesCamera,
-                GameSettingsMath.KeyAimAssistLevel
+                GameSettingsMath.KeyAimAssistLevel,
+                GameSettingsMath.KeyBotDifficulty
             };
 
             for (int i = 0; i < keys.Length; i++)
@@ -110,6 +111,7 @@ namespace P1.Tests
             Assert.AreEqual("P1_Settings_FixedJoystick", GameSettingsMath.KeyFixedJoystick);
             Assert.AreEqual("P1_Settings_FireRotatesCamera", GameSettingsMath.KeyFireButtonRotatesCamera);
             Assert.AreEqual("P1_Settings_AimAssistLevel", GameSettingsMath.KeyAimAssistLevel);
+            Assert.AreEqual("P1_Settings_BotDifficulty", GameSettingsMath.KeyBotDifficulty);
         }
 
         [Test]
@@ -131,6 +133,21 @@ namespace P1.Tests
         }
 
         [Test]
+        public void BotDifficulty_NormalizesAndLabelsThreeTiers()
+        {
+            Assert.AreEqual(GameSettingsMath.MinBotDifficulty, GameSettingsMath.NormalizeBotDifficulty(-3));
+            Assert.AreEqual(GameSettingsMath.MaxBotDifficulty, GameSettingsMath.NormalizeBotDifficulty(9));
+            Assert.AreEqual(1, GameSettingsMath.NormalizeBotDifficulty(1));
+
+            Assert.AreEqual("轻松", GameSettingsMath.GetBotDifficultyLabel(0));
+            Assert.AreEqual("普通", GameSettingsMath.GetBotDifficultyLabel(1));
+            Assert.AreEqual("硬核", GameSettingsMath.GetBotDifficultyLabel(2));
+
+            // 默认档必须是「普通」，否则不切难度的老玩家会感到 Bot 变强/变弱。
+            Assert.AreEqual(1, GameSettingsMath.DefaultBotDifficulty);
+        }
+
+        [Test]
         public void GameSettingsService_ResetToDefaults_RestoresExpectedValues()
         {
             GameSettingsService.EnsureInitialized();
@@ -143,6 +160,7 @@ namespace P1.Tests
             GameSettingsService.FixedJoystick = true;
             GameSettingsService.FireButtonRotatesCamera = false;
             GameSettingsService.AimAssistLevel = 0;
+            GameSettingsService.BotDifficulty = GameSettingsMath.MaxBotDifficulty;
 
             GameSettingsService.ResetToDefaults();
 
@@ -155,6 +173,7 @@ namespace P1.Tests
             Assert.AreEqual(GameSettingsMath.DefaultFixedJoystick, GameSettingsService.FixedJoystick);
             Assert.AreEqual(GameSettingsMath.DefaultFireButtonRotatesCamera, GameSettingsService.FireButtonRotatesCamera);
             Assert.AreEqual(GameSettingsMath.DefaultAimAssistLevel, GameSettingsService.AimAssistLevel);
+            Assert.AreEqual(GameSettingsMath.DefaultBotDifficulty, GameSettingsService.BotDifficulty);
         }
     }
 }

@@ -19,7 +19,7 @@ namespace P1.UI
         const string k_ResourcesRoot = "P1Icons/";
         const string k_EditorIconsRoot = "Assets/_Project/Art/Sprites/Icons/";
 
-        static readonly string[] k_EditorFolders = { "Glyphs", "Marks", "Rules", "Specials", "Subs", "Weapons" };
+        static readonly string[] k_EditorFolders = { "Brand", "Glyphs", "Marks", "Rules", "Specials", "Subs", "Weapons" };
 
         static readonly Dictionary<string, Sprite> s_cache = new Dictionary<string, Sprite>();
         static readonly HashSet<string> s_warned = new HashSet<string>();

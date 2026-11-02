@@ -213,6 +213,10 @@
 所有盒子来自 `MenuLayoutMath.Home()` 的 `HeroCard / Tile(i) / HeroCta / FooterTag / VersionTag`，
 `MenuLayoutMathTests` 断言"不出画布 / 互不重叠 / 横向铺满"。
 
+- **宽屏分配**：安全区比「Hero + ColumnGap + 2×2」设计总宽更宽时，整块版面水平居中，
+  `ColumnGap` 恒为版面表值，多余宽度均分到左右外边距；**禁止**把多余宽度灌进 Hero 与卡阵之间
+  （20:9 真机曾因此形成 146px 中部空场）。Hero 左缘以 `HomeRuntimeBoard.HeroX` 为准，不再固定 `Margin`。
+
 | 元素 | 桌面 | 移动端 | 规则 |
 |---|---|---|---|
 | 卡片区 | 1792×816（93% 宽） | 1856×704（97% 宽） | 安全区左右各留 `Margin`；底部预留整备卡 + 角签 |
@@ -221,6 +225,7 @@
 | 开赛 CTA | 640×148 | 860×200 | Hero 卡底部满宽（墨底 + 金黄字 + 按钮硬影），`UIJellyButton` 按压物理 |
 | 次级卡（2×2） | 504×396 | 438×342 | 纸白 + 3px 墨框 + **面板硬影 (4,-5)** + 顶部 5px 身份色带 + 角签 + `》` |
 | 顶部小按钮 | 不显示 | 300×96 | 右上「自定义按键」：纸白底 + 3px 墨框 + 按钮硬影 |
+| Bot 难度段选 | 3×88×44，间距 8 | 3×136×64，间距 8 | Hero 卡头部右侧、与 PLAY 同排：纸白实底 + 3px 墨框，选中=墨黑实底 + 金黄字；窄窗先收窄段宽（下限 64/92），仍放不下则隐藏模式微标，绝不压住 PLAY |
 | 角签（左下/右下） | 320×36 / 300×36 | 左下让位整备卡 / 360×44 | 黑底纸白/金黄字、字距 1.5~2、Tag 硬影 |
 | 武器整备卡 | 380×112 | 680×176 | 左下角；圆形队伍色盘 + 当前武器名 + 黄色箭头块 |
 | 武器抽屉 | 620 宽、单列 592×164 | 82% 宽（1574）、双列 759×236 | 移动端双列网格，触控滚动 |
@@ -232,7 +237,15 @@
   旧值按 1.2em 预留），底部信息行拿整行宽度；两者**绝不共行**——移动端字号 ×1.28 后信息行共行必然叠字。
   信息行文案超宽时由 `MatchFlowUI.FitTileInfoText` 逐级缩字号（底线桌面 18 / 移动端 20）兜住，
   缩到底仍放不下才在开发期 LogWarning；**禁止 Truncate 截字**。
+- **角签宽度随文本自适应**：`CreateStageTag` 先按文本自然宽度测量，只放大不缩小；
+  下限为版面表设计宽（桌面 118 / 移动 140），上限为卡片内容行宽。移动端 26 号字的 `SETTINGS`
+  自然宽约 193px，固定 140px 会画出黑底；**禁止**让角签文字溢出实底。
 - **整卡可点**：次级卡把按钮铺满整张卡（透明 Image 只负责射线），按下阴影归零 + 内容位移。
+
+- **Bot 难度**：Hero 头部右侧三档段选（轻松 / 普通 / 硬核）写入 `GameSettingsService.BotDifficulty`
+  （PlayerPrefs `P1_Settings_BotDifficulty`，默认普通＝不缩放）。难度只缩放 Bot 的反应 / 瞄准误差 /
+  弹簧刚度 / 甩枪转速 / 感知半径 / 撤退血线等拟人参数，行为状态机三档共用；选择即改即生效，
+  已在场景里的 Bot 会通过 `BotDifficultyChanged` 重建配置，切回普通必须复用 `BotConfig.asset` 本身。
 
 - 首页内容必须放在 `MenuSafeArea`（`SafeAreaFitter`）里，背景装饰留在全屏层；刘海/圆角不吃字。
 - 抽屉收起时显示左下「武器整备」整备卡（替代过去 176×72 的纯黄方块页签），选枪后实时刷新图标与名称。
@@ -300,6 +313,32 @@
 快捷入口：`ApplyComic(fill)` 现在是几何风默认（直角、无网点、无边光、**默认无硬影**）。
 要硬影不要靠它——用 `theme.ApplyHardShadow(graphic, level)` 显式开档，保证偏移只有规范里的那几档。
 
+## 品牌资产与启动动画（2026-11-02）
+
+App 图标 / 启动画面 / 启动动画是一套视觉，统一由 `tools/bake_brand.py` 从矢量源烘出，
+**不允许**在 Inspector 手改或临时拼图：
+
+| 产物 | 路径 | 用途 |
+|---|---|---|
+| 主图标 1024 | `Art/Brand/app_icon_1024.png` | 桌面 `.icns/.ico` 与商店主图（Default 纹理） |
+| 自适应前景 / 背景 | `Art/Brand/android_adaptive_*.png` | Android 8+ 两层图标（前景必须落在中心 66.7% 安全圆内） |
+| 圆形图标 | `Art/Brand/app_icon_round_512.png` | 商店/宣传位备用（Unity 6 不再接受 Legacy/Round 槽位） |
+| 启动画面 logo | `Art/Sprites/Icons/Brand/splash_logo.png` | Unity SplashScreen（1.2s，底 `#0B0B0B`） |
+| 启动动画贴纸 / 墨点 | `Art/Sprites/Icons/Brand/brand_*.png` | 运行时 `LaunchIntroView` |
+
+- 构图常量：墨黑 `#0B0B0B` + 队橙 `#FF700F` 正圆 + 纸白乌贼 + 钴蓝 `#266BFF` 墨点。
+  只用这三种高饱和色；白色乌贼保证 48px 图标仍能读出「乌贼 + 两只眼」。
+- 导入策略：`Art/Brand/` 由 `MediaImportPolicy` 强制 **Default 纹理**——
+  Sprite 导入会把 `maxTextureSize` 钳到 512，1024 母版直接废掉；
+  `Art/Sprites/Icons/Brand/` 走 Sprite，菜单 `P1/构建/11` 自动收进 `P1RuntimeAssets`，独立包才取得到。
+- 接线：菜单 `P1/构建/13. 应用 App 图标与启动画面` 写 PlayerSettings；
+  `ApplyDesktop/ApplyAndroidPlayerSettings` 出包前也会自动调用，不存在「忘记点菜单就没图标」。
+- 启动动画：`UI/LaunchIntroView` + `UI/LaunchIntroMath`（纯函数时序）。
+  只在主场景（存在 `MatchManager`）的**首次启动**出现一次，任意键/点击/触屏跳过，
+  总时长 2.96s（unscaled）；跳过只快进到擦除段，不做瞬时消失。
+- 启动动画的装饰性构建 / 播放必须 `try/catch + LogWarning`：演出失败绝不能拖垮开局。
+- **禁止**：给启动动画加模糊 / 渐变 / 半透明投影；用生图模型出 App 图标（风格与几何风冲突且不可复现）。
+
 ## 交付自检清单
 
 - [ ] 渐变 / 网点 / 气泡尾 / wobble 全无（唯一例外：`InkEdgeWarningView` 屏幕边缘敌墨反馈）
@@ -321,5 +360,7 @@
 - [ ] 移动端字号 ≥ 桌面，正文 ≥ 18（移动端 ≥20），全部走 `UITypography.Font()`
 - [ ] 正文对比度 ≥ 4.5
 - [ ] 图标缺失时隐藏而非白块
+- [ ] 改过 App 图标 / 启动画面后：`python3 tools/bake_brand.py` → `P1/构建/13` → `P1/构建/11`，并确认 Standalone 8 槽位、Android Adaptive 6 槽位 × 2 层都已写入
+- [ ] 改过 `LaunchIntroMath` 时间轴后：同步 `LaunchIntroMathTests`，并 Play 一遍确认首帧不露首页、收尾必自毁
 - [ ] 游戏触控键 ≥ 132 UI px @1920×1080；设置/编辑器按钮高 ≥64px、字号 ≥20
 - [ ] 编译干净 + `tools/run_tests.sh ui` 全绿

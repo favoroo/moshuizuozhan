@@ -149,6 +149,15 @@ namespace P1.UI
         public float TileInfoFont;
         public float TileArrowFont;
 
+        /// <summary>
+        /// Hero 卡头部右侧的 Bot 难度三档段选：单段尺寸、段间距、单段最小宽度与字号。
+        /// 三档总宽 = SegmentSize.x × 3 + Gap × 2；运行时按可用宽度收窄（见 ResolveHeroDifficulty）。
+        /// </summary>
+        public Vector2 DifficultySegmentSize;
+        public float DifficultyGap;
+        public float DifficultyMinSegmentWidth;
+        public float DifficultyFont;
+
         /// <summary>左下 / 右下黑底角签（宽或高为 0 表示该平台不显示）。</summary>
         public Vector2 FooterTagSize;
         public float FooterTagFont;
@@ -189,6 +198,24 @@ namespace P1.UI
 
         public HomeBox HeroTag =>
             new HomeBox(Margin + HeroPadding.x, CardTop + HeroPadding.y, TagSize.x, TagSize.y);
+
+        /// <summary>
+        /// Hero 卡头部右侧的 Bot 难度段选（设计盒）：与 PLAY 角签同一行、右对齐贴 Hero 内边。
+        /// Y 基准与 HeroWeaponSlot / ResolveHomeBoard 同源（CenteredBoardTop），运行时不会脱离 Hero 卡。
+        /// </summary>
+        public HomeBox HeroDifficulty
+        {
+            get
+            {
+                float innerWidth = HeroBox.x - HeroPadding.x * 2f;
+                float total = DifficultySegmentSize.x * 3f + DifficultyGap * 2f;
+                return new HomeBox(
+                    Margin + HeroPadding.x + innerWidth - total,
+                    CenteredBoardTop + HeroPadding.y + (TagSize.y - DifficultySegmentSize.y) * 0.5f,
+                    total,
+                    DifficultySegmentSize.y);
+            }
+        }
 
         /// <summary>Hero 卡内嵌的武器整备卡绝对盒子（以 MenuSafeArea 左上角为原点）。</summary>
         public HomeBox HeroWeaponSlot
@@ -296,10 +323,21 @@ namespace P1.UI
     {
         public float Top;
         public float Height;
+
+        /// <summary>Hero 卡左缘（安全区本地坐标）。安全区比设计宽时整块版面居中，不再固定为 Margin。</summary>
+        public float HeroX;
         public float HeroWidth;
         public float GridX;
         public float TileWidth;
         public float TileHeight;
+    }
+
+    /// <summary>Hero 卡头部 Bot 难度段选在运行时实际采用的几何（按可用宽度自适应收窄）。</summary>
+    public struct DifficultyBarLayout
+    {
+        public float SegmentWidth;
+        public float Gap;
+        public float TotalWidth;
     }
 
     /// <summary>
@@ -358,6 +396,10 @@ namespace P1.UI
                     TileTitleFont = 44f,
                     TileInfoFont = 18f,
                     TileArrowFont = 40f,
+                    DifficultySegmentSize = new Vector2(88f, 44f),
+                    DifficultyGap = 8f,
+                    DifficultyMinSegmentWidth = 64f,
+                    DifficultyFont = 20f,
                     FooterTagSize = new Vector2(320f, 36f),
                     FooterTagFont = 18f,
                     VersionTagSize = new Vector2(300f, 36f),
@@ -400,6 +442,10 @@ namespace P1.UI
                 TileTitleFont = 44f,
                 TileInfoFont = 18f,
                 TileArrowFont = 44f,
+                DifficultySegmentSize = new Vector2(136f, 64f),
+                DifficultyGap = 8f,
+                DifficultyMinSegmentWidth = 92f,
+                DifficultyFont = 20f,
                 // 移动端左下是「武器整备」整备卡的地盘，社区角签不显示（返回空盒）。
                 FooterTagSize = Vector2.zero,
                 FooterTagFont = 18f,
@@ -523,14 +569,47 @@ namespace P1.UI
                 m.HeroBox.x * 0.62f,
                 m.HeroBox.x);
 
+            // 列间距恒为 ColumnGap：安全区比「Hero + 2×2」设计总宽更宽时（20:9 手机、超宽窗口），
+            // 多余宽度均分到左右外边距，整块版面水平居中；绝不能全部灌进 Hero 与卡阵之间——
+            // 真机 2148 宽安全区曾因此得到 146px 的中部空场（设计值 20）。
+            float boardWidth = heroWidth + m.ColumnGap + m.GridWidth;
+            float heroX = Mathf.Max(m.Margin, (safeW - boardWidth) * 0.5f);
+
             return new HomeRuntimeBoard
             {
                 Top = m.CenteredBoardTop,
                 Height = height,
+                HeroX = heroX,
                 HeroWidth = heroWidth,
-                GridX = safeW - m.Margin - m.GridWidth,
+                GridX = heroX + heroWidth + m.ColumnGap,
                 TileWidth = (m.GridWidth - m.TileGap) * 0.5f,
                 TileHeight = Mathf.Max(140f, (height - m.TileGap) * 0.5f),
+            };
+        }
+
+        /// <summary>
+        /// Hero 头部难度段选的实际几何：按设计段宽排；可用宽度不够时先收窄、
+        /// 收到最小段宽仍不够则继续等比压缩（兜底 48），绝不让三档按钮压到 PLAY 角签上。
+        /// </summary>
+        public static DifficultyBarLayout ResolveHeroDifficulty(HomeMenuMetrics m, float availableWidth)
+        {
+            float gap = m.DifficultyGap;
+            float segment = m.DifficultySegmentSize.x;
+            float width = Mathf.Max(0f, availableWidth);
+
+            float total = segment * 3f + gap * 2f;
+            if (total > width)
+            {
+                float fitted = (width - gap * 2f) / 3f;
+                segment = Mathf.Clamp(fitted, 48f, segment);
+                total = segment * 3f + gap * 2f;
+            }
+
+            return new DifficultyBarLayout
+            {
+                SegmentWidth = segment,
+                Gap = gap,
+                TotalWidth = total,
             };
         }
     }

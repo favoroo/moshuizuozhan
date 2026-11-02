@@ -119,6 +119,65 @@ namespace P1.Tests
         }
 
         [Test]
+        public void Home_HeroDifficulty_FitsHeaderAndDoesNotOverlapHeroTag()
+        {
+            foreach (bool mobile in new[] { false, true })
+            {
+                string tag = mobile ? "[移动端]" : "[桌面端]";
+                HomeMenuMetrics home = MenuLayoutMath.Home(mobile);
+                Vector2 canvas = new Vector2(MenuLayoutMath.RefWidth, MenuLayoutMath.RefHeight);
+                HomeBox difficulty = home.HeroDifficulty;
+                HomeBox heroTag = home.HeroTag;
+                HomeBox hero = home.HeroCard;
+                HomeBox weaponSlot = home.HeroWeaponSlot;
+                HomeBox cta = home.HeroCta;
+
+                Assert.IsTrue(difficulty.FitsIn(canvas), tag + " 难度段选不应超出参考画布");
+                Assert.IsTrue(hero.Contains(difficulty.Center.x, difficulty.Center.y),
+                    tag + " 难度段选必须落在 Hero 卡内");
+                Assert.IsFalse(difficulty.Overlaps(heroTag), tag + " 难度段选与 PLAY 角签不得重叠");
+                Assert.Greater(difficulty.X, heroTag.Right, tag + " 难度段选必须在 PLAY 角签右侧");
+                Assert.LessOrEqual(difficulty.Bottom, weaponSlot.Y, tag + " 难度段选不得压住武器整备卡");
+                Assert.LessOrEqual(difficulty.Bottom, cta.Y, tag + " 难度段选不得压住开始游戏按钮");
+                Assert.GreaterOrEqual(difficulty.X, hero.X + home.HeroPadding.x,
+                    tag + " 难度段选不应越过 Hero 内边距");
+
+                // 三档总宽 = 3 段 + 2 间隙；段宽必须够放两字中文。
+                float expectedWidth = home.DifficultySegmentSize.x * 3f + home.DifficultyGap * 2f;
+                Assert.AreEqual(expectedWidth, difficulty.Width, 0.5f, tag + " 难度段选总宽应为 3 段 + 2 间隙");
+                Assert.GreaterOrEqual(home.DifficultySegmentSize.x, 80f, tag + " 单段难度按钮应至少 80 宽");
+                Assert.GreaterOrEqual(home.DifficultySegmentSize.y, 44f, tag + " 单段难度按钮高度不得低于桌面可点下限");
+
+                if (mobile)
+                {
+                    Assert.GreaterOrEqual(home.DifficultySegmentSize.y, 64f, "移动端难度按钮高度必须 ≥64（触控下限）");
+                    Assert.Greater(home.DifficultySegmentSize.x, MenuLayoutMath.Home(false).DifficultySegmentSize.x,
+                        "移动端难度按钮应明显宽于桌面");
+                }
+            }
+        }
+
+        [Test]
+        public void ResolveHeroDifficulty_ShrinksSegmentsWithoutOverflowingAvailableWidth()
+        {
+            HomeMenuMetrics desktop = MenuLayoutMath.Home(false);
+
+            // 设计宽度：保持版面表尺寸
+            DifficultyBarLayout design = MenuLayoutMath.ResolveHeroDifficulty(desktop, 480f);
+            Assert.AreEqual(desktop.DifficultySegmentSize.x, design.SegmentWidth, 0.5f,
+                "宽度充足时应保持设计段宽");
+            Assert.AreEqual(desktop.DifficultyGap, design.Gap, 0.5f);
+
+            // 极窄：Hero 卡被压到最小宽度（桌面 0.62 × 728）时的可用区
+            const float narrowAvailable = 207f;
+            DifficultyBarLayout narrow = MenuLayoutMath.ResolveHeroDifficulty(desktop, narrowAvailable);
+            Assert.Less(narrow.SegmentWidth, desktop.DifficultySegmentSize.x, "窄宽必须收窄段宽");
+            Assert.GreaterOrEqual(narrow.SegmentWidth, 48f, "段宽不得缩到不可点的程度");
+            Assert.LessOrEqual(narrow.TotalWidth, narrowAvailable + 0.01f,
+                "收窄后的总宽必须落在可用宽度内，不能压住 PLAY 角签");
+        }
+
+        [Test]
         public void Drawer_DesktopTwoColumnFitsAllSevenWeaponsWithoutScroll()
         {
             WeaponDrawerMetrics d = MenuLayoutMath.Drawer(false);
@@ -214,6 +273,27 @@ namespace P1.Tests
         }
 
         [Test]
+        public void ResolveHomeBoard_WideSafeAreaKeepsColumnGapAndCentersBoard()
+        {
+            // 20:9 真机（2146 宽安全区）比「Hero 940 + 列距 20 + 卡阵 896」宽 290：
+            // 旧实现把多出来的宽度全部灌进列间，Hero 与 2×2 之间形成 146px 中部空场。
+            HomeMenuMetrics mobile = MenuLayoutMath.Home(true);
+            Vector2 canvas = new Vector2(2146f, 966f);
+            HomeRuntimeBoard board = MenuLayoutMath.ResolveHomeBoard(mobile, canvas.x, canvas.y, canvas);
+
+            float gap = board.GridX - (board.HeroX + board.HeroWidth);
+            Assert.AreEqual(mobile.ColumnGap, gap, 0.5f,
+                "Hero 与 2×2 卡阵的列间距必须等于版面表 ColumnGap，不能随屏幕变宽而膨胀");
+
+            float leftMargin = board.HeroX;
+            float rightMargin = canvas.x - (board.GridX + mobile.GridWidth);
+            Assert.AreEqual(leftMargin, rightMargin, 0.5f,
+                "多余宽度应均分到左右外边距，让整块版面保持水平居中");
+            Assert.Greater(leftMargin, mobile.Margin, "宽安全区的外边距应大于设计最小留白");
+            Assert.AreEqual(mobile.HeroBox.x, board.HeroWidth, 0.5f, "宽屏仍保持 Hero 设计宽度");
+        }
+
+        [Test]
         public void ResolveHomeBoard_NormalSafeAreaMatchesDesign()
         {
             // 桌面 16:9、安全区=画布：运行时盒必须与设计表一致（回归锚点）。
@@ -241,7 +321,10 @@ namespace P1.Tests
             HomeMenuMetrics mobile = MenuLayoutMath.Home(true);
             HomeRuntimeBoard board = MenuLayoutMath.ResolveHomeBoard(mobile, 2533f, 1199f, Vector2.zero);
 
-            Assert.AreEqual(2533f - mobile.Margin - mobile.GridWidth, board.GridX, 0.5f);
+            float boardWidth = mobile.HeroBox.x + mobile.ColumnGap + mobile.GridWidth;
+            float expectedHeroX = (2533f - boardWidth) * 0.5f;
+            Assert.AreEqual(expectedHeroX, board.HeroX, 0.5f);
+            Assert.AreEqual(expectedHeroX + mobile.HeroBox.x + mobile.ColumnGap, board.GridX, 0.5f);
             Assert.AreEqual(1199f - mobile.CardTop - mobile.CardBottom, board.Height, 0.5f);
         }
     }

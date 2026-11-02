@@ -543,7 +543,7 @@ namespace P1.UI.WeaponSelect
         /// </summary>
         private void BuildDrawerToggleButton()
         {
-            HomeBox slot = MenuLayoutMath.Home(_mobile).HeroWeaponSlot;
+            HomeBox slot = ResolveHeroWeaponSlot();
             Vector2 actualSize = ResolveLoadoutSize(slot);
 
             var btnGo = new GameObject("DrawerToggleButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(UIJellyButton));
@@ -815,6 +815,26 @@ namespace P1.UI.WeaponSelect
             return Mathf.Max(0f, left);
         }
 
+        /// <summary>
+        /// 首页 Hero 卡内的整备卡槽（运行时）：主页面的 Hero 卡在宽安全区会整体居中，
+        /// X 必须跟随 Hero 卡实际左缘，不能再用设计表里固定的 Margin。
+        /// </summary>
+        private HomeBox ResolveHeroWeaponSlot()
+        {
+            HomeMenuMetrics home = MenuLayoutMath.Home(_mobile);
+            HomeBox slot = home.HeroWeaponSlot;
+
+            var heroCard = GameObject.Find("HomeHeroCard")?.GetComponent<RectTransform>();
+            if (heroCard != null && heroCard.sizeDelta.x > 10f)
+            {
+                float innerWidth = Mathf.Max(0f, heroCard.sizeDelta.x - home.HeroPadding.x * 2f);
+                slot.X = heroCard.anchoredPosition.x + home.HeroPadding.x;
+                slot.Width = Mathf.Min(slot.Width, innerWidth);
+            }
+
+            return slot;
+        }
+
         private Vector2 ResolveLoadoutSize(HomeBox slot)
         {
             float heroWidth = MenuLayoutMath.Home(_mobile).HeroBox.x;
@@ -851,7 +871,7 @@ namespace P1.UI.WeaponSelect
         {
             if (_toggleButtonRoot == null) return;
 
-            HomeBox slot = MenuLayoutMath.Home(_mobile).HeroWeaponSlot;
+            HomeBox slot = ResolveHeroWeaponSlot();
             Vector2 actualSize = ResolveLoadoutSize(slot);
             _toggleButtonRoot.anchoredPosition = slot.AnchoredPosition;
             _toggleButtonRoot.sizeDelta = actualSize;
@@ -905,7 +925,7 @@ namespace P1.UI.WeaponSelect
             _toggleButtonRoot.gameObject.SetActive(!_isDrawerOpen);
             if (!_isDrawerOpen)
             {
-                HomeBox slot = MenuLayoutMath.Home(_mobile).HeroWeaponSlot;
+                HomeBox slot = ResolveHeroWeaponSlot();
                 _toggleButtonRoot.anchoredPosition = slot.AnchoredPosition;
                 _toggleButtonRoot.sizeDelta = ResolveLoadoutSize(slot);
             }

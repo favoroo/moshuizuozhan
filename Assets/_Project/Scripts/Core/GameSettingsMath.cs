@@ -16,6 +16,7 @@ namespace P1.Core
         public const string KeyFixedJoystick = "P1_Settings_FixedJoystick";
         public const string KeyFireButtonRotatesCamera = "P1_Settings_FireRotatesCamera";
         public const string KeyAimAssistLevel = "P1_Settings_AimAssistLevel";
+        public const string KeyBotDifficulty = "P1_Settings_BotDifficulty";
 
         public const float DefaultMasterVolume = 1.0f;
         public const float DefaultShakeScale = 1.0f;
@@ -29,6 +30,11 @@ namespace P1.Core
         public const int DefaultAimAssistLevel = 2;
         public const int MinAimAssistLevel = 0;
         public const int MaxAimAssistLevel = 3;
+
+        /// <summary>Bot 难度档位：0 轻松 / 1 普通 / 2 硬核（与 P1.AI.BotDifficultyMath 的档位定义一一对应）。</summary>
+        public const int DefaultBotDifficulty = 1;
+        public const int MinBotDifficulty = 0;
+        public const int MaxBotDifficulty = 2;
 
         public const float AimAssistRadiusWeak = 0.5f;
         public const float AimAssistRadiusMedium = 0.8f;
@@ -131,6 +137,30 @@ namespace P1.Core
                 case MinAimAssistLevel:
                 default:
                     return "关";
+            }
+        }
+
+        /// <summary>裁切 Bot 难度到 [0, 2]；越界按最近合法档位收口。</summary>
+        public static int NormalizeBotDifficulty(int level)
+        {
+            if (level <= MinBotDifficulty)
+                return MinBotDifficulty;
+            if (level >= MaxBotDifficulty)
+                return MaxBotDifficulty;
+            return level;
+        }
+
+        /// <summary>Bot 难度的中文展示文案（只使用项目字集里已有的字）。</summary>
+        public static string GetBotDifficultyLabel(int level)
+        {
+            switch (NormalizeBotDifficulty(level))
+            {
+                case MinBotDifficulty:
+                    return "轻松";
+                case MaxBotDifficulty:
+                    return "硬核";
+                default:
+                    return "普通";
             }
         }
 

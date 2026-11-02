@@ -235,6 +235,152 @@ namespace P1.Editor
             Debug.Log("[P12-C] Graphics > BatchRendererGroup Variants 已设为 Keep All，防止玩家包构建时剥离 DOTS instancing 变体导致 GRD 失效。");
         }
 
+        /// <summary>
+        /// P12-D：给所有不透明自研材质打开 GPU Instancing。
+        /// 角色合并网格跨角色共享，同一 (mesh, material) 组合可由 GPU instancing / GRD 一次提交；
+        /// 透明材质（墨墙/水/玻璃/贴花/接触阴影）不在此列——实例化会改变透明排序语义。
+        /// 只改 Material 资产 API，不手改 .mat YAML。
+        /// </summary>
+        [MenuItem("P1/性能/6. 开启不透明材质 GPU Instancing (P12-D)", false, 94)]
+        public static void EnableOpaqueMaterialGpuInstancing()
+        {
+            string[] guids = AssetDatabase.FindAssets("t:Material", new[] { "Assets/_Project/Materials" });
+            int enabledCount = 0;
+            int alreadyCount = 0;
+            int skippedCount = 0;
+
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                Material mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (!IsInstancingEligible(mat))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                if (mat.enableInstancing)
+                {
+                    alreadyCount++;
+                    continue;
+                }
+
+                mat.enableInstancing = true;
+                EditorUtility.SetDirty(mat);
+                enabledCount++;
+            }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log($"[P12-D] 不透明材质 GPU Instancing：新开 {enabledCount}，已开 {alreadyCount}，跳过 {skippedCount}（透明/非自研 shader）。");
+        }
+
+        private static bool IsInstancingEligible(Material mat)
+        {
+            if (mat == null || mat.shader == null)
+                return false;
+
+            string shaderName = mat.shader.name;
+            if (shaderName != "P1/CharacterToon"
+                && shaderName != "P1/CharacterToonOutlined"
+                && shaderName != "P1/ObstacleDitherLit"
+                && shaderName != "P1/PropLit"
+                && shaderName != "P1/InkGround"
+                && shaderName != "P1/SpawnPad")
+            {
+                return false;
+            }
+
+            // 透明队列 / URP Lit 透明表面不参与实例批处理，避免改变透明排序。
+            if (mat.renderQueue >= (int)RenderQueue.Transparent)
+                return false;
+            if (mat.HasProperty("_Surface") && mat.GetFloat("_Surface") > 0.5f)
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// 移动端渲染路径开关：URP 自定义 shader 只有在 SRP Batcher 关闭（或 shader 不兼容 SRP Batcher）时
+        /// 才会走 GPU instancing。PC 保持 SRP Batcher + GRD；移动端（Forward、无 GRD）用 instancing 换 DrawCall。
+        /// </summary>
+        [MenuItem("P1/性能/7. 移动端 GPU Instancing：切换 SRP Batcher (P12-D)", false, 95)]
+        public static void ToggleMobileSrpBatcher()
+        {
+            const string path = "Assets/Settings/Mobile_RPAsset.asset";
+            Object asset = AssetDatabase.LoadAssetAtPath<Object>(path);
+            if (asset == null)
+            {
+                Debug.LogError($"[P12-D] 找不到 {path}");
+                return;
+            }
+
+            var so = new SerializedObject(asset);
+            SerializedProperty prop = so.FindProperty("m_UseSRPBatcher");
+            if (prop == null)
+            {
+                Debug.LogError("[P12-D] Mobile_RPAsset 缺少 m_UseSRPBatcher 字段（URP 版本差异）。");
+                return;
+            }
+
+            bool willEnable = prop.intValue == 0;
+            prop.intValue = willEnable ? 1 : 0;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(asset);
+            AssetDatabase.SaveAssets();
+
+            Debug.Log($"[P12-D] 移动端 SRP Batcher 已{(willEnable ? "启用" : "关闭")}。" +
+                      (willEnable ? " 自定义 shader 的 GPU instancing 将失效。" : " 自定义 shader 将走 GPU instancing，DrawCall 下降、状态切换开销上升。"));
+        }
+
+        /// <summary>
+        /// P12-D：移动端 GRD 开关。GRD 要求 Forward+/Deferred+ 渲染路径；GLES3 设备不支持 GRD 时
+        /// 会自动回退普通 Forward+，不会黑屏。开启时同步把 SRP Batcher 打开（非 GRD renderer 仍受益）。
+        /// </summary>
+        [MenuItem("P1/性能/8. 移动端 Forward+ / GRD 开关 (P12-D)", false, 96)]
+        public static void ToggleMobileGpuResidentDrawer()
+        {
+            const string mobileRpPath = "Assets/Settings/Mobile_RPAsset.asset";
+            const string mobileRendererPath = "Assets/Settings/Mobile_Renderer.asset";
+
+            Object rpAsset = AssetDatabase.LoadAssetAtPath<Object>(mobileRpPath);
+            Object rendererAsset = AssetDatabase.LoadAssetAtPath<Object>(mobileRendererPath);
+            if (rpAsset == null || rendererAsset == null)
+            {
+                Debug.LogError("[P12-D] 找不到 Mobile_RPAsset / Mobile_Renderer。");
+                return;
+            }
+
+            var rpSo = new SerializedObject(rpAsset);
+            var rendererSo = new SerializedObject(rendererAsset);
+            SerializedProperty grdMode = rpSo.FindProperty("m_GPUResidentDrawerMode");
+            SerializedProperty srpBatcher = rpSo.FindProperty("m_UseSRPBatcher");
+            SerializedProperty renderingMode = rendererSo.FindProperty("m_RenderingMode");
+            if (grdMode == null || srpBatcher == null || renderingMode == null)
+            {
+                Debug.LogError("[P12-D] Mobile 资产缺少 m_GPUResidentDrawerMode / m_UseSRPBatcher / m_RenderingMode 字段。");
+                return;
+            }
+
+            bool willEnable = grdMode.intValue == 0;
+            grdMode.intValue = willEnable ? 1 : 0;
+            // 0=Forward, 2=Forward+；GRD 只支持 Forward+/Deferred+
+            renderingMode.intValue = willEnable ? 2 : 0;
+            // GRD 与 SRP Batcher 可并存；开启 GRD 时恢复 SRP Batcher（非 GRD 的墙面/UI 仍受益）
+            if (willEnable)
+                srpBatcher.intValue = 1;
+
+            rpSo.ApplyModifiedPropertiesWithoutUndo();
+            rendererSo.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(rpAsset);
+            EditorUtility.SetDirty(rendererAsset);
+            AssetDatabase.SaveAssets();
+
+            if (willEnable)
+                EnsureBrgVariantsKeepAll();
+
+            Debug.Log($"[P12-D] 移动端 GRD 已{(willEnable ? "启用（Forward+ + InstancedDrawing + SRP Batcher）" : "停用（Forward + 经典 GPU instancing）")}。");
+        }
+
         [MenuItem("P1/性能/9. 渲染统计报告 (P12)", false, 99)]
         public static void ReportRenderingStats()
         {

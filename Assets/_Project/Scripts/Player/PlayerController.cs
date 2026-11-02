@@ -800,18 +800,14 @@ namespace P1.Player
         {
             Vector2 move = TouchMoveInput;
 
-            var kb = Keyboard.current;
-            if (kb != null)
-            {
-                float x = 0f, y = 0f;
-                if (kb.aKey.isPressed || kb.leftArrowKey.isPressed) x -= 1f;
-                if (kb.dKey.isPressed || kb.rightArrowKey.isPressed) x += 1f;
-                if (kb.sKey.isPressed || kb.downArrowKey.isPressed) y -= 1f;
-                if (kb.wKey.isPressed || kb.upArrowKey.isPressed) y += 1f;
-                Vector2 kbVec = new Vector2(x, y);
-                if (kbVec.sqrMagnitude > move.sqrMagnitude)
-                    move = kbVec.normalized;
-            }
+            float x = 0f, y = 0f;
+            if (DesktopKeyBindingService.IsActionPressed(DesktopAction.MoveLeft)) x -= 1f;
+            if (DesktopKeyBindingService.IsActionPressed(DesktopAction.MoveRight)) x += 1f;
+            if (DesktopKeyBindingService.IsActionPressed(DesktopAction.MoveBackward)) y -= 1f;
+            if (DesktopKeyBindingService.IsActionPressed(DesktopAction.MoveForward)) y += 1f;
+            Vector2 kbVec = new Vector2(x, y);
+            if (kbVec.sqrMagnitude > move.sqrMagnitude)
+                move = kbVec.normalized;
 
             var gp = Gamepad.current;
             if (gp != null)
@@ -827,7 +823,7 @@ namespace P1.Player
         private bool ReadFireHeld()
         {
             if (TouchFireHeld) return true;
-            if (Mouse.current != null && Mouse.current.leftButton.isPressed) return true;
+            if (DesktopKeyBindingService.IsActionPressed(DesktopAction.Fire)) return true;
             if (Gamepad.current != null && Gamepad.current.rightTrigger.isPressed) return true;
             return false;
         }
@@ -835,8 +831,7 @@ namespace P1.Player
         private bool ReadSwimHeld()
         {
             if (TouchSwimHeld) return true;
-            if (Mouse.current != null && Mouse.current.rightButton.isPressed) return true;
-            if (Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed) return true;
+            if (DesktopKeyBindingService.IsActionPressed(DesktopAction.Swim)) return true;
             if (Gamepad.current != null && Gamepad.current.leftTrigger.isPressed) return true;
             return false;
         }
@@ -844,8 +839,7 @@ namespace P1.Player
         private bool ReadBombPressed()
         {
             // 仅桌面端按下沿；触屏「按下即投」由 TouchBombTriggered 承载，在副武器仲裁处单独消费
-            if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame) return true;
-            if (Mouse.current != null && Mouse.current.middleButton.wasPressedThisFrame) return true;
+            if (DesktopKeyBindingService.WasActionPressedThisFrame(DesktopAction.SubWeapon)) return true;
             if (Gamepad.current != null && Gamepad.current.rightShoulder.wasPressedThisFrame) return true;
             return false;
         }
@@ -857,7 +851,7 @@ namespace P1.Player
                 TouchJumpTriggered = false;
                 return true;
             }
-            if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) return true;
+            if (DesktopKeyBindingService.WasActionPressedThisFrame(DesktopAction.Jump)) return true;
             if (Gamepad.current != null && Gamepad.current.buttonSouth.wasPressedThisFrame) return true;
             return false;
         }
@@ -869,7 +863,7 @@ namespace P1.Player
                 TouchSpecialTriggered = false;
                 return true;
             }
-            if (Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame)
+            if (DesktopKeyBindingService.WasActionPressedThisFrame(DesktopAction.Special))
                 return true;
             if (Gamepad.current != null && Gamepad.current.leftShoulder.wasPressedThisFrame)
                 return true;

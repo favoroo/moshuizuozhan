@@ -76,9 +76,15 @@ Shader "P1/InkBody"
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
+            // 队伍色是逐实例数据（每个弹丸/手雷一个颜色），必须放进 instancing buffer；
+// 仍留在 UnityPerMaterial 会让 MaterialPropertyBlock 覆盖破坏 instancing，
+// 每个弹丸退化成独立 draw call。
+            UNITY_INSTANCING_BUFFER_START(PerInstance)
+                UNITY_DEFINE_INSTANCED_PROP(half4, _BaseColor)
+                UNITY_DEFINE_INSTANCED_PROP(half4, _Color)
+            UNITY_INSTANCING_BUFFER_END(PerInstance)
+
             CBUFFER_START(UnityPerMaterial)
-                half4 _BaseColor;
-                half4 _Color;
                 float _WetGloss;
                 float _DryGloss;
                 float _EnvSpec;
@@ -109,8 +115,10 @@ Shader "P1/InkBody"
             {
                 UNITY_SETUP_INSTANCE_ID(input);
 
-                // 队伍颜色读取：兼容 _BaseColor 与 _Color 两套命名
-                half4 rawColor = _BaseColor.a > 0.001 ? _BaseColor : _Color;
+                // 队伍颜色读取：兼容 _BaseColor 与 _Color 两套命名（逐实例，允许同批不同队色）
+                half4 baseProp = UNITY_ACCESS_INSTANCED_PROP(PerInstance, _BaseColor);
+                half4 fallbackProp = UNITY_ACCESS_INSTANCED_PROP(PerInstance, _Color);
+                half4 rawColor = baseProp.a > 0.001 ? baseProp : fallbackProp;
                 half3 baseColor = rawColor.rgb;
 
                 // 法线解算（假球法线兜底）：当顶点法线过小/退化时，使用局部中心发散向量

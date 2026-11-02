@@ -60,6 +60,7 @@ Shader "P1/PropLit"
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
             #pragma target 4.5
             #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma multi_compile_instancing
             #pragma multi_compile _ P1_INK_HIGH
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -88,6 +89,7 @@ Shader "P1/PropLit"
                 float3 normalOS   : NORMAL;
                 float4 color      : COLOR;
                 float2 uv         : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -128,6 +130,7 @@ Shader "P1/PropLit"
             Varyings vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
@@ -256,6 +259,7 @@ Shader "P1/PropLit"
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体（shadowmap 同样走 GRD 批处理）
             #pragma target 4.5
             #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -264,6 +268,7 @@ Shader "P1/PropLit"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct ShadowVaryings
@@ -302,6 +307,7 @@ Shader "P1/PropLit"
             ShadowVaryings ShadowPassVertex(ShadowAttributes input)
             {
                 ShadowVaryings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
                 float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
 
@@ -343,6 +349,7 @@ Shader "P1/PropLit"
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体（DepthNormals prepass 同样走 GRD 批处理）
             #pragma target 4.5
             #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma multi_compile_instancing
 
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
 
@@ -352,6 +359,7 @@ Shader "P1/PropLit"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct DepthNormalsVaryings
@@ -388,6 +396,7 @@ Shader "P1/PropLit"
             DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)
             {
                 DepthNormalsVaryings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.normalWS   = TransformObjectToWorldNormal(input.normalOS);
                 return output;

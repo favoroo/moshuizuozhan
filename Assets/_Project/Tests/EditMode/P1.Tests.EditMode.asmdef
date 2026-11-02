@@ -4,6 +4,7 @@
     "references": [
         "P1.Game",
         "P1.Editor",
+        "Unity.InputSystem",
         "Unity.TextMeshPro",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"

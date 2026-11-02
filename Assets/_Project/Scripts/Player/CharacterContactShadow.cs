@@ -282,6 +282,9 @@ namespace P1.Player
             {
                 var contact = new Material(shader) { name = "ContactShadowMat" };
                 if (contact.HasProperty(ColorId)) contact.SetColor(ColorId, Color.black);
+                // P12-D：8 个角色阴影共享同一个 quad mesh/材质，颜色是逐实例属性；
+                // 开启 instancing 后可见阴影从 N 个 draw 收敛为 1 个。
+                contact.enableInstancing = true;
                 return contact;
             }
 

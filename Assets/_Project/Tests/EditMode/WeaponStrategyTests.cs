@@ -153,6 +153,67 @@ namespace P1.Tests
         }
 
         [Test]
+        public void Roller_MoveSpeed_RampsFromHalfToFullWhileRolling()
+        {
+            // P35 对齐 INKWAVE weapons.js：推地起步 50%，0.45s 内 SmoothStep 加速到 100%。
+            WeaponConfigSO config = CreateConfig(WeaponKind.Roller);
+            config.flickWindup = 0f;
+            config.flickInkCost = 0f;
+            config.rollMinInkToStart = 0f;
+            config.rollInkPerMeter = 0f;
+            config.rollStartSpeedFactor = 0.5f;
+            config.rollAccelTime = 0.45f;
+
+            var host = new FakeHost { Config = config, CurrentInk = 100f, IsGrounded = true };
+            var strategy = new RollerWeaponStrategy(config);
+            WeaponAim aim = ForwardAim();
+
+            host.TriggerHeldLastFrame = false;
+            strategy.OnTriggerHeld(aim, 1f / 60f, host);
+            strategy.Tick(1f / 60f, true, aim, host);
+
+            Assert.IsTrue(strategy.IsRolling, "无前摇配置下按住应直接进入推地");
+            Assert.AreEqual(0.5f, strategy.MoveSpeedMultiplier, 0.02f, "推地首帧应为起步系数 0.5");
+
+            for (int i = 0; i < 27; i++)
+                strategy.Tick(1f / 60f, true, aim, host);
+
+            Assert.AreEqual(1f, strategy.MoveSpeedMultiplier, 0.02f, "0.45s 后应达到满速");
+        }
+
+        [Test]
+        public void Roller_MoveSpeed_SlowsDuringFlickWindup_ThenRecovers()
+        {
+            // P35：前摇 1 -> 0.45，释放后收势 0.6 -> 1（0.18s）。
+            WeaponConfigSO config = CreateConfig(WeaponKind.Roller);
+            config.flickWindup = 0.22f;
+            config.flickInkCost = 0f;
+            config.flickWindupMoveFactor = 0.45f;
+            config.flickRecoverMoveTime = 0.18f;
+            config.flickRecoverMoveFactor = 0.6f;
+
+            var host = new FakeHost { Config = config, CurrentInk = 1000f, IsGrounded = true };
+            var strategy = new RollerWeaponStrategy(config);
+            WeaponAim aim = ForwardAim();
+
+            host.TriggerHeldLastFrame = false;
+            strategy.OnTriggerHeld(aim, 1f / 60f, host);
+            Assert.AreEqual(1f, strategy.MoveSpeedMultiplier, 0.02f, "前摇刚开始应保持满速");
+
+            strategy.Tick(0.11f, true, aim, host);
+            Assert.AreEqual(0.725f, strategy.MoveSpeedMultiplier, 0.03f, "前摇过半应减速到约 72.5%");
+
+            strategy.Tick(0.11f, true, aim, host); // 前摇走完，释放墨滴
+            Assert.IsFalse(strategy.IsFlicking, "前摇走完应释放");
+            Assert.AreEqual(0.6f, strategy.MoveSpeedMultiplier, 0.02f, "释放后从收势系数 0.6 开始恢复");
+
+            for (int i = 0; i < 12; i++)
+                strategy.Tick(1f / 60f, false, aim, host);
+
+            Assert.AreEqual(1f, strategy.MoveSpeedMultiplier, 0.02f, "0.18s 收势后应恢复满速");
+        }
+
+        [Test]
         public void Roller_FlickLaunchesNineDroplets_InFan_WithNearAndFarDamage()
         {
             WeaponConfigSO config = CreateConfig(WeaponKind.Roller);

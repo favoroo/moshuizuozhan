@@ -32,11 +32,12 @@ Shader "P1/InkVfx"
             ZTest LEqual
 
             HLSLPROGRAM
-            #pragma target 3.0
+            #pragma target 4.5
             #pragma vertex vert
             #pragma fragment frag
 
             #pragma multi_compile _ P1_INK_HIGH
+            #pragma multi_compile_instancing
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -48,6 +49,7 @@ Shader "P1/InkVfx"
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
                 float4 color      : COLOR;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -59,8 +61,12 @@ Shader "P1/InkVfx"
                 half   fogFactor  : TEXCOORD3;
             };
 
+            // 队色逐实例：墨珠/溅射共享同一 material，颜色进 instancing buffer 才能合批。
+            UNITY_INSTANCING_BUFFER_START(PerInstance)
+                UNITY_DEFINE_INSTANCED_PROP(half4, _BaseColor)
+            UNITY_INSTANCING_BUFFER_END(PerInstance)
+
             CBUFFER_START(UnityPerMaterial)
-                half4 _BaseColor;
                 float _Smoothness;
                 float _EmissionStrength;
             CBUFFER_END
@@ -68,20 +74,21 @@ Shader "P1/InkVfx"
             Varyings vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
                 output.positionCS = posInputs.positionCS;
                 output.positionWS = posInputs.positionWS;
                 output.normalWS = normInputs.normalWS;
-                output.color = input.color;
+                output.color = input.color * UNITY_ACCESS_INSTANCED_PROP(PerInstance, _BaseColor);
                 output.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
                 return output;
             }
 
             half4 frag(Varyings input) : SV_Target
             {
-                half4 col = input.color * _BaseColor;
+                half4 col = input.color;
                 half3 albedo = col.rgb;
 
                 float3 N = normalize(input.normalWS);

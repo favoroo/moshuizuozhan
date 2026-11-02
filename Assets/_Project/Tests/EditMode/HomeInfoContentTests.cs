@@ -54,6 +54,21 @@ namespace P1.Tests
         }
 
         [Test]
+        public void DynamicControls_Desktop_ReturnsEightRowsAndReflectsBindings()
+        {
+            DesktopKeyBindingService.ResetToDefaults();
+            var rows = HomeInfoContent.DynamicControls(false);
+            Assert.AreEqual(8, rows.Count);
+            Assert.AreEqual("移动", rows[0].Action);
+            Assert.AreEqual("WASD", rows[0].Key);
+            Assert.AreEqual("跳跃", rows[2].Action);
+            Assert.AreEqual("空格", rows[2].Key);
+
+            var mobileRows = HomeInfoContent.DynamicControls(true);
+            Assert.AreEqual(6, mobileRows.Count);
+        }
+
+        [Test]
         public void RowsInGroup_SplitsMovementAndCombat()
         {
             ControlRow[] movement = HomeInfoContent.RowsInGroup(false, ControlGroup.Movement);

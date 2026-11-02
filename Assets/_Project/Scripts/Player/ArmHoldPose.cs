@@ -134,10 +134,10 @@ namespace P1.Player
             {
                 // 右手统一抬到胸腹之间偏右前方（肩高 0.746，手臂总长 0.325）：手位离肩 0.26~0.30m，
                 // 肘弯 40~65°，向右外展 5~7cm，从正背后与过肩视角看过去枪身清晰可辨，不挡中线准星。
-                case WeaponKind.Charger: return new Vector3(0.165f, 0.590f, 0.260f);
+                case WeaponKind.Charger: return new Vector3(0.140f, 0.575f, 0.240f);
                 case WeaponKind.Roller: return new Vector3(0.050f, 0.560f, 0.160f);
                 case WeaponKind.Slosher: return new Vector3(0.155f, 0.540f, 0.220f);
-                case WeaponKind.Splatling: return new Vector3(0.160f, 0.570f, 0.230f);
+                case WeaponKind.Splatling: return new Vector3(0.130f, 0.555f, 0.210f);
                 case WeaponKind.Blaster: return new Vector3(0.170f, 0.580f, 0.245f);
                 case WeaponKind.Dualies: return new Vector3(0.160f, 0.580f, 0.225f);
                 default: return new Vector3(0.165f, 0.585f, 0.250f);
@@ -185,10 +185,34 @@ namespace P1.Player
         public static void LeftRelaxedPose(WeaponKind kind, out Quaternion shoulder, out Quaternion elbow)
         {
             float shoulderPitch = 6f;   // 上臂顺重力自然下垂，微向后
+            float shoulderYaw = 0f;
             float shoulderRoll = -10f;  // 略微外展，避开衣服短裤侧缘
             float elbowPitch = -20f;    // 肘部自然微屈 20°
 
-            shoulder = Quaternion.Euler(shoulderPitch, 0f, shoulderRoll);
+            // P35 单手重武器：左手不再完全垂在身侧，改为胸前扶枪/托举，读作"双手在稳住这把枪"。
+            // 这是纯静态姿态（不参与左手 IK），不改变右手握把与武器位置。
+            switch (kind)
+            {
+                case WeaponKind.Charger:
+                    shoulderPitch = -18f;
+                    shoulderYaw = 10f;
+                    shoulderRoll = -16f;
+                    elbowPitch = -48f;
+                    break;
+                case WeaponKind.Splatling:
+                    shoulderPitch = -14f;
+                    shoulderYaw = 6f;
+                    shoulderRoll = -14f;
+                    elbowPitch = -52f;
+                    break;
+                case WeaponKind.Slosher:
+                    shoulderPitch = 2f;
+                    shoulderRoll = -12f;
+                    elbowPitch = -24f;
+                    break;
+            }
+
+            shoulder = Quaternion.Euler(shoulderPitch, shoulderYaw, shoulderRoll);
             elbow = Quaternion.Euler(elbowPitch, 0f, 0f);
         }
     }

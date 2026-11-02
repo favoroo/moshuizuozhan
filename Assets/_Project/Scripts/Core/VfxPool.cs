@@ -126,6 +126,9 @@ namespace P1.Core
                 particleShader = Shader.Find("Sprites/Default");
 
             _sharedParticleMat = new Material(particleShader) { name = "VfxInkParticleMat" };
+            // P12-D：所有卫星墨珠共享同一球网格/材质，队色是逐实例属性；
+            // 开启 instancing 后同屏 20+ 墨珠从逐个 draw 收敛为 1 个批次。
+            _sharedParticleMat.enableInstancing = true;
             if (_sharedParticleMat.HasProperty(BaseColorProp))
                 _sharedParticleMat.SetColor(BaseColorProp, Color.white);
 

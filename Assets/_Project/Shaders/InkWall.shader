@@ -58,6 +58,7 @@ Shader "P1/InkWall"
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
             #pragma target 4.5
             #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma multi_compile_instancing
             #pragma multi_compile _ P1_INK_HIGH
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -75,6 +76,7 @@ Shader "P1/InkWall"
                 float3 normalOS   : NORMAL;
                 float2 uv         : TEXCOORD0;
                 float2 uv2        : TEXCOORD1; // (面宽, 面高) 米，由 InkWallSurface 写入
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -120,6 +122,7 @@ Shader "P1/InkWall"
             Varyings vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 

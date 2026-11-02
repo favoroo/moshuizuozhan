@@ -48,7 +48,7 @@ namespace P1.Ink
         private InkGrid _grid;
         private Texture2D _inkTexture;
         private InkSplatAtlas _atlas;
-        private MaterialPropertyBlock _surfaceBlock;
+        private readonly List<Material> _inkSurfaceMaterials = new List<Material>(4);
         private float _nextMinimapFlushTime;
         private float _nextRippleSyncTime;
         private float _nextWallFlushTime;
@@ -605,8 +605,10 @@ namespace P1.Ink
             if (!AreRipplesDirty())
                 return;
 
-            // 波纹只在真正变化时写 MPB，并按 rippleSyncHz 节流：34 个墨面 Renderer 的
-            // Get/SetPropertyBlock 从「每个涟漪帧」降到 ≤30 次/秒，视觉上不可察觉。
+            // 波纹数组对所有墨面完全相同，改为全局 uniform 推送（_InkRipples / _InkRippleParams
+            // 在 InkGround 的 ForwardLit 中本来就是非 CBUFFER 的全局 uniform）。
+            // 这样 34 个墨面不再各写一块 MPB，恢复「同 mesh + 同 material」的合批资格。
+            // 仍按 rippleSyncHz 节流：数组只在新增波纹时变化，≤30 次/秒肉眼不可察觉。
             float rippleHz = config != null ? config.rippleSyncHz : 30f;
             if (rippleHz > 0.01f)
             {
@@ -617,59 +619,29 @@ namespace P1.Ink
             }
 
             SyncRippleCache();
+            PushRippleGlobals();
+            ApplyWetnessToSharedMaterials();
+        }
 
-            if (_surfaceBlock == null)
-            {
-                _surfaceBlock = new MaterialPropertyBlock();
-            }
-
-            for (int i = 0; i < inkableSurfaceRenderers.Count; i++)
-            {
-                Renderer r = inkableSurfaceRenderers[i];
-                if (r == null) continue;
-
-                r.GetPropertyBlock(_surfaceBlock);
-                // 增量键：波纹 / 湿润度
-                _surfaceBlock.SetVectorArray(RipplesProp, _ripplePositions);
-                _surfaceBlock.SetVectorArray(RippleParamsProp, _rippleParams);
-                _surfaceBlock.SetFloat(WetnessFactorProp, wetnessFactor);
-                // 自愈键：把墨迹绑定一并回写。InkGround 的 ForwardLit 已经改采全局 uniform，
-                // 这里重写是为了兼容任何仍在读 per-material / per-renderer _InkTex 的着色器，
-                // 并抵消其它系统（历史上是 OcclusionFader 的 SetPropertyBlock(null)）
-                // 对同一块 MPB 的破坏。
-                ReapplyInkBindingKeys(_surfaceBlock);
-                r.SetPropertyBlock(_surfaceBlock);
-            }
+        /// <summary>把 8 组波纹一次性推给所有墨面共享的全局 uniform。</summary>
+        private void PushRippleGlobals()
+        {
+            Shader.SetGlobalVectorArray(RipplesProp, _ripplePositions);
+            Shader.SetGlobalVectorArray(RippleParamsProp, _rippleParams);
         }
 
         /// <summary>
-        /// 把墨迹图集与映射参数写进给定的 MaterialPropertyBlock（供绑定与每帧自愈共用）。
+        /// 湿润度写在墨面共享材质上（所有墨面共用同一材质），而不是逐 renderer MPB。
+        /// 这样 GPU instancing / GRD 能继续把这些墨面批在一起。
         /// </summary>
-        private void ReapplyInkBindingKeys(MaterialPropertyBlock block)
+        private void ApplyWetnessToSharedMaterials()
         {
-            if (block == null)
-                return;
-
-            Texture inkTexture = _atlas != null ? (Texture)_atlas.Atlas : _inkTexture;
-            if (inkTexture == null)
-                return;
-
-            Vector2 atlasOrigin = _atlas != null ? _atlas.OriginXZ : _grid != null ? _grid.OriginXZ : Vector2.zero;
-            Vector2 atlasMapSize = _atlas != null ? _atlas.MapSize : _grid != null ? _grid.MapSize : Vector2.one;
-
-            block.SetTexture(InkTexProp, inkTexture);
-            block.SetVector(InkTexelSizeProp, new Vector4(
-                1f / Mathf.Max(1, inkTexture.width),
-                1f / Mathf.Max(1, inkTexture.height),
-                inkTexture.width,
-                inkTexture.height));
-            block.SetVector(InkMapOriginProp, new Vector4(
-                atlasOrigin.x,
-                atlasOrigin.y,
-                atlasMapSize.x,
-                atlasMapSize.y));
-            block.SetColor(TeamAColorProp, config != null ? config.teamAColor : new Color(1.00f, 0.44f, 0.06f, 1f));
-            block.SetColor(TeamBColorProp, config != null ? config.teamBColor : new Color(0.15f, 0.42f, 1.00f, 1f));
+            for (int i = 0; i < _inkSurfaceMaterials.Count; i++)
+            {
+                Material mat = _inkSurfaceMaterials[i];
+                if (mat != null && mat.HasProperty(WetnessFactorProp))
+                    mat.SetFloat(WetnessFactorProp, wetnessFactor);
+            }
         }
 
         private bool AreRipplesDirty()
@@ -700,13 +672,9 @@ namespace P1.Ink
 
         private void BindSurfaceMaterials()
         {
-            // 运行时 Texture2D 无法序列化进 .mat 资产，因此用 MaterialPropertyBlock 逐 Renderer
-            // 绑定墨水和世界映射参数：不污染资产、不打断合批，EditMode 与 PlayMode 都生效。
-            if (_surfaceBlock == null)
-            {
-                _surfaceBlock = new MaterialPropertyBlock();
-            }
-
+            // InkGround 的 ForwardLit 已全部改读全局 uniform（_GlobalInkAtlasTex / _GlobalInkMapOriginXZ /
+            // _GlobalInkTexelSize / 队伍色 / _InkRipples），不再需要逐 renderer MPB。
+            // 只有湿润度是 UnityPerMaterial 属性，写到所有墨面共享的材质实例上即可。
             Vector2 atlasOrigin = _atlas != null ? _atlas.OriginXZ : _grid.OriginXZ;
             Vector2 atlasMapSize = _atlas != null ? _atlas.MapSize : _grid.MapSize;
             Vector4 originAndSize = new Vector4(
@@ -749,21 +717,32 @@ namespace P1.Ink
             Shader.SetGlobalFloat(GlobalWetnessFactorProp, wetnessFactor);
             Shader.SetGlobalFloat(InkTimeProp, Time.time);
             PushWetClockGlobals();
+            PushRippleGlobals();
 
+            // 收集墨面共享材质（通常只有 Mat_InkGround 一个），湿润度只写一次。
+            _inkSurfaceMaterials.Clear();
             for (int i = 0; i < inkableSurfaceRenderers.Count; i++)
             {
                 Renderer r = inkableSurfaceRenderers[i];
                 if (r == null) continue;
 
-                r.GetPropertyBlock(_surfaceBlock);
-                // 墨迹绑定键由 ReapplyInkBindingKeys 统一写入，避免与每帧自愈路径分叉
-                ReapplyInkBindingKeys(_surfaceBlock);
-                _surfaceBlock.SetFloat(WetnessFactorProp, wetnessFactor);
-                _surfaceBlock.SetVectorArray(RipplesProp, _ripplePositions);
-                _surfaceBlock.SetVectorArray(RippleParamsProp, _rippleParams);
-                r.SetPropertyBlock(_surfaceBlock);
+                Material mat = r.sharedMaterial;
+                if (mat == null) continue;
+
+                bool exists = false;
+                for (int m = 0; m < _inkSurfaceMaterials.Count; m++)
+                {
+                    if (ReferenceEquals(_inkSurfaceMaterials[m], mat))
+                    {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists)
+                    _inkSurfaceMaterials.Add(mat);
             }
 
+            ApplyWetnessToSharedMaterials();
             SyncRippleCache();
         }
     }

@@ -123,6 +123,41 @@ namespace P1.UI
             return mobile ? MobileRows : DesktopRows;
         }
 
+        /// <summary>
+        /// 获取当前生效的键位表（桌面端动态读取用户自定义键位，移动端返回触屏说明）。
+        /// </summary>
+        public static IReadOnlyList<ControlRow> DynamicControls(bool mobile)
+        {
+            if (mobile) return MobileRows;
+
+            DesktopKeyBindingService.EnsureInitialized();
+            DesktopKeyBindingService.GetBinding(DesktopAction.MoveForward, out var fwd, out _);
+            DesktopKeyBindingService.GetBinding(DesktopAction.MoveLeft, out var left, out _);
+            DesktopKeyBindingService.GetBinding(DesktopAction.MoveBackward, out var back, out _);
+            DesktopKeyBindingService.GetBinding(DesktopAction.MoveRight, out var right, out _);
+            DesktopKeyBindingService.GetBinding(DesktopAction.Jump, out var jump, out _);
+            DesktopKeyBindingService.GetBinding(DesktopAction.Fire, out var fire, out _);
+            DesktopKeyBindingService.GetBinding(DesktopAction.Swim, out var swimPri, out var swimSec);
+            DesktopKeyBindingService.GetBinding(DesktopAction.SubWeapon, out var subPri, out var subSec);
+            DesktopKeyBindingService.GetBinding(DesktopAction.Special, out var sp, out _);
+
+            string moveKey = $"{fwd.GetDisplayName()}{left.GetDisplayName()}{back.GetDisplayName()}{right.GetDisplayName()}";
+            string swimKey = swimSec.IsEmpty ? swimPri.GetDisplayName() : $"{swimPri.GetDisplayName()} · {swimSec.GetDisplayName()}";
+            string subKey = subSec.IsEmpty ? subPri.GetDisplayName() : $"{subPri.GetDisplayName()} · {subSec.GetDisplayName()}";
+
+            return new ControlRow[]
+            {
+                new ControlRow(moveKey, "移动", ControlGroup.Movement),
+                new ControlRow("鼠标", "转视角", ControlGroup.Movement),
+                new ControlRow(jump.GetDisplayName(), "跳跃", ControlGroup.Movement),
+                new ControlRow(swimKey, "潜墨 · 爬墙", ControlGroup.Movement),
+                new ControlRow(fire.GetDisplayName(), "开火涂地", ControlGroup.Combat),
+                new ControlRow(subKey, "投掷手雷", ControlGroup.Combat),
+                new ControlRow(sp.GetDisplayName(), "释放大招", ControlGroup.Combat),
+                new ControlRow("Esc", "暂停 · 设置", ControlGroup.Combat),
+            };
+        }
+
         /// <summary>按语义分组取键位行（浮层左右两栏用）。</summary>
         public static ControlRow[] RowsInGroup(bool mobile, ControlGroup group)
         {

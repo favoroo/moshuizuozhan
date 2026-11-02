@@ -84,6 +84,7 @@ Shader "P1/ObstacleDitherLit"
             // 注：带 MPB（OcclusionFader 淡化中）的 renderer 会被 GRD 排除并自动回退普通路径，仍正确
             #pragma target 4.5
             #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma multi_compile_instancing
             #pragma multi_compile _ P1_INK_HIGH
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -108,6 +109,7 @@ Shader "P1/ObstacleDitherLit"
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
                 float2 uv         : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -167,6 +169,7 @@ Shader "P1/ObstacleDitherLit"
             Varyings vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
@@ -368,6 +371,7 @@ Shader "P1/ObstacleDitherLit"
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体（shadowmap 同样走 GRD 批处理）
             #pragma target 4.5
             #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -376,6 +380,7 @@ Shader "P1/ObstacleDitherLit"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -433,6 +438,7 @@ Shader "P1/ObstacleDitherLit"
             Varyings ShadowPassVertex(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
                 float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
 
@@ -474,6 +480,7 @@ Shader "P1/ObstacleDitherLit"
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体（DepthNormals prepass 同样走 GRD 批处理）
             #pragma target 4.5
             #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma multi_compile_instancing
 
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
 
@@ -483,6 +490,7 @@ Shader "P1/ObstacleDitherLit"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct DepthNormalsVaryings
@@ -539,6 +547,7 @@ Shader "P1/ObstacleDitherLit"
             DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)
             {
                 DepthNormalsVaryings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 output.positionWS = TransformObjectToWorld(input.positionOS.xyz);
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.normalWS   = TransformObjectToWorldNormal(input.normalOS);

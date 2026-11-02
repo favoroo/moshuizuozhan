@@ -182,11 +182,23 @@ namespace P1.Weapons
         /// <summary>滚筒挥击前摇中（抡起阶段）；前摇走完释放墨滴的同一帧回到 false。表现层轮询下降沿即可与墨滴同步做砸地动画。</summary>
         public virtual bool IsFlicking => false;
 
+        /// <summary>泼桶前摇中（从按下到甩出墨浪）；表现层据此播放桶身后仰。</summary>
+        public virtual bool IsWindingUp => false;
+
+        /// <summary>当前前摇进度 0~1（0 = 刚按下，1 = 即将甩出）；非前摇武器恒为 0。</summary>
+        public virtual float Windup01 => 0f;
+
         /// <summary>双枪战术翻滚中（期间无法正常开火，位移并沿途滴墨）。</summary>
         public virtual bool IsRollingDodge => false;
 
         /// <summary>双枪翻滚方向（世界平移向量，模长为 1）。</summary>
         public virtual Vector3 DodgeDirection => Vector3.forward;
+
+        /// <summary>双枪翻滚方向相对触发瞬间角色右方的分量（-1 左 ~ +1 右）。</summary>
+        public virtual float DodgeSide => 0f;
+
+        /// <summary>双枪翻滚方向相对触发瞬间角色前方的分量（-1 后 ~ +1 前）。</summary>
+        public virtual float DodgeForward => 1f;
 
         /// <summary>双枪翻滚后的原地架枪状态（移速锁定、射速提升 20%、散布清零）。</summary>
         public virtual bool IsTurretLocked => false;

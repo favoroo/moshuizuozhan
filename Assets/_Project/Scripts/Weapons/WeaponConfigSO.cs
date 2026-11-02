@@ -90,6 +90,25 @@ namespace P1.Weapons
                  "正常 60fps 潜行 11.8m/s 也只有 0.2m，1.5m 留足卡顿余量")]
         public float rollMaxStepMeters = 1.5f;
 
+        [Header("滚筒移速手感 (P35，参考 INKWAVE weapons.js)")]
+        [Tooltip("推地起步速度系数：按住推地瞬间从该倍率开始加速")]
+        [Range(0f, 1f)]
+        public float rollStartSpeedFactor = 0.5f;
+
+        [Tooltip("推地从起步系数加速到满速所需时间（秒）")]
+        public float rollAccelTime = 0.45f;
+
+        [Tooltip("挥击前摇期间移速系数（1 -> 该值，按前摇进度）")]
+        [Range(0f, 1f)]
+        public float flickWindupMoveFactor = 0.45f;
+
+        [Tooltip("挥击后收势移速恢复时长（秒）")]
+        public float flickRecoverMoveTime = 0.18f;
+
+        [Tooltip("挥击后收势移速恢复起始系数（该值 -> 1）")]
+        [Range(0f, 1f)]
+        public float flickRecoverMoveFactor = 0.6f;
+
         [Tooltip("挥击间隔（秒，从按下扳机算起）")]
         public float flickInterval = 0.62f;
 
@@ -382,6 +401,11 @@ namespace P1.Weapons
             rollWidth = Mathf.Max(0.2f, rollWidth);
             rollForwardReach = Mathf.Max(0.1f, rollForwardReach);
             rollPaintRadius = Mathf.Max(0.05f, rollPaintRadius);
+            rollStartSpeedFactor = Mathf.Clamp01(rollStartSpeedFactor);
+            rollAccelTime = Mathf.Max(0.05f, rollAccelTime);
+            flickWindupMoveFactor = Mathf.Clamp01(flickWindupMoveFactor);
+            flickRecoverMoveTime = Mathf.Max(0f, flickRecoverMoveTime);
+            flickRecoverMoveFactor = Mathf.Clamp01(flickRecoverMoveFactor);
             flickDrops = Mathf.Max(1, flickDrops);
             flickWindup = Mathf.Max(0f, flickWindup);
             flickInterval = Mathf.Max(flickWindup, flickInterval);

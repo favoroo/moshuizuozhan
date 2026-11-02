@@ -47,6 +47,18 @@ namespace P1.Player
             _mergedBodyMeshCache.Clear();
         }
 
+        /// <summary>
+        /// 项目关闭了 Domain Reload（EditorSettings.enterPlayModeOptions = DisableDomainReload），
+        /// 静态缓存会从编辑器装配期直接带进 PlayMode。那些 Mesh 是编辑器场景构建时创建的临时对象，
+        /// 进 Play 后已失效，缓存里只剩 null；必须每次进 Play 清空，否则身体/武器合并会静默跳过。
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStaticCachesForPlayMode()
+        {
+            ClearCaches();
+            LastMergeDiagnostics = string.Empty;
+        }
+
         #region Public Assembly Entry
 
         public static CharacterVisualController Assemble(
@@ -380,6 +392,11 @@ namespace P1.Player
             {
                 if (mat.HasProperty("_EmissionStrength")) mat.SetFloat("_EmissionStrength", 0f);
             }
+
+            // P12-D：角色合并网格跨角色共享，开启材质 instancing 后同一
+            // (mesh, material) 组合可由 GPU instancing / GRD 一次提交。
+            // 仅用于不透明 CharacterToon 材质；墨罐玻璃走 CreateLitMat，不在此处。
+            mat.enableInstancing = true;
         }
 
         private static Material CreateLitMat(string name, Color baseCol, float smoothness, float metallic, Color? emission = null)
@@ -2059,6 +2076,20 @@ namespace P1.Player
             }
             List<Mesh> cachedGroups = perRoot[mergeIndex];
             bool reuseCache = cachedGroups != null && cachedGroups.Count == groups.Count;
+            if (reuseCache)
+            {
+                // 关闭 Domain Reload 时静态缓存会跨 PlayMode 存活；编辑器装配期创建的
+                // Mesh 对象在进 Play 后可能已被销毁，缓存里只剩 null。必须逐项校验，
+                // 否则「reuseCache=true + 全 null」会静默跳过合并（实测武器/身体都不再合批）。
+                for (int c = 0; c < cachedGroups.Count; c++)
+                {
+                    if (cachedGroups[c] == null)
+                    {
+                        reuseCache = false;
+                        break;
+                    }
+                }
+            }
 
             var builtMeshes = new Mesh[groups.Count];
             bool allGroupsBuilt = true;
@@ -2507,6 +2538,18 @@ namespace P1.Player
             List<Mesh> cachedGroups;
             bool reuseCache = _mergedBodyMeshCache.TryGetValue(cacheKey, out cachedGroups)
                               && cachedGroups != null && cachedGroups.Count == groups.Count;
+            if (reuseCache)
+            {
+                // 同武器缓存：DisableDomainReload 下编辑器装配期缓存可能只剩被销毁的 Mesh。
+                for (int c = 0; c < cachedGroups.Count; c++)
+                {
+                    if (cachedGroups[c] == null)
+                    {
+                        reuseCache = false;
+                        break;
+                    }
+                }
+            }
 
             var builtMeshes = new Mesh[groups.Count];
             bool allGroupsBuilt = true;

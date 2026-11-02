@@ -89,7 +89,31 @@ namespace P1.UI.Menus
         // 视图切换容器
         private GameObject _mainViewContainer;
         private GameObject _settingsViewContainer;
+        private GameObject _keyBindingsViewContainer;
         private bool _isSettingsOpen;
+        private bool _isKeyBindingsOpen;
+        private bool _isListeningForKey;
+        private DesktopAction _listeningAction;
+        private bool _listeningIsSecondary;
+        private int _listeningStartFrame;
+        private Button _activeListeningButton;
+        private UIInkShapeGraphic _activeListeningShape;
+        private TextMeshProUGUI _activeListeningText;
+
+        private class KeyBindingRowUI
+        {
+            public DesktopAction action;
+            public Button primaryBtn;
+            public UIInkShapeGraphic primaryShape;
+            public TextMeshProUGUI primaryText;
+            public Button secondaryBtn;
+            public UIInkShapeGraphic secondaryShape;
+            public TextMeshProUGUI secondaryText;
+        }
+
+        private readonly List<KeyBindingRowUI> _keyBindingRows = new List<KeyBindingRowUI>();
+        private static readonly Key[] s_AllCandidateKeys = (Key[])Enum.GetValues(typeof(Key));
+
         // 首页「设置」卡直开模式：只挂出设置视图，不走对局暂停语义（IsPaused 保持 false，
         // timeScale / AudioListener / GameplayInputEnabled / PauseStateChanged 均不动）。
         private bool _homeSettingsMode;
@@ -210,7 +234,14 @@ namespace P1.UI.Menus
             }
 
             CheckScreenResolutionChange();
-            HandleInput();
+            if (_isListeningForKey)
+            {
+                HandleKeyListening();
+            }
+            else
+            {
+                HandleInput();
+            }
             UpdateMobileButtonVisibility();
         }
 
@@ -435,6 +466,17 @@ namespace P1.UI.Menus
             setRt.offsetMax = Vector2.zero;
             BuildSettingsViewContent(_settingsViewContainer.transform);
 
+            // 3) 桌面按键设置视图容器
+            _keyBindingsViewContainer = new GameObject("KeyBindingsView", typeof(RectTransform));
+            _keyBindingsViewContainer.transform.SetParent(panelGo.transform, false);
+            var keyRt = _keyBindingsViewContainer.GetComponent<RectTransform>();
+            keyRt.anchorMin = Vector2.zero;
+            keyRt.anchorMax = Vector2.one;
+            keyRt.offsetMin = Vector2.zero;
+            keyRt.offsetMax = Vector2.zero;
+            BuildKeyBindingsViewContent(_keyBindingsViewContainer.transform);
+
+            _keyBindingsViewContainer.SetActive(false);
             _settingsViewContainer.SetActive(false);
             _modalRoot.SetActive(false);
 
@@ -537,8 +579,8 @@ namespace P1.UI.Menus
             bool mobile = UITypography.IsMobileLike;
 
             // 键位表统一来自 HomeInfoContent：首页「键位说明 / 操作指南」浮层与这里共用一份数据源，
-            // 以后改键位不会再出现两处各写一套文案的情况。
-            IReadOnlyList<ControlRow> keys = HomeInfoContent.Controls(mobile);
+            // 桌面端动态展示最新自定义键位。
+            IReadOnlyList<ControlRow> keys = HomeInfoContent.DynamicControls(mobile);
             int rowCount = keys.Count;
             float rowsHeight = rowCount * ControlsRowHeight + (rowCount - 1) * ControlsRowGap;
             float cardHeight = 118f + rowsHeight;
@@ -695,8 +737,7 @@ namespace P1.UI.Menus
             titleRt.anchoredPosition = new Vector2(20f, 0f);
             titleRt.sizeDelta = new Vector2(-20f, 44f);
 
-            bool showControlRow = Application.isMobilePlatform || Application.isEditor;
-            int totalRows = showControlRow ? 8 : 7;
+            int totalRows = 8;
 
             var tableGo = new GameObject("SettingsTable", typeof(RectTransform));
             tableGo.transform.SetParent(parent, false);
@@ -850,17 +891,19 @@ namespace P1.UI.Menus
             backRt.anchoredPosition = new Vector2(-28f, 0f);
             backBtn.onClick.AddListener(CloseSettings);
 
-            // Row 7: 移动端操作设置入口
-            if (showControlRow)
-            {
-                BuildControlSettingsRow(tableGo.transform, 7, totalRows);
-            }
+            // Row 7: 操作设置入口（移动端打开触控布局自定义，桌面端打开按键自定义）
+            BuildControlSettingsRow(tableGo.transform, 7, totalRows);
         }
 
         private void BuildControlSettingsRow(Transform parent, int index, int totalRows)
         {
             var row = CreateSettingRow(parent, index, totalRows);
-            var label = CreateTextMesh("ControlLabel", row.transform, "触控操作与按键", UITypography.FontSnapped(24f), ComicStyle.Ink, null,
+            bool isMobile = Application.isMobilePlatform;
+
+            string labelText = isMobile ? "触控操作与按键" : "键盘与鼠标按键";
+            string btnText = isMobile ? "打开操作设置" : "自定义按键";
+
+            var label = CreateTextMesh("ControlLabel", row.transform, labelText, UITypography.FontSnapped(24f), ComicStyle.Ink, null,
                 TextAlignmentOptions.Left, isDisplay: false);
             label.fontStyle = FontStyles.Bold;
             var labelRt = label.rectTransform;
@@ -870,7 +913,7 @@ namespace P1.UI.Menus
             labelRt.anchoredPosition = new Vector2(28f, 0f);
             labelRt.sizeDelta = new Vector2(320f, 44f);
 
-            var button = CreateStyledButton("ControlSettingsBtn", row.transform, "打开操作设置",
+            var button = CreateStyledButton("ControlSettingsBtn", row.transform, btnText,
                 ComicStyle.Yellow, ComicStyle.Ink, new Vector2(PauseSettingControlWidth, PauseSettingControlHeight), _theme, UITypography.FontSnapped(PauseSettingControlFont),
                 ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var rt = button.GetComponent<RectTransform>();
@@ -878,7 +921,18 @@ namespace P1.UI.Menus
             rt.anchorMax = new Vector2(1f, 0.5f);
             rt.pivot = new Vector2(1f, 0.5f);
             rt.anchoredPosition = new Vector2(-28f, 0f);
-            button.onClick.AddListener(OpenControlSettings);
+
+            button.onClick.AddListener(() =>
+            {
+                if (isMobile)
+                {
+                    OpenControlSettings();
+                }
+                else
+                {
+                    OpenKeyBindings();
+                }
+            });
         }
 
         private void OpenControlSettings()
@@ -889,6 +943,366 @@ namespace P1.UI.Menus
             {
                 touchUI.OpenLayoutCustomizer();
             }
+        }
+
+        public void OpenKeyBindings()
+        {
+            if (_keyBindingsViewContainer == null) return;
+            _isKeyBindingsOpen = true;
+            _settingsViewContainer.SetActive(false);
+            _keyBindingsViewContainer.SetActive(true);
+            RefreshKeyBindingsUI();
+
+            if (_panelMotion != null)
+            {
+                _panelMotion.Punch(0.04f);
+            }
+        }
+
+        public void CloseKeyBindings()
+        {
+            if (_isListeningForKey)
+            {
+                CancelKeyListening();
+            }
+
+            _isKeyBindingsOpen = false;
+            if (_keyBindingsViewContainer != null) _keyBindingsViewContainer.SetActive(false);
+            if (_settingsViewContainer != null) _settingsViewContainer.SetActive(true);
+
+            if (_panelMotion != null)
+            {
+                _panelMotion.Punch(0.04f);
+            }
+        }
+
+        private void BuildKeyBindingsViewContent(Transform parent)
+        {
+            _keyBindingRows.Clear();
+
+            // 1. 标题头 (960x64，锚定在 y = 335)
+            var headerGo = new GameObject("KeyHeaderBox", typeof(RectTransform));
+            headerGo.transform.SetParent(parent, false);
+            var headerRt = headerGo.GetComponent<RectTransform>();
+            headerRt.anchorMin = new Vector2(0.5f, 0.5f);
+            headerRt.anchorMax = new Vector2(0.5f, 0.5f);
+            headerRt.anchoredPosition = new Vector2(0f, 335f);
+            headerRt.sizeDelta = new Vector2(960f, 64f);
+
+            var barGo = new GameObject("AccentBar", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            barGo.transform.SetParent(headerGo.transform, false);
+            var barRt = barGo.GetComponent<RectTransform>();
+            barRt.anchorMin = new Vector2(0f, 0.5f);
+            barRt.anchorMax = new Vector2(0f, 0.5f);
+            barRt.pivot = new Vector2(0f, 0.5f);
+            barRt.anchoredPosition = new Vector2(0f, 0f);
+            barRt.sizeDelta = new Vector2(8f, 44f);
+            var barShape = barGo.GetComponent<UIInkShapeGraphic>();
+            barShape.Shape = UIInkShape.SharpRect;
+            barShape.CornerRadius = ComicStyle.CornerSharp;
+            barShape.BorderWidth = 0f;
+            barShape.color = ComicStyle.Yellow;
+            barShape.HardShadow = false;
+
+            var title = CreateTextMesh("Title", headerGo.transform, "按键设置 / KEY BINDINGS", UITypography.FontSnapped(32f), ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: true);
+            title.fontStyle = FontStyles.Bold;
+            var titleRt = title.rectTransform;
+            titleRt.anchorMin = new Vector2(0f, 0.5f);
+            titleRt.anchorMax = new Vector2(1f, 0.5f);
+            titleRt.pivot = new Vector2(0f, 0.5f);
+            titleRt.anchoredPosition = new Vector2(20f, 10f);
+            titleRt.sizeDelta = new Vector2(-20f, 36f);
+
+            var tip = CreateTextMesh("Tip", headerGo.transform, "点击按键卡片后按新键修改；按 ESC 取消；Backspace 清空备用键", UITypography.FontSnapped(18f), ComicStyle.WithAlpha(ComicStyle.Ink, 0.65f), null, TextAlignmentOptions.Left, isDisplay: false);
+            var tipRt = tip.rectTransform;
+            tipRt.anchorMin = new Vector2(0f, 0.5f);
+            tipRt.anchorMax = new Vector2(1f, 0.5f);
+            tipRt.pivot = new Vector2(0f, 0.5f);
+            tipRt.anchoredPosition = new Vector2(20f, -18f);
+            tipRt.sizeDelta = new Vector2(-20f, 26f);
+
+            // 2. 表头与按键列表容器
+            var tableGo = new GameObject("KeyBindingsTable", typeof(RectTransform));
+            tableGo.transform.SetParent(parent, false);
+            var tableRt = tableGo.GetComponent<RectTransform>();
+            tableRt.anchorMin = new Vector2(0.5f, 0.5f);
+            tableRt.anchorMax = new Vector2(0.5f, 0.5f);
+            tableRt.pivot = new Vector2(0.5f, 0.5f);
+            tableRt.anchoredPosition = new Vector2(0f, 10f);
+            tableRt.sizeDelta = new Vector2(960f, 520f);
+
+            DesktopAction[] actions = (DesktopAction[])Enum.GetValues(typeof(DesktopAction));
+            float rowHeight = 48f;
+            float rowGap = 8f;
+            float totalHeight = actions.Length * (rowHeight + rowGap);
+            float topY = totalHeight * 0.5f - rowHeight * 0.5f;
+
+            for (int i = 0; i < actions.Length; i++)
+            {
+                DesktopAction act = actions[i];
+                float y = topY - i * (rowHeight + rowGap);
+
+                var rowGo = new GameObject($"KeyRow_{act}", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                rowGo.transform.SetParent(tableGo.transform, false);
+                var rt = rowGo.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0.5f, 0.5f);
+                rt.anchorMax = new Vector2(0.5f, 0.5f);
+                rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.sizeDelta = new Vector2(960f, rowHeight);
+                rt.anchoredPosition = new Vector2(0f, y);
+
+                var shape = rowGo.GetComponent<UIInkShapeGraphic>();
+                shape.Shape = UIInkShape.SharpRect;
+                shape.CornerRadius = ComicStyle.CornerSharp;
+                shape.BorderWidth = ComicStyle.BorderThin;
+                shape.BorderColor = ComicStyle.InkSoft;
+                shape.color = (i % 2 == 0) ? ComicStyle.Paper : ComicStyle.PaperAlt;
+                shape.HardShadow = false;
+
+                // 动作名称标签
+                string actionName = DesktopKeyBindingService.GetActionDisplayName(act);
+                var actLabel = CreateTextMesh("ActLabel", rowGo.transform, actionName, UITypography.FontSnapped(22f), ComicStyle.Ink, null, TextAlignmentOptions.Left, isDisplay: false);
+                actLabel.fontStyle = FontStyles.Bold;
+                var actRt = actLabel.rectTransform;
+                actRt.anchorMin = new Vector2(0f, 0.5f);
+                actRt.anchorMax = new Vector2(0f, 0.5f);
+                actRt.pivot = new Vector2(0f, 0.5f);
+                actRt.anchoredPosition = new Vector2(24f, 0f);
+                actRt.sizeDelta = new Vector2(300f, 40f);
+
+                // 主按键按钮 (180x38)
+                var priBtn = CreateStyledButton($"PriBtn_{act}", rowGo.transform, "-", ComicStyle.Paper, ComicStyle.Ink, new Vector2(180f, 38f), _theme, UITypography.FontSnapped(20f), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+                var priRt = priBtn.GetComponent<RectTransform>();
+                priRt.anchorMin = new Vector2(1f, 0.5f);
+                priRt.anchorMax = new Vector2(1f, 0.5f);
+                priRt.pivot = new Vector2(1f, 0.5f);
+                priRt.anchoredPosition = new Vector2(-220f, 0f);
+                var priShape = priBtn.GetComponent<UIInkShapeGraphic>();
+                var priText = priBtn.GetComponentInChildren<TextMeshProUGUI>();
+
+                priBtn.onClick.AddListener(() =>
+                {
+                    StartKeyListening(act, false, priBtn, priShape, priText);
+                });
+
+                // 备用按键按钮 (180x38)
+                var secBtn = CreateStyledButton($"SecBtn_{act}", rowGo.transform, "-", ComicStyle.Paper, ComicStyle.Ink, new Vector2(180f, 38f), _theme, UITypography.FontSnapped(20f), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+                var secRt = secBtn.GetComponent<RectTransform>();
+                secRt.anchorMin = new Vector2(1f, 0.5f);
+                secRt.anchorMax = new Vector2(1f, 0.5f);
+                secRt.pivot = new Vector2(1f, 0.5f);
+                secRt.anchoredPosition = new Vector2(-24f, 0f);
+                var secShape = secBtn.GetComponent<UIInkShapeGraphic>();
+                var secText = secBtn.GetComponentInChildren<TextMeshProUGUI>();
+
+                secBtn.onClick.AddListener(() =>
+                {
+                    StartKeyListening(act, true, secBtn, secShape, secText);
+                });
+
+                _keyBindingRows.Add(new KeyBindingRowUI
+                {
+                    action = act,
+                    primaryBtn = priBtn,
+                    primaryShape = priShape,
+                    primaryText = priText,
+                    secondaryBtn = secBtn,
+                    secondaryShape = secShape,
+                    secondaryText = secText
+                });
+            }
+
+            // 3. 底部操作栏（恢复默认 + 返回）
+            var bottomGo = new GameObject("BottomBar", typeof(RectTransform));
+            bottomGo.transform.SetParent(parent, false);
+            var bottomRt = bottomGo.GetComponent<RectTransform>();
+            bottomRt.anchorMin = new Vector2(0.5f, 0.5f);
+            bottomRt.anchorMax = new Vector2(0.5f, 0.5f);
+            bottomRt.pivot = new Vector2(0.5f, 0.5f);
+            bottomRt.anchoredPosition = new Vector2(0f, -345f);
+            bottomRt.sizeDelta = new Vector2(960f, 56f);
+
+            var resetBtn = CreateStyledButton("ResetKeyBtn", bottomGo.transform, "恢复默认", ComicStyle.Paper, ComicStyle.Ink, new Vector2(190f, 48f), _theme, UITypography.FontSnapped(PauseSettingControlFont), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            var resetRt = resetBtn.GetComponent<RectTransform>();
+            resetRt.anchorMin = new Vector2(0.5f, 0.5f);
+            resetRt.anchorMax = new Vector2(0.5f, 0.5f);
+            resetRt.pivot = new Vector2(0.5f, 0.5f);
+            resetRt.anchoredPosition = new Vector2(-110f, 0f);
+            resetBtn.onClick.AddListener(OnResetKeyBindingsClicked);
+
+            var backBtn = CreateStyledButton("BackKeyBtn", bottomGo.transform, "返回", ComicStyle.Yellow, ComicStyle.Ink, new Vector2(190f, 48f), _theme, UITypography.FontSnapped(PauseSettingControlFont), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            var backRt = backBtn.GetComponent<RectTransform>();
+            backRt.anchorMin = new Vector2(0.5f, 0.5f);
+            backRt.anchorMax = new Vector2(0.5f, 0.5f);
+            backRt.pivot = new Vector2(0.5f, 0.5f);
+            backRt.anchoredPosition = new Vector2(110f, 0f);
+            backBtn.onClick.AddListener(CloseKeyBindings);
+        }
+
+        private void StartKeyListening(DesktopAction action, bool isSecondary, Button btn, UIInkShapeGraphic shape, TextMeshProUGUI text)
+        {
+            if (_isListeningForKey)
+            {
+                CancelKeyListening();
+            }
+
+            _isListeningForKey = true;
+            _listeningAction = action;
+            _listeningIsSecondary = isSecondary;
+            _listeningStartFrame = Time.frameCount;
+            _activeListeningButton = btn;
+            _activeListeningShape = shape;
+            _activeListeningText = text;
+
+            if (_activeListeningShape != null)
+            {
+                _activeListeningShape.color = ComicStyle.Yellow;
+            }
+            if (_activeListeningText != null)
+            {
+                _activeListeningText.text = "[ 请按键... ]";
+                _activeListeningText.fontStyle = FontStyles.Bold;
+            }
+        }
+
+        private void StopKeyListening()
+        {
+            _isListeningForKey = false;
+            _activeListeningButton = null;
+            _activeListeningShape = null;
+            _activeListeningText = null;
+        }
+
+        private void CancelKeyListening()
+        {
+            StopKeyListening();
+            RefreshKeyBindingsUI();
+        }
+
+        private void OnResetKeyBindingsClicked()
+        {
+            if (_isListeningForKey) CancelKeyListening();
+            DesktopKeyBindingService.ResetToDefaults();
+            RefreshKeyBindingsUI();
+        }
+
+        public void RefreshKeyBindingsUI()
+        {
+            if (_keyBindingRows == null) return;
+            for (int i = 0; i < _keyBindingRows.Count; i++)
+            {
+                var row = _keyBindingRows[i];
+                if (row == null) continue;
+
+                DesktopKeyBindingService.GetBinding(row.action, out var primary, out var secondary);
+
+                bool isPrimaryListening = _isListeningForKey && _listeningAction == row.action && !_listeningIsSecondary;
+                bool isSecondaryListening = _isListeningForKey && _listeningAction == row.action && _listeningIsSecondary;
+
+                if (!isPrimaryListening)
+                {
+                    if (row.primaryText != null)
+                    {
+                        row.primaryText.text = primary.GetDisplayName();
+                        row.primaryText.fontStyle = FontStyles.Normal;
+                    }
+                    if (row.primaryShape != null)
+                    {
+                        row.primaryShape.color = ComicStyle.Paper;
+                    }
+                }
+
+                if (!isSecondaryListening)
+                {
+                    if (row.secondaryText != null)
+                    {
+                        row.secondaryText.text = secondary.GetDisplayName();
+                        row.secondaryText.fontStyle = FontStyles.Normal;
+                    }
+                    if (row.secondaryShape != null)
+                    {
+                        row.secondaryShape.color = ComicStyle.Paper;
+                    }
+                }
+            }
+        }
+
+        private void HandleKeyListening()
+        {
+            if (Time.frameCount <= _listeningStartFrame) return;
+
+            var kb = Keyboard.current;
+            var mouse = Mouse.current;
+
+            // Esc: 取消改键
+            if (kb != null && kb.escapeKey.wasPressedThisFrame)
+            {
+                CancelKeyListening();
+                return;
+            }
+
+            // Backspace 或 Delete: 清空备用键
+            if (_listeningIsSecondary && kb != null && (kb.backspaceKey.wasPressedThisFrame || kb.deleteKey.wasPressedThisFrame))
+            {
+                DesktopKeyBindingService.ClearSecondary(_listeningAction);
+                StopKeyListening();
+                RefreshKeyBindingsUI();
+                return;
+            }
+
+            // 检测鼠标按键
+            if (mouse != null)
+            {
+                if (mouse.leftButton.wasPressedThisFrame)
+                {
+                    ApplyNewBinding(DesktopBindingSlot.FromMouse(0));
+                    return;
+                }
+                if (mouse.rightButton.wasPressedThisFrame)
+                {
+                    ApplyNewBinding(DesktopBindingSlot.FromMouse(1));
+                    return;
+                }
+                if (mouse.middleButton.wasPressedThisFrame)
+                {
+                    ApplyNewBinding(DesktopBindingSlot.FromMouse(2));
+                    return;
+                }
+                if (mouse.forwardButton.wasPressedThisFrame)
+                {
+                    ApplyNewBinding(DesktopBindingSlot.FromMouse(3));
+                    return;
+                }
+                if (mouse.backButton.wasPressedThisFrame)
+                {
+                    ApplyNewBinding(DesktopBindingSlot.FromMouse(4));
+                    return;
+                }
+            }
+
+            // 检测键盘按键
+            if (kb != null)
+            {
+                for (int i = 0; i < s_AllCandidateKeys.Length; i++)
+                {
+                    Key k = s_AllCandidateKeys[i];
+                    if (k == Key.None || k == Key.Escape) continue;
+
+                    var control = kb[k];
+                    if (control != null && control.wasPressedThisFrame)
+                    {
+                        ApplyNewBinding(DesktopBindingSlot.FromKey(k));
+                        return;
+                    }
+                }
+            }
+        }
+
+        private void ApplyNewBinding(DesktopBindingSlot slot)
+        {
+            DesktopKeyBindingService.TryBind(_listeningAction, _listeningIsSecondary, slot, out _);
+            StopKeyListening();
+            RefreshKeyBindingsUI();
         }
 
         private GameObject CreateSettingRow(Transform parent, int index, int totalRows)
@@ -1150,7 +1564,7 @@ namespace P1.UI.Menus
         /// <summary>
         /// 暂停菜单或设置页是否处于展开态（供 <see cref="MenuInputRouter"/> 仲裁 Esc 归属）。
         /// </summary>
-        public bool IsMenuExpanded => IsPaused || _isSettingsOpen;
+        public bool IsMenuExpanded => IsPaused || _isSettingsOpen || _isKeyBindingsOpen;
 
         /// <summary>静态快捷入口：暂停菜单 / 设置页是否展开（无实例时为 false）。</summary>
         public static bool IsAnyMenuExpanded => Instance != null && Instance.IsMenuExpanded;
@@ -1160,6 +1574,12 @@ namespace P1.UI.Menus
             if (!IsPaused && MobileLayoutCustomizer.IsEditingAny)
             {
                 MobileLayoutCustomizer.ActiveEditor?.Close(false);
+                return;
+            }
+
+            if (_isKeyBindingsOpen)
+            {
+                CloseKeyBindings();
                 return;
             }
 
@@ -1235,6 +1655,9 @@ namespace P1.UI.Menus
 
             _modalRoot.SetActive(false);
             _isSettingsOpen = false;
+            _isKeyBindingsOpen = false;
+            if (_isListeningForKey) CancelKeyListening();
+            if (_keyBindingsViewContainer != null) _keyBindingsViewContainer.SetActive(false);
 
             UpdateMobileButtonVisibility();
             PauseStateChanged?.Invoke(false);
@@ -1329,6 +1752,9 @@ namespace P1.UI.Menus
 
             _homeSettingsMode = false;
             _isSettingsOpen = false;
+            _isKeyBindingsOpen = false;
+            if (_isListeningForKey) CancelKeyListening();
+            if (_keyBindingsViewContainer != null) _keyBindingsViewContainer.SetActive(false);
             // OnDisable/OnDestroy 拆除期调用时容器可能已销毁，做判空
             if (_settingsViewContainer != null) _settingsViewContainer.SetActive(false);
             if (_modalRoot != null) _modalRoot.SetActive(false);

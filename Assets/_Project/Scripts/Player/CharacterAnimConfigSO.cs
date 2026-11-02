@@ -370,6 +370,60 @@ namespace P1.Player
         [Tooltip("拖地入地瞬间果冻压扁冲量（0 = 关闭），让角色有'把滚筒按下去'的重量感")]
         public float rollerRollPlantSquashImpulse = 0.6f;
 
+        [Header("武器持握/动作 (Weapon Wield P35)")]
+        [Tooltip("双枪翻滚/架枪、加特林扫射等二值状态的姿态权重平滑速率（1/s）")]
+        public float weaponWieldSmoothRate = 18f;
+        [Tooltip("持枪待机微摆幅度（度）：站定时武器绕握把的轻微晃动")]
+        public float weaponIdleSwayDeg = 0.6f;
+        [Tooltip("持枪待机微摆频率（Hz）")]
+        public float weaponIdleSwayHz = 0.4f;
+        [Tooltip("蓄力武器后拉距离（米，满蓄力）")]
+        public float weaponChargePullback = 0.05f;
+        [Tooltip("蓄力武器下压距离（米，满蓄力）")]
+        public float weaponChargeDrop = 0.015f;
+        [Tooltip("蓄力时胸口后仰（度，满蓄力）")]
+        public float weaponChargeBodyPitchDeg = 4f;
+        [Tooltip("蓄力抖动幅度（度，满蓄力）")]
+        public float weaponChargeTremorDeg = 0.18f;
+        [Tooltip("泼桶前摇桶身后仰角（度）")]
+        public float slosherCoilPitchDeg = 14f;
+        [Tooltip("泼桶甩出桶身前倾角（度）")]
+        public float slosherThrowPitchDeg = 32f;
+        [Tooltip("泼桶甩出胸口前压（度）")]
+        public float slosherThrowBodyPitchDeg = 14f;
+        [Tooltip("泼桶甩出动作时长（秒）")]
+        public float slosherThrowDuration = 0.24f;
+        [Tooltip("爆破枪开火后坐枪口上抬（度）")]
+        public float blasterKickPitchDeg = 10f;
+        [Tooltip("爆破枪开火后坐距离（米）")]
+        public float blasterKickBackMeters = 0.07f;
+        [Tooltip("双枪翻滚身体侧倾（度）")]
+        public float dualiesDodgeBodyRollDeg = 16f;
+        [Tooltip("双枪翻滚重心下沉（比例）")]
+        [Range(0f, 0.2f)]
+        public float dualiesDodgeSink = 0.05f;
+        [Tooltip("双枪架枪重心下沉（比例）")]
+        [Range(0f, 0.2f)]
+        public float dualiesTurretSink = 0.06f;
+        [Tooltip("双枪架枪胸口前压（度）")]
+        public float dualiesTurretBodyPitchDeg = 5f;
+        [Tooltip("加特林蓄力下压距离（米，满蓄力）")]
+        public float splatlingChargeDropMeters = 0.025f;
+        [Tooltip("加特林蓄力胸口前压（度，满蓄力）")]
+        public float splatlingChargeBodyPitchDeg = 3f;
+        [Tooltip("加特林枪管最低转速（度/秒）")]
+        public float splatlingSpinMinDegPerSec = 280f;
+        [Tooltip("加特林枪管最高转速（度/秒）")]
+        public float splatlingSpinMaxDegPerSec = 1400f;
+        [Tooltip("加特林枪管松开后的惯性衰减率（1/s）")]
+        public float splatlingSpinCoastRate = 5f;
+        [Tooltip("加特林扫射时机身抖动幅度（度）")]
+        public float splatlingStreamShakeDeg = 0.5f;
+        [Tooltip("小枪持续射击胸口前压（度）")]
+        public float shooterFireBodyPitchDeg = 2f;
+        [Tooltip("小枪持续射击枪身回拉（米）")]
+        public float shooterFirePullbackMeters = 0.01f;
+
         /// <summary>运行时实际使用的速度归一化分母：优先玩家配置的潜墨速度。</summary>
         public float ResolveSwimRefSpeed(PlayerConfigSO playerConfig)
         {

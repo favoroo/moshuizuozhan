@@ -79,6 +79,8 @@ namespace P1.Weapons
                 if (sh == null) sh = Shader.Find("Sprites/Default");
             }
             _sharedMat = new Material(sh) { name = "InkBombSharedMat" };
+            // P12-D：手雷外壳/内胆共享材质，队伍色为逐实例属性，允许与同池弹体合并提交。
+            _sharedMat.enableInstancing = true;
             _ringMesh = VfxPool.BuildRingMesh(36, 0.90f, 1.0f);
 
             // 预热 12：4v4 多枚手雷同时在场时避免释放瞬间 new GameObject 造成帧尖刺

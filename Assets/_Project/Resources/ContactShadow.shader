@@ -37,12 +37,18 @@ Shader "P1/ContactShadow"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #pragma target 2.0
+            #pragma target 4.5
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
+            // 阴影颜色/不透明度逐角色不同（接触高度决定 alpha），必须进 instancing buffer，
+            // 否则 MaterialPropertyBlock 会让每个角色阴影各占一个 draw。
+            UNITY_INSTANCING_BUFFER_START(PerInstance)
+                UNITY_DEFINE_INSTANCED_PROP(half4, _Color)
+            UNITY_INSTANCING_BUFFER_END(PerInstance)
+
             CBUFFER_START(UnityPerMaterial)
-                half4 _Color;
                 float _CoreRadius;
                 float _EdgeRadius;
             CBUFFER_END
@@ -51,6 +57,7 @@ Shader "P1/ContactShadow"
             {
                 float4 positionOS : POSITION;
                 float2 uv         : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -62,6 +69,7 @@ Shader "P1/ContactShadow"
             Varyings vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.uv = input.uv;
                 return output;
@@ -73,9 +81,10 @@ Shader "P1/ContactShadow"
                 // 无论什么视角/缩放都不会再露出方角。
                 float2 p = input.uv * 2.0 - 1.0;
                 float r = length(p);
-                float a = (1.0 - smoothstep(_CoreRadius, _EdgeRadius, r)) * _Color.a;
+                half4 shadowColor = UNITY_ACCESS_INSTANCED_PROP(PerInstance, _Color);
+                float a = (1.0 - smoothstep(_CoreRadius, _EdgeRadius, r)) * shadowColor.a;
                 if (a <= 0.002) discard;
-                return half4(_Color.rgb, saturate(a));
+                return half4(shadowColor.rgb, saturate(a));
             }
             ENDHLSL
         }

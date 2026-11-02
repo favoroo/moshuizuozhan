@@ -627,12 +627,19 @@ namespace P1.Player
             {
                 var r = bodyRenderers[i];
                 if (r == null) continue;
-                r.GetPropertyBlock(_propBlock);
                 if (whiteFlash)
+                {
+                    r.GetPropertyBlock(_propBlock);
                     _propBlock.SetColor(BaseColorProp, Color.white);
+                    r.SetPropertyBlock(_propBlock);
+                }
                 else
-                    _propBlock.Clear();
-                r.SetPropertyBlock(_propBlock);
+                {
+                    // 必须传 null 而不是空 MPB：空 MPB 仍会让 renderer 退出 GRD / GPU instancing
+                    // 的合批路径。ResetImmediately 开局会给每个身体部件清一次闪白，
+                    // 传空块会把全部角色永久踢出批处理；闪白只在受击的 0.09s 内保留 MPB。
+                    r.SetPropertyBlock(null);
+                }
             }
         }
 

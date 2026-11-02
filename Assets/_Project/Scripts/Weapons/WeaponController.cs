@@ -11,6 +11,7 @@ namespace P1.Weapons
     /// 副武器（抛物线延时墨水手雷）与大招（超级墨水砸地冲击波 Splashdown）。
     /// 原有 public 签名全部保留；主武器行为由 <see cref="MainWeaponStrategy"/> 子类驱动。
     /// </summary>
+    [DefaultExecutionOrder(50)]
     [RequireComponent(typeof(InkCharacterMotor))]
     [RequireComponent(typeof(CombatantHealth))]
     public class WeaponController : MonoBehaviour, IWeaponRuntimeHost
@@ -164,6 +165,12 @@ namespace P1.Weapons
         /// <summary>滚筒挥击前摇中（抡起阶段）：表现层轮询下降沿与墨滴释放同步砸地（P27）。</summary>
         public bool IsFlicking => _strategy != null && _strategy.IsFlicking;
 
+        /// <summary>泼桶是否处于前摇中（表现层据此播放桶身后仰）。</summary>
+        public bool IsWindingUp => _strategy != null && _strategy.IsWindingUp;
+
+        /// <summary>泼桶前摇进度 0~1（0 = 刚按下，1 = 即将甩出）。</summary>
+        public float Windup01 => _strategy != null ? _strategy.Windup01 : 0f;
+
         /// <summary>双枪是否处于战术翻滚中。</summary>
         public bool IsRollingDodge => _strategy != null && _strategy.IsRollingDodge;
 
@@ -172,6 +179,12 @@ namespace P1.Weapons
 
         /// <summary>双枪当前战术翻滚的方向向量。</summary>
         public Vector3 DodgeDirection => _strategy != null ? _strategy.DodgeDirection : transform.forward;
+
+        /// <summary>双枪翻滚方向相对触发瞬间角色右方的分量（-1 左 ~ +1 右）。</summary>
+        public float DodgeSide => _strategy != null ? _strategy.DodgeSide : 0f;
+
+        /// <summary>双枪翻滚方向相对触发瞬间角色前方的分量（-1 后 ~ +1 前）。</summary>
+        public float DodgeForward => _strategy != null ? _strategy.DodgeForward : 1f;
 
         /// <summary>加特林是否正在释放高密度暴风雨弹幕。</summary>
         public bool IsStreaming => _strategy is SplatlingWeaponStrategy s && s.IsStreaming;

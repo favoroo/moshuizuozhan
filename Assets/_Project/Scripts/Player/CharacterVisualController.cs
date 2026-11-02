@@ -26,6 +26,7 @@ namespace P1.Player
     /// 9. 人 ⇄ 乌贼弹性手势（弹簧 + SO 曲线，过冲即表演）；游动姿态（SwimPoseSolver）+ 触须行波；
     /// 10. 7 类主武器换装、双枪姿态与滚筒挥击/拖地/贴地闭环（P27/P31 管线不变，标定值已按新手位重推）。
     /// </summary>
+    [DefaultExecutionOrder(100)]
     [DisallowMultipleComponent]
     public class CharacterVisualController : MonoBehaviour
     {
@@ -259,6 +260,32 @@ namespace P1.Player
         private float _rollerPoseContact01;
         private float _rollerContactWeight;
         private readonly RaycastHit[] _rollerGroundHits = new RaycastHit[8];
+        private bool _rollerModelBaseCaptured;
+        private Vector3 _rollerModelBaseLocalPos;
+
+        // P35 通用武器持握/动作层帧值（非滚筒武器；滚筒恒为 0，由 RollerWieldSolver 全权接管）。
+        // 由 UpdateWeaponWieldPose 采样，在 UpdateAimPose / UpdateRecoilKick / UpdateBodyPose 合成写回。
+        private float _wieldPitchDeg;
+        private float _wieldYawDeg;
+        private float _wieldRollDeg;
+        private float _wieldDrop;
+        private float _wieldForward;
+        private float _wieldBodyPitchDeg;
+        private float _wieldBodyRollDeg;
+        private float _wieldSink01;
+        private float _wieldTime;
+        private float _shooterKick01;
+        private float _dualiesKick01;
+        private float _dualiesKickSign = 1f;
+        private float _chargerReleaseTimer;
+        private float _chargerReleaseStrength = 1f;
+        private float _slosherThrowTimer;
+        private float _blasterKickTimer;
+        private float _dodgeWeight;
+        private float _turretWeight;
+        private float _streamingWeight;
+        private float _splatlingSpinDegPerSec;
+        private float _rollerSprayTimer;
 
         // 身体前倾与侧倾平滑状态（Lean Springs）
         private float _currentPitch;
@@ -531,6 +558,23 @@ namespace P1.Player
                 weaponSlosher, weaponBlaster, weaponSplatling,
                 WeaponHoldRig.ChestChainY);
             BindArmHoldPoses(poses);
+            CacheRollerModelBasePosition();
+        }
+
+        /// <summary>
+        /// P35 滚筒贴地保险的基准位置：握把锚定（WeaponHoldRig.Build）后滚筒模型的 localPosition。
+        /// 贴地闭环每帧先把模型复位到此基准，再叠加俯仰/高度修正，避免逐帧累积漂移。
+        /// </summary>
+        private void CacheRollerModelBasePosition()
+        {
+            _rollerModelBaseCaptured = false;
+            if (_weaponMap != null &&
+                _weaponMap.TryGetValue(WeaponKind.Roller, out GameObject roller) &&
+                roller != null)
+            {
+                _rollerModelBaseLocalPos = roller.transform.localPosition;
+                _rollerModelBaseCaptured = true;
+            }
         }
 
         /// <summary>
@@ -1121,6 +1165,9 @@ namespace P1.Player
             }
             _lastRecoilFrame = Time.frameCount;
 
+            // P35 每帧最多一次的动作触发：泼桶 8 滴/加特林补帧齐射只读作一次动作。
+            TriggerWieldAction(config != null ? config.weaponKind : _currentWeaponKind);
+
             // 触发后坐力冲量：幅度按当前武器手感配置（P16），蓄力狙按蓄力刻度缩放（P28），
             // 并加入轻微随机 Yaw，否则连发时每一发都沿完全相同的轨迹回弹，看起来像机械臂。
             WeaponFeelParams feel = _weaponController != null
@@ -1145,10 +1192,204 @@ namespace P1.Player
             _lastFireTime = Time.time;
         }
 
+        /// <summary>
+        /// P35 开火动作触发（每帧最多一次）：小枪后坐、双枪左右交替、蓄力狙释放、泼桶甩出、爆破回坐。
+        /// 滚筒走自己的四段时间线，不在此列。
+        /// </summary>
+        private void TriggerWieldAction(WeaponKind kind)
+        {
+            switch (kind)
+            {
+                case WeaponKind.Shooter:
+                    _shooterKick01 = 1f;
+                    break;
+
+                case WeaponKind.Charger:
+                    _chargerReleaseStrength = _weaponController != null
+                        ? Mathf.Clamp01(_weaponController.LastShotStrength01)
+                        : 1f;
+                    _chargerReleaseTimer = WeaponWieldSolver.ChargerReleaseDuration;
+                    break;
+
+                case WeaponKind.Dualies:
+                    _dualiesKickSign = -_dualiesKickSign;
+                    _dualiesKick01 = 1f;
+                    break;
+
+                case WeaponKind.Slosher:
+                    _slosherThrowTimer = Mathf.Max(0.01f, AnimConfig.slosherThrowDuration);
+                    break;
+
+                case WeaponKind.Blaster:
+                    _blasterKickTimer = WeaponWieldSolver.BlasterKickDuration;
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// P35 通用持握/动作采样：把 WeaponController 的蓄力/扫射/翻滚/架枪/前摇状态与开火动作计时
+        /// 汇总成纯数据姿态，供武器模型、挂点、胸口、果冻缩放四个写回点合成。
+        /// 非滚筒武器每帧只做一次 switch + 少量三角/插值，零分配。
+        /// </summary>
+        private void UpdateWeaponWieldPose(float dt)
+        {
+            _wieldTime += dt;
+
+            // 动作计时始终推进：切乌贼形态/切枪时不会把半截动作冻结在模型上。
+            if (_shooterKick01 > 0f)
+                _shooterKick01 = Mathf.MoveTowards(_shooterKick01, 0f, dt / WeaponWieldSolver.ShooterKickDuration);
+            if (_dualiesKick01 > 0f)
+                _dualiesKick01 = Mathf.MoveTowards(_dualiesKick01, 0f, dt / WeaponWieldSolver.DualiesKickDuration);
+            if (_chargerReleaseTimer > 0f)
+                _chargerReleaseTimer = Mathf.Max(0f, _chargerReleaseTimer - dt);
+            if (_blasterKickTimer > 0f)
+                _blasterKickTimer = Mathf.Max(0f, _blasterKickTimer - dt);
+            if (_slosherThrowTimer > 0f)
+                _slosherThrowTimer = Mathf.Max(0f, _slosherThrowTimer - dt);
+
+            if (_currentWeaponKind == WeaponKind.Roller)
+            {
+                ClearWieldPose();
+                return;
+            }
+
+            CharacterAnimConfigSO cfg = AnimConfig;
+            WeaponWieldParams p = BuildWieldParams(cfg);
+
+            float smooth = Mathf.Max(1f, p.SmoothRate);
+            float weightK = 1f - Mathf.Exp(-smooth * dt);
+            bool dodging = _weaponController != null && _weaponController.IsRollingDodge;
+            bool turret = _weaponController != null && _weaponController.IsTurretLocked;
+            bool streaming = _weaponController != null && _weaponController.IsStreaming;
+            _dodgeWeight += ((dodging ? 1f : 0f) - _dodgeWeight) * weightK;
+            _turretWeight += ((turret ? 1f : 0f) - _turretWeight) * weightK;
+            _streamingWeight += ((streaming ? 1f : 0f) - _streamingWeight) * weightK;
+
+            float windup01 = _weaponController != null ? _weaponController.Windup01 : 0f;
+            float throw01 = cfg.slosherThrowDuration > 0.0001f
+                ? Mathf.Clamp01(_slosherThrowTimer / cfg.slosherThrowDuration)
+                : 0f;
+
+            float fireKick01;
+            switch (_currentWeaponKind)
+            {
+                case WeaponKind.Shooter:
+                    fireKick01 = _shooterKick01;
+                    break;
+                case WeaponKind.Dualies:
+                    fireKick01 = _dualiesKick01;
+                    break;
+                case WeaponKind.Blaster:
+                    fireKick01 = WeaponWieldSolver.BlasterKickDuration > 0.0001f
+                        ? Mathf.Clamp01(_blasterKickTimer / WeaponWieldSolver.BlasterKickDuration)
+                        : 0f;
+                    break;
+                default:
+                    fireKick01 = 0f;
+                    break;
+            }
+
+            float release01 = WeaponWieldSolver.ChargerReleaseDuration > 0.0001f
+                ? Mathf.Clamp01(_chargerReleaseTimer / WeaponWieldSolver.ChargerReleaseDuration)
+                  * _chargerReleaseStrength
+                : 0f;
+
+            float side = dodging && _weaponController != null ? _weaponController.DodgeSide : 0f;
+            float forwardSign = dodging && _weaponController != null ? _weaponController.DodgeForward : 1f;
+            float dodgeSign = Mathf.Abs(side) > 0.2f ? Mathf.Sign(side) : 0f;
+
+            WeaponWieldInput input = new WeaponWieldInput
+            {
+                Time = _wieldTime,
+                Speed01 = Mathf.Clamp01(_planarSpeed / 6f),
+                Charging = _weaponController != null && _weaponController.IsCharging,
+                Charge01 = _weaponController != null ? _weaponController.Charge01 : 0f,
+                Streaming = streaming,
+                Streaming01 = _streamingWeight,
+                Rolling = false,
+                Dodge01 = _dodgeWeight,
+                DodgeSign = dodgeSign,
+                DodgeForwardSign = forwardSign,
+                Turret01 = _turretWeight,
+                Windup01 = windup01,
+                Throw01 = throw01,
+                FireKick01 = fireKick01,
+                FireKickSign = _dualiesKickSign,
+                Release01 = release01
+            };
+
+            WeaponWieldPose pose = WeaponWieldSolver.Sample(_currentWeaponKind, input, p);
+            _wieldPitchDeg = pose.PitchDeg;
+            _wieldYawDeg = pose.YawDeg;
+            _wieldRollDeg = pose.RollDeg;
+            _wieldDrop = pose.DropMeters;
+            _wieldForward = pose.ForwardMeters;
+            _wieldBodyPitchDeg = pose.BodyPitchDeg;
+            _wieldBodyRollDeg = pose.BodyRollDeg;
+            _wieldSink01 = pose.Sink01;
+        }
+
+        /// <summary>滚筒/切枪时清空通用动作层，防止上一把枪的蓄力/后坐残留在新枪上。</summary>
+        private void ClearWieldPose()
+        {
+            _wieldPitchDeg = 0f;
+            _wieldYawDeg = 0f;
+            _wieldRollDeg = 0f;
+            _wieldDrop = 0f;
+            _wieldForward = 0f;
+            _wieldBodyPitchDeg = 0f;
+            _wieldBodyRollDeg = 0f;
+            _wieldSink01 = 0f;
+            _dodgeWeight = 0f;
+            _turretWeight = 0f;
+            _streamingWeight = 0f;
+            _shooterKick01 = 0f;
+            _dualiesKick01 = 0f;
+            _chargerReleaseTimer = 0f;
+            _chargerReleaseStrength = 1f;
+            _slosherThrowTimer = 0f;
+            _blasterKickTimer = 0f;
+        }
+
+        /// <summary>把 CharacterAnimConfigSO 的 P35 字段打包成纯函数参数（字段缺失时用默认值兜底）。</summary>
+        private static WeaponWieldParams BuildWieldParams(CharacterAnimConfigSO cfg)
+        {
+            return new WeaponWieldParams
+            {
+                SmoothRate = Mathf.Max(1f, cfg.weaponWieldSmoothRate),
+                IdleSwayDeg = Mathf.Max(0f, cfg.weaponIdleSwayDeg),
+                IdleSwayHz = Mathf.Max(0.01f, cfg.weaponIdleSwayHz),
+                ChargePullbackMeters = Mathf.Max(0f, cfg.weaponChargePullback),
+                ChargeDropMeters = Mathf.Max(0f, cfg.weaponChargeDrop),
+                ChargeBodyPitchDeg = Mathf.Max(0f, cfg.weaponChargeBodyPitchDeg),
+                ChargeTremorDeg = Mathf.Max(0f, cfg.weaponChargeTremorDeg),
+                SlosherCoilPitchDeg = Mathf.Max(0f, cfg.slosherCoilPitchDeg),
+                SlosherThrowPitchDeg = Mathf.Max(0f, cfg.slosherThrowPitchDeg),
+                SlosherThrowBodyPitchDeg = Mathf.Max(0f, cfg.slosherThrowBodyPitchDeg),
+                BlasterKickPitchDeg = Mathf.Max(0f, cfg.blasterKickPitchDeg),
+                BlasterKickBackMeters = Mathf.Max(0f, cfg.blasterKickBackMeters),
+                DualiesDodgeBodyRollDeg = Mathf.Max(0f, cfg.dualiesDodgeBodyRollDeg),
+                DualiesDodgeSink = Mathf.Clamp01(cfg.dualiesDodgeSink),
+                DualiesTurretSink = Mathf.Clamp01(cfg.dualiesTurretSink),
+                DualiesTurretBodyPitchDeg = Mathf.Max(0f, cfg.dualiesTurretBodyPitchDeg),
+                SplatlingChargeDropMeters = Mathf.Max(0f, cfg.splatlingChargeDropMeters),
+                SplatlingChargeBodyPitchDeg = Mathf.Max(0f, cfg.splatlingChargeBodyPitchDeg),
+                SplatlingSpinMinDegPerSec = Mathf.Max(0f, cfg.splatlingSpinMinDegPerSec),
+                SplatlingSpinMaxDegPerSec = Mathf.Max(0f, cfg.splatlingSpinMaxDegPerSec),
+                SplatlingSpinCoastRate = Mathf.Max(0f, cfg.splatlingSpinCoastRate),
+                SplatlingStreamShakeDeg = Mathf.Max(0f, cfg.splatlingStreamShakeDeg),
+                ShooterFireBodyPitchDeg = Mathf.Max(0f, cfg.shooterFireBodyPitchDeg),
+                ShooterFirePullbackMeters = Mathf.Max(0f, cfg.shooterFirePullbackMeters)
+            };
+        }
+
         public void EquipWeaponKind(WeaponKind kind)
         {
             _currentWeaponKind = kind;
             CacheHeldGripTargets(kind);
+            ClearWieldPose();
+            _splatlingSpinDegPerSec = 0f;
+            _rollerSprayTimer = 0f;
 
             // P28 切枪复位后坐力弹簧，避免上一把枪的残余位移带到新枪
             _recoilZSpring.Reset();
@@ -1232,6 +1473,7 @@ namespace P1.Player
             SampleMotion(dt);
             UpdateFormMorph(dt);
             UpdateRollerPose(dt);   // P27 滚筒时间线先算帧值，供下方武器/身体写回段合成
+            UpdateWeaponWieldPose(dt); // P35 其余武器的持握/蓄力/翻滚/泼洒动作帧值
             UpdateAimPose(dt);
             UpdateFlourish(dt);
 
@@ -1700,8 +1942,8 @@ namespace P1.Player
             _jelly = Mathf.Clamp(_jelly, -0.22f, 0.16f);
             // P26 滞空挤压修正：快速下落再拉伸、顶点微团身缩（贴地时 air 为 Neutral，不修正）
             squashY *= air.SquashYMul;
-            // P27 滚筒拖地重心下沉（压低身体扛住滚筒推地，参考 INKWAVE H.crouch 0.035）
-            squashY *= 1f - _rollerSink01;
+            // P27/P35 重心下沉：滚筒拖地 + 双枪翻滚/架枪/加特林蓄力共用同一竖向缩放通道
+            squashY *= 1f - Mathf.Clamp01(_rollerSink01 + _wieldSink01);
 
             // --- 4. 前倾与侧倾（速度层 Lean Springs） ---
             // P33 真骨骼：俯仰枢轴从"贴地整蛋"回到腰/胸骨，倾斜不再被枢轴放大，
@@ -1796,8 +2038,9 @@ namespace P1.Player
                 : 0.18f;
             float dynPitch = _currentPitch + _leanPitchSpring.Value + airPitch
                 + _aimPitchCurrent * chestAimWeight + _landPitchKickDeg
-                + _rollerBodyPitchDeg;   // 滚筒蓄力后仰/砸地前压/拖地前倾
-            float dynRoll = _currentRoll + _leanRollSpring.Value;
+                + _rollerBodyPitchDeg     // 滚筒蓄力后仰/砸地前压/拖地前倾
+                + _wieldBodyPitchDeg;     // P35 蓄力后仰/泼桶甩出/爆破后坐/架枪前压
+            float dynRoll = _currentRoll + _leanRollSpring.Value + _wieldBodyRollDeg;
             float rollMix = dynRoll + rock * 0.6f;
 
             // 8.4 Hips：骨盆竖向起伏（贴地几何+步频起伏，含惯性滞后）+ 侧转主轴 + 25% 步态前倾 + 部分侧倾
@@ -2225,9 +2468,9 @@ namespace P1.Player
             // P27 滚筒持握/攻击姿态角直接合成进同一欧拉角（_rollerPosePitchDeg 非滚筒恒为 0，
             // 且位于瞄准权重之后不受其缩放）——不在 WeaponVisual 上另写旋转，避免与后坐力写回互踩
             modelTransform.localRotation = baseRot * Quaternion.Euler(
-                _aimPitchCurrent * weight + _rollerPosePitchDeg,
-                _rollerPoseYawDeg,
-                _rollerPoseRollDeg);
+                _aimPitchCurrent * weight + _rollerPosePitchDeg + _wieldPitchDeg,
+                _rollerPoseYawDeg + _wieldYawDeg,
+                _rollerPoseRollDeg + _wieldRollDeg);
         }
 
         /// <summary>
@@ -2338,7 +2581,8 @@ namespace P1.Player
             _rollerPoseForward = pose.ForwardMeters;
             _rollerBodyPitchDeg = pose.BodyPitchDeg;
             _rollerSink01 = pose.Sink01;
-            _rollerPoseContact01 = Mathf.Clamp01(pose.GroundContact01);
+            // P35：只要处于推地状态就强制贴地闭环满权重，挥击收势姿态不得把滚筒重新抬离地面
+            _rollerPoseContact01 = rolling ? 1f : Mathf.Clamp01(pose.GroundContact01);
         }
 
         /// <summary>
@@ -2363,7 +2607,8 @@ namespace P1.Player
 
             // P27 滚筒砸地/拖地挂点下压与前推合成进同一位置（非滚筒武器两项恒为 0）
             weaponRoot.transform.localPosition = _weaponRootBasePos
-                + new Vector3(0f, -_rollerPoseDrop, recoilZ + _rollerPoseForward);
+                + new Vector3(0f, -(_rollerPoseDrop + _wieldDrop),
+                    recoilZ + _rollerPoseForward + _wieldForward);
             weaponRoot.transform.localRotation = Quaternion.Euler(-recoilPitch, recoilYaw, 0f);
         }
 
@@ -2408,16 +2653,57 @@ namespace P1.Player
                 {
                     rollerDrumTransform.Rotate(Vector3.right, _drumSpinRadPerSec * Mathf.Rad2Deg * dt, Space.Self);
                 }
+
+                // P35 轻量墨雾：推地时在滚轴接地处每 0.15s 喷 2~3 颗队伍色墨滴，
+                // 走 VfxPool 池化粒子，补足"滚筒压着湿墨推着走"的视觉信号。
+                if (rolling && _motor != null && _motor.IsGrounded && VfxPool.Instance != null)
+                {
+                    _rollerSprayTimer -= dt;
+                    if (_rollerSprayTimer <= 0f)
+                    {
+                        _rollerSprayTimer = 0.15f;
+                        Color sprayColor = InkSurfaceController.Instance != null
+                            ? InkSurfaceController.Instance.GetTeamColor(_team)
+                            : Color.white;
+                        Vector3 sprayPos = rollerDrumTransform.position
+                            + Vector3.down * (RollerWieldSolver.DrumRadiusMeters * 0.6f);
+                        VfxPool.Instance.SpawnInkSplat(sprayPos, sprayColor, 0.3f, 3);
+                    }
+                }
+                else
+                {
+                    _rollerSprayTimer = 0f;
+                }
             }
 
-            // 2. 加特林枪管旋转
+            // 2. 加特林枪管旋转（P35：转速随蓄力刻度连续上升，扫射满速，松开惯性滑停）
             if (_currentWeaponKind == WeaponKind.Splatling && splatlingBarrelsTransform != null)
             {
-                bool isOperating = _weaponController != null && (_weaponController.IsCharging || _weaponController.IsPerformingSpecial);
-                float spinSpeed = isOperating ? 900f : 0f;
-                if (spinSpeed > 0f)
+                WeaponWieldParams p = BuildWieldParams(AnimConfig);
+                bool charging = _weaponController != null && _weaponController.IsCharging;
+                bool streaming = _weaponController != null && _weaponController.IsStreaming;
+                bool special = _weaponController != null && _weaponController.IsPerformingSpecial;
+                float charge01 = _weaponController != null ? _weaponController.Charge01 : 0f;
+
+                float targetSpin = special
+                    ? p.SplatlingSpinMaxDegPerSec
+                    : WeaponWieldSolver.SplatlingSpinDegPerSec(charging, streaming, charge01, p);
+
+                if (targetSpin > 0.5f)
                 {
-                    splatlingBarrelsTransform.Rotate(Vector3.forward, spinSpeed * dt, Space.Self);
+                    _splatlingSpinDegPerSec = Mathf.MoveTowards(
+                        _splatlingSpinDegPerSec, targetSpin, 6000f * dt);
+                }
+                else
+                {
+                    _splatlingSpinDegPerSec = WeaponWieldSolver.SplatlingSpinCoastStep(
+                        _splatlingSpinDegPerSec, dt, p);
+                }
+
+                if (_splatlingSpinDegPerSec > 0.5f)
+                {
+                    splatlingBarrelsTransform.Rotate(
+                        Vector3.forward, _splatlingSpinDegPerSec * dt, Space.Self);
                 }
             }
 
@@ -2426,7 +2712,10 @@ namespace P1.Player
             {
                 float charge = _weaponController != null ? _weaponController.Charge01 : 0f;
                 Color baseGlow = _team == Team.TeamA ? new Color(1f, 0.45f, 0.08f) : new Color(0.16f, 0.55f, 1f);
-                Color glow = baseGlow * (0.2f + charge * 2.8f);
+                // P35 蓄力越高，线圈脉冲越快，读作"能量在往枪口涌"
+                float pulseHz = Mathf.Lerp(12f, 34f, Mathf.Clamp01(charge));
+                float pulse = 0.85f + 0.15f * Mathf.Sin(Time.time * pulseHz);
+                Color glow = baseGlow * (0.2f + charge * 2.8f) * pulse;
 
                 if (_chargerCoilPropBlock == null)
                 {
@@ -2457,11 +2746,23 @@ namespace P1.Player
         /// </summary>
         private void ApplyRollerGroundContact(float dt)
         {
+            if (!_weaponMap.TryGetValue(WeaponKind.Roller, out GameObject rollerModel) || rollerModel == null)
+            {
+                _rollerContactWeight = 0f;
+                return;
+            }
+
+            Transform model = rollerModel.transform;
+
+            // P35 先复位到装配期基准：上一帧的高度保险/俯仰修正绝不累积。
+            // 基准在 RebuildArmHoldPoses（握把锚定）之后捕获，切枪/重装配时会刷新。
+            // 即使当前拿的是别的武器也复位一次，避免隐藏的滚筒残留高度修正。
+            if (_rollerModelBaseCaptured)
+                model.localPosition = _rollerModelBaseLocalPos;
+
             if (_currentWeaponKind != WeaponKind.Roller ||
                 weaponRoot == null ||
-                rollerDrumTransform == null ||
-                !_weaponMap.TryGetValue(WeaponKind.Roller, out GameObject rollerModel) ||
-                rollerModel == null)
+                rollerDrumTransform == null)
             {
                 _rollerContactWeight = 0f;
                 return;
@@ -2477,7 +2778,6 @@ namespace P1.Player
             if (_rollerContactWeight < 0.002f)
                 return;
 
-            Transform model = rollerModel.transform;
             Vector3 drumAxis = rollerDrumTransform.position;
             float lever = Vector3.Dot(drumAxis - model.position, model.forward);
             if (lever <= 0.02f)
@@ -2510,6 +2810,21 @@ namespace P1.Player
             }
 
             model.localRotation = Quaternion.Slerp(originalRot, solvedRot, _rollerContactWeight);
+
+            // P35 最终高度保险：俯仰反解在极端视角/坡度下仍可能残留 1~2cm，这里直接按世界高度差
+            // 平移整个滚筒模型（握把/双手随 IK 跟下去），确保"按住推地 = 滚轴底缘贴地"。
+            // 只在贴地权重过半后生效；单帧限幅 ±5cm，避免把滚筒拽下悬崖或抬上箱顶。
+            if (_rollerContactWeight > 0.5f)
+            {
+                float gap = rollerDrumTransform.position.y
+                            - RollerWieldSolver.DrumRadiusMeters
+                            - groundY;
+                if (Mathf.Abs(gap) > 0.001f)
+                {
+                    float correction = Mathf.Clamp(gap, -0.05f, 0.05f) * _rollerContactWeight;
+                    model.position += Vector3.down * correction;
+                }
+            }
         }
 
         /// <summary>

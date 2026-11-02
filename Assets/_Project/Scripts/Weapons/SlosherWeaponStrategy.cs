@@ -29,7 +29,19 @@ namespace P1.Weapons
 
         public override WeaponKind Kind => WeaponKind.Slosher;
 
-        public bool IsWindingUp => _windupTimer >= 0f;
+        public override bool IsWindingUp => _windupTimer >= 0f;
+
+        public override float Windup01
+        {
+            get
+            {
+                if (_windupTimer < 0f)
+                    return 0f;
+
+                float windup = Config != null ? Mathf.Max(0.0001f, Config.slosherWindup) : 0.13f;
+                return Mathf.Clamp01(1f - _windupTimer / windup);
+            }
+        }
 
         public override void Reset()
         {

@@ -107,6 +107,9 @@ namespace P1.Weapons
                 if (sh == null) sh = Shader.Find("Sprites/Default");
             }
             _sharedMat = new Material(sh) { name = "InkProjectileMat" };
+            // P12-D：同池弹丸共享 mesh/material，队伍色已改为 shader 的逐实例属性；
+            // 开启 instancing 后多枚弹丸一次提交（移动端 SRP Batcher 关闭时生效）。
+            _sharedMat.enableInstancing = true;
             _cometMesh = BuildCometMesh(16);
 
             for (int i = 0; i < PrewarmCount; i++)

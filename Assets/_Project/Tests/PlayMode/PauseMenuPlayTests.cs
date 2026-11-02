@@ -167,5 +167,43 @@ namespace P1.Tests
             GameSettingsService.ResetToDefaults();
             yield return null;
         }
+
+        [UnityTest]
+        public IEnumerator PauseMenuOverlay_KeyBindings_OpenCloseAndEscHierarchy()
+        {
+            var matchGo = new GameObject("TestMatch", typeof(MatchManager));
+            var match = matchGo.GetComponent<MatchManager>();
+            SetMatchPhase(match, MatchManager.Phase.Playing);
+            yield return null;
+
+            var overlay = PauseMenuOverlay.CreateInstance();
+            yield return null;
+
+            overlay.Pause();
+            Assert.IsTrue(overlay.IsPaused);
+
+            overlay.OpenSettings();
+            Assert.IsTrue(overlay.IsMenuExpanded);
+
+            overlay.OpenKeyBindings();
+            Assert.IsTrue(overlay.IsMenuExpanded);
+
+            // 第一次 Esc: 退出按键设置，回退到系统设置
+            overlay.TogglePause();
+            Assert.IsTrue(overlay.IsPaused);
+            Assert.IsTrue(overlay.IsMenuExpanded);
+
+            // 第二次 Esc: 退出系统设置，回退到暂停主面板
+            overlay.TogglePause();
+            Assert.IsTrue(overlay.IsPaused);
+
+            // 第三次 Esc: 继续游戏
+            overlay.TogglePause();
+            Assert.IsFalse(overlay.IsPaused);
+
+            Object.Destroy(overlay.gameObject);
+            Object.Destroy(matchGo);
+            yield return null;
+        }
     }
 }

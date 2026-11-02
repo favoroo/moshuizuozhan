@@ -17,6 +17,8 @@ namespace P1.Weapons
         private float _turretTimer;
         private int _rollsLeft = 2;
         private Vector3 _dodgeDirection = Vector3.forward;
+        private float _dodgeSide;
+        private float _dodgeForward = 1f;
         private float _rollPaintTimer;
 
         public DualiesWeaponStrategy(WeaponConfigSO config) : base(config)
@@ -34,7 +36,11 @@ namespace P1.Weapons
 
         public override int RollsRemaining => _rollsLeft;
 
-        public Vector3 DodgeDirection => _dodgeDirection;
+        public override Vector3 DodgeDirection => _dodgeDirection;
+
+        public override float DodgeSide => _dodgeSide;
+
+        public override float DodgeForward => _dodgeForward;
 
         public override float SpreadDegrees
         {
@@ -60,6 +66,8 @@ namespace P1.Weapons
             _turretTimer = 0f;
             _rollsLeft = Config != null ? Config.dualiesMaxRolls : 2;
             _rollPaintTimer = 0f;
+            _dodgeSide = 0f;
+            _dodgeForward = 1f;
         }
 
         public override bool TryPerformDodgeRoll(Vector3 moveDirection, IWeaponRuntimeHost host)
@@ -82,6 +90,15 @@ namespace P1.Weapons
 
             Vector3 flat = new Vector3(moveDirection.x, 0f, moveDirection.z);
             _dodgeDirection = flat.sqrMagnitude > 0.001f ? flat.normalized : host.Forward;
+
+            // 触发瞬间锁定相对身体右方与前方的投影（翻滚中角色会随位移转向，必须用起滚相对向量）
+            Vector3 hostFwd = host.Forward;
+            hostFwd.y = 0f;
+            if (hostFwd.sqrMagnitude < 0.001f) hostFwd = Vector3.forward;
+            hostFwd.Normalize();
+            Vector3 hostRight = Vector3.Cross(Vector3.up, hostFwd).normalized;
+            _dodgeSide = Vector3.Dot(_dodgeDirection, hostRight);
+            _dodgeForward = Vector3.Dot(_dodgeDirection, hostFwd);
 
             host.ReportShotFeedback();
             return true;

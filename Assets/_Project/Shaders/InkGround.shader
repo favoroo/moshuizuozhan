@@ -98,6 +98,11 @@ Shader "P1/InkGround"
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #pragma multi_compile_fog
             #pragma multi_compile _ P1_INK_HIGH
+            // DOTS_INSTANCING_ON 需要 SM 4.5；缺 target 会让 GRD 变体编译失败并回退洋红错误 shader
+            #pragma target 4.5
+            // P12-D：InkGround 使用 4096² 图集 + 全局 uniform，DOTS/GRD 路径下贴图绑定不稳定（实测洋红），
+// 这里只保留传统 GPU instancing（移动端 SRP Batcher 关闭时生效）；PC 端 GRD 不接管墨面。
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -110,6 +115,7 @@ Shader "P1/InkGround"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -219,6 +225,7 @@ Shader "P1/InkGround"
             Varyings vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
@@ -674,6 +681,10 @@ Shader "P1/InkGround"
             #pragma vertex ShadowPassVertex
             #pragma fragment ShadowPassFragment
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+            #pragma target 4.5
+            // P12-D：InkGround 使用 4096² 图集 + 全局 uniform，DOTS/GRD 路径下贴图绑定不稳定（实测洋红），
+// 这里只保留传统 GPU instancing（移动端 SRP Batcher 关闭时生效）；PC 端 GRD 不接管墨面。
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -682,6 +693,7 @@ Shader "P1/InkGround"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct ShadowVaryings
@@ -746,6 +758,7 @@ Shader "P1/InkGround"
             ShadowVaryings ShadowPassVertex(ShadowAttributes input)
             {
                 ShadowVaryings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
                 float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
 
@@ -790,6 +803,10 @@ Shader "P1/InkGround"
             #pragma vertex DepthNormalsVertex
             #pragma fragment DepthNormalsFragment
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
+            #pragma target 4.5
+            // P12-D：InkGround 使用 4096² 图集 + 全局 uniform，DOTS/GRD 路径下贴图绑定不稳定（实测洋红），
+// 这里只保留传统 GPU instancing（移动端 SRP Batcher 关闭时生效）；PC 端 GRD 不接管墨面。
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
@@ -797,6 +814,7 @@ Shader "P1/InkGround"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct DepthNormalsVaryings
@@ -859,6 +877,7 @@ Shader "P1/InkGround"
             DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)
             {
                 DepthNormalsVaryings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
@@ -912,7 +931,7 @@ Shader "P1/InkGround"
             HLSLPROGRAM
             #pragma vertex P1InkAtlasVert
             #pragma fragment P1InkAtlasPaintFrag
-            #pragma target 3.5
+            #pragma target 4.5
 
             // CBUFFER_START / CBUFFER_END 由 SRP Core 的平台 API 头定义，
             // 本 Pass 必须显式包含 Core.hlsl（否则 Metal/GLES3/Vulkan 报 unrecognized identifier 'CBUFFER_START'，
@@ -1012,7 +1031,7 @@ Shader "P1/InkGround"
             HLSLPROGRAM
             #pragma vertex P1InkAtlasVert
             #pragma fragment P1InkAtlasStampFrag
-            #pragma target 3.5
+            #pragma target 4.5
 
             // 与 InkAtlasPaint 同上：CBUFFER_START 需要先包含 SRP Core 的平台 API 头。
             // 缺少这一行时 Stamp Pass 编译失败 → G 通道时间戳永远不写，湿润度/生长动画全部失效。

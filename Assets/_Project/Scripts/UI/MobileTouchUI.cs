@@ -1933,7 +1933,7 @@ namespace P1.UI
                 _canvasGroup.alpha = _baseAlpha;
                 if (_labelText != null && (!_hasSpecialState || !_lastReadyState))
                 {
-                    _labelText.text = "大招就绪!";
+                    _labelText.text = _defaultLabelText; // 按钮装不下「大招就绪」，就绪态沿用「大招」
                 }
             }
             else

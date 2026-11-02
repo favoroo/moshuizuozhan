@@ -14,6 +14,8 @@ namespace P1.Weapons
         private float _flickWindup = -1f;
         private float _emptyFeedbackCooldown;
         private bool _isRolling;
+        private float _rollElapsed;
+        private float _recoverTimer;
         private Vector3 _lastRollPosition;
 
         public RollerWeaponStrategy(WeaponConfigSO config) : base(config)
@@ -27,12 +29,51 @@ namespace P1.Weapons
         /// <summary>挥击前摇期间为 true（表现层据此把滚筒抡过肩）；Tick 走完前摇的同一帧回到 false。</summary>
         public override bool IsFlicking => _flickWindup >= 0f;
 
+        /// <summary>
+        /// 滚筒移速手感（P35，参考 INKWAVE weapons.js L57-68）：
+        /// 挥击前摇 1 → 0.45；推地 0.5 → 1（0.45s）；挥击后收势 0.6 → 1（0.18s）。
+        /// 推地时角色按 firingMoveSpeed 计速，因此满速仍是 3.8m/s，不改变平衡上限。
+        /// </summary>
+        public override float MoveSpeedMultiplier
+        {
+            get
+            {
+                float windup = Config != null ? Mathf.Max(0f, Config.flickWindup) : 0.22f;
+                if (_flickWindup >= 0f && windup > 0.0001f)
+                {
+                    float t = Mathf.Clamp01(1f - _flickWindup / windup);
+                    float factor = Config != null ? Mathf.Clamp01(Config.flickWindupMoveFactor) : 0.45f;
+                    return Mathf.Lerp(1f, factor, Mathf.SmoothStep(0f, 1f, t));
+                }
+
+                if (_isRolling)
+                {
+                    float accel = Config != null ? Mathf.Max(0.05f, Config.rollAccelTime) : 0.45f;
+                    float start = Config != null ? Mathf.Clamp01(Config.rollStartSpeedFactor) : 0.5f;
+                    float t = Mathf.Clamp01(_rollElapsed / accel);
+                    return Mathf.Lerp(start, 1f, Mathf.SmoothStep(0f, 1f, t));
+                }
+
+                float recover = Config != null ? Mathf.Max(0f, Config.flickRecoverMoveTime) : 0.18f;
+                if (_recoverTimer > 0f && recover > 0.0001f)
+                {
+                    float start = Config != null ? Mathf.Clamp01(Config.flickRecoverMoveFactor) : 0.6f;
+                    float t = Mathf.Clamp01(1f - _recoverTimer / recover);
+                    return Mathf.Lerp(start, 1f, t);
+                }
+
+                return 1f;
+            }
+        }
+
         public override void Reset()
         {
             _cooldown = 0f;
             _flickWindup = -1f;
             _emptyFeedbackCooldown = 0f;
             _isRolling = false;
+            _rollElapsed = 0f;
+            _recoverTimer = 0f;
             _lastRollPosition = Vector3.zero;
         }
 
@@ -46,6 +87,8 @@ namespace P1.Weapons
         {
             _isRolling = false;
             _flickWindup = -1f;
+            _rollElapsed = 0f;
+            _recoverTimer = 0f;
             if (host != null)
                 _lastRollPosition = host.Position;
         }
@@ -101,12 +144,15 @@ namespace P1.Weapons
                 _cooldown -= dt;
             if (_emptyFeedbackCooldown > 0f)
                 _emptyFeedbackCooldown -= dt;
+            if (_recoverTimer > 0f)
+                _recoverTimer = Mathf.Max(0f, _recoverTimer - dt);
 
             // 1. 挥击前摇：走完立刻抛出扇形墨滴（即使中途松开扳机也照常挥出，墨水已付）。
             if (_flickWindup >= 0f)
             {
                 _flickWindup -= dt;
                 _isRolling = false;
+                _rollElapsed = 0f;
                 if (_flickWindup <= 0f)
                 {
                     _flickWindup = -1f;
@@ -122,6 +168,7 @@ namespace P1.Weapons
             if (!canRoll)
             {
                 _isRolling = false;
+                _rollElapsed = 0f;
                 return;
             }
 
@@ -129,8 +176,11 @@ namespace P1.Weapons
             if (!_isRolling)
             {
                 _isRolling = true;
+                _rollElapsed = 0f;
                 _lastRollPosition = current;
             }
+
+            _rollElapsed += dt;
 
             Vector3 delta = current - _lastRollPosition;
             delta.y = 0f;
@@ -143,6 +193,7 @@ namespace P1.Weapons
             {
                 _lastRollPosition = current;
                 _isRolling = false;
+                _rollElapsed = 0f;
                 return;
             }
 
@@ -152,6 +203,7 @@ namespace P1.Weapons
                 if (!host.ConsumeInk(inkPerMeter * moved))
                 {
                     _isRolling = false;
+                    _rollElapsed = 0f;
                     _lastRollPosition = current;
                     ReportEmpty(host);
                     return;
@@ -175,6 +227,10 @@ namespace P1.Weapons
 
         private void FireFlick(WeaponAim aim, IWeaponRuntimeHost host)
         {
+            // 挥击后移速收势（INKWAVE 0.18s 从 60% 回到 100%）：即使玩家仍按住，
+            // 下一帧进入推地分支后由推地起步加速接管，不会卡在收势倍率。
+            _recoverTimer = Config != null ? Mathf.Max(0f, Config.flickRecoverMoveTime) : 0.18f;
+
             int drops = Config != null ? Mathf.Max(1, Config.flickDrops) : 9;
             float fanDegrees = Config != null ? Mathf.Max(0f, Config.flickSpreadDegrees) : 34f;
             float speed = Config != null ? Mathf.Max(1f, Config.flickSpeed) : 17f;

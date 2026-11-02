@@ -229,11 +229,11 @@ namespace P1.Tests
             fader.ResetToOpaque();
             yield return null;
 
-            var block = new MaterialPropertyBlock();
-            renderer.GetPropertyBlock(block);
-            Assert.IsTrue(renderer.HasPropertyBlock(), "恢复不透明后高台应仍持有 MaterialPropertyBlock");
-            Assert.IsNotNull(block.GetTexture(Shader.PropertyToID("_InkTex")),
-                "恢复不透明不得抹掉墨迹图集绑定，否则该台面永远喷不上油漆");
+            // P12-D：墨迹绑定已从逐 renderer MPB 改为全局 uniform（_GlobalInkAtlasTex /
+            // _GlobalInkMapOriginXZ / _InkRipples）。OcclusionFader.SetPropertyBlock(null)
+            // 不可能再清掉图集绑定，因此改为验证全局贴图仍然存在；台面可涂性继续由下方断言覆盖。
+            Assert.IsNotNull(Shader.GetGlobalTexture(Shader.PropertyToID("_GlobalInkAtlasTex")),
+                "恢复不透明后全局墨迹图集仍应绑定，否则该台面永远喷不上油漆");
 
             // 台面本身必须仍然可涂：玩法网格与图集都要接受落墨
             var ink = InkSurfaceController.Instance;

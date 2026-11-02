@@ -148,6 +148,7 @@ namespace P1.Weapons
                     sh = Shader.Find("Sprites/Default");
             }
             _sharedMat = new Material(sh) { name = "InkStormCloudMat" };
+            _sharedMat.enableInstancing = true;
         }
 
         /// <summary>

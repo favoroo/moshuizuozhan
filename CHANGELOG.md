@@ -7,6 +7,21 @@
 > **不记**：逐项 `Added` / `Changed` / `Verified` 流水账、测试项数与 exit 状态明细、selftest 细节、用户原话、设计推导、临时出图路径。
 > 2026-11-01 之前的条目按 GitHub Release 说明回填（仅版本里程碑）；逐条根因记录自 v0.1.8 起。
 
+## 2026-11-02 #08
+【发布墨水作战 v0.1.11：桌面改键 + 7 类武器持枪动作 + DrawCalls 专项收敛】本版把 #05 桌面按键自定义、#06 墨面/Instancing 批处理收敛、#07 持枪动作求解与滚筒贴地闭环一并发出；发布前按 `P1/画风/漫画风/0` → `P1/画风/几何风/1` → `P1/构建/11` 顺序重跑接线（新增改键文案带来的缺字会让 `FontCoverageTests` 两条预烘断言转红，重跑即恢复），`PlayerSettings` 版本 0.1.11 / bundleVersionCode 111 与 `GameVersion.APP_VERSION` 三方一致。涉及 `Scripts/Core/GameVersion.cs`、`ProjectSettings/ProjectSettings.asset`、`build/moshuizuozhan-v0.1.11-arm64-v8a.apk`。
+
+## 2026-11-02 #07
+【7 类主武器手感与持枪动作优化 + 滚筒贴地闭环与移速手感重构】引入纯函数持枪动作求解层 `WeaponWieldSolver` 接管 6 类枪械动作（小枪持续射击前压回拉、蓄力狙蓄力后拉后仰与释放前推、双枪交替后坐与翻滚侧倾下沉与架枪前压、泼桶前摇后仰与甩出前倾、爆破重炮回拉上抬、加特林蓄力下压与扫射机身抖动与转速连续驱动）；Fixed: 滚筒推地仅依靠姿态混合与数值俯仰反解，极端视角与动作切换会导致滚轴底缘微悬空 → `CharacterVisualController.ApplyRollerGroundContact` 增加装配期基准坐标复位与闭环最终高度补偿（限幅 ±5cm 保险），推地状态强制贴地权重满额；Fixed: 双枪战术翻滚因 Motor 在 Update 中已面向位移方向导致 LateUpdate 采样侧向投影为零 → `DualiesWeaponStrategy.TryPerformDodgeRoll` 触发瞬间锁定相对身体右方与前方的投影（`DodgeSide`/`DodgeForward`）；滚筒移速接入 INKWAVE 起步 50%→100% 加速与挥击前摇减速（`RollerWeaponStrategy.MoveSpeedMultiplier`）；狙击线圈高频脉冲与滚筒推地喷雾轻量视觉补充；`ArmHoldPose` 微调蓄力狙与加特林右手位与左臂胸前扶枪待机姿态；`WeaponController` 设置 `[DefaultExecutionOrder(50)]` 与 `CharacterVisualController` 设置 `[DefaultExecutionOrder(100)]`。涉及 `Scripts/Player/{WeaponWieldSolver,CharacterVisualController,CharacterAnimConfigSO,ArmHoldPose}.cs`、`Scripts/Weapons/{MainWeaponStrategy,DualiesWeaponStrategy,RollerWeaponStrategy,SlosherWeaponStrategy,WeaponConfigSO,WeaponController}.cs`、`Tests/EditMode/{WeaponWieldSolverTests,WeaponStrategyTests}.cs`、`Tests/PlayMode/WeaponWieldPlayTests.cs`。
+
+## 2026-11-02 #06
+【渲染 DrawCalls 专项收敛：解除墨面 MPB + 顶点 Instancing 管线 + 缓存失效与闪白修复】Fixed: 34 个墨面因逐帧写 MPB 且角色受击重置清空为「空 MPB」导致 GPU Resident Drawer (GRD) 与 GPU Instancing 判定失效（全场 DrawCalls 均值 773.5 / 峰值 2282）→ 墨面波纹数组改走全局 uniform 推送（`PushRippleGlobals`）且湿润度直接写共享材质，`CombatantHealth.ClearHitFlash` 改用 `SetPropertyBlock(null)` 彻底移除空属性块；Fixed: 自研着色器缺少 `UNITY_VERTEX_INPUT_INSTANCE_ID` 与 `UNITY_SETUP_INSTANCE_ID` 导致 GRD 批处理阶段顶点矩阵丢失与地面洋红 → 补齐 7 款着色器（CharacterToon 系列/ObstacleDitherLit/PropLit/InkGround/InkWall/InkBody/InkVfx/ContactShadow）的 instancing 顶点输入与设置宏，并为墨滴/墨珠/手雷/接触阴影将颜色抽为逐实例属性（`UNITY_DEFINE_INSTANCED_PROP`）；Fixed: DisableDomainReload 下角色与武器静态合并网格缓存残留已销毁 Mesh 导致身体部件合并被静默跳过 → `CharacterVisualAssembler` 增加 `ResetStaticCachesForPlayMode` 子系统注册重置与有效性校验。实测结果：120s 真实战斗 Profiler 采样 DrawCalls 均值从 773.5 降至 310.7（-60%），峰值从 2282 降至 836（-63%），平均 FPS 61.5，P5-A 全角色与武器展示图像素级零损失。涉及 `Scripts/Ink/InkSurfaceController.cs`、`Scripts/Player/{CombatantHealth,CharacterVisualAssembler,CharacterContactShadow}.cs`、`Scripts/Core/VfxPool.cs`、`Scripts/Weapons/{InkProjectilePool,InkBombPool,InkStormCloudPool}.cs`、`Scripts/Editor/PerformanceOptimizeTools.cs`、`Shaders/{CharacterToonCommon.hlsl,CharacterToon.shader,CharacterToonOutlined.shader,ObstacleDitherLit.shader,PropLit.shader,InkGround.shader,InkWall.shader}`、`Resources/{ContactShadow.shader,InkBody.shader,InkVfx.shader}`、`Tests/PlayMode/WallInkPlayboxTests.cs`、`Docs/ProfilerReport_P6C.md`。
+
+## 2026-11-02 #05
+【桌面端操作按键自定义与改键设置】在系统设置中为桌面端新增「按键设置 / KEY BINDINGS」模态子面板，支持 9 项核心操作（前进/后退/左右/跳跃/射击/潜墨/手雷/大招）的主键与备用键修改；引入 `DesktopKeyBindingService` 接管键盘与鼠标按键检测与 PlayerPrefs JSON 持久化，支持按键冲突自动互换与备用键清空、Esc 取消监听与多级返回导航；`PlayerController` 输入读取解耦至服务层并保留触控与手柄分支；`HomeInfoContent.DynamicControls` 动态联动更新暂停操作说明卡。涉及 `Scripts/Core/DesktopKeyBindings.cs`、`Scripts/Player/PlayerController.cs`、`Scripts/UI/Menus/PauseMenuOverlay.cs`、`Scripts/UI/HomeInfoContent.cs`、`Tests/EditMode/DesktopKeyBindingsTests.cs`、`Tests/PlayMode/PauseMenuPlayTests.cs`。
+
+## 2026-11-02 #04
+【移动端大招按钮就绪文案改短】Fixed: 大招就绪时按钮文字用「大招就绪!」超出 148px 按钮宽度显示不下 → 就绪态沿用默认文案「大招」（`_defaultLabelText`），颜色/实底高亮仍保留就绪强调。涉及 `Scripts/UI/MobileTouchUI.cs`。
+
 ## 2026-11-02 #03
 【发布墨水作战 v0.1.10：结算页 v2 读数板/战绩台账 + 首页设置卡 + 武器动作接入 + 性能尖刺收敛】涵盖结算页深度重做（拔河条/4v4台账明细）、首页系统设置卡（直开音量与震屏调节）、双枪翻滚架枪与加特林移速倍率接入、墨迹图集 mip 重建与小地图脏矩形上传收敛、角色网格静态合并。发布前跑通正文字集预烘与主题资产接线（`P1/画风/漫画风/0` 与 `P1/构建/11`），全量 EditMode 615 项与 PlayMode UI 58 项全绿。涉及 `Scripts/Core/GameVersion.cs`、`ProjectSettings/ProjectSettings.asset`、`build/moshuizuozhan-v0.1.10-arm64-v8a.apk`。
 

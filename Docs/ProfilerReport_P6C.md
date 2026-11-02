@@ -1,30 +1,30 @@
 # P1 性能采样报告 [P6-C-R]
 
-> **生成时间**: 2026-11-02 00:20:13
+> **生成时间**: 2026-11-02 09:28:26
 > **运行环境**: Unity Editor PlayMode · 平台 OSXEditor · GPU Metal (Apple M1) · 设备 MacBookPro17,1 · CPU 8 核 (Apple M1) · 内存 16.0 GB · 分辨率 1845x1121 · targetFrameRate 60 · Unity 6000.6.7f1
 > **数据来源**: 真实 PlayMode 战斗逐帧实测（Time.unscaledDeltaTime + ProfilerRecorder + InkSurfaceController 上报），无任何仿真或写死数值
 
 ## 采样结果
 ### Profiler 性能测试报告：Editor PlayMode 实测 · MacBookPro17,1
 - **运行环境**: Unity Editor PlayMode · 平台 OSXEditor · GPU Metal (Apple M1) · 设备 MacBookPro17,1 · CPU 8 核 (Apple M1) · 内存 16.0 GB · 分辨率 1845x1121 · targetFrameRate 60 · Unity 6000.6.7f1
-- **总采样帧数**: 7193 帧（运行时长：120.01 秒）
+- **总采样帧数**: 6882 帧（运行时长：120.00 秒）
 - **帧率表现 (FPS)**:
-  - 平均 FPS: **60.6**
-  - 1% Low FPS: **47.2**
-  - 极值范围: 15.5 ~ 196.0 FPS
+  - 平均 FPS: **61.5**
+  - 1% Low FPS: **37.5**
+  - 极值范围: 0.2 ~ 153.6 FPS
   - 说明: 编辑器 PlayMode 数值受帧率上限设置与编辑器自身开销影响，真机红线以 Player 采样为准
 - **GC 内存分配 (GC.Alloc)**:
-  - **[Recorder 实测] 平均每帧分配: 111333 Bytes/frame** (108.72 KB)
-  - **[Recorder 实测] 单帧最高分配: 887549 Bytes** (866.75 KB)
-  - [近似口径·托管堆差值] 平均每帧: 64956.3 Bytes/frame，单帧最高: 671744 Bytes，总计: 456280 KB
+  - **[Recorder 实测] 平均每帧分配: 83000 Bytes/frame** (81.05 KB)
+  - **[Recorder 实测] 单帧最高分配: 61071270 Bytes** (59639.91 KB)
+  - [近似口径·托管堆差值] 平均每帧: 38422.8 Bytes/frame，单帧最高: 23216128 Bytes，总计: 258228 KB
 - **涂地上传 (GPU 图集提交 InkSplatAtlas.Execute + 小地图 CPU FlushTexture)**:
-  - 上传次数: 5922 次
-  - 平均上传耗时: **0.140 ms**
-  - P95 耗时: **0.183 ms**
-  - P99 耗时: **0.200 ms**
-  - 单帧最高耗时 (Peak): **0.372 ms**
+  - 上传次数: 6071 次
+  - 平均上传耗时: **0.146 ms**
+  - P95 耗时: **0.207 ms**
+  - P99 耗时: **0.258 ms**
+  - 单帧最高耗时 (Peak): **0.533 ms**
 - **Draw Calls (ProfilerRecorder)**:
-  - 平均每帧: **773.5**，峰值: **2282**（红线：桌面 < 120 / 移动端 < 150）
+  - 平均每帧: **310.7**，峰值: **836**（红线：桌面 < 120 / 移动端 < 150）
 - **指标综合达标判定**:
   - 帧率达标 (Desktop >= 60 / Mobile >= 30): PASS
   - GC.Alloc 趋零 (Recorder 实测 < 2KB/帧): FAIL

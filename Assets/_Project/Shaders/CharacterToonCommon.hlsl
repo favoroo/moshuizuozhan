@@ -68,6 +68,7 @@ struct Attributes
     float4 positionOS : POSITION;
     float3 normalOS   : NORMAL;
     float2 uv         : TEXCOORD0;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct Varyings
@@ -82,6 +83,7 @@ struct Varyings
 Varyings vert(Attributes input)
 {
     Varyings output;
+    UNITY_SETUP_INSTANCE_ID(input);
     VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
     VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
@@ -160,6 +162,7 @@ struct ShadowAttributes
 {
     float4 positionOS : POSITION;
     float3 normalOS   : NORMAL;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct ShadowVaryings
@@ -170,6 +173,7 @@ struct ShadowVaryings
 ShadowVaryings ShadowPassVertex(ShadowAttributes input)
 {
     ShadowVaryings output;
+    UNITY_SETUP_INSTANCE_ID(input);
     float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
     float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
 
@@ -201,6 +205,7 @@ struct OutlineAttributes
 {
     float4 positionOS : POSITION;
     float3 normalOS   : NORMAL;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct OutlineVaryings
@@ -212,6 +217,7 @@ struct OutlineVaryings
 OutlineVaryings OutlinePassVertex(OutlineAttributes input)
 {
     OutlineVaryings output;
+    UNITY_SETUP_INSTANCE_ID(input);
     float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
     float camDist = distance(positionWS, GetCameraPositionWS());
     float widthScale = clamp(camDist / 4.5, 0.7, 2.2);

@@ -7,6 +7,9 @@
 > **不记**：逐项 `Added` / `Changed` / `Verified` 流水账、测试项数与 exit 状态明细、selftest 细节、用户原话、设计推导、临时出图路径。
 > 2026-11-01 之前的条目按 GitHub Release 说明回填（仅版本里程碑）；逐条根因记录自 v0.1.8 起。
 
+## 2026-11-03 #01
+【发布墨水作战 v0.1.14：TapTap 隐私合规 + WebGL 网页试玩 + 手感与观感修复】本版把 #26–#36 一并发出：首启隐私同意弹窗并移除未使用的计费/统计依赖与安装权限（合规审核用）、介绍页接入 WebGL 网页试玩并修复网页端全黑/粉块渲染、手雷投掷俯仰符号修正与敌墨减速手感（1.9→2.4 m/s）、场景精修档 P32、角色受击顿挫与眼神灵动、顶部战况条/生命值重影等多处 UI 修复；`PlayerSettings` 版本 0.1.14 / bundleVersionCode 114 与 `GameVersion.APP_VERSION` 三方一致。涉及 `ProjectSettings/ProjectSettings.asset`、`build/moshuizuozhan-v0.1.14-arm64-v8a.apk`。陷阱：上一个会话已 bump 到 0.1.14 并出包但未提交/发布，本次直接复用该 APK（`release.py build` 经 aapt2 包内校验通过）。
+
 ## 2026-11-02 #36
 【首页 Hero 卡补品牌标题群 + 键帽文案紧凑化】Fixed: ① 首页 Hero 卡中部整片空场——版面表 `HomeMenuMetrics.TitleFont/LatinFont` 一直存在但 `BuildHomeHero` 从未落地标题，现补 120 号「墨水大作战」+ 拉丁副标（桌面端），整体在武器整备卡与 CTA 之间空档内垂直偏上排布，底部让开 CTA 上方按键提示区（陷阱：CTA 上方 36.8px 是 HeroKeyHint 常驻区，标题群底限必须扣掉它，否则速记行与提示互撞）；规则速记行不重复放（顶部微标/左下类型签/KEYS 浮层已覆盖）。② HeroKeyHint 16px 违反规范 18px 下限 → 18px。③ Fixed: 暂停菜单/首页浮层键帽文案超宽截断（「鼠标右键 · 左 Shi」被 150px 键帽切掉）——`DesktopBindingSlot` 新增 `GetCompactDisplayName()`（「鼠标右键→右键」「左 Shift→Shift」），`HomeInfoContent.DynamicControls` 8 处全换紧凑名；完整名 `GetDisplayName()` 保留给键位自定义面板（`DesktopKeyBindingsTests` 断言不可改）。涉及 `Scripts/UI/{MatchFlowUI,HomeInfoContent}.cs`、`Scripts/Core/DesktopKeyBindings.cs`。
 

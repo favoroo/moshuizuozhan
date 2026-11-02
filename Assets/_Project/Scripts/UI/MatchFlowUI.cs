@@ -103,9 +103,11 @@ namespace P1.UI
         private TextMeshProUGUI _homeRecordInfo;
         private TextMeshProUGUI _homeKeysInfo;
 
-        // 首页 Hero 卡头部的 Bot 难度三档段选（轻松/普通/硬核），选择结果持久化到 GameSettingsService。
-        private readonly UIInkShapeGraphic[] _difficultyShapes = new UIInkShapeGraphic[3];
-        private readonly TextMeshProUGUI[] _difficultyTexts = new TextMeshProUGUI[3];
+        // 首页 Hero 卡头部的 Bot 难度四档段选（新手/轻松/普通/硬核），选择结果持久化到 GameSettingsService。
+        private readonly UIInkShapeGraphic[] _difficultyShapes =
+            new UIInkShapeGraphic[MenuLayoutMath.DifficultyTierCount];
+        private readonly TextMeshProUGUI[] _difficultyTexts =
+            new TextMeshProUGUI[MenuLayoutMath.DifficultyTierCount];
 
         private readonly List<UISpringMotion> _homeEntrance = new List<UISpringMotion>();
         private bool _homeEntrancePending;
@@ -598,7 +600,7 @@ namespace P1.UI
 
             float innerWidth = heroWidth - m.HeroPadding.x * 2f;
 
-            // 1. 顶部 Header：左上「PLAY」硬角签 + 右侧 Bot 难度三档段选 + 模式微标
+            // 1. 顶部 Header：左上「PLAY」硬角签 + 右侧 Bot 难度四档段选 + 模式微标
             CreateStageTag(card, "HeroTag", "PLAY", m.TagSize, m.TagFont, theme,
                 ComicStyle.Ink, ComicStyle.Paper, m.HeroPadding, TextAlignmentOptions.Center);
 
@@ -637,7 +639,7 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// Hero 卡头部右侧的 Bot 难度三档段选（轻松 / 普通 / 硬核）。
+        /// Hero 卡头部右侧的 Bot 难度四档段选（新手 / 轻松 / 普通 / 硬核）。
         /// 位置：与 PLAY 角签同一行、右对齐贴 Hero 内边；窄窗先收窄段宽，绝不压住 PLAY。
         /// 点击只改 <see cref="GameSettingsService.BotDifficulty"/>，Bot 通过事件即时重建缩放配置。
         /// 返回整组占用的宽度（供模式微标让位）。
@@ -2784,7 +2786,12 @@ namespace P1.UI
 
         private void OnCheckUpdateClicked()
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // 浏览器里 DownloadHandlerFile 与 Releases API（跨域/安装包落地）都不可用，直接开 Releases 页。
+            Application.OpenURL("https://github.com/favoroo/moshuizuozhan/releases/latest");
+#else
             UpdateManager.Instance?.CheckForUpdate(manual: true);
+#endif
         }
 
         /// <summary>首页信息卡（战绩 / 键位说明）打开详情浮层：浮层自带遮罩与同帧输入仲裁。</summary>

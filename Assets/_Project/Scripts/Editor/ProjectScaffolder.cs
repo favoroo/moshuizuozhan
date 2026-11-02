@@ -753,7 +753,7 @@ namespace P1.Editor
         public static void ApplyProjectPlayerSettings()
         {
             PlayerSettings.companyName = "P1Studio";
-            PlayerSettings.productName = "InkTurfDemo";
+            PlayerSettings.productName = GameVersion.APP_NAME;
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
             PlayerSettings.allowedAutorotateToPortrait = false;
             PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;

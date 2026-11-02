@@ -71,6 +71,9 @@ crashlytics-build.properties
 # 本地烘焙音效（tools/bake_sfx.py 固定种子可确定性重烘，进去只是噪音）
 /MediaRaw/sfx/
 
+# TapTap 上架素材暂存（图标/截图/宣传视频，本地工作区，不进版本库）
+/.taptap-upload/
+
 # ZCode 本地会话计划记录（工具本地状态，非工程配置）
 /.zcode/plans/
 /.zcode/skills/

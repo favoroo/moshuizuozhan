@@ -23,8 +23,9 @@ namespace P1.Editor
     public static class BuildAndProfilerSuite
     {
         public const string MainScenePath = "Assets/_Project/Scenes/PhaseA_Playbox.unity";
-        public const string StandaloneOutputPath = "Builds/StandaloneOSX/InkTurfDemo.app";
-        public const string AndroidOutputPath = "Builds/Android/InkTurfDemo.apk";
+        public const string StandaloneOutputPath = "Builds/StandaloneOSX/InkTurf.app";
+        public const string AndroidOutputPath = "Builds/Android/InkTurf.apk";
+        public const string WebGLOutputPath = "Builds/WebGL";
 
         /// <summary>真实采样报告的输出路径（写入方为 PlayModeProfilerSession）。</summary>
         public const string ProfilerReportPath = "Docs/ProfilerReport_P6C.md";
@@ -81,7 +82,7 @@ namespace P1.Editor
             var options = new BuildPlayerOptions
             {
                 scenes = new[] { MainScenePath },
-                locationPathName = "Builds/StandaloneOSX/InkTurfDemo_Dev.app",
+                locationPathName = "Builds/StandaloneOSX/InkTurf_Dev.app",
                 target = BuildTarget.StandaloneOSX,
                 options = BuildOptions.Development | BuildOptions.ConnectWithProfiler
             };
@@ -92,7 +93,7 @@ namespace P1.Editor
             if (summary.result == BuildResult.Succeeded)
             {
                 Debug.Log($"[P6-C-R][Build] Development Player 构建成功: {options.locationPathName} ({summary.totalSize / (1024f * 1024f):F2} MB)\n" +
-                          $"采样用法: 向 {System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile)}/Library/Application Support/P1Studio/InkTurfDemo/ " +
+                          $"采样用法: 向 {Application.persistentDataPath}/ " +
                           $"写入 P1_AutoProfile.request（内容=秒数），启动游戏，结束后取 P1_AutoProfiles/ 下报告");
                 return true;
             }
@@ -112,6 +113,108 @@ namespace P1.Editor
                 }
             }
             return AndroidOutputPath;
+        }
+
+        public static string ResolveWebGLOutputPath()
+        {
+            string[] args = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == "-buildOutput" || args[i] == "-customBuildOutput" || args[i] == "--output-path")
+                {
+                    return args[i + 1];
+                }
+            }
+            return WebGLOutputPath;
+        }
+
+        /// <summary>
+        /// 构建 GitHub Pages 用的 WebGL 网页试玩包（产物目录 Builds/WebGL，部署时拷进 site/dist/play）。
+        /// 关键点：Brotli + 解压兜底（Pages 不能设 Content-Encoding）；哈希文件名避免 CDN 缓存错配；
+        /// 不建 Development 包，避免把 com.unity.pipeline 的线程/网络代码带进浏览器。
+        /// </summary>
+        [MenuItem("P1/构建/14. 构建 WebGL 网页试玩包", false, 83)]
+        public static bool BuildWebGL()
+        {
+            string outputDir = ResolveWebGLOutputPath();
+            Debug.Log($"[WebGL][Build] 开始构建 WebGL 网页试玩包 (产物目录: {outputDir})...");
+
+            EnsureSceneInBuildSettings();
+            ApplyWebGLPlayerSettings();
+
+            if (!EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.WebGL, BuildTarget.WebGL))
+            {
+                Debug.LogError("[WebGL][Build] 切换 WebGL 构建目标失败（WebGL Build Support 模块是否已安装？）。");
+                ExitBatchOnFailure();
+                return false;
+            }
+
+            // 哈希文件名会随每次构建变化，旧产物必须清掉，否则会一起进 gh-pages。
+            if (Directory.Exists(outputDir)) Directory.Delete(outputDir, true);
+            EnsureOutputDirectory(outputDir);
+
+            var options = new BuildPlayerOptions
+            {
+                scenes = new[] { MainScenePath },
+                locationPathName = outputDir,
+                target = BuildTarget.WebGL,
+                options = BuildOptions.None
+            };
+
+            BuildReport report = BuildPipeline.BuildPlayer(options);
+            BuildSummary summary = report.summary;
+
+            if (summary.result == BuildResult.Succeeded)
+            {
+                Debug.Log($"[WebGL][Build] WebGL 构建成功！\n" +
+                          $"- 产物目录: {outputDir}\n" +
+                          $"- 包体总大小: {summary.totalSize / (1024f * 1024f):F2} MB\n" +
+                          $"- 耗时: {summary.totalTime.TotalSeconds:F2} 秒\n" +
+                          $"- Errors: {summary.totalErrors}, Warnings: {summary.totalWarnings}");
+                return true;
+            }
+
+            Debug.LogError($"[WebGL][Build] WebGL 构建失败: {summary.result}, Errors: {summary.totalErrors}");
+            ExitBatchOnFailure();
+            return false;
+        }
+
+        /// <summary>批处理模式下构建失败必须以非零码退出，否则 unity build 会把失败当成功。</summary>
+        private static void ExitBatchOnFailure()
+        {
+            if (Application.isBatchMode) EditorApplication.Exit(1);
+        }
+
+        public static void ApplyWebGLPlayerSettings()
+        {
+            PlayerSettings.companyName = "P1Studio";
+            PlayerSettings.productName = GameVersion.APP_NAME;
+            PlayerSettings.bundleVersion = GameVersion.APP_VERSION;
+            PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
+            PlayerSettings.allowedAutorotateToPortrait = false;
+            PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+            PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+            PlayerSettings.allowedAutorotateToLandscapeRight = true;
+
+            var target = NamedBuildTarget.WebGL;
+            PlayerSettings.SetApplicationIdentifier(target, "com.p1studio.inkturfdemo");
+            PlayerSettings.SetScriptingBackend(target, ScriptingImplementation.IL2CPP);
+            PlayerSettings.SetIl2CppCompilerConfiguration(target, Il2CppCompilerConfiguration.Release);
+
+            PlayerSettings.WebGL.template = "PROJECT:InkTurf";
+            PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Brotli;
+            PlayerSettings.WebGL.decompressionFallback = true;
+            PlayerSettings.WebGL.dataCaching = true;
+            PlayerSettings.WebGL.nameFilesAsHashes = true;
+            PlayerSettings.WebGL.threadsSupport = false;
+            PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
+            PlayerSettings.WebGL.initialMemorySize = 64;
+            PlayerSettings.WebGL.maximumMemorySize = 2048;
+            PlayerSettings.defaultWebScreenWidth = 1280;
+            PlayerSettings.defaultWebScreenHeight = 720;
+            PlayerSettings.WebGL.powerPreference = WebGLPowerPreference.HighPerformance;
+
+            AssetDatabase.SaveAssets();
         }
 
         [MenuItem("P1/构建/9. 构建 Android APK (ARM64 + Vulkan/GLES3) (P6-C)", false, 81)]
@@ -203,7 +306,7 @@ namespace P1.Editor
         public static void ApplyDesktopPlayerSettings()
         {
             PlayerSettings.companyName = "P1Studio";
-            PlayerSettings.productName = "InkTurfDemo";
+            PlayerSettings.productName = GameVersion.APP_NAME;
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Standalone, "com.p1studio.inkturfdemo");
             PlayerSettings.defaultScreenWidth = 1920;
@@ -219,7 +322,7 @@ namespace P1.Editor
         public static void ApplyAndroidPlayerSettings()
         {
             PlayerSettings.companyName = "P1Studio";
-            PlayerSettings.productName = "InkTurfDemo";
+            PlayerSettings.productName = GameVersion.APP_NAME;
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
             PlayerSettings.allowedAutorotateToPortrait = false;
             PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;

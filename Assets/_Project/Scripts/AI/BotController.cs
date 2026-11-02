@@ -409,7 +409,10 @@ namespace P1.AI
             enemyPosition = default;
             if (_weapon == null || _health == null) return null;
 
-            float sight = BotTactics.SightRange(_weapon.CurrentWeaponKind, _weapon.Config, config);
+            // SightRange 会被武器射程兜底（maxRange + margin），只缩放 sightRange 对大多数枪无效；
+            // 难度通过 sightRangeScale 乘在最终结果上，才能真正缩短索敌距离（新手档更容易被绕后）。
+            float sight = BotTactics.SightRange(_weapon.CurrentWeaponKind, _weapon.Config, config)
+                          * (config != null ? Mathf.Clamp(config.sightRangeScale, 0.2f, 3f) : 1f);
             float sightSq = sight * sight;
             float stealthDetect = config != null ? Mathf.Max(0.5f, config.stealthDetectRange) : 2.5f;
 

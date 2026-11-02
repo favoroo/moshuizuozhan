@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using P1.AI;
 using P1.Core;
+using P1.UI;
 using UnityEngine;
 
 namespace P1.Tests
@@ -37,29 +38,35 @@ namespace P1.Tests
             Assert.AreEqual(GameSettingsMath.MinBotDifficulty, BotDifficultyMath.MinLevel);
             Assert.AreEqual(GameSettingsMath.MaxBotDifficulty, BotDifficultyMath.MaxLevel);
             Assert.AreEqual(GameSettingsMath.DefaultBotDifficulty, BotDifficultyMath.DefaultLevel);
+
+            Assert.AreEqual(GameSettingsMath.BotDifficultyBeginner, BotDifficultyMath.LevelBeginner);
+            Assert.AreEqual(GameSettingsMath.BotDifficultyEasy, BotDifficultyMath.LevelEasy);
+            Assert.AreEqual(GameSettingsMath.BotDifficultyNormal, BotDifficultyMath.LevelNormal);
+            Assert.AreEqual(GameSettingsMath.BotDifficultyHard, BotDifficultyMath.LevelHard);
+            Assert.AreEqual(MenuLayoutMath.DifficultyTierCount, BotDifficultyMath.MaxLevel - BotDifficultyMath.MinLevel + 1,
+                "难度档数在 UI 版面表与 AI 档位区间必须一致");
         }
 
         [Test]
-        public void Normalize_ClampsToThreeTiers()
+        public void Normalize_ClampsToFourTiers()
         {
-            Assert.AreEqual(BotDifficultyMath.LevelEasy, BotDifficultyMath.Normalize(-7));
-            Assert.AreEqual(BotDifficultyMath.LevelNormal, BotDifficultyMath.Normalize(1));
+            Assert.AreEqual(BotDifficultyMath.LevelBeginner, BotDifficultyMath.Normalize(-7));
+            Assert.AreEqual(BotDifficultyMath.LevelEasy, BotDifficultyMath.Normalize(1));
             Assert.AreEqual(BotDifficultyMath.LevelHard, BotDifficultyMath.Normalize(42));
         }
 
         [Test]
         public void Labels_AreDistinctAndNonEmpty()
         {
-            string easy = BotDifficultyMath.GetLabel(BotDifficultyMath.LevelEasy);
-            string normal = BotDifficultyMath.GetLabel(BotDifficultyMath.LevelNormal);
-            string hard = BotDifficultyMath.GetLabel(BotDifficultyMath.LevelHard);
+            var labels = new System.Collections.Generic.HashSet<string>();
+            for (int level = BotDifficultyMath.MinLevel; level <= BotDifficultyMath.MaxLevel; level++)
+            {
+                string label = BotDifficultyMath.GetLabel(level);
+                Assert.IsNotEmpty(label);
+                Assert.IsTrue(labels.Add(label), "难度档位文案不得重复：" + label);
+            }
 
-            Assert.IsNotEmpty(easy);
-            Assert.IsNotEmpty(normal);
-            Assert.IsNotEmpty(hard);
-            Assert.AreNotEqual(easy, normal);
-            Assert.AreNotEqual(normal, hard);
-            Assert.AreNotEqual(easy, hard);
+            Assert.AreEqual(4, labels.Count, "应有新手 / 轻松 / 普通 / 硬核四档");
         }
 
         [Test]
@@ -70,7 +77,7 @@ namespace P1.Tests
             Assert.AreEqual(1f, profile.aimError, 1e-5f);
             Assert.AreEqual(1f, profile.aimSpringOmega, 1e-5f);
             Assert.AreEqual(1f, profile.aimMaxTurnRate, 1e-5f);
-            Assert.AreEqual(1f, profile.sightRange, 1e-5f);
+            Assert.AreEqual(1f, profile.sightRangeScale, 1e-5f);
             Assert.AreEqual(0, profile.specialMinEnemiesDelta);
 
             BotConfigSO runtime = BotDifficultyMath.CreateRuntimeConfig(_baseConfig, BotDifficultyMath.LevelNormal);
@@ -84,7 +91,7 @@ namespace P1.Tests
             float baseError = _baseConfig.aimErrorDegrees;
             float baseOmega = _baseConfig.aimSpringOmega;
             float baseTurn = _baseConfig.aimMaxTurnRateDegrees;
-            float baseSight = _baseConfig.sightRange;
+            float baseSightScale = _baseConfig.sightRangeScale;
             float basePerception = _baseConfig.perceptionInterval;
             int baseSpecialMinEnemies = _baseConfig.specialMinEnemies;
 
@@ -99,7 +106,7 @@ namespace P1.Tests
                 Assert.Greater(easy.aimWanderDegrees, _baseConfig.aimWanderDegrees, "轻松档慢漂移必须更大");
                 Assert.Less(easy.aimSpringOmega, baseOmega, "轻松档跟枪弹簧必须更软");
                 Assert.Less(easy.aimMaxTurnRateDegrees, baseTurn, "轻松档甩枪转速必须更低");
-                Assert.Less(easy.sightRange, baseSight, "轻松档感知半径必须更短");
+                Assert.Less(easy.sightRangeScale, baseSightScale, "轻松档索敌半径倍率必须更短");
                 Assert.Greater(easy.perceptionInterval, basePerception, "轻松档决策节拍必须更慢");
                 Assert.Greater(easy.specialMinEnemies, baseSpecialMinEnemies, "轻松档大招门槛必须更保守");
                 Assert.Less(easy.bombUseChance, _baseConfig.bombUseChance, "轻松档炸弹使用率必须更低");
@@ -115,13 +122,46 @@ namespace P1.Tests
         }
 
         [Test]
+        public void Beginner_IsClearlyFriendlierThanEasy()
+        {
+            BotConfigSO beginner = BotDifficultyMath.CreateRuntimeConfig(_baseConfig, BotDifficultyMath.LevelBeginner);
+            BotConfigSO easy = BotDifficultyMath.CreateRuntimeConfig(_baseConfig, BotDifficultyMath.LevelEasy);
+            Assert.IsNotNull(beginner);
+            Assert.IsNotNull(easy);
+
+            try
+            {
+                Assert.Greater(beginner.reactionTime, easy.reactionTime, "新手档反应必须比轻松更慢");
+                Assert.Greater(beginner.aimErrorDegrees, easy.aimErrorDegrees, "新手档瞄准误差必须比轻松更大");
+                Assert.Greater(beginner.aimWanderDegrees, easy.aimWanderDegrees, "新手档慢漂移必须比轻松更大");
+                Assert.Less(beginner.aimSpringOmega, easy.aimSpringOmega, "新手档跟枪必须比轻松更软");
+                Assert.Less(beginner.aimMaxTurnRateDegrees, easy.aimMaxTurnRateDegrees, "新手档甩枪必须比轻松更慢");
+                Assert.Less(beginner.sightRangeScale, easy.sightRangeScale, "新手档索敌必须比轻松更短");
+                Assert.Greater(beginner.perceptionInterval, easy.perceptionInterval, "新手档决策必须比轻松更慢");
+                Assert.Greater(beginner.specialMinEnemies, easy.specialMinEnemies, "新手档大招门槛必须更保守");
+                Assert.Less(beginner.bombUseChance, easy.bombUseChance, "新手档炸弹使用率必须更低");
+                Assert.Less(beginner.retreatHealthThreshold, easy.retreatHealthThreshold, "新手档应更少撤退（更容易被打死）");
+
+                // 手机端最低档的硬指标：反应 ≥0.45s、瞄准误差 ≥12°、索敌倍率 ≤0.6。
+                Assert.GreaterOrEqual(beginner.reactionTime, 0.45f);
+                Assert.GreaterOrEqual(beginner.aimErrorDegrees, 12f);
+                Assert.LessOrEqual(beginner.sightRangeScale, 0.6f);
+            }
+            finally
+            {
+                Object.DestroyImmediate(beginner);
+                Object.DestroyImmediate(easy);
+            }
+        }
+
+        [Test]
         public void Hard_MakesBotsSharper()
         {
             float baseReaction = _baseConfig.reactionTime;
             float baseError = _baseConfig.aimErrorDegrees;
             float baseOmega = _baseConfig.aimSpringOmega;
             float baseTurn = _baseConfig.aimMaxTurnRateDegrees;
-            float baseSight = _baseConfig.sightRange;
+            float baseSightScale = _baseConfig.sightRangeScale;
             float basePerception = _baseConfig.perceptionInterval;
 
             BotConfigSO hard = BotDifficultyMath.CreateRuntimeConfig(_baseConfig, BotDifficultyMath.LevelHard);
@@ -134,7 +174,7 @@ namespace P1.Tests
                 Assert.Less(hard.aimWanderDegrees, _baseConfig.aimWanderDegrees, "硬核档慢漂移必须更小");
                 Assert.Greater(hard.aimSpringOmega, baseOmega, "硬核档跟枪弹簧必须更硬");
                 Assert.Greater(hard.aimMaxTurnRateDegrees, baseTurn, "硬核档甩枪转速必须更高");
-                Assert.Greater(hard.sightRange, baseSight, "硬核档感知半径必须更远");
+                Assert.Greater(hard.sightRangeScale, baseSightScale, "硬核档索敌半径倍率必须更远");
                 Assert.Less(hard.perceptionInterval, basePerception, "硬核档决策节拍必须更快");
             }
             finally

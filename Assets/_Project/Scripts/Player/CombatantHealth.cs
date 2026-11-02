@@ -18,6 +18,7 @@ namespace P1.Player
         [SerializeField] private Transform respawnAnchor;
 
         private float _currentHealth = 100f;
+        private float _maxHealthScale = 1f;
         private float _respawnTimer;
         private float _hitFlashTimer;
         private bool _externalInvulnerable;
@@ -46,9 +47,28 @@ namespace P1.Player
 
         public Team Team => team;
         public float CurrentHealth => _currentHealth;
-        public float MaxHealth => config != null ? config.maxHealth : 100f;
+        public float MaxHealth => (config != null ? config.maxHealth : 100f) * _maxHealthScale;
+        public float MaxHealthScale => _maxHealthScale;
         public float Health01 => Mathf.Clamp01(_currentHealth / MaxHealth);
         public bool IsAlive { get; private set; } = true;
+
+        /// <summary>
+        /// 设置最大生命倍率（低难度给本地玩家的容错补偿）。只应由 PlayerController 调用；
+        /// Bot / 队友保持 1.0。已受伤时按当前血量比例缩放，切难度时血条百分比不跳变。
+        /// </summary>
+        public void SetMaxHealthScale(float scale)
+        {
+            scale = PlayerDifficultyMath.ClampMaxHealthScale(scale);
+            if (Mathf.Approximately(_maxHealthScale, scale))
+                return;
+
+            float oldMax = MaxHealth;
+            _maxHealthScale = scale;
+            float newMax = MaxHealth;
+
+            if (IsAlive && oldMax > 0.01f)
+                _currentHealth = Mathf.Clamp(_currentHealth * (newMax / oldMax), 0f, newMax);
+        }
 
         /// <summary>
         /// 是否免疫伤害：外部（大招等）无敌与复活出生保护取并集。

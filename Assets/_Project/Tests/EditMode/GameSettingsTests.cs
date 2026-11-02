@@ -93,7 +93,8 @@ namespace P1.Tests
                 GameSettingsMath.KeyFixedJoystick,
                 GameSettingsMath.KeyFireButtonRotatesCamera,
                 GameSettingsMath.KeyAimAssistLevel,
-                GameSettingsMath.KeyBotDifficulty
+                GameSettingsMath.KeyBotDifficulty,
+                GameSettingsMath.KeyBotDifficultyVersion
             };
 
             for (int i = 0; i < keys.Length; i++)
@@ -112,6 +113,7 @@ namespace P1.Tests
             Assert.AreEqual("P1_Settings_FireRotatesCamera", GameSettingsMath.KeyFireButtonRotatesCamera);
             Assert.AreEqual("P1_Settings_AimAssistLevel", GameSettingsMath.KeyAimAssistLevel);
             Assert.AreEqual("P1_Settings_BotDifficulty", GameSettingsMath.KeyBotDifficulty);
+            Assert.AreEqual("P1_Settings_BotDifficultyVersion", GameSettingsMath.KeyBotDifficultyVersion);
         }
 
         [Test]
@@ -133,18 +135,35 @@ namespace P1.Tests
         }
 
         [Test]
-        public void BotDifficulty_NormalizesAndLabelsThreeTiers()
+        public void BotDifficulty_NormalizesAndLabelsFourTiers()
         {
             Assert.AreEqual(GameSettingsMath.MinBotDifficulty, GameSettingsMath.NormalizeBotDifficulty(-3));
             Assert.AreEqual(GameSettingsMath.MaxBotDifficulty, GameSettingsMath.NormalizeBotDifficulty(9));
-            Assert.AreEqual(1, GameSettingsMath.NormalizeBotDifficulty(1));
+            Assert.AreEqual(2, GameSettingsMath.NormalizeBotDifficulty(2));
 
-            Assert.AreEqual("轻松", GameSettingsMath.GetBotDifficultyLabel(0));
-            Assert.AreEqual("普通", GameSettingsMath.GetBotDifficultyLabel(1));
-            Assert.AreEqual("硬核", GameSettingsMath.GetBotDifficultyLabel(2));
+            Assert.AreEqual("新手", GameSettingsMath.GetBotDifficultyLabel(0));
+            Assert.AreEqual("轻松", GameSettingsMath.GetBotDifficultyLabel(1));
+            Assert.AreEqual("普通", GameSettingsMath.GetBotDifficultyLabel(2));
+            Assert.AreEqual("硬核", GameSettingsMath.GetBotDifficultyLabel(3));
 
             // 默认档必须是「普通」，否则不切难度的老玩家会感到 Bot 变强/变弱。
-            Assert.AreEqual(1, GameSettingsMath.DefaultBotDifficulty);
+            Assert.AreEqual(2, GameSettingsMath.DefaultBotDifficulty);
+        }
+
+        [Test]
+        public void BotDifficulty_MigratesOldThreeTierSavesWithoutChangingMeaning()
+        {
+            // v0.1.12 的旧三档：0 轻松 / 1 普通 / 2 硬核 → 四档后整体 +1。
+            Assert.AreEqual(GameSettingsMath.BotDifficultyEasy, GameSettingsMath.MigrateBotDifficulty(0, true, 0));
+            Assert.AreEqual(GameSettingsMath.BotDifficultyNormal, GameSettingsMath.MigrateBotDifficulty(1, true, 0));
+            Assert.AreEqual(GameSettingsMath.BotDifficultyHard, GameSettingsMath.MigrateBotDifficulty(2, true, 0));
+
+            // 没有存档：默认普通，不能被 +1 推成硬核。
+            Assert.AreEqual(GameSettingsMath.DefaultBotDifficulty, GameSettingsMath.MigrateBotDifficulty(2, false, 0));
+
+            // 已经是当前版本：新手档不能被再次 +1。
+            Assert.AreEqual(GameSettingsMath.BotDifficultyBeginner, GameSettingsMath.MigrateBotDifficulty(0, true, 1));
+            Assert.AreEqual(GameSettingsMath.BotDifficultyHard, GameSettingsMath.MigrateBotDifficulty(3, true, 1));
         }
 
         [Test]

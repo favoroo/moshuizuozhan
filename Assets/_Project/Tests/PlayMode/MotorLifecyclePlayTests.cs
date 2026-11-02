@@ -227,7 +227,8 @@ namespace P1.Tests
             yield return PlayModeTestKit.WaitGameSecondsAccelerated(4.3f);
 
             Assert.IsTrue(health.IsAlive, "4s 后应自动复活");
-            Assert.AreEqual(100f, health.CurrentHealth, 0.5f, "复活应满血");
+            // 低难度会给本地玩家加最大生命（新手 150 / 轻松 125），断言按实际 MaxHealth 而非写死 100。
+            Assert.AreEqual(health.MaxHealth, health.CurrentHealth, 0.5f, "复活应满血");
             Assert.AreEqual(100f, motor.CurrentInk, 0.5f, "复活应满墨");
             Assert.IsFalse(motor.IsSwimming, "复活后应回到人形");
             Assert.IsFalse(motor.IsStealthed, "复活后必须清除隐匿状态");

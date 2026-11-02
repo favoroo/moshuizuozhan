@@ -142,15 +142,18 @@ namespace P1.Tests
                 Assert.GreaterOrEqual(difficulty.X, hero.X + home.HeroPadding.x,
                     tag + " 难度段选不应越过 Hero 内边距");
 
-                // 三档总宽 = 3 段 + 2 间隙；段宽必须够放两字中文。
-                float expectedWidth = home.DifficultySegmentSize.x * 3f + home.DifficultyGap * 2f;
-                Assert.AreEqual(expectedWidth, difficulty.Width, 0.5f, tag + " 难度段选总宽应为 3 段 + 2 间隙");
-                Assert.GreaterOrEqual(home.DifficultySegmentSize.x, 80f, tag + " 单段难度按钮应至少 80 宽");
+                // 四档总宽 = 4 段 + 3 间隙；段宽必须够放两字中文。
+                float expectedWidth = home.DifficultySegmentSize.x * MenuLayoutMath.DifficultyTierCount
+                                      + home.DifficultyGap * (MenuLayoutMath.DifficultyTierCount - 1);
+                Assert.AreEqual(expectedWidth, difficulty.Width, 0.5f, tag + " 难度段选总宽应为 4 段 + 3 间隙");
+                Assert.AreEqual(4, MenuLayoutMath.DifficultyTierCount, tag + " 难度必须是四档（新手/轻松/普通/硬核）");
+                Assert.GreaterOrEqual(home.DifficultySegmentSize.x, 64f, tag + " 单段难度按钮应至少 64 宽");
                 Assert.GreaterOrEqual(home.DifficultySegmentSize.y, 44f, tag + " 单段难度按钮高度不得低于桌面可点下限");
 
                 if (mobile)
                 {
                     Assert.GreaterOrEqual(home.DifficultySegmentSize.y, 64f, "移动端难度按钮高度必须 ≥64（触控下限）");
+                    Assert.GreaterOrEqual(home.DifficultySegmentSize.x, 100f, "移动端单段难度按钮应 ≥100 宽");
                     Assert.Greater(home.DifficultySegmentSize.x, MenuLayoutMath.Home(false).DifficultySegmentSize.x,
                         "移动端难度按钮应明显宽于桌面");
                 }
@@ -172,7 +175,8 @@ namespace P1.Tests
             const float narrowAvailable = 207f;
             DifficultyBarLayout narrow = MenuLayoutMath.ResolveHeroDifficulty(desktop, narrowAvailable);
             Assert.Less(narrow.SegmentWidth, desktop.DifficultySegmentSize.x, "窄宽必须收窄段宽");
-            Assert.GreaterOrEqual(narrow.SegmentWidth, 48f, "段宽不得缩到不可点的程度");
+            Assert.GreaterOrEqual(narrow.SegmentWidth, desktop.DifficultyMinSegmentWidth,
+                "段宽不得缩到低于版面表下限");
             Assert.LessOrEqual(narrow.TotalWidth, narrowAvailable + 0.01f,
                 "收窄后的总宽必须落在可用宽度内，不能压住 PLAY 角签");
         }

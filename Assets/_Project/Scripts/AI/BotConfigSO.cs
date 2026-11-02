@@ -94,6 +94,9 @@ namespace P1.AI
         [Range(0.3f, 1f)] public float splatlingPaintReleaseCharge = 0.6f;
         [Tooltip("索敌半径在武器射程外额外留的余量（米）")]
         public float weaponSightMargin = 2f;
+        [Tooltip("索敌半径总倍率（Bot 档位用）：BotTactics.SightRange 的结果再乘它。1 = 按武器射程全额索敌；越低 Bot 的索敌距离越短")]
+        [Range(0.2f, 3f)]
+        public float sightRangeScale = 1f;
 
         [Header("墨水加权寻路")]
         [Tooltip("己方墨水格子的寻路代价倍率：<1 表示鼓励沿墨道高速切入")]

@@ -7,6 +7,36 @@
 > **不记**：逐项 `Added` / `Changed` / `Verified` 流水账、测试项数与 exit 状态明细、selftest 细节、用户原话、设计推导、临时出图路径。
 > 2026-11-01 之前的条目按 GitHub Release 说明回填（仅版本里程碑）；逐条根因记录自 v0.1.8 起。
 
+## 2026-11-02 #25
+【发布墨水作战 v0.1.13：「新手」难度 + 设置页重排 + 更新弹窗修复】本版把 #16–#24 一并发出：新增手机端「新手」难度与低难度玩家生命加成、设置页分组栅格与滑条手柄修复、更新弹窗进度条与更新说明 Markdown、桌面图标与窗口名统一「墨水大作战」，并补齐介绍页源码与字体预烘（新增文案的缺字会让 `FontCoverageTests` 转红，需按 `P1/画风/漫画风/0` → `P1/画风/几何风/1` → `P1/构建/11` 重跑）；`PlayerSettings` 版本 0.1.13 / bundleVersionCode 113 与 `GameVersion.APP_VERSION` 三方一致。涉及 `Scripts/Core/GameVersion.cs`、`ProjectSettings/ProjectSettings.asset`、`build/moshuizuozhan-v0.1.13-arm64-v8a.apk`。
+
+## 2026-11-02 #24
+【低难度给本地玩家加最大生命】此前难度只弱化 Bot，玩家自身没有任何容错补偿；手机端触屏瞄准吃亏，新手档仍可能被两发带走。新增 `Player/PlayerDifficultyMath`：新手档玩家最大生命 ×1.5（100→150）、轻松 ×1.25、普通/硬核基准 ×1.0；`CombatantHealth` 增加实例级 `SetMaxHealthScale`（按当前血量比例缩放，切难度血条百分比不跳变；复活/重开以新 MaxHealth 满血），`PlayerController` 在 Awake 与 `GameSettingsService.BotDifficultyChanged` 时应用，**只改本地玩家**，Bot 与队友保持基准血量。HUD 直接读 `CurrentHealth`/`Health01`，无需改 UI（满血显示 150）。涉及 `Scripts/Player/{PlayerDifficultyMath,CombatantHealth,PlayerController}.cs`、`Tests/{EditMode/PlayerDifficultyMathTests,PlayMode/BotDifficultyPlayTests}.cs`、`Docs/UI-GeometricBold.md`。
+
+## 2026-11-02 #23
+【系统层应用名去掉 Demo：productName 统一为「墨水大作战」】游戏内 `GameVersion.APP_NAME` 早已是「墨水大作战」，但 `PlayerSettings.productName` 仍是 `InkTurfDemo`，导致安卓桌面图标名、桌面窗口标题与 PlayerPrefs / persistentDataPath 目录都带 Demo。Fixed: 出包与场景构建前置（`ProjectScaffolder.ApplyProjectPlayerSettings`、`BuildAndProfilerSuite.ApplyDesktopPlayerSettings/ApplyAndroidPlayerSettings`）改为写入 `GameVersion.APP_NAME`；固定构建产物名 `InkTurfDemo.app/.apk/_Dev.app` 改为 `InkTurf.app/.apk/_Dev.app`（`release.py` 候选表保留旧名以兼容历史产物）；Development Player 采样提示改用 `Application.persistentDataPath` 动态输出。注意：`productName` 变更会换掉 macOS/Windows 的 PlayerPrefs 与 persistentDataPath 目录（安卓按包名 `com.p1studio.inkturfdemo` 不受影响），老桌面端设置不会自动迁移；包名保持不变，避免安卓更新断链。涉及 `ProjectSettings/ProjectSettings.asset`、`Scripts/Editor/{ProjectScaffolder,BuildAndProfilerSuite}.cs`、`.agents/skills/p1-release/release.py`。
+
+## 2026-11-02 #22
+【介绍页接入宣传视频（AV1 1080p 主源 + H.264 720p 兜底）】源片为微信 HEVC 1920×864（20:9）23.4MB；H.264 CRF20 重编码反而涨到 43MB，最终用 `libsvtav1 -preset 6 -crf 38` 得 18.7MB（抽帧对比源片目视无差）+ H.264 720p CRF24 15MB 兜底，音轨直接 copy；Hero 视频框改 20:9（`aspect-ratio: 20/9` + 1920×864 属性，避免 16:9 裁边），海报改由 `build_site.py` 从视频第 3 秒抽帧生成（与视频画面一致），播放改为纯点击（去掉 HEAD 探测与「即将上线」角标）。陷阱：`play()` 在无用户手势的自动化环境会被自动播放策略拒绝，验收需用 CDP 真实鼠标事件 + `--autoplay-policy=no-user-gesture-required`；AAC 音轨 `-c:a copy` 保留 128k 原质量。涉及 `site/{index.html,styles.css,app.js,README.md,video/promo.av1.mp4,video/promo.mp4}`、`tools/build_site.py`。
+
+## 2026-11-02 #21
+【新增「新手」难度作为手机端最低档】v0.1.12 的「轻松」对触屏玩家仍偏难：四档重排为 0 新手 / 1 轻松 / 2 普通 / 3 硬核（默认仍普通＝恒等档），新手档反应 ×2.6（≈0.57s）、瞄准误差 ×2.8（≈15°）、跟枪弹簧 ×0.45、甩枪转速 ×0.42、索敌半径 ×0.55、决策节拍 ×2.2、炸弹率 ×0.3、几乎不放大招（`BotDifficultyMath.GetProfile`）。Fixed: 旧实现只缩放 `BotConfigSO.sightRange`，而 `BotTactics.SightRange` 用「武器射程 + 余量」兜底（小枪 12m → 14.6m），倍率对大多数枪完全无效 → 新增 `BotConfigSO.sightRangeScale`，`BotController.FindNearestEnemy` 把最终索敌半径再乘它，视野缩放才真正生效。存档迁移：`P1_Settings_BotDifficultyVersion`（v0.1.12 的三档旧值整体 +1，避免老玩家选的「轻松」被解释成「新手」；无存档仍默认普通）。首页 Hero 头部段选由 3 段改 4 段（桌面 4×68×44 / 移动 4×112×64，窄宽自适应收窄），模式微标保留。涉及 `Scripts/AI/{BotDifficultyMath,BotConfigSO,BotController}.cs`、`Scripts/Core/{GameSettingsMath,GameSettingsService}.cs`、`Scripts/UI/{MenuLayoutMath,MatchFlowUI}.cs`、`Tests/{EditMode/BotDifficultyTests,EditMode/GameSettingsTests,EditMode/MenuLayoutMathTests,PlayMode/BotDifficultyPlayTests}.cs`、`Docs/UI-GeometricBold.md`。
+
+## 2026-11-02 #20
+【系统设置页重排：分组栅格 + 小圆形滑条手柄】设置视图改为 900 宽双分组（声音与视角 / 画面与操作）+ 独立页脚操作条，标签列 / 控件列 / 数值列统一右对齐基准，全部 TMP 文案 `NoWrap`；屏幕震动长标签拆成主标签 +「无障碍减弱」小注解，帧率段选改 30 / 60 / 120 / 无限制 防折行，灵敏度数值从「100%」改「1.0x」避免与 1/3 填充位置矛盾。Fixed: 滑条 Fill 的 RectTransform 用点锚 + offset 把高度压成 0，黄色进度从未渲染；改为 26 高轨道内缩 3px 的 fillArea。Fixed: Slider 会把 handleRect 锚点拉满整条轨道，44×44 方块实际渲染成竖条；改为零宽 HandleSlot 接管锚点、26×26 Pill 圆手柄作为居中子物体（整条 64 高滑条仍是拖动热区）。涉及 `Assets/_Project/Scripts/UI/Menus/PauseMenuOverlay.cs`。
+
+## 2026-11-02 #19
+【更新弹窗：进度条动画 + 更新说明 Markdown】Fixed: 进度条 Fill 是裸 `Image`（`sprite == null`），`fillAmount` 被 Unity 忽略、整条恒为满格——这是「一直全绿且像没有动画」的根因；改用 `UIFlatSprite.MakeFlat(filled:true)` 补 1×1 白图，槽底改深灰（`Darken(PaperAlt, 0.74)`）、填充改主行动黄，并加「纸白 + 2px 墨边」进度头小方块与按帧指数逼近目标值（unscaled，下载回调再粗也不会硬跳）。更新说明新增 `UpdateNotesMarkdown`：标题 / 无序有序列表 / 引用 / 分隔线 / 表格行 / 加粗 / 斜体 / 删除线 / 行内代码 / 链接 → TMP 富文本，原文尖括号转 `noparse` 防止说明里的伪标签改色。涉及 `Scripts/UI/{UpdateDialog,UpdateNotesMarkdown}.cs`、`Tests/EditMode/UpdateSystemTests.cs`。
+
+## 2026-11-02 #18
+【介绍页战场截图精简为两张】按反馈移除「4v4 对局 HUD」与「湿墨质感」两张截图，战场区保留「码头全景」「正面交火」一行两栏；`build_site.py` 同步不再生成 `shot_hud.webp` / `shot_wet.webp`，部署产物减两图。涉及 `site/index.html`、`tools/build_site.py`。
+
+## 2026-11-02 #17
+【介绍页去掉游戏版本号展示与 FAQ】按反馈移除页面所有版本号（顶栏 CTA、Hero 标签、下载卡 meta、页脚）与底部 FAQ 三个问题及对应样式；`deploy_site.py` 的脏工作树检查从「拒绝部署」改为「仅警告」——部署走独立 worktree 不动 main，而正常流程下 CHANGELOG 往往就是未提交状态，原逻辑会把部署拦死。涉及 `site/{index.html,styles.css,README.md}`、`tools/deploy_site.py`。
+
+## 2026-11-02 #16
+【游戏介绍页上线 GitHub Pages（favoroo.github.io/moshuizuozhan）】新增 `site/` 纯静态介绍站（Hero 视频位 + 数字带 + 玩法四卡 + 武器库 7+2+1 + 战场截图画廊 + 下载/FAQ），视觉沿用游戏内几何大胆风（3px 墨黑框 / 零模糊硬偏移影 / 黄色行动带 / MiSans）；`tools/build_site.py` 从 `Logs/` 拷截图转 WebP、从 `GameVersion.cs` 注入版本号、按页面字符集子集化 MiSans（4.8MB→~84KB/字重）、把 `__V__` / `__APP_VERSION__` 令牌注水进 `site/dist/`；`tools/deploy_site.py` 用独立 worktree 建孤儿 `gh-pages` 分支 force-with-lease 推送并自动开 Pages（主分支不提交）。陷阱：本机 git 的 `worktree add --orphan` 是旧式无参形式，必须写 `--orphan -b gh-pages <path>`，`--orphan <branch> <path>` 会把路径当 commit-ish 报 fatal；`Logs/` 被 gitignore，换机器构建会缺图；网页视频位已预接 `video/promo.mp4`（HEAD 探测存在才显示播放键，否则海报占位）。涉及 `site/{index.html,styles.css,app.js,README.md}`、`tools/{build_site.py,deploy_site.py}`。
+
 ## 2026-11-02 #15
 【发布墨水作战 v0.1.12：App 图标与启动动画 + Bot 三档难度 + 墨幕开场】本版把 #09–#14 一并发出：品牌图标与启动动画、首页轻松/普通/硬核难度选择、开赛墨幕撕开入场，以及安卓更新安装旧包、首页宽屏空场与角签溢出的修复；`PlayerSettings` 版本 0.1.12 / bundleVersionCode 112 与 `GameVersion.APP_VERSION` 三方一致。涉及 `Scripts/Core/GameVersion.cs`、`ProjectSettings/ProjectSettings.asset`、`build/moshuizuozhan-v0.1.12-arm64-v8a.apk`。
 

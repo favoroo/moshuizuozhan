@@ -17,6 +17,7 @@ namespace P1.Core
         public const string KeyFireButtonRotatesCamera = "P1_Settings_FireRotatesCamera";
         public const string KeyAimAssistLevel = "P1_Settings_AimAssistLevel";
         public const string KeyBotDifficulty = "P1_Settings_BotDifficulty";
+        public const string KeyBotDifficultyVersion = "P1_Settings_BotDifficultyVersion";
 
         public const float DefaultMasterVolume = 1.0f;
         public const float DefaultShakeScale = 1.0f;
@@ -31,10 +32,23 @@ namespace P1.Core
         public const int MinAimAssistLevel = 0;
         public const int MaxAimAssistLevel = 3;
 
-        /// <summary>Bot 难度档位：0 轻松 / 1 普通 / 2 硬核（与 P1.AI.BotDifficultyMath 的档位定义一一对应）。</summary>
-        public const int DefaultBotDifficulty = 1;
+        /// <summary>
+        /// Bot 难度档位：0 新手 / 1 轻松 / 2 普通 / 3 硬核（与 P1.AI.BotDifficultyMath 一一对应）。
+        /// 默认普通（恒等档）；新手档是后加的最低档，旧存档通过 <see cref="BotDifficultyVersion"/> 迁移。
+        /// </summary>
+        public const int DefaultBotDifficulty = 2;
         public const int MinBotDifficulty = 0;
-        public const int MaxBotDifficulty = 2;
+        public const int MaxBotDifficulty = 3;
+        public const int BotDifficultyBeginner = 0;
+        public const int BotDifficultyEasy = 1;
+        public const int BotDifficultyNormal = 2;
+        public const int BotDifficultyHard = 3;
+
+        /// <summary>
+        /// 难度存档版本：v1 起从三档（0 轻松/1 普通/2 硬核）扩为四档（0 新手/1 轻松/2 普通/3 硬核）。
+        /// 旧值整体 +1，避免老玩家选中的「轻松」被静默解释成「新手」。
+        /// </summary>
+        public const int BotDifficultyVersion = 1;
 
         public const float AimAssistRadiusWeak = 0.5f;
         public const float AimAssistRadiusMedium = 0.8f;
@@ -140,7 +154,7 @@ namespace P1.Core
             }
         }
 
-        /// <summary>裁切 Bot 难度到 [0, 2]；越界按最近合法档位收口。</summary>
+        /// <summary>裁切 Bot 难度到 [0, 3]；越界按最近合法档位收口。</summary>
         public static int NormalizeBotDifficulty(int level)
         {
             if (level <= MinBotDifficulty)
@@ -150,14 +164,27 @@ namespace P1.Core
             return level;
         }
 
+        /// <summary>
+        /// 把旧版三档存档值迁移到当前四档：v0（0 轻松/1 普通/2 硬核）整体 +1 变为
+        /// v1（0 新手/1 轻松/2 普通/3 硬核）。无存档或已是当前版本时原样规范化返回。
+        /// </summary>
+        public static int MigrateBotDifficulty(int storedValue, bool hasStored, int storedVersion)
+        {
+            if (hasStored && storedVersion < BotDifficultyVersion)
+                return NormalizeBotDifficulty(storedValue + 1);
+            return NormalizeBotDifficulty(storedValue);
+        }
+
         /// <summary>Bot 难度的中文展示文案（只使用项目字集里已有的字）。</summary>
         public static string GetBotDifficultyLabel(int level)
         {
             switch (NormalizeBotDifficulty(level))
             {
-                case MinBotDifficulty:
+                case BotDifficultyBeginner:
+                    return "新手";
+                case BotDifficultyEasy:
                     return "轻松";
-                case MaxBotDifficulty:
+                case BotDifficultyHard:
                     return "硬核";
                 default:
                     return "普通";

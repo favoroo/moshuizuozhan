@@ -150,8 +150,9 @@ namespace P1.UI
         public float TileArrowFont;
 
         /// <summary>
-        /// Hero 卡头部右侧的 Bot 难度三档段选：单段尺寸、段间距、单段最小宽度与字号。
-        /// 三档总宽 = SegmentSize.x × 3 + Gap × 2；运行时按可用宽度收窄（见 ResolveHeroDifficulty）。
+        /// Hero 卡头部右侧的 Bot 难度段选：单段尺寸、段间距、单段最小宽度与字号。
+        /// 共 <see cref="MenuLayoutMath.DifficultyTierCount"/> 档（新手/轻松/普通/硬核）；
+        /// 总宽 = SegmentSize.x × 档数 + Gap × (档数 - 1)，运行时按可用宽度收窄。
         /// </summary>
         public Vector2 DifficultySegmentSize;
         public float DifficultyGap;
@@ -208,7 +209,8 @@ namespace P1.UI
             get
             {
                 float innerWidth = HeroBox.x - HeroPadding.x * 2f;
-                float total = DifficultySegmentSize.x * 3f + DifficultyGap * 2f;
+                float total = DifficultySegmentSize.x * MenuLayoutMath.DifficultyTierCount
+                              + DifficultyGap * (MenuLayoutMath.DifficultyTierCount - 1);
                 return new HomeBox(
                     Margin + HeroPadding.x + innerWidth - total,
                     CenteredBoardTop + HeroPadding.y + (TagSize.y - DifficultySegmentSize.y) * 0.5f,
@@ -356,6 +358,9 @@ namespace P1.UI
         public const float RefWidth = 1920f;
         public const float RefHeight = 1080f;
 
+        /// <summary>Bot 难度档数（新手 / 轻松 / 普通 / 硬核），与 GameSettingsMath 的档位区间一致。</summary>
+        public const int DifficultyTierCount = 4;
+
         /// <summary>移动端抽屉宽度占参考画布宽度的比例（桌面 620/1920≈32%）。</summary>
         public const float MobileDrawerWidthRatio = 0.82f;
 
@@ -396,9 +401,9 @@ namespace P1.UI
                     TileTitleFont = 44f,
                     TileInfoFont = 18f,
                     TileArrowFont = 40f,
-                    DifficultySegmentSize = new Vector2(88f, 44f),
+                    DifficultySegmentSize = new Vector2(68f, 44f),
                     DifficultyGap = 8f,
-                    DifficultyMinSegmentWidth = 64f,
+                    DifficultyMinSegmentWidth = 44f,
                     DifficultyFont = 20f,
                     FooterTagSize = new Vector2(320f, 36f),
                     FooterTagFont = 18f,
@@ -442,9 +447,9 @@ namespace P1.UI
                 TileTitleFont = 44f,
                 TileInfoFont = 18f,
                 TileArrowFont = 44f,
-                DifficultySegmentSize = new Vector2(136f, 64f),
+                DifficultySegmentSize = new Vector2(112f, 64f),
                 DifficultyGap = 8f,
-                DifficultyMinSegmentWidth = 92f,
+                DifficultyMinSegmentWidth = 72f,
                 DifficultyFont = 20f,
                 // 移动端左下是「武器整备」整备卡的地盘，社区角签不显示（返回空盒）。
                 FooterTagSize = Vector2.zero,
@@ -589,20 +594,22 @@ namespace P1.UI
 
         /// <summary>
         /// Hero 头部难度段选的实际几何：按设计段宽排；可用宽度不够时先收窄、
-        /// 收到最小段宽仍不够则继续等比压缩（兜底 48），绝不让三档按钮压到 PLAY 角签上。
+        /// 收到最小段宽仍不够则继续等比压缩（兜底 48），绝不让难度按钮压到 PLAY 角签上。
         /// </summary>
         public static DifficultyBarLayout ResolveHeroDifficulty(HomeMenuMetrics m, float availableWidth)
         {
             float gap = m.DifficultyGap;
             float segment = m.DifficultySegmentSize.x;
             float width = Mathf.Max(0f, availableWidth);
+            int count = DifficultyTierCount;
+            float gapTotal = gap * (count - 1);
 
-            float total = segment * 3f + gap * 2f;
+            float total = segment * count + gapTotal;
             if (total > width)
             {
-                float fitted = (width - gap * 2f) / 3f;
-                segment = Mathf.Clamp(fitted, 48f, segment);
-                total = segment * 3f + gap * 2f;
+                float fitted = (width - gapTotal) / count;
+                segment = Mathf.Clamp(fitted, m.DifficultyMinSegmentWidth, segment);
+                total = segment * count + gapTotal;
             }
 
             return new DifficultyBarLayout

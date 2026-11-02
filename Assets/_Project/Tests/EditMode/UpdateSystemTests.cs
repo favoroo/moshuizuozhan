@@ -330,5 +330,55 @@ namespace P1.Tests
             Object.DestroyImmediate(readyPanel);
             Object.DestroyImmediate(go);
         }
+
+        [Test]
+        public void ReleaseNotesMarkdown_RendersHeadingsListsAndInlineStyles()
+        {
+            const string md =
+                "## 墨水作战 v0.1.12\n\n" +
+                "### 新增内容\n" +
+                "- **全新** App 图标与开场动画\n" +
+                "- 修复 `bake_brand.py` 与 [说明](https://example.com)\n";
+
+            string tmp = UpdateNotesMarkdown.ToTmp(md, 22f);
+
+            StringAssert.Contains("<size=30><b>墨水作战 v0.1.12</b></size>", tmp);
+            StringAssert.Contains("<size=26><b>新增内容</b></size>", tmp);
+            StringAssert.Contains("• <b>全新</b> App 图标", tmp);
+            StringAssert.Contains("<color=#2456FF>bake_brand.py</color>", tmp);
+            StringAssert.Contains("<color=#2456FF><u>说明</u></color>", tmp);
+            StringAssert.DoesNotContain("##", tmp);
+            StringAssert.DoesNotContain("**", tmp);
+            StringAssert.DoesNotContain("](", tmp);
+        }
+
+        [Test]
+        public void ReleaseNotesMarkdown_EscapesRawAngleBrackets()
+        {
+            string tmp = UpdateNotesMarkdown.ToTmp("修复 <color=red>文字</color> 被吞的问题", 22f);
+
+            // 原始尖括号必须转义成 noparse，不能让玩家笔记里的“标签”改变弹窗配色
+            StringAssert.DoesNotContain("<color=red>", tmp);
+            StringAssert.Contains("<noparse><", tmp);
+        }
+
+        [Test]
+        public void ReleaseNotesMarkdown_CodeFenceKeepsMarkdownLiteral()
+        {
+            const string md = "```\n**not bold**\n```\n";
+
+            string tmp = UpdateNotesMarkdown.ToTmp(md, 22f);
+
+            StringAssert.Contains("**not bold**", tmp);
+            StringAssert.Contains("<color=#5A5A5A>", tmp);
+            StringAssert.DoesNotContain("<b>", tmp);
+        }
+
+        [Test]
+        public void ReleaseNotesMarkdown_EmptyOrRuleOnlyFallsBackSafely()
+        {
+            Assert.AreEqual("暂无更新说明", UpdateNotesMarkdown.ToTmp(null, 22f));
+            Assert.AreEqual("暂无更新说明", UpdateNotesMarkdown.ToTmp("   \n\n ", 22f));
+        }
     }
 }

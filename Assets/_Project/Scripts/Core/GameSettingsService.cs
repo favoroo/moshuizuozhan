@@ -243,7 +243,7 @@ namespace P1.Core
         }
 
         /// <summary>
-        /// Bot 难度档位：0 轻松 / 1 普通 / 2 硬核（默认普通）。
+        /// Bot 难度档位：0 新手 / 1 轻松 / 2 普通 / 3 硬核（默认普通）。
         /// BotController 订阅 <see cref="BotDifficultyChanged"/> 后即时重建难度缩放配置。
         /// </summary>
         public static int BotDifficulty
@@ -339,8 +339,29 @@ namespace P1.Core
             _fireButtonRotatesCamera = PlayerPrefs.GetInt(GameSettingsMath.KeyFireButtonRotatesCamera, 1) != 0;
             _aimAssistLevel = GameSettingsMath.NormalizeAimAssistLevel(
                 PlayerPrefs.GetInt(GameSettingsMath.KeyAimAssistLevel, GameSettingsMath.DefaultAimAssistLevel));
-            _botDifficulty = GameSettingsMath.NormalizeBotDifficulty(
-                PlayerPrefs.GetInt(GameSettingsMath.KeyBotDifficulty, GameSettingsMath.DefaultBotDifficulty));
+            _botDifficulty = LoadBotDifficultyWithMigration();
+        }
+
+        /// <summary>
+        /// 读取 Bot 难度并做一次存档迁移：v0 是三档（0 轻松 / 1 普通 / 2 硬核），
+        /// v1 扩成四档（0 新手 / 1 轻松 / 2 普通 / 3 硬核）。旧值整体 +1，
+        /// 避免老玩家选中的「轻松」被静默解释成「新手」；无存档时保持默认「普通」。
+        /// </summary>
+        private static int LoadBotDifficultyWithMigration()
+        {
+            bool hasStored = PlayerPrefs.HasKey(GameSettingsMath.KeyBotDifficulty);
+            int raw = PlayerPrefs.GetInt(GameSettingsMath.KeyBotDifficulty, GameSettingsMath.DefaultBotDifficulty);
+            int storedVersion = PlayerPrefs.GetInt(GameSettingsMath.KeyBotDifficultyVersion, 0);
+            int migrated = GameSettingsMath.MigrateBotDifficulty(raw, hasStored, storedVersion);
+
+            if (hasStored && storedVersion < GameSettingsMath.BotDifficultyVersion)
+            {
+                PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficulty, migrated);
+                PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficultyVersion, GameSettingsMath.BotDifficultyVersion);
+                PlayerPrefs.Save();
+            }
+
+            return migrated;
         }
 
         private static void SaveVolume()
@@ -400,6 +421,7 @@ namespace P1.Core
         private static void SaveBotDifficulty()
         {
             PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficulty, _botDifficulty);
+            PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficultyVersion, GameSettingsMath.BotDifficultyVersion);
             PlayerPrefs.Save();
         }
 
@@ -415,6 +437,7 @@ namespace P1.Core
             PlayerPrefs.SetInt(GameSettingsMath.KeyFireButtonRotatesCamera, _fireButtonRotatesCamera ? 1 : 0);
             PlayerPrefs.SetInt(GameSettingsMath.KeyAimAssistLevel, _aimAssistLevel);
             PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficulty, _botDifficulty);
+            PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficultyVersion, GameSettingsMath.BotDifficultyVersion);
             PlayerPrefs.Save();
         }
 

@@ -45,8 +45,19 @@ namespace P1.UI
         // 进度控件
         private GameObject _progressBox;
         private Image _progressBarFill;
+        private RectTransform _progressFillArea;
+        private UIInkShapeGraphic _progressBarHead;
         private TextMeshProUGUI _progressPercentText;
         private TextMeshProUGUI _progressSpeedText;
+
+        // 进度条动画状态：下载回调粒度很粗（一次可能跳好几个百分点），
+        // 直接写 fillAmount 会一顿一顿；按帧指数逼近目标值，条子才会连续滑动。
+        private float _targetProgress;
+        private float _displayedProgress;
+        private bool _progressRunning;
+
+        /// <summary>进度槽底色：深灰，才能和纸白面板、黄色填充都拉开层次。</summary>
+        private static readonly Color ProgressTrackColor = ComicStyle.Darken(ComicStyle.PaperAlt, 0.74f);
 
         // 按钮
         private Button _actionBtn;
@@ -112,6 +123,60 @@ namespace P1.UI
             }
         }
 
+        private void Update()
+        {
+            if (_progressBarFill == null) return;
+
+            if (!Mathf.Approximately(_displayedProgress, _targetProgress))
+            {
+                // 用 unscaled 时间：更新弹窗可能在 Time.timeScale=0（暂停/结算）时出现。
+                float k = 1f - Mathf.Exp(-9f * Time.unscaledDeltaTime);
+                _displayedProgress = Mathf.Lerp(_displayedProgress, _targetProgress, k);
+                if (Mathf.Abs(_targetProgress - _displayedProgress) < 0.0015f)
+                {
+                    _displayedProgress = _targetProgress;
+                }
+
+                _progressBarFill.fillAmount = _displayedProgress;
+            }
+
+            UpdateProgressHead();
+        }
+
+        /// <summary>
+        /// 把目标进度交给动画层；immediate 用于「开始下载 / 已就绪 / 下载完成」这类必须立刻到位的切换。
+        /// </summary>
+        private void SetProgressTarget(float value, bool immediate = false)
+        {
+            _targetProgress = Mathf.Clamp01(value);
+            if (immediate) _displayedProgress = _targetProgress;
+
+            if (_progressBarFill != null) _progressBarFill.fillAmount = _displayedProgress;
+            UpdateProgressHead();
+        }
+
+        /// <summary>
+        /// 黄色填充条尽头的小方块：跟着动画进度走，让「下载中」有明确的运动参照。
+        /// 完成 / 未开始时隐藏（满格时它只会压在右边框上）。
+        /// </summary>
+        private void UpdateProgressHead()
+        {
+            if (_progressBarHead == null) return;
+
+            bool visible = _progressRunning && _progressBox != null && _progressBox.activeSelf
+                && _displayedProgress > 0.002f && _displayedProgress < 0.998f;
+            if (_progressBarHead.gameObject.activeSelf != visible)
+            {
+                _progressBarHead.gameObject.SetActive(visible);
+            }
+            if (!visible) return;
+
+            float width = _progressFillArea != null ? _progressFillArea.rect.width : 734f;
+            float half = _progressBarHead.rectTransform.rect.width * 0.5f;
+            float x = Mathf.Clamp(width * _displayedProgress, half, width - half);
+            _progressBarHead.rectTransform.anchoredPosition = new Vector2(x, 0f);
+        }
+
         /// <summary>
         /// 体积等元信息是延迟补齐的：Gitee 的 Release API 不给 asset size，
         /// UpdateManager 会另发一次 HEAD 探测，拿到后回来刷这行「大小」。
@@ -127,7 +192,9 @@ namespace P1.UI
             {
                 _isCompleted = false;
                 _completedApkPath = "";
+                _progressRunning = false;
                 if (_progressBox != null) _progressBox.SetActive(false);
+                SetProgressTarget(0f, immediate: true);
                 if (_actionBtn != null) _actionBtn.interactable = info.hasApk;
                 if (_actionBtnText != null) _actionBtnText.text = info.hasApk ? "立 即 更 新" : "无内置安装包";
             }
@@ -145,12 +212,16 @@ namespace P1.UI
             _currentInfo = info;
             _isCompleted = false;
             _completedApkPath = "";
+            _progressRunning = false;
 
             EnsureUI();
             ApplyResponsivePanelScale();
             if (_verText != null) _verText.text = $"新版本: {info.tagName}";
             RefreshSizeText(info);
-            if (_notesText != null) _notesText.text = string.IsNullOrEmpty(info.releaseNotes) ? "暂无更新说明" : info.releaseNotes;
+            if (_notesText != null)
+            {
+                _notesText.text = UpdateNotesMarkdown.ToTmp(info.releaseNotes, _notesText.fontSize);
+            }
 
             if (_scrollRect != null) _scrollRect.verticalNormalizedPosition = 1f;
 
@@ -167,13 +238,14 @@ namespace P1.UI
                 _completedApkPath = UpdateManager.Instance.GetApkSavePath(info);
 
                 if (_progressBox != null) _progressBox.SetActive(true);
-                if (_progressBarFill != null) _progressBarFill.fillAmount = 1f;
+                SetProgressTarget(1f, immediate: true);
                 if (_progressPercentText != null) _progressPercentText.text = "安装包已就绪";
                 if (_progressSpeedText != null) _progressSpeedText.text = "点「立即安装」开始安装";
                 if (_actionBtnText != null) _actionBtnText.text = "立 即 安 装";
             }
             else
             {
+                SetProgressTarget(0f, immediate: true);
                 if (_progressBox != null) _progressBox.SetActive(false);
             }
 
@@ -221,14 +293,16 @@ namespace P1.UI
 
             if (!_currentInfo.hasApk)
             {
+                _progressRunning = false;
                 if (_progressBox != null) _progressBox.SetActive(true);
                 if (_progressPercentText != null) _progressPercentText.text = "该版本未附带安装包";
                 if (_progressSpeedText != null) _progressSpeedText.text = "请点「浏览器下载」";
                 return;
             }
 
+            _progressRunning = true;
             if (_progressBox != null) _progressBox.SetActive(true);
-            if (_progressBarFill != null) _progressBarFill.fillAmount = 0f;
+            SetProgressTarget(0f, immediate: true);
             if (_progressPercentText != null) _progressPercentText.text = "准备下载...";
             if (_progressSpeedText != null) _progressSpeedText.text = "";
             if (_actionBtn != null) _actionBtn.interactable = false;
@@ -266,8 +340,9 @@ namespace P1.UI
         private void HandleDownloadProgress(long loaded, long total, float percent, float speed, float etaSec)
         {
             if (_progressBox == null || !_progressBox.activeSelf) return;
+            _progressRunning = true;
 
-            if (_progressBarFill != null) _progressBarFill.fillAmount = percent / 100f;
+            SetProgressTarget(percent / 100f);
 
             string loadedStr = GameVersion.FormatBytes(loaded);
             string totalStr = GameVersion.FormatBytes(total);
@@ -296,9 +371,10 @@ namespace P1.UI
         {
             _isCompleted = true;
             _completedApkPath = filePath;
+            _progressRunning = false;
 
             if (_progressBox != null) _progressBox.SetActive(true);
-            if (_progressBarFill != null) _progressBarFill.fillAmount = 1f;
+            SetProgressTarget(1f, immediate: true);
             if (_progressPercentText != null) _progressPercentText.text = "100% (下载完成)";
             if (_progressSpeedText != null) _progressSpeedText.text = "准备安装";
 
@@ -310,6 +386,7 @@ namespace P1.UI
 
         private void HandleDownloadFailed(string error)
         {
+            _progressRunning = false;
             if (_progressBox != null)
             {
                 _progressBox.SetActive(true);
@@ -522,7 +599,7 @@ namespace P1.UI
             barBgShape.CornerRadius = ComicStyle.CornerSharp;
             barBgShape.BorderWidth = ComicStyle.BorderThin;
             barBgShape.BorderColor = ComicStyle.Ink;
-            barBgShape.color = ComicStyle.PaperAlt;
+            barBgShape.color = ProgressTrackColor; // 深灰槽底：空槽与黄色填充都有清晰边界
             barBgShape.HardShadow = false;
 
             var fillArea = new GameObject("FillArea", typeof(RectTransform));
@@ -532,6 +609,7 @@ namespace P1.UI
             fillAreaRt.anchorMax = Vector2.one;
             fillAreaRt.offsetMin = new Vector2(3f, 3f);
             fillAreaRt.offsetMax = new Vector2(-3f, -3f);
+            _progressFillArea = fillAreaRt;
 
             var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
             fillGo.transform.SetParent(fillArea.transform, false);
@@ -541,11 +619,32 @@ namespace P1.UI
             fillRt.offsetMin = Vector2.zero;
             fillRt.offsetMax = Vector2.zero;
             _progressBarFill = fillGo.GetComponent<Image>();
-            _progressBarFill.type = Image.Type.Filled;
-            _progressBarFill.fillMethod = Image.FillMethod.Horizontal;
-            _progressBarFill.fillOrigin = (int)Image.OriginHorizontal.Left;
-            _progressBarFill.color = ComicStyle.Green;
+            // 关键：Image 没有 sprite 时 fillAmount 完全失效（整条恒为满格）——
+            // 这就是旧版「进度条一直全绿、像没有动画」的根因。
+            UIFlatSprite.MakeFlat(_progressBarFill, filled: true);
+            _progressBarFill.color = ComicStyle.Yellow; // 主行动黄，替代原来的绿色
             _progressBarFill.fillAmount = 0f;
+
+            // 进度头：纸白小方块 + 2px 墨边，沿填充条尽头移动（下载中的运动参照）
+            var headGo = new GameObject("ProgressHead", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            headGo.transform.SetParent(fillArea.transform, false);
+            var headRt = headGo.GetComponent<RectTransform>();
+            headRt.anchorMin = new Vector2(0f, 0.5f);
+            headRt.anchorMax = new Vector2(0f, 0.5f);
+            headRt.pivot = new Vector2(0.5f, 0.5f);
+            headRt.sizeDelta = new Vector2(8f, 14f);
+            headRt.anchoredPosition = Vector2.zero;
+
+            _progressBarHead = headGo.GetComponent<UIInkShapeGraphic>();
+            _progressBarHead.Shape = UIInkShape.SharpRect;
+            _progressBarHead.CornerRadius = ComicStyle.CornerSharp;
+            _progressBarHead.BorderWidth = 2f;
+            _progressBarHead.BorderColor = ComicStyle.Ink;
+            _progressBarHead.color = ComicStyle.Paper;
+            _progressBarHead.HardShadow = false;
+            _progressBarHead.Halftone = false;
+            _progressBarHead.raycastTarget = false;
+            headGo.SetActive(false);
 
             _progressPercentText = CreateTextMesh("PercentLabel", _progressBox.transform, "准备下载...", UITypography.FontSnapped(20f), ComicStyle.Ink, isDisplay: false, TextAlignmentOptions.Left);
             var pRt = _progressPercentText.rectTransform;

@@ -564,7 +564,8 @@ def cmd_build(args) -> None:
     candidates = [
         dst,
         REPO_ROOT / 'Builds' / 'Android' / apk_name,
-        REPO_ROOT / 'Builds' / 'Android' / 'InkTurfDemo.apk',
+        REPO_ROOT / 'Builds' / 'Android' / 'InkTurf.apk',
+        REPO_ROOT / 'Builds' / 'Android' / 'InkTurfDemo.apk',  # 旧产物名，兼容历史构建
         REPO_ROOT / 'Builds' / 'Android' / 'moshuizuozhan.apk'
     ]
 

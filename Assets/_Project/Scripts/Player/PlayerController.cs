@@ -146,6 +146,21 @@ namespace P1.Player
             _aimPoint = transform.position + Vector3.up * AimChestHeight + transform.forward * 6f;
             _aimGroundPoint = transform.position + transform.forward * 5f;
             BuildGroundReticle();
+
+            // 低难度给本地玩家加血（新手 ×1.5 / 轻松 ×1.25）；只影响玩家，Bot 与队友保持基准。
+            ApplyDifficultyHealthScale();
+            GameSettingsService.BotDifficultyChanged += HandleBotDifficultyChanged;
+        }
+
+        private void HandleBotDifficultyChanged(int level)
+        {
+            ApplyDifficultyHealthScale();
+        }
+
+        private void ApplyDifficultyHealthScale()
+        {
+            if (_health == null) return;
+            _health.SetMaxHealthScale(PlayerDifficultyMath.GetMaxHealthScale(GameSettingsService.BotDifficulty));
         }
 
         private void Start()
@@ -173,6 +188,7 @@ namespace P1.Player
         private void OnDestroy()
         {
             ReleaseCursor();
+            GameSettingsService.BotDifficultyChanged -= HandleBotDifficultyChanged;
 
             if (LocalPlayer == this)
                 LocalPlayer = null;

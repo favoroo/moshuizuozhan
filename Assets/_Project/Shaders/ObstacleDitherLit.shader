@@ -82,9 +82,10 @@ Shader "P1/ObstacleDitherLit"
 
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
             // 注：带 MPB（OcclusionFader 淡化中）的 renderer 会被 GRD 排除并自动回退普通路径，仍正确
-            #pragma target 4.5
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma target 3.0
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
             #pragma multi_compile _ P1_INK_HIGH
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -215,10 +216,14 @@ Shader "P1/ObstacleDitherLit"
 
                 // 2. 集装箱条纹瓦楞造型 (Container Corrugation Ribs)
                 float3 geomN = normalize(input.normalWS);
-                // P31 可选 albedo 细节层：默认 white 与旧版纯色完全一致
+                // P31 可选 albedo 细节层：WebGL 未绑定 BaseMap 贴图时采样返回 0 会导致整块变黑，WebGL 直接用 BaseColor
+#if UNITY_WEBGL && !UNITY_EDITOR
+                half3 surfaceColor = _BaseColor.rgb;
+#else
                 float2 baseUV = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
                 half3 surfaceColor = _BaseColor.rgb *
                     SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUV).rgb;
+#endif
 
                 // 2.1 混凝土/钢板结构细节：踢脚线、压顶、横向板缝与细噪点
                 float sideMask = 1.0 - saturate(abs(geomN.y) * 1.5);
@@ -343,10 +348,26 @@ Shader "P1/ObstacleDitherLit"
 
                 // 4. 掩体边界线（P17-A）：到最近棱边的世界米距离 → 四周一圈深色硬边。
                 // 必须压在墨水叠加之后：顶面/立面涂满墨后轮廓仍然可辨，掩体不会"消失"在同色地面里。
-                float edgeDist = min(min(input.edgeDist3.x, input.edgeDist3.y), input.edgeDist3.z);
+                // WebGL (GLES3/HLSLcc) 平台对 UNITY_MATRIX_M swizzle 支持有限会导致尺度为 0 变黑，WebGL 端跳过该装饰线。
+#if !UNITY_WEBGL
+                float3 normAbs = abs(geomN);
+                float edgeDist = 1000.0;
+                if (normAbs.x > 0.5)
+                {
+                    edgeDist = min(input.edgeDist3.y, input.edgeDist3.z);
+                }
+                else if (normAbs.y > 0.5)
+                {
+                    edgeDist = min(input.edgeDist3.x, input.edgeDist3.z);
+                }
+                else
+                {
+                    edgeDist = min(input.edgeDist3.x, input.edgeDist3.y);
+                }
                 float edgeFw = max(fwidth(edgeDist), 0.005);
                 float edgeLine = 1.0 - smoothstep(_EdgeLineWidth, _EdgeLineWidth + edgeFw, edgeDist);
                 shaded = lerp(shaded, _EdgeLineColor.rgb, edgeLine * _EdgeLineStrength);
+#endif
 
                 half3 finalColor = MixFog(shaded, input.fogFactor);
                 return half4(finalColor, 1.0);
@@ -369,9 +390,10 @@ Shader "P1/ObstacleDitherLit"
             #pragma fragment ShadowPassFragment
 
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体（shadowmap 同样走 GRD 批处理）
-            #pragma target 4.5
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma target 3.0
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -478,9 +500,10 @@ Shader "P1/ObstacleDitherLit"
             #pragma fragment DepthNormalsFragment
 
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体（DepthNormals prepass 同样走 GRD 批处理）
-            #pragma target 4.5
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma target 3.0
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
 
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
 

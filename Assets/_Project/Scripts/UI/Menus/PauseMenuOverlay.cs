@@ -591,6 +591,14 @@ namespace P1.UI.Menus
             hintRt.anchoredPosition = new Vector2(PauseButtonColumnX, -295f);
             hintRt.sizeDelta = new Vector2(500f, 30f);
 
+            // 隐私政策入口：同意后也能随时查看完整政策（TapTap 隐私合规要求）。
+            var privacyBtn = CreateStyledButton("PrivacyBtn", parent, "隐私政策", ComicStyle.Paper, ComicStyle.Ink,
+                new Vector2(300f, 48f), _theme, UITypography.FontSnapped(20f),
+                ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            var privacyRt = privacyBtn.GetComponent<RectTransform>();
+            privacyRt.anchoredPosition = new Vector2(PauseButtonColumnX, -352f);
+            privacyBtn.onClick.AddListener(PrivacyConsentDialog.OpenPolicyPage);
+
             // 右列「操作说明」卡：原 HUD 底部那排小字改由这里承载，键帽 + 动作两栏排布
             BuildControlsCard(parent);
         }

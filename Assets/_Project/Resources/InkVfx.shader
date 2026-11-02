@@ -32,12 +32,14 @@ Shader "P1/InkVfx"
             ZTest LEqual
 
             HLSLPROGRAM
-            #pragma target 4.5
+            #pragma target 3.0
             #pragma vertex vert
             #pragma fragment frag
 
             #pragma multi_compile _ P1_INK_HIGH
+            #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"

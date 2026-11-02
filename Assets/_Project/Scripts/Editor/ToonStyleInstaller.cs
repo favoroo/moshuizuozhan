@@ -277,6 +277,74 @@ namespace P1.Editor
         }
 
         /// <summary>
+        /// P32 场景精修档：以 P31 软化卡通为基线，叠加一轮面向「场内+外围统一观感」的调色——
+        /// 白云、更通透的水天交界、更清晰的地面接缝、掩体微提亮、水面反射收敛。
+        /// 只改风格数值，不动布局/碰撞/玩法。
+        /// </summary>
+        [MenuItem("P1/画风/7. 应用场景精修档（白云+通透水天+接缝清晰+掩体提亮）", false, 16)]
+        public static void ApplyScenePolishStyle()
+        {
+            var style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(StylePath);
+            if (style == null)
+            {
+                Debug.LogError("[P32] 找不到 " + StylePath + "，请先运行 P1/构建/1 生成配置。");
+                return;
+            }
+
+            WriteStylePresetSoftCartoon(style);
+            WriteScenePolishDeltas(style);
+            ApplyEnvironmentMaterials(style, groundShadowFloor: 0.55f, inkGlow: 0.10f);
+            ApplyInkwaveAssets(style);
+            ApplyCharacterMaterials(style);
+            ApplyAlbedoDetailMaps(style);
+            ApplyPostProcessStyle(style);
+
+            Material outlineMat = EnsureOutlineMaterial(style);
+            if (outlineMat != null)
+            {
+                InstallOutlineFeature(outlineMat, style.sceneOutlineEnabled, style.ssaoIntensity);
+            }
+
+            InstallMobileOutlineFeature(style);
+            InstallScreenFxFeature();
+            ArenaAtmosphereBuilder.Apply(style);
+
+            var scene = EditorSceneManager.GetActiveScene();
+            if (scene.IsValid() && !string.IsNullOrEmpty(scene.path))
+            {
+                EditorSceneManager.MarkSceneDirty(scene);
+                EditorSceneManager.SaveScene(scene);
+            }
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log("[P32] 场景精修档已应用：白云/通透水天/接缝清晰/掩体提亮/水面反射收敛。");
+        }
+
+        /// <summary>P32 精修增量（在 P31 基线之上覆写，随预设档重放不会丢）。</summary>
+        private static void WriteScenePolishDeltas(ArenaStyleSO style)
+        {
+            // 云朵由灰紫（0.55,0.52,0.62）提回近白，天空更晴朗。
+            style.cloudColor = new Color(0.98f, 0.97f, 0.99f, 1f);
+            // 太阳盘不过橘，贴合暖白日光基调。
+            style.sunDisc = new Color(1f, 0.95f, 0.82f, 1f);
+            // 地面接缝加深，远看场地分格结构可读（原值远看几乎消失）。
+            style.groundSeam = new Color(0.44f, 0.42f, 0.38f, 1f);
+            // 深水更蓝更亮、水天线更通透，消除远景「灰绿 muddy 带」。
+            style.waterDeep = new Color(0.06f, 0.30f, 0.44f, 1f);
+            style.waterHorizon = new Color(0.72f, 0.84f, 0.90f, 1f);
+            // 天空盒地平线以下（240m 水面之外的露底区）同步提亮到水天线色系：
+            // 原 slate 灰绿带在水天交界处形成一条脏带，提亮后远景融入薄雾。
+            style.skyGround = new Color(0.66f, 0.76f, 0.84f, 1f);
+            // 水面环境反射收敛：掠射角不再把反射内容铺成重复亮斑。
+            style.waterReflectionStrength = 0.5f;
+            // 中灰混凝土与掩体顶面微提亮，远看不再是「黑盒子」。
+            style.concreteMid = new Color(0.68f, 0.66f, 0.61f, 1f);
+            style.coverTopLift = 0.09f;
+            EditorUtility.SetDirty(style);
+        }
+
+        /// <summary>
         /// P31 软化卡通预设：完整继承 P18 质感档（材质/湿墨/后处理），仅软化观感三要素——
         /// 1) Toon 色阶从硬切换改为柔和三阶；2) 全屏描边减淡（色值与粗细）；3) 环境光增强。
         /// 硬基础（涂装色/布局/反射体系）全部保留，回退旧档运行 P1/画风/4。

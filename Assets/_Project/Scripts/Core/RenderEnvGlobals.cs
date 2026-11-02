@@ -43,10 +43,10 @@ namespace P1.Core
         private static readonly int WaterReflectionStrengthId = Shader.PropertyToID("_P1WaterReflectionStrength");
         private static readonly int EmissiveStrengthId = Shader.PropertyToID("_P1EmissiveStrength");
 
-        // 深炭紫回退默认值（与 STYLE.md 的 #15121C 系一致；sRGB 值在这里转线性）
-        private static readonly Color FallbackSkyTop = new Color(0.055f, 0.050f, 0.090f, 1f);
-        private static readonly Color FallbackSkyHorizon = new Color(0.130f, 0.120f, 0.170f, 1f);
-        private static readonly Color FallbackSkyGround = new Color(0.030f, 0.028f, 0.045f, 1f);
+        // 港口日间画风回退默认值（与 ArenaStyleSO.asset 一致；sRGB 值在 Push 时转线性）
+        private static readonly Color FallbackSkyTop = new Color(0.16f, 0.46f, 0.86f, 1f);
+        private static readonly Color FallbackSkyHorizon = new Color(0.80f, 0.89f, 0.97f, 1f);
+        private static readonly Color FallbackSkyGround = new Color(0.52f, 0.60f, 0.66f, 1f);
 
         private static ArenaStyleSO _style;
         private static bool _styleLookupDone;
@@ -179,6 +179,9 @@ namespace P1.Core
         {
             if (_styleLookupDone) return;
             _styleLookupDone = true;
+            _style = Resources.Load<ArenaStyleSO>("ArenaStyle");
+            if (_style != null) return;
+
             Object[] found = Object.FindObjectsOfTypeAll(typeof(ArenaStyleSO));
             for (int i = 0; i < found.Length; i++)
             {

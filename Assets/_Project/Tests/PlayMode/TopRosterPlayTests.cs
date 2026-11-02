@@ -2,6 +2,7 @@ using System.Collections;
 using NUnit.Framework;
 using P1.Core;
 using P1.UI;
+using TMPro;
 using UnityEngine;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
@@ -52,21 +53,35 @@ namespace P1.Tests
                 Assert.AreEqual(Team.TeamB, roster.TeamBSlots[i].SlotTeam);
             }
 
-            // 纵向：根高 = 槽高（槽顶与根顶对齐），根顶下移 12px 安全内边距 + 28px YOU 角标，
-            // 84 槽 + 色签硬影 3px + 12 顶部内边距全部落在屏内（旧版槽顶在 -14、YOU 顶到 +14 被裁）
+            // 纵向：根高 = 槽高（槽顶与根顶对齐），根顶下移 12px 安全内边距 + YOU 角标（间隙 4 + 实测高度）。
+            // 「YOU」必须单行、角标必须容得下文本，否则两行溢出会把角标顶出屏幕顶部。
+            roster.SetMobileLayout(false);
             var rootRt = (RectTransform)roster.transform;
-            Assert.AreEqual(-40f, rootRt.anchoredPosition.y, 0.01f,
-                "桌面根节点应下移 12(安全内边距) + 28(YOU 角标)");
+            var slot0Rt = (RectTransform)roster.TeamASlots[0].transform;
+            var youBadgeRt = (RectTransform)slot0Rt.Find("YouIndicator");
+
+            Assert.IsNotNull(youBadgeRt, "本地玩家槽位应带 YouIndicator 角标");
+            var youText = youBadgeRt.Find("YouText").GetComponent<TMP_Text>();
+
+            Assert.AreEqual(TextWrappingModes.NoWrap, youText.textWrappingMode,
+                "「YOU」不允许换行：移动端 24pt「YOU」比旧角标宽，折行后文本块会顶出屏幕");
+            Assert.GreaterOrEqual(youBadgeRt.rect.width, youText.preferredWidth,
+                "角标宽度必须容得下单行「YOU」");
+            Assert.Greater(youBadgeRt.rect.height, 0f, "角标高度必须为正");
+
+            Assert.AreEqual(-(12f + 4f + youBadgeRt.rect.height), rootRt.anchoredPosition.y, 0.01f,
+                "根节点下沉量 = 12px 安全内边距 + 角标间隙 + YOU 角标实际高度");
             Assert.AreEqual(72f, rootRt.sizeDelta.y, 0.01f, "桌面根高应等于槽高 72");
             Assert.AreEqual(rootRt.sizeDelta.y,
-                ((RectTransform)roster.TeamASlots[0].transform).sizeDelta.y, 0.01f,
+                slot0Rt.sizeDelta.y, 0.01f,
                 "槽顶必须与根顶对齐（同一套纵向推导）");
 
             roster.SetMobileLayout(true);
-            Assert.AreEqual(-40f, rootRt.anchoredPosition.y, 0.01f,
-                "移动端同样保留 12(安全内边距) + 28(YOU 角标)");
+            youBadgeRt = (RectTransform)slot0Rt.Find("YouIndicator");
+            Assert.AreEqual(-(12f + 4f + youBadgeRt.rect.height), rootRt.anchoredPosition.y, 0.01f,
+                "移动端同样按 12px 安全内边距 + 角标实际高度下沉");
             Assert.AreEqual(84f, rootRt.sizeDelta.y, 0.01f, "移动端根高应等于槽高 84");
-            Assert.AreEqual(84f, ((RectTransform)roster.TeamASlots[0].transform).sizeDelta.y, 0.01f);
+            Assert.AreEqual(84f, slot0Rt.sizeDelta.y, 0.01f);
 
             Object.Destroy(canvasGo);
             yield return null;

@@ -160,7 +160,7 @@ Material:
     - _SurfaceNormalStrength: 0.55
     - _SurfaceSmoothnessScale: 0.7
     - _SurfaceTexelScale: 0.7
-    - _TopLift: 0.06
+    - _TopLift: 0.09
     - _WorkflowMode: 1
     - _XRMotionVectorsPass: 1
     - _ZWrite: 1

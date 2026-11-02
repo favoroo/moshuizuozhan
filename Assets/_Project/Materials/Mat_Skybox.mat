@@ -31,11 +31,11 @@ Material:
     - _HorizonWarmth: 0.35
     - _SunIntensity: 2.2
     m_Colors:
-    - _CloudColor: {r: 0.26327342, g: 0.23302203, b: 0.34239164, a: 1}
-    - _GroundColor: {r: 0.23302203, g: 0.31854683, b: 0.3931232, a: 1}
+    - _CloudColor: {r: 0.95510465, g: 0.9331069, b: 0.9774019, a: 1}
+    - _GroundColor: {r: 0.3931232, g: 0.5382356, b: 0.67385954, a: 1}
     - _HorizonColor: {r: 0.6038274, g: 0.7677688, b: 0.9331069, a: 1}
     - _HorizonWarmthColor: {r: 1, g: 0.86889946, b: 0.67385954, a: 1}
-    - _SunColor: {r: 1, g: 0.6920712, b: 0.31854683, a: 1}
+    - _SunColor: {r: 1, g: 0.89000547, b: 0.63828325, a: 1}
     - _SunDirection: {r: 0.37903905, g: 0.7880107, b: -0.4851479, a: 0}
     - _TopColor: {r: 0.021980947, g: 0.1788675, b: 0.71056664, a: 1}
   m_BuildTextureStacks: []

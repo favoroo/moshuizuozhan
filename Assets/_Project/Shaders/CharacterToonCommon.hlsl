@@ -97,11 +97,14 @@ Varyings vert(Attributes input)
 
 half4 frag(Varyings input) : SV_Target
 {
-    // P31 albedo 细节层：默认 white（不贴图时与旧版纯色完全一致），
-    // 贴图时以乘法混入织物/壳面肌理，程序化网格 UV 未展开也不影响正确性。
+    // P31 albedo 细节层：默认 white（WebGL 未绑定 BaseMap 时直接用 BaseColor 避免采样返 0 变黑）
+#if UNITY_WEBGL && !UNITY_EDITOR
+    half4 albedo = _BaseColor;
+#else
     float2 baseUV = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
     half3 albedoTex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUV).rgb;
     half4 albedo = half4(_BaseColor.rgb * albedoTex, _BaseColor.a);
+#endif
 
     float3 N = normalize(input.normalWS);
     float3 V = normalize(GetCameraPositionWS() - input.positionWS);

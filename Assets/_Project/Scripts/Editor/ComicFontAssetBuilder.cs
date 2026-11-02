@@ -208,6 +208,12 @@ namespace P1.Editor
 
             ApplyBoldStyle(existing, boldStyle);
 
+            // 保留预烘字形：TMP 默认在保存/构建时清空 Dynamic 资产的字表，
+            // 导致 FontCoverageTests 读到 characterTable=0。用 SerializedObject 关掉。
+            var so = new SerializedObject(existing);
+            var clearProp = so.FindProperty("m_ClearDynamicDataOnBuild");
+            if (clearProp != null) { clearProp.boolValue = false; so.ApplyModifiedPropertiesWithoutUndo(); }
+
             int prebakedBefore = existing.characterTable.Count;
             existing.TryAddCharacters(prebake, out string missing);
 

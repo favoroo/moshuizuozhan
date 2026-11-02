@@ -1016,9 +1016,9 @@ namespace P1.UI
                 if (badgeCreated)
                 {
                     _hpBadgeText.text = "HP";
-                    labelChunky.Configure(themeResolved, "HP", badgeFontSize, displayFont: true,
-                        doubleLayered: false, fill: ComicStyle.Green, outlinedText: false);
                 }
+                labelChunky.Configure(themeResolved, "HP", badgeFontSize, displayFont: true,
+                    doubleLayered: false, fill: ComicStyle.Green, outlinedText: false);
             }
         }
 
@@ -1065,9 +1065,10 @@ namespace P1.UI
             if (valueCreated)
             {
                 _hpText.text = "100";
-                chunky.Configure(themeResolved, "100", fontSize, displayFont: true,
-                    doubleLayered: false, fill: ComicStyle.Ink, outlinedText: false);
             }
+            string currentText = !string.IsNullOrEmpty(_hpText.text) ? _hpText.text : "100";
+            chunky.Configure(themeResolved, currentText, fontSize, displayFont: true,
+                doubleLayered: false, fill: ComicStyle.Ink, outlinedText: false);
         }
 
         /// <summary>

@@ -42,12 +42,13 @@ Shader "P1/InkBody"
             ZTest LEqual
 
             HLSLPROGRAM
-            #pragma target 4.5
+            #pragma target 3.0
             #pragma vertex vert
             #pragma fragment frag
 
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
             #pragma multi_compile _ P1_INK_HIGH
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT

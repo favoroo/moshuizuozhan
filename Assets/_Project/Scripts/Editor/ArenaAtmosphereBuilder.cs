@@ -196,15 +196,18 @@ namespace P1.Editor
             water.SetColor(WaterDeepColorId, Linear(style.waterDeep));
             water.SetColor(WaterHorizonColorId, Linear(style.waterHorizon));
 
-            if (water.HasProperty(WaterWaveScaleId)) water.SetFloat(WaterWaveScaleId, 1.0f);
+            // 场景精修：波形放大（0.8）、波涌减弱（0.22）——原 1.0/0.35 在 240m 水面上
+            // 密铺出细碎亮斑，掠射角远看像满屏白色噪点；大波低频后远看是大片蓝面。
+            if (water.HasProperty(WaterWaveScaleId)) water.SetFloat(WaterWaveScaleId, 0.8f);
             if (water.HasProperty(WaterWaveSpeedId)) water.SetFloat(WaterWaveSpeedId, 0.18f);
-            if (water.HasProperty(WaterWaveStrengthId)) water.SetFloat(WaterWaveStrengthId, 0.35f);
-            if (water.HasProperty(WaterWaveNormalStrengthId)) water.SetFloat(WaterWaveNormalStrengthId, 0.36f);
-            // P30 返修：glitter 收敛——更弱、更稀疏，远看是大片蓝面上的稀疏波峰亮点
-            if (water.HasProperty(WaterGlitterStrengthId)) water.SetFloat(WaterGlitterStrengthId, 0.72f);
-            if (water.HasProperty(WaterGlitterThresholdId)) water.SetFloat(WaterGlitterThresholdId, 0.972f);
+            if (water.HasProperty(WaterWaveStrengthId)) water.SetFloat(WaterWaveStrengthId, 0.22f);
+            if (water.HasProperty(WaterWaveNormalStrengthId)) water.SetFloat(WaterWaveNormalStrengthId, 0.30f);
+            // P30 返修 + 场景精修：glitter 再次收敛——更弱（0.45）、更稀疏（阈值 0.988），
+            // 远看只剩零星波峰闪点；阈值仍低于 1 保证近看有活泼高光。
+            if (water.HasProperty(WaterGlitterStrengthId)) water.SetFloat(WaterGlitterStrengthId, 0.45f);
+            if (water.HasProperty(WaterGlitterThresholdId)) water.SetFloat(WaterGlitterThresholdId, 0.988f);
             if (water.HasProperty(WaterShoreDistanceId)) water.SetFloat(WaterShoreDistanceId, 12.0f);
-            if (water.HasProperty(WaterFoamStrengthId)) water.SetFloat(WaterFoamStrengthId, 0.65f);
+            if (water.HasProperty(WaterFoamStrengthId)) water.SetFloat(WaterFoamStrengthId, 0.35f);
 
             EditorUtility.SetDirty(water);
         }

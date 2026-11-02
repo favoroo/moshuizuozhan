@@ -18,12 +18,12 @@ RenderSettings:
   m_FogColor: {r: 0.55907094, g: 0.7246253, b: 0.8974625, a: 1}
   m_FogMode: 1
   m_FogDensity: 0.01
-  m_LinearFogStart: 70
-  m_LinearFogEnd: 190
+  m_LinearFogStart: 45
+  m_LinearFogEnd: 135
   m_AmbientSkyColor: {r: 0.11204189, g: 0.22646289, b: 0.55939513, a: 1}
   m_AmbientEquatorColor: {r: 0.2802941, g: 0.2591152, b: 0.21963675, a: 1}
-  m_AmbientGroundColor: {r: 0.027211785, g: 0.02451501, b: 0.02451501, a: 1}
-  m_AmbientIntensity: 0.82
+  m_AmbientGroundColor: {r: 0.0637238, g: 0.039681915, b: 0.027211785, a: 1}
+  m_AmbientIntensity: 0.88
   m_AmbientMode: 1
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
   m_SkyboxMaterial: {fileID: 2100000, guid: ff7b11e51c9a54e5bb49deea98973d7c, type: 2}
@@ -25282,6 +25282,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: P1.Game::P1.Core.MatchManager
   gameConfig: {fileID: 11400000, guid: 74c2b5baac84241c58249abd1bd4dced, type: 2}
   countdownSeconds: 3
+  introSeconds: 0.86
   finishFreezeSeconds: 1.6
   resultRollSeconds: 1.4
 --- !u!114 &364536293
@@ -25574,7 +25575,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: P1.Game::P1.Environment.TopDownOcclusionManager
   obstacleLayerMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 4294966783
   sphereCastRadius: 0.32
   localPlayerOnly: 1
   autoBindFaders: 1

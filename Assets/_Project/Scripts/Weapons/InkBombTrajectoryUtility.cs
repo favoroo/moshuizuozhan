@@ -134,14 +134,25 @@ namespace P1.Weapons
         public const float BounceDampWall = 0.6f;
 
         /// <summary>
-        /// 按相机俯仰解算出手初速（inkwave throwVelocity 公式）：
-        /// pitch = clamp(相机俯仰 + 偏移, 下限, 上限)；
+        /// P1 相机俯仰（TopDownCameraFollow.PitchDegrees，正数 = 低头俯视）换算成
+        /// inkwave 的瞄准俯仰（正数 = 抬头仰视）。<see cref="ComputeThrowVelocity"/> 的 pitch
+        /// 参数用的是后者；直接把相机俯仰传进去会让「抬头」变成负仰角、手雷砸脚，必须经过本方法。
+        /// </summary>
+        public static float CameraPitchToAimPitchDegrees(float cameraPitchDegrees)
+        {
+            return -cameraPitchDegrees;
+        }
+
+        /// <summary>
+        /// 按瞄准俯仰解算出手初速（inkwave throwVelocity 公式）：
+        /// pitch = clamp(瞄准俯仰 + 偏移, 下限, 上限)，瞄准俯仰正数 = 抬头；
         /// v = 水平瞄准方向 * cos(pitch) * 初速 + up * (sin(pitch) * 初速 + 上抛加成) + 0.4 * 携带速度。
-        /// 远近完全由俯仰物理决定：平抛约 8m、满仰角最远约 10.5m、低头贴脚丢，无任何落点钳制。
+        /// 远近完全由俯仰物理决定：平视约 8m、抬头约 30° 接近最远约 10m、低头贴脚丢，无任何落点钳制。
+        /// 相机链路必须先经 <see cref="CameraPitchToAimPitchDegrees"/> 翻符号（两套俯仰约定相反）。
         /// </summary>
         public static Vector3 ComputeThrowVelocity(
             Vector3 planarAimDirection,
-            float cameraPitchDegrees,
+            float aimPitchDegrees,
             Vector3 carryVelocity,
             WeaponConfigSO config)
         {
@@ -151,7 +162,7 @@ namespace P1.Weapons
             float minRad = (config != null ? config.bombThrowPitchMinDegrees : -17.2f) * Mathf.Deg2Rad;
             float maxRad = (config != null ? config.bombThrowPitchMaxDegrees : 63f) * Mathf.Deg2Rad;
 
-            float pitch = Mathf.Clamp(cameraPitchDegrees * Mathf.Deg2Rad + offsetRad, minRad, maxRad);
+            float pitch = Mathf.Clamp(aimPitchDegrees * Mathf.Deg2Rad + offsetRad, minRad, maxRad);
 
             Vector3 flat = planarAimDirection;
             flat.y = 0f;

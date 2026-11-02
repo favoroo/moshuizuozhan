@@ -305,6 +305,21 @@ namespace P1.Player
         private AnimSpring1D _recoilYawSpring = new AnimSpring1D(0f);
         private int _lastRecoilFrame = -1;
 
+        // P36 受击顿挫：订阅 CombatantHealth.DamageApplied，按攻击者方位注入
+        // 后仰/侧让弹簧冲量（目标恒 0，只在事件里 Kick）。与白闪/震屏并行，不进武器姿态通道。
+        private AnimSpring1D _flinchPitchSpring = new AnimSpring1D(0f);
+        private AnimSpring1D _flinchRollSpring = new AnimSpring1D(0f);
+        private CombatantHealth _health;
+
+        // P36 视线灵动：眼球（含虹膜/瞳孔/高光的整只合并网格）在深色眼罩内整体微移。
+        // 待机随机游目（saccade）+ 瞄准俯仰注视；只写 localPosition，与眨眼的 localScale 互不干扰。
+        private Vector3 _defaultLeftEyePos;
+        private Vector3 _defaultRightEyePos;
+        private Vector2 _eyeLookCurrent;
+        private Vector2 _eyeLookVelocity;
+        private Vector2 _eyeSaccadeTarget;
+        private float _eyeSaccadeTimer = 1.5f;
+
         // 瞄准俯仰姿态：相机俯仰（正 = 低头）→ 武器挂点承担全部仰角，胸腔只分担一小部分
         private float _aimPitchTarget;
         private float _aimPitchCurrent;
@@ -914,11 +929,57 @@ namespace P1.Player
         private void OnEnable()
         {
             SubscribeWeaponEvents();
+            if (_health == null)
+            {
+                _health = GetComponentInParent<CombatantHealth>();
+            }
+            CombatantHealth.DamageApplied += HandleDamageApplied;
         }
 
         private void OnDisable()
         {
             UnsubscribeWeaponEvents();
+            CombatantHealth.DamageApplied -= HandleDamageApplied;
+        }
+
+        /// <summary>
+        /// P36 受击顿挫：子弹命中时按「攻击者 → 我」的方向把上身朝受击方向顿一下
+        /// （正面中弹后仰、侧面中弹侧让），伤害越大幅度越大；大伤害附一次吃痛眨眼。
+        /// 白闪/震屏/墨花之外的第三层命中反馈，纯增量叠加在动态俯仰/滚转通道上。
+        /// </summary>
+        private void HandleDamageApplied(CombatantHealth victim, CombatantHealth attacker, float damage, bool killed)
+        {
+            if (victim == null || victim != _health || !isActiveAndEnabled) return;
+            if (damage <= 0f) return;
+
+            CharacterAnimConfigSO cfg = AnimConfig;
+            // 小子弹也要可读：0.35 起步，满伤害 1.0
+            float strength = Mathf.Lerp(0.35f, 1f,
+                Mathf.Clamp01(damage / Mathf.Max(1f, cfg.flinchFullDamage)));
+
+            // 击退方向（攻击者 → 我）转到本地空间：z>0 向后仰、x>0 向右让
+            Vector3 localDir = Vector3.forward;
+            if (attacker != null)
+            {
+                Vector3 worldDir = transform.position - attacker.transform.position;
+                worldDir.y = 0f;
+                if (worldDir.sqrMagnitude > 0.0001f)
+                {
+                    localDir = transform.InverseTransformDirection(worldDir.normalized);
+                }
+            }
+
+            float omega = 2f * Mathf.PI * Mathf.Max(1f, cfg.flinchSpringHz);
+            _flinchPitchSpring.Kick(AnimSpring1D.ImpulseForPeak(
+                -localDir.z * cfg.flinchPitchMaxDeg * strength, omega, cfg.flinchSpringZeta));
+            _flinchRollSpring.Kick(AnimSpring1D.ImpulseForPeak(
+                -localDir.x * cfg.flinchRollMaxDeg * strength, omega, cfg.flinchSpringZeta));
+            // 身体向下砸一下（负果冻冲量），给命中一点重量感
+            _jellyVel += cfg.flinchJellyKick * strength;
+            if (damage >= cfg.flinchBlinkDamage)
+            {
+                TriggerBlink();
+            }
         }
 
         private void SubscribeWeaponEvents()
@@ -1040,16 +1101,18 @@ namespace P1.Player
                 _defaultHipsRot = hipsTransform.localRotation;
             }
 
-            // 缓存眼睛默认尺寸，防止眨眼循环缩放累乘漂移
+            // 缓存眼睛默认尺寸与位置，防止眨眼/视线循环写回累乘漂移
             if (leftEyeTransform != null && leftEyeTransform != _lastCachedLeftEye)
             {
                 _lastCachedLeftEye = leftEyeTransform;
                 _defaultLeftEyeScale = leftEyeTransform.localScale;
+                _defaultLeftEyePos = leftEyeTransform.localPosition;
             }
             if (rightEyeTransform != null && rightEyeTransform != _lastCachedRightEye)
             {
                 _lastCachedRightEye = rightEyeTransform;
                 _defaultRightEyeScale = rightEyeTransform.localScale;
+                _defaultRightEyePos = rightEyeTransform.localPosition;
             }
 
             if (weaponRoot != null)
@@ -1957,6 +2020,11 @@ namespace P1.Player
             // P26 惯性倾斜弹簧层（加速度层）：起步前倾冲劲/刹车后仰/侧移压弯 + 骨盆滞后位移
             UpdateLeanSprings(dt, grounded, isWallClimbing, cfg);
 
+            // P36 受击弹簧回稳：目标恒 0，冲量只在 DamageApplied 事件里注入
+            float flinchOmega = 2f * Mathf.PI * Mathf.Max(1f, cfg.flinchSpringHz);
+            _flinchPitchSpring.Step(0f, flinchOmega, cfg.flinchSpringZeta, dt);
+            _flinchRollSpring.Step(0f, flinchOmega, cfg.flinchSpringZeta, dt);
+
             // --- 5. 待机生命感（P26）：呼吸节奏起伏 / 重心转移 / 偶发小动作 ---
             bool idle = grounded && speed < KidGaitSolver.GaitMinSpeed && !isWallClimbing;
             float breath = UpdateIdleBreath(dt, idle, cfg);
@@ -1972,6 +2040,7 @@ namespace P1.Player
             UpdateIdleFidget(dt, idle, cfg, ref rock);
 
             UpdateBlink(dt);
+            UpdateEyeLook(dt, cfg, idle);
 
             // --- 6. 踩敌墨高频受击抖动 ---
             float grip = _motor != null ? _motor.EnemyInkGrip01 : 0f;
@@ -2039,8 +2108,10 @@ namespace P1.Player
             float dynPitch = _currentPitch + _leanPitchSpring.Value + airPitch
                 + _aimPitchCurrent * chestAimWeight + _landPitchKickDeg
                 + _rollerBodyPitchDeg     // 滚筒蓄力后仰/砸地前压/拖地前倾
-                + _wieldBodyPitchDeg;     // P35 蓄力后仰/泼桶甩出/爆破后坐/架枪前压
-            float dynRoll = _currentRoll + _leanRollSpring.Value + _wieldBodyRollDeg;
+                + _wieldBodyPitchDeg      // P35 蓄力后仰/泼桶甩出/爆破后坐/架枪前压
+                + _flinchPitchSpring.Value; // P36 受击后仰顿挫
+            float dynRoll = _currentRoll + _leanRollSpring.Value + _wieldBodyRollDeg
+                + _flinchRollSpring.Value; // P36 受击侧让顿挫
             float rollMix = dynRoll + rock * 0.6f;
 
             // 8.4 Hips：骨盆竖向起伏（贴地几何+步频起伏，含惯性滞后）+ 侧转主轴 + 25% 步态前倾 + 部分侧倾
@@ -2338,6 +2409,55 @@ namespace P1.Player
             if (rightEyeTransform != null)
             {
                 rightEyeTransform.localScale = new Vector3(_defaultRightEyeScale.x, _defaultRightEyeScale.y * scaleYFactor, _defaultRightEyeScale.z);
+            }
+        }
+
+        /// <summary>
+        /// P36 视线灵动：眼球（白膜+虹膜+瞳孔+高光在装配期已按眼合并成单个网格）在深色眼罩内
+        /// 整体微移，模拟"看"。待机且未开火时随机游目（saccade），活动/开火后回中；
+        /// 瞄准俯仰映射到竖向偏移（抬头瞄准眼球上移）。只写 localPosition，
+        /// 严格基于装配期缓存的默认位置，杜绝累乘；偏移钳在眼罩留白内（眼罩比眼球宽约 12mm）。
+        /// </summary>
+        private void UpdateEyeLook(float dt, CharacterAnimConfigSO cfg, bool idle)
+        {
+            if (leftEyeTransform == null && rightEyeTransform == null) return;
+
+            float maxOffset = Mathf.Max(0f, cfg.eyeLookMaxOffset);
+            if (idle && Time.time - _lastFireTime > 1.5f)
+            {
+                _eyeSaccadeTimer -= dt;
+                if (_eyeSaccadeTimer <= 0f)
+                {
+                    _eyeSaccadeTimer = UnityEngine.Random.Range(cfg.eyeSaccadeIntervalMin, cfg.eyeSaccadeIntervalMax);
+                    _eyeSaccadeTarget = new Vector2(
+                        UnityEngine.Random.Range(-maxOffset, maxOffset),
+                        UnityEngine.Random.Range(-maxOffset * 0.5f, maxOffset * 0.7f));
+                }
+            }
+            else
+            {
+                _eyeSaccadeTarget = Vector2.zero;
+                // 回到待机后 0.4s 内恢复游目，不会长时间"瞪直眼"
+                _eyeSaccadeTimer = Mathf.Min(_eyeSaccadeTimer, 0.4f);
+            }
+
+            // 瞄准注视：_aimPitchCurrent 正 = 低头 → 眼球下移；负 = 抬头 → 上移
+            float aimY = Mathf.Clamp(-_aimPitchCurrent * cfg.eyeLookAimGain, -maxOffset, maxOffset);
+            Vector2 target = _eyeSaccadeTarget + new Vector2(0f, aimY);
+            target.x = Mathf.Clamp(target.x, -maxOffset, maxOffset);
+            target.y = Mathf.Clamp(target.y, -maxOffset, maxOffset);
+
+            _eyeLookCurrent = Vector2.SmoothDamp(_eyeLookCurrent, target, ref _eyeLookVelocity,
+                Mathf.Max(0.02f, cfg.eyeLookSmoothTime), 1f, dt);
+
+            Vector3 offset = new Vector3(_eyeLookCurrent.x, _eyeLookCurrent.y, 0f);
+            if (leftEyeTransform != null)
+            {
+                leftEyeTransform.localPosition = _defaultLeftEyePos + offset;
+            }
+            if (rightEyeTransform != null)
+            {
+                rightEyeTransform.localPosition = _defaultRightEyePos + offset;
             }
         }
 

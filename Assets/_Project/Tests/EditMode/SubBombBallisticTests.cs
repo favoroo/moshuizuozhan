@@ -121,6 +121,39 @@ namespace P1.Tests
         }
 
         [Test]
+        public void CameraPitchToAimPitch_LookUpFlipsToPositiveThrowPitch()
+        {
+            // P1 相机：正数 = 低头；inkwave throwVelocity：正数 = 抬头。两套约定相反，必须翻符号。
+            Assert.AreEqual(30f, InkBombTrajectoryUtility.CameraPitchToAimPitchDegrees(-30f), 0.001f,
+                "相机抬头 -30° 必须换算成 +30° 投掷仰角");
+            Assert.AreEqual(-30f, InkBombTrajectoryUtility.CameraPitchToAimPitchDegrees(30f), 0.001f,
+                "相机低头 +30° 必须换算成 -30° 投掷俯角");
+        }
+
+        [Test]
+        public void SimulateThrow_CameraLookUp_LandsFartherThanLookDown()
+        {
+            // 回归：抬头必须把雷抛远，低头才贴脚丢（旧实现直接把相机俯仰塞进公式，抬头发近）
+            Vector3 upVel = InkBombTrajectoryUtility.ComputeThrowVelocity(
+                Vector3.forward,
+                InkBombTrajectoryUtility.CameraPitchToAimPitchDegrees(-30f),
+                Vector3.zero, _config);
+            Vector3 downVel = InkBombTrajectoryUtility.ComputeThrowVelocity(
+                Vector3.forward,
+                InkBombTrajectoryUtility.CameraPitchToAimPitchDegrees(30f),
+                Vector3.zero, _config);
+
+            var points = new Vector3[InkBombTrajectoryUtility.TrajectoryPointCount];
+            Assert.IsTrue(InkBombTrajectoryUtility.SimulateThrow(Origin, upVel, _config, null, points, out Vector3 upHit));
+            Assert.IsTrue(InkBombTrajectoryUtility.SimulateThrow(Origin, downVel, _config, null, points, out Vector3 downHit));
+
+            float upFlat = new Vector2(upHit.x - Origin.x, upHit.z - Origin.z).magnitude;
+            float downFlat = new Vector2(downHit.x - Origin.x, downHit.z - Origin.z).magnitude;
+            Assert.Greater(upFlat, downFlat + 3f, "相机抬头 30° 应比低头 30° 至少远 3m");
+            Assert.That(upFlat, Is.InRange(8.5f, 11f), "抬头 30° 接近 45° 最大射程（约 10m）");
+        }
+
+        [Test]
         public void ComputeThrowVelocityToLandAt_NearTarget_LandsWithinCoreRadius()
         {
             // 旧落点制契约回归：4m 目标（SpecialWeaponsPlayTests 场景）必须被砸中

@@ -238,14 +238,16 @@ namespace P1.Tests
         }
 
         [Test]
-        public void PlayerConfig_InkwaveAlignedDefaults()
+        public void PlayerConfig_DefaultTuningContracts()
         {
             var cfg = ScriptableObject.CreateInstance<PlayerConfigSO>();
             try
             {
                 Assert.AreEqual(6.0f, cfg.normalMoveSpeed, 0.001f, "人形态跑速对齐 Inkwave runSpeed");
                 Assert.AreEqual(11.8f, cfg.swimMoveSpeed, 0.001f, "潜墨移速对齐 swimSpeed");
-                Assert.AreEqual(1.9f, cfg.enemyInkMoveSpeed, 0.001f, "踩敌墨移速对齐 enemyInkSpeed");
+                Assert.AreEqual(2.4f, cfg.enemyInkMoveSpeed, 0.001f, "踩敌墨移速 2.4（约 40% 跑速，已从 Inkwave 1.9 上调）");
+                Assert.AreEqual(30f, cfg.enemyInkAccel, 0.001f, "敌墨加速度对齐 Inkwave enemyInkAccel");
+                Assert.AreEqual(30f, cfg.enemyInkDecel, 0.001f, "敌墨减速度对齐 Inkwave enemyInkDecel");
                 Assert.AreEqual(42f, cfg.swimInkRefillRate, 0.001f, "潜墨回墨对齐 inkRefillSwim");
                 Assert.AreEqual(60f, cfg.swimHealthRegenRate, 0.001f, "潜墨回血对齐 regenRateSwim");
                 Assert.AreEqual(20f, cfg.enemyInkDamagePerSec, 0.001f, "敌墨 DOT 对齐 enemyInkDps");

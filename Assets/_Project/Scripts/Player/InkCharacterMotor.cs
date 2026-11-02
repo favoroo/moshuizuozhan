@@ -451,10 +451,11 @@ namespace P1.Player
                 }
             }
 
-            // 4. 计算移速、回墨与敌墨伤害（数值对齐 Inkwave PLAYER：跑 6.0 / 潜 11.8 / 敌墨 1.9 m/s）
+            // 4. 计算移速、回墨与敌墨伤害（跑 6.0 / 潜 11.8 / 敌墨 2.4 m/s：Splatoon 约 40% 跑速；
+            //    INKWAVE 原值 1.9 在 4v4 实战里体感过重，按反馈上调，加速度曲线仍对齐其 enemyInkAccel/Decel）
             float normalSpd = config != null ? config.normalMoveSpeed : 6.0f;
             float fireSpd = config != null ? config.firingMoveSpeed : 3.8f;
-            float enemySpd = config != null ? config.enemyInkMoveSpeed : 1.9f;
+            float enemySpd = config != null ? config.enemyInkMoveSpeed : 2.4f;
             float swimSpd = config != null ? config.swimMoveSpeed : 11.8f;
 
             // 敌墨「受击槽」：踩敌墨瞬间锁满；离开敌墨后按速率快速恢复（约 0.5s 摆脱惩罚状态）。
@@ -572,7 +573,7 @@ namespace P1.Player
 
                 if (IsInEnemyInk)
                 {
-                    // 踩敌墨：移速骤降 1.9 m/s + DOT 20 点/秒；60 HP 保护底线保证单靠踩墨绝不致死
+                    // 踩敌墨：移速降至 2.4 m/s（约 40% 跑速）+ DOT 20 点/秒；60 HP 保护底线保证单靠踩墨绝不致死
                     CurrentMoveSpeed = enemySpd;
                     ApplyEnemyInkPenalty(dt);
                 }
@@ -589,10 +590,13 @@ namespace P1.Player
             // 4.5 超速惯性滑行（INKWAVE swim-exit glide，config.js L60：swimDecel=42，注释 "1.6 m glide to a stop"）：
             // 形态切换/离开敌墨瞬间当前速度可能远高于新目标（潜墨 11.8 → 人形 6.0），不瞬间贴回目标，
             // 而是按 swimExitGlideDecel 自然衰减 —— 出水后保留约 1.5m 滑行动量。
+            // 踩敌墨走 INKWAVE 的 enemyInkDecel=30（比 42 更缓）：踩入敌墨保留短暂前冲，不做硬钳制。
             // 加速方向瞬时对齐（起步/正常手感不变），只有超速方向走衰减曲线。
             if (_glideSpeed > CurrentMoveSpeed)
             {
-                float glideDecel = config != null ? config.swimExitGlideDecel : 42f;
+                float glideDecel = config != null
+                    ? (IsInEnemyInk ? config.enemyInkDecel : config.swimExitGlideDecel)
+                    : (IsInEnemyInk ? 30f : 42f);
                 _glideSpeed = Mathf.Max(CurrentMoveSpeed, _glideSpeed - Mathf.Max(1f, glideDecel) * dt);
             }
             else
@@ -689,7 +693,7 @@ namespace P1.Player
                     float airControl = isGrounded ? 1.0f : (config != null ? config.airControl : 0.95f);
                     // 目标速度用 EffectiveMoveSpeed（含超速滑行惯性），而非直接贴目标值的 CurrentMoveSpeed
                     Vector3 desiredVel = _moveInputWorld * (EffectiveMoveSpeed * airControl);
-                    _planarVelocity = ComputePlanarVelocity(_planarVelocity, desiredVel, isGrounded, config, dt);
+                    _planarVelocity = ComputePlanarVelocity(_planarVelocity, desiredVel, isGrounded, config, dt, IsInEnemyInk);
 
                     Vector3 step = _planarVelocity * dt + Vector3.up * (_verticalVelocity * dt);
                     Vector3 beforeMove = transform.position;
@@ -804,7 +808,7 @@ namespace P1.Player
         /// 纯函数、零分配；无配置时回退到默认手感参数。
         /// </summary>
         private static Vector3 ComputePlanarVelocity(
-            Vector3 current, Vector3 desired, bool grounded, PlayerConfigSO cfg, float dt)
+            Vector3 current, Vector3 desired, bool grounded, PlayerConfigSO cfg, float dt, bool inEnemyInk = false)
         {
             float runAccel = cfg != null ? cfg.runAccel : 60f;
             float runDecel = cfg != null ? cfg.runDecel : 48f;
@@ -812,6 +816,14 @@ namespace P1.Player
             float airAccel = cfg != null ? cfg.airAccel : 20f;
             float airDecel = cfg != null ? cfg.airDecel : 6f;
             float turnRateDeg = cfg != null ? cfg.turnRateDegPerSec : 860f;
+
+            // 敌墨独立手感（对齐 INKWAVE actor.js：A = min(A, enemyInkAccel)、D = enemyInkDecel）：
+            // 起步更沉、超速衰减更缓，读出「陷入」而不是一帧钉死；反向输入仍保留正常急刹，方便掉头逃出。
+            if (inEnemyInk && grounded)
+            {
+                runAccel = Mathf.Min(runAccel, cfg != null ? cfg.enemyInkAccel : 30f);
+                runDecel = cfg != null ? cfg.enemyInkDecel : 30f;
+            }
 
             float curSpeed = current.magnitude;
             float targetSpeed = desired.magnitude;

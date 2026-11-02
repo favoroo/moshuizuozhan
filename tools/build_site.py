@@ -135,7 +135,7 @@ def copy_ui_icons() -> int:
 
 def collect_text() -> str:
     raw = ""
-    for f in ("index.html", "styles.css", "app.js"):
+    for f in ("index.html", "styles.css", "app.js", "privacy.html", "terms.html"):
         raw += (SITE / f).read_text(encoding="utf-8")
     # 试玩页（Unity 模板）也用 MiSans，字符集必须一起子集化，否则会显示方框
     if WEBGL_TEMPLATE.exists():
@@ -175,7 +175,7 @@ def subset_fonts() -> int:
 # ---------- HTML/CSS/JS 令牌替换 ----------
 
 def stamp_sources(build_v: str, app_version: str) -> None:
-    for f in ("index.html", "styles.css", "app.js"):
+    for f in ("index.html", "styles.css", "app.js", "privacy.html", "terms.html"):
         text = (SITE / f).read_text(encoding="utf-8")
         text = text.replace("__APP_VERSION__", app_version).replace("__V__", build_v)
         (DIST / f).write_text(text, encoding="utf-8")
@@ -192,20 +192,15 @@ def copy_video() -> int:
     return n
 
 
-def copy_webgl_build(allow_missing: bool = False) -> tuple[int, int]:
+def copy_webgl_build() -> tuple[int, int]:
     entry = PLAY_SRC / "index.html"
     if not entry.exists():
-        if allow_missing:
-            print("[build_site] 警告：--skip-play，本次不打包 WebGL 试玩页（仅供本地预览）。")
-            return 0, 0
-        fail(
-            "WebGL 试玩包缺失：Builds/WebGL/index.html\n"
-            "  先出包：~/.unity/bin/unity build <项目> --target WebGL "
-            "--execute-method P1.Editor.BuildAndProfilerSuite.BuildWebGL --output-path Builds/WebGL\n"
-            "  （或菜单 P1/构建/14）；否则本次部署会把线上 /play/ 删掉。"
-        )
+        print("[build_site] 警告：找不到 Builds/WebGL/index.html，本次产物不含 /play/。"
+              "（先出 WebGL 包；部署脚本会阻止覆盖线上已有的 /play/）")
+        return 0, 0
 
-    shutil.copytree(PLAY_SRC, PLAY)
+    shutil.copytree(PLAY_SRC, PLAY,
+                    ignore=shutil.ignore_patterns("unity-build.provenance.json"))
 
     newest_src = 0.0
     for root in (REPO / "Assets/_Project/Scripts", REPO / "Assets/_Project/Scenes",
@@ -237,7 +232,7 @@ def main() -> None:
     n_fonts = subset_fonts()
     stamp_sources(build_v, app_version)
     n_video = copy_video()
-    n_play, play_bytes = copy_webgl_build(allow_missing="--skip-play" in sys.argv)
+    n_play, play_bytes = copy_webgl_build()
     (DIST / ".nojekyll").write_text("", encoding="utf-8")
 
     total = sum(p.stat().st_size for p in DIST.rglob("*") if p.is_file())

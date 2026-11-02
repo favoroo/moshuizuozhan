@@ -4,10 +4,11 @@
 
 流程（与 t-1 的 deploy_web.py 同模式，但只发宣传站）：
   1. 先运行 tools/build_site.py 生成 site/dist/
-  2. 校验主工作树没有未提交的「已跟踪」改动（未跟踪文件不拦）
-  3. 用独立 worktree 建孤儿分支 gh-pages，把 dist/ 拷到分支根目录
-  4. 提交并 git push origin gh-pages --force-with-lease（该分支始终单提交）
-  5. 尝试用 gh CLI 开启 GitHub Pages（gh-pages 分支 / 根目录 / legacy）
+  2. 主工作树有未提交的「已跟踪」改动时只警告（部署用独立 worktree，不动 main）
+  3. 若本轮产物缺少 play/，但线上 gh-pages 已有 play/，拒绝部署（避免误删网页试玩）
+  4. 用独立 worktree 建孤儿分支 gh-pages，把 dist/ 拷到分支根目录
+  5. 提交并 git push origin gh-pages --force-with-lease（该分支始终单提交）
+  6. 尝试用 gh CLI 开启 GitHub Pages（gh-pages 分支 / 根目录 / legacy）
 
 用法：python3 tools/deploy_site.py
 注意：只推 gh-pages 分支，不会改动/提交 main。
@@ -51,10 +52,23 @@ def warn_if_dirty() -> None:
         print("[deploy_site] 提示：主工作树有未提交的已跟踪改动（部署只发 gh-pages，不影响 main）。")
 
 
+def guard_play() -> None:
+    """本轮产物没有 play/ 时，如果线上已有 play/ 就拒绝部署，避免一次文案发布把试玩页删掉。"""
+    if (DIST / "play/index.html").exists():
+        return
+    probe = subprocess.run(["git", "cat-file", "-e", "origin/gh-pages:play/index.html"],
+                           cwd=REPO, capture_output=True)
+    if probe.returncode == 0:
+        fail("site/dist/play 缺失，但线上 gh-pages 已有 /play/；拒绝部署以免删掉网页试玩。"
+             "先跑 WebGL 构建（菜单 P1/构建/14）再重新 build_site.py。")
+    print("[deploy_site] 提示：本轮不含 /play/（线上也还没有），继续部署介绍页。")
+
+
 def deploy() -> None:
     if not DIST.exists():
         fail("site/dist 不存在，先跑 python3 tools/build_site.py")
     warn_if_dirty()
+    guard_play()
 
     # 清理可能残留的旧 worktree / 本地 gh-pages 分支
     if WORKTREE.exists():

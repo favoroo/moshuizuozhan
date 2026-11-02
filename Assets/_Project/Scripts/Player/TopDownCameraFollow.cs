@@ -512,8 +512,14 @@ namespace P1.Player
                 }
                 else
                 {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    // WebGL 单线程 + 浏览器合成，SMAA High 成本偏高；用 FXAA 换更稳的帧率。
+                    data.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
+                    data.antialiasingQuality = AntialiasingQuality.Low;
+#else
                     data.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
                     data.antialiasingQuality = AntialiasingQuality.High;
+#endif
                 }
             }
         }

@@ -141,6 +141,16 @@ namespace P1.Core
 
             return "-";
         }
+
+        /// <summary>
+        /// 紧凑显示名（键帽 / 信息卡用）：「鼠标右键→右键」「左 Shift→Shift」。
+        /// 完整名 <see cref="GetDisplayName"/> 保留给键位自定义面板（那里需要明确左右手）；
+        /// 150px 键帽放不下「鼠标右键 · 左 Shift」（≈165px），会横向截断。
+        /// </summary>
+        public string GetCompactDisplayName()
+        {
+            return GetDisplayName().Replace("鼠标", "").Replace("左 ", "").Replace("右 ", "");
+        }
     }
 
     /// <summary>

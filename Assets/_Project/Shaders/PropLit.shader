@@ -58,9 +58,10 @@ Shader "P1/PropLit"
             #pragma fragment frag
 
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
-            #pragma target 4.5
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma target 3.0
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
             #pragma multi_compile _ P1_INK_HIGH
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -137,7 +138,8 @@ Shader "P1/PropLit"
                 output.positionCS = posInputs.positionCS;
                 output.positionWS = posInputs.positionWS;
                 output.normalWS   = normInputs.normalWS;
-                output.color      = input.color;
+                // 无顶点色网格（或 WebGL 未绑定顶点色属性时默认为 0）回退纯白，避免整面变黑
+                output.color      = any(input.color.rgb > 0.001) ? input.color : half4(1.0, 1.0, 1.0, 1.0);
                 output.uv         = input.uv;
                 output.fogFactor  = ComputeFogFactor(posInputs.positionCS.z);
                 return output;
@@ -145,10 +147,14 @@ Shader "P1/PropLit"
 
             half4 frag(Varyings input) : SV_Target
             {
-                // 顶点色与基础色混合；P31 可选 albedo 细节层（默认 white 与旧版一致）
+                // 顶点色与基础色混合；P31 可选 albedo 细节层（WebGL 未绑定 BaseMap 时直接用 BaseColor 避免采样返 0 变黑）
+#if UNITY_WEBGL && !UNITY_EDITOR
+                half4 albedo = _BaseColor * input.color;
+#else
                 float2 baseUV = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
                 half4 albedo = _BaseColor * input.color *
                     half4(SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUV).rgb, 1.0);
+#endif
 
                 float3 geomN = normalize(input.normalWS);
                 float3 viewDirWS = normalize(GetCameraPositionWS() - input.positionWS);
@@ -257,9 +263,10 @@ Shader "P1/PropLit"
             #pragma fragment ShadowPassFragment
 
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体（shadowmap 同样走 GRD 批处理）
-            #pragma target 4.5
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma target 3.0
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -347,9 +354,10 @@ Shader "P1/PropLit"
             #pragma fragment DepthNormalsFragment
 
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体（DepthNormals prepass 同样走 GRD 批处理）
-            #pragma target 4.5
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma target 3.0
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
 
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
 

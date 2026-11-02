@@ -499,6 +499,7 @@ namespace P1.UI
             tagText.alignment = TextAlignmentOptions.Center;
             tagText.characterSpacing = 4f;
 
+#if !UNITY_WEBGL || UNITY_EDITOR
             var version = CreateText("Version", _stageRoot, _theme.ResolveFont(false, "INK TURF"),
                 $"{GameVersion.APP_NAME_EN} {GameVersion.APP_VERSION_NAME}",
                 UITypography.Font(20f), new Color(1f, 1f, 1f, 0.45f));
@@ -508,6 +509,7 @@ namespace P1.UI
             versionRt.sizeDelta = new Vector2(420f, 40f);
             versionRt.anchoredPosition = new Vector2(-46f, 34f);
             version.alignment = TextAlignmentOptions.Right;
+#endif
         }
 
         private void BuildWipeEdge()

@@ -141,19 +141,19 @@ namespace P1.UI
             DesktopKeyBindingService.GetBinding(DesktopAction.SubWeapon, out var subPri, out var subSec);
             DesktopKeyBindingService.GetBinding(DesktopAction.Special, out var sp, out _);
 
-            string moveKey = $"{fwd.GetDisplayName()}{left.GetDisplayName()}{back.GetDisplayName()}{right.GetDisplayName()}";
-            string swimKey = swimSec.IsEmpty ? swimPri.GetDisplayName() : $"{swimPri.GetDisplayName()} · {swimSec.GetDisplayName()}";
-            string subKey = subSec.IsEmpty ? subPri.GetDisplayName() : $"{subPri.GetDisplayName()} · {subSec.GetDisplayName()}";
+            string moveKey = $"{fwd.GetCompactDisplayName()}{left.GetCompactDisplayName()}{back.GetCompactDisplayName()}{right.GetCompactDisplayName()}";
+            string swimKey = swimSec.IsEmpty ? swimPri.GetCompactDisplayName() : $"{swimPri.GetCompactDisplayName()} · {swimSec.GetCompactDisplayName()}";
+            string subKey = subSec.IsEmpty ? subPri.GetCompactDisplayName() : $"{subPri.GetCompactDisplayName()} · {subSec.GetCompactDisplayName()}";
 
             return new ControlRow[]
             {
                 new ControlRow(moveKey, "移动", ControlGroup.Movement),
                 new ControlRow("鼠标", "转视角", ControlGroup.Movement),
-                new ControlRow(jump.GetDisplayName(), "跳跃", ControlGroup.Movement),
+                new ControlRow(jump.GetCompactDisplayName(), "跳跃", ControlGroup.Movement),
                 new ControlRow(swimKey, "潜墨 · 爬墙", ControlGroup.Movement),
-                new ControlRow(fire.GetDisplayName(), "开火涂地", ControlGroup.Combat),
+                new ControlRow(fire.GetCompactDisplayName(), "开火涂地", ControlGroup.Combat),
                 new ControlRow(subKey, "投掷手雷", ControlGroup.Combat),
-                new ControlRow(sp.GetDisplayName(), "释放大招", ControlGroup.Combat),
+                new ControlRow(sp.GetCompactDisplayName(), "释放大招", ControlGroup.Combat),
                 new ControlRow("Esc", "暂停 · 设置", ControlGroup.Combat),
             };
         }

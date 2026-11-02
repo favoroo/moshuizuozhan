@@ -317,6 +317,35 @@ namespace P1.Player
         [Tooltip("待机微动作间隔上限（秒）")]
         public float idleFidgetIntervalMax = 9f;
 
+        [Header("受击顿挫 (Hit Flinch，P36：子弹命中的方向性身体反应；白闪/震屏之外的第三层反馈)")]
+        [Tooltip("受击后仰最大俯仰角（度，满伤害时）：正面中弹上身向后顿")]
+        public float flinchPitchMaxDeg = 9f;
+        [Tooltip("受击侧让最大滚转角（度，满伤害时）：侧向中弹身体朝受击方向让")]
+        public float flinchRollMaxDeg = 7f;
+        [Tooltip("受击弹簧频率（Hz）：越大越脆，过小会读成慢动作后仰")]
+        public float flinchSpringHz = 6.5f;
+        [Tooltip("受击弹簧阻尼比（<1 带一次回摆过冲）")]
+        [Range(0.05f, 1.5f)]
+        public float flinchSpringZeta = 0.32f;
+        [Tooltip("达到满幅度所需的伤害量（HP）：小子弹小顿挫、重武器大顿挫")]
+        public float flinchFullDamage = 45f;
+        [Tooltip("受击果冻压扁冲量（负 = 身体向下砸一下，复用起跳/落地弹簧通道）")]
+        public float flinchJellyKick = -1.4f;
+        [Tooltip("单次伤害超过该值触发一次眨眼（吃痛表情）")]
+        public float flinchBlinkDamage = 20f;
+
+        [Header("视线灵动 (Eye Look，P36：眼球在深色眼罩内整体微移；待机游目 + 瞄准注视)")]
+        [Tooltip("眼球最大偏移（米）：眼罩横向比眼球宽约 12mm，偏移须留边不穿帮")]
+        public float eyeLookMaxOffset = 0.004f;
+        [Tooltip("待机游目间隔下限（秒）")]
+        public float eyeSaccadeIntervalMin = 1.2f;
+        [Tooltip("待机游目间隔上限（秒）")]
+        public float eyeSaccadeIntervalMax = 3.0f;
+        [Tooltip("瞄准俯仰映射到眼球竖向偏移的增益（米/度）：抬头瞄准眼球上移")]
+        public float eyeLookAimGain = 0.00012f;
+        [Tooltip("眼球偏移平滑时间（秒）：扫视快到位、不瞬移")]
+        public float eyeLookSmoothTime = 0.07f;
+
         [Header("滚筒持握 (Roller Wield，参考 Inkwave _poseFlick 四段 / wRoll 拖地 / 滚轴自转)")]
         [Tooltip("待机持握俯仰（度，正 = 主鼓压低斜提；旧版 -28° 会把滚筒抬到胸口挡视野）")]
         public float rollerCarryPitchDeg = 16f;

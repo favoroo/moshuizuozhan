@@ -235,6 +235,25 @@ namespace P1.Ink
             // Shader 类没有公开 FindPass（Unity 6000.6）：按名查 Pass 必须经由 Material.FindPass
             _paintPassIndex = _splatMaterial.FindPass("InkAtlasPaint");
             _stampPassIndex = _splatMaterial.FindPass("InkAtlasStamp");
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // WebGL 玩家包会剥掉自定义 Pass 名（FindPass 恒为 -1），但 Pass 顺序与 shader 文件一致：
+            // ForwardLit=0 / ShadowCaster=1 / DepthNormals=2 / InkAtlasPaint=3 / InkAtlasStamp=4。
+            if (_paintPassIndex < 0 || _stampPassIndex < 0)
+            {
+                int passCount = _splatMaterial.passCount;
+                var passNames = new System.Text.StringBuilder();
+                for (int p = 0; p < passCount; p++)
+                {
+                    passNames.Append(p).Append('=').Append(_splatMaterial.GetPassName(p)).Append(' ');
+                }
+                Debug.LogWarning($"[InkSplatAtlas] WebGL FindPass 失败，passCount={passCount}，PassNames=[{passNames}]");
+                if (passCount >= 5)
+                {
+                    _paintPassIndex = 3;
+                    _stampPassIndex = 4;
+                }
+            }
+#endif
             if (_paintPassIndex < 0 || _stampPassIndex < 0)
             {
                 Debug.LogError("[InkSplatAtlas] P1/InkGround 缺少 InkAtlasPaint/InkAtlasStamp 写入 Pass，地面将不显示墨水。");

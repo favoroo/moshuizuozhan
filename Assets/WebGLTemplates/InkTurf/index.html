@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>墨水大作战 InkTurf — 网页试玩</title>
+    <link rel="icon" href="../img/favicon-64.png">
+    <link rel="stylesheet" href="TemplateData/style.css">
+  </head>
+  <body>
+    <header class="p1-bar">
+      <a class="p1-back" href="../">← 返回介绍页</a>
+      <div class="p1-brand">
+        <span class="p1-brand-cn">墨水大作战</span>
+        <span class="p1-brand-en">InkTurf · 网页试玩</span>
+      </div>
+      <button id="p1-fullscreen" class="p1-full" type="button">全屏</button>
+    </header>
+
+    <main class="p1-stage">
+      <div id="unity-container" class="unity-desktop">
+        <div id="unity-fullscreen-container">
+          <canvas id="unity-canvas" width="{{{ WIDTH }}}" height="{{{ HEIGHT }}}" tabindex="-1"></canvas>
+          <div id="unity-loading-container">
+            <div class="p1-loading-card">
+              <p class="p1-kicker">正在加载</p>
+              <h1>把整座码头<br>涂成你的颜色</h1>
+              <div id="unity-loading-bar">
+                <div id="unity-progress-bar-empty">
+                  <div id="unity-progress-bar-full"></div>
+                </div>
+              </div>
+              <p class="p1-loading-note">首次加载需要一点时间，请保持页面打开</p>
+            </div>
+          </div>
+          <div id="unity-warning"></div>
+        </div>
+      </div>
+
+      <div id="p1-mobile" hidden>
+        <div class="p1-mobile-card">
+          <p class="p1-kicker">手机浏览器</p>
+          <h1>网页版暂未适配手机</h1>
+          <p>请在桌面浏览器打开，或下载 Android 版直接开玩。</p>
+          <div class="p1-mobile-btns">
+            <a class="p1-btn p1-btn-yellow" href="https://github.com/favoroo/moshuizuozhan/releases/latest">下载 Android 版</a>
+            <a class="p1-btn p1-btn-dark" href="../">返回介绍页</a>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="p1-foot">
+      <span>WASD 移动</span><i></i><span>鼠标瞄准射击</span><i></i><span>Esc 暂停</span>
+    </footer>
+
+    <script>
+      (function () {
+        var canvas = document.querySelector("#unity-canvas");
+        var fullscreenContainer = document.querySelector("#unity-fullscreen-container");
+        var loadingContainer = document.querySelector("#unity-loading-container");
+        var progressBarFull = document.querySelector("#unity-progress-bar-full");
+        var warningBanner = document.querySelector("#unity-warning");
+        var mobileNotice = document.querySelector("#p1-mobile");
+        var stage = document.querySelector(".p1-stage");
+
+        // 非致命警告/错误显示在画布上方，不打断游戏。
+        function unityShowBanner(msg, type) {
+          function updateBannerVisibility() {
+            warningBanner.style.display = warningBanner.children.length ? "block" : "none";
+          }
+          var div = document.createElement("div");
+          div.innerHTML = msg;
+          div.className = type === "error" ? "p1-warn p1-warn-error" : "p1-warn p1-warn-info";
+          warningBanner.appendChild(div);
+          if (type !== "error") {
+            setTimeout(function () {
+              warningBanner.removeChild(div);
+              updateBannerVisibility();
+            }, 5000);
+          }
+          updateBannerVisibility();
+        }
+
+        // 指针锁定失败时 Unity 会弹 blocking alert（浏览器失焦/自动化环境常见），
+        // 会把页面整个卡住。只把 pointer lock 提示降级成横幅，其他 alert 保持原样。
+        var nativeAlert = window.alert;
+        window.alert = function (msg) {
+          if (typeof msg === "string" && /pointer lock/i.test(msg)) {
+            unityShowBanner("鼠标锁定失败：请点击游戏画面重试（浏览器窗口需要获得焦点）。", "info");
+            return;
+          }
+          nativeAlert.call(window, msg);
+        };
+
+        // 手机浏览器不加载 Unity：WebGL 下 Application.isMobilePlatform 为 false，
+        // 现有触屏 UI 不会启用，直接引导下载 Android 版。
+        var isTouch = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
+          /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+        if (isTouch) {
+          stage.classList.add("is-mobile");
+          mobileNotice.hidden = false;
+          document.querySelector(".p1-foot").hidden = true;
+          document.querySelector("#p1-fullscreen").hidden = true;
+          loadingContainer.style.display = "none";
+          return;
+        }
+
+        var buildUrl = "Build";
+        var loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
+        var config = {
+          arguments: [],
+#if PROGRESSIVE_ASSET_LOADING
+          primaryDataUrls: {{{ JSON.stringify(PRIMARY_DATA_FILES) }}},
+          secondaryDataUrls: {{{ JSON.stringify(SECONDARY_DATA_FILES) }}},
+#else
+          dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+#endif
+          frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+#if USE_WASM
+          codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+          symbolsUrl: buildUrl + "/{{{ SYMBOLS_FILENAME }}}",
+#endif
+          streamingAssetsUrl: "StreamingAssets",
+          fullscreenElementID: "unity-fullscreen-container",
+          companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+          productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+          productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+          showBanner: unityShowBanner,
+        };
+
+        fullscreenContainer.style.width = "100%";
+        fullscreenContainer.style.height = "100%";
+
+        var script = document.createElement("script");
+        script.src = loaderUrl;
+        script.onerror = function () {
+          loadingContainer.style.display = "none";
+          unityShowBanner("加载器脚本加载失败，请刷新页面重试。", "error");
+        };
+        script.onload = function () {
+          if (typeof createUnityInstance !== "function") {
+            loadingContainer.style.display = "none";
+            unityShowBanner("浏览器无法启动 Unity 网页版，请换用最新版 Chrome / Edge / Safari。", "error");
+            return;
+          }
+          createUnityInstance(canvas, config, function (progress) {
+            if (progress < 1) {
+              loadingContainer.style.display = "flex";
+              progressBarFull.style.width = (100 * progress) + "%";
+            } else {
+              loadingContainer.style.display = "none";
+            }
+          }).then(function (unityInstance) {
+            window.__unityInstance = unityInstance;
+            document.querySelector("#p1-fullscreen").onclick = function () {
+              unityInstance.SetFullscreen(1);
+            };
+          }).catch(function (message) {
+            loadingContainer.style.display = "none";
+            unityShowBanner("启动失败：" + message, "error");
+          });
+        };
+        document.body.appendChild(script);
+      })();
+    </script>
+  </body>
+</html>

@@ -136,7 +136,7 @@ namespace P1.Tests
         }
 
         [UnityTest]
-        public IEnumerator EnemyInk_SlowsTo1_9_AndSixtyHealthFloor_NeverKills()
+        public IEnumerator EnemyInk_SlowsTo2_4_AndSixtyHealthFloor_NeverKills()
         {
             yield return LoadPlaybox();
             var player = PlayerController.LocalPlayer;
@@ -157,7 +157,7 @@ namespace P1.Tests
             yield return null;
 
             Assert.IsTrue(motor.IsInEnemyInk, "应踩在敌方墨水上");
-            Assert.AreEqual(1.9f, motor.CurrentMoveSpeed, 0.01f, "踩敌墨移速骤降到 1.9 m/s");
+            Assert.AreEqual(2.4f, motor.CurrentMoveSpeed, 0.01f, "踩敌墨移速降到 2.4 m/s（约 40% 跑速）");
             Assert.AreEqual(1f, motor.EnemyInkGrip01, 0.01f, "踩敌墨瞬间受击槽锁满");
 
             // 站在敌墨上 3s：DOT 20/s 只能压到 60，绝不致死

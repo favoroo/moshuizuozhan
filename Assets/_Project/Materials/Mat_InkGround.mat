@@ -153,7 +153,7 @@ Material:
     - _GroundAOStrength: 0.45
     - _GroundNormalStrength: 0.55
     - _GroundTexStrength: 1
-    - _InkGlow: 0.2
+    - _InkGlow: 0.1
     - _InkGrainScale: 1.6
     - _InkGrainStrength: 0.35
     - _InkRoughVarStrength: 0.5
@@ -198,7 +198,7 @@ Material:
     - _Color: {r: 0.76, g: 0.74, b: 0.68, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
-    - _GridLineColor: {r: 0.23302203, g: 0.21404114, b: 0.17064494, a: 1}
+    - _GridLineColor: {r: 0.16264722, g: 0.14731899, b: 0.11928018, a: 1}
     - _InkMapOriginXZ: {r: -20, g: -20, b: 40, a: 40}
     - _InkMapSize: {r: 40, g: 56, b: 0, a: 0}
     - _InkTexelSize: {r: 0.0002441406, g: 0.0002441406, b: 4096, a: 4096}

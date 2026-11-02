@@ -17,15 +17,11 @@ tools/deploy_site.py                 # 部署：构建 + gh-pages 孤儿分支�
 
 ```bash
 # 本地预览（改完页面后）
-python3 tools/build_site.py            # 需要先有 Builds/WebGL（见下节）
+python3 tools/build_site.py            # 没有 Builds/WebGL 时会提示跳过 /play/
 python3 -m http.server 8080 -d site/dist
 # 打开 http://localhost:8080
 
-# 只预览介绍页、暂时没有 WebGL 包时
-python3 tools/build_site.py --skip-play
-python3 -m http.server 8080 -d site/dist
-
-# 部署上线（会重新 build_site，缺 WebGL 包会直接报错）
+# 部署上线（会重新 build_site；线上已有 /play/ 而本轮产物没有时会拒绝部署）
 python3 tools/deploy_site.py
 ```
 
@@ -48,7 +44,8 @@ python3 tools/deploy_site.py
 
   也可以在 Unity 菜单点 `P1/构建/14. 构建 WebGL 网页试玩包`。
 - `tools/build_site.py` 会把 `Builds/WebGL/` 整体拷进 `site/dist/play/`；缺少
-  `Builds/WebGL/index.html` 时**硬失败**，避免只改文案的部署把线上 `/play/` 静默删掉。
+  `Builds/WebGL/index.html` 时会跳过 `/play/` 并警告。`deploy_site.py` 会检查线上是否已有
+  `/play/`，已有但本轮产物没有时**拒绝部署**，避免只改文案的发布把网页试玩删掉。
   脚本比源码旧时会打印“可能不是最新构建”的警告（不会自动重建）。
 - 构建配置：Brotli + **Decompression Fallback**（GitHub Pages 不能设 `Content-Encoding`）、
   哈希文件名（避免 CDN 缓存错配）、关闭多线程；模板在

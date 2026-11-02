@@ -64,7 +64,7 @@ Material:
     - _SurfaceNormalStrength: 0.55
     - _SurfaceSmoothnessScale: 1.25
     - _SurfaceTexelScale: 0.5
-    - _TopLift: 0.06
+    - _TopLift: 0.09
     m_Colors:
     - _BaseColor: {r: 0.039681915, g: 0.27383846, b: 0.25295013, a: 1}
     - _EdgeLineColor: {r: 0.0173891, g: 0.013411746, b: 0.027211785, a: 1}

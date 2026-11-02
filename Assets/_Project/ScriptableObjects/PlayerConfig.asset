@@ -14,7 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: P1.Game::P1.Player.PlayerConfigSO
   normalMoveSpeed: 6
   firingMoveSpeed: 3.8
-  enemyInkMoveSpeed: 1.9
+  enemyInkMoveSpeed: 2.4
+  enemyInkAccel: 30
+  enemyInkDecel: 30
   swimMoveSpeed: 11.8
   rotationLerpSpeed: 22
   jumpHeight: 1.35

@@ -610,14 +610,18 @@ namespace P1.Player
         private Vector3 ComputeBombThrowVelocity()
         {
             TopDownCameraFollow cameraFollow = TopDownCameraFollow.Instance;
-            float pitchDegrees = cameraFollow != null ? cameraFollow.PitchDegrees : 0f;
+            // 相机俯仰正数 = 低头（TopDownCameraFollow 约定），投掷公式正数 = 抬头（inkwave 约定）：
+            // 必须翻转符号，否则「朝天瞄」会被解成向下的负仰角，手雷直接砸在脚边。
+            float aimPitchDegrees = cameraFollow != null
+                ? InkBombTrajectoryUtility.CameraPitchToAimPitchDegrees(cameraFollow.PitchDegrees)
+                : 0f;
             Vector3 carry = Vector3.zero;
             if (_cc != null)
             {
                 carry = _cc.velocity;
                 carry.y = 0f;
             }
-            return InkBombTrajectoryUtility.ComputeThrowVelocity(_aimDirectionFlat, pitchDegrees, carry, _weapon.Config);
+            return InkBombTrajectoryUtility.ComputeThrowVelocity(_aimDirectionFlat, aimPitchDegrees, carry, _weapon.Config);
         }
 
         private static bool IsStealthed(CombatantHealth target)

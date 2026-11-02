@@ -150,7 +150,9 @@ namespace P1.Tests
             {
                 Assert.AreEqual(100f, cfg.maxInk, 0.001f);
                 Assert.AreEqual(11.8f, cfg.swimMoveSpeed, 0.001f, "潜墨移速 11.8 m/s");
-                Assert.AreEqual(1.9f, cfg.enemyInkMoveSpeed, 0.001f, "踩敌墨减速到 1.9 m/s");
+                Assert.AreEqual(2.4f, cfg.enemyInkMoveSpeed, 0.001f, "踩敌墨减速到 2.4 m/s（约 40% 跑速）");
+                Assert.AreEqual(30f, cfg.enemyInkAccel, 0.001f, "敌墨加速度 30（Inkwave enemyInkAccel）");
+                Assert.AreEqual(30f, cfg.enemyInkDecel, 0.001f, "敌墨减速度 30（Inkwave enemyInkDecel）");
                 Assert.AreEqual(42f, cfg.swimInkRefillRate, 0.001f, "潜墨回墨 42/s");
                 Assert.AreEqual(60f, cfg.swimHealthRegenRate, 0.001f, "潜墨回血 60/s");
                 Assert.AreEqual(20f, cfg.enemyInkDamagePerSec, 0.001f, "敌墨 DOT 20/s");

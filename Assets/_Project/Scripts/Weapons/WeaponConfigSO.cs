@@ -267,17 +267,17 @@ namespace P1.Weapons
         public float bombInkCost = 0f;
         [Tooltip("投掷冷却（秒）：默认 6s。手雷不再受墨水限制，用冷却防刷")]
         public float bombCooldown = 6f;
-        [Tooltip("出手初速（米/秒）：inkwave SUB.bomb.throwSpeed = 13.5。远近由相机俯仰决定：平抛约 8m、抬头最远约 10.5m、低头贴脚丢")]
+        [Tooltip("出手初速（米/秒）：inkwave SUB.bomb.throwSpeed = 13.5。远近由瞄准俯仰决定：平视约 8m、抬头约 30° 最远约 10m、低头贴脚丢")]
         public float bombThrowSpeed = 13.5f;
         [Tooltip("手雷飞行重力（米/秒²）：inkwave 炸弹积分器 = 24（角色重力 25）")]
         public float bombThrowGravity = 24f;
         [Tooltip("出手固定向上加成（米/秒）：inkwave throwVelocity 的 +1.5，保证平抛也有柔和上抛弧")]
         public float bombThrowUpBoost = 1.5f;
-        [Tooltip("俯仰偏移（度）：实际出手俯仰 = 相机俯仰 + 该值（inkwave +0.28rad ≈ 16°），低头时也能温柔地抛出去")]
+        [Tooltip("俯仰偏移（度）：实际出手俯仰 = 瞄准俯仰（正 = 抬头）+ 该值（inkwave +0.28rad ≈ 16°），平视也有柔和上抛弧")]
         public float bombThrowPitchOffsetDegrees = 16f;
         [Tooltip("出手俯仰下限（度）：inkwave clamp 下限 -0.3rad ≈ -17.2°，再低头也不会垂直砸脚")]
         public float bombThrowPitchMinDegrees = -17.2f;
-        [Tooltip("出手俯仰上限（度）：inkwave clamp 上限 1.1rad ≈ 63°，即最远投掷的仰角")]
+        [Tooltip("出手俯仰上限（度）：inkwave clamp 上限 1.1rad ≈ 63°；45° 附近射程最大，抬得更高弧线更高但落点更近")]
         public float bombThrowPitchMaxDegrees = 63f;
         [Tooltip("（旧字段，弹道模型已废弃）落点钳制距离：现行模型远近由俯仰物理决定，无钳制，保留供旧调用兼容")]
         public float bombMaxThrowDistance = 12f;

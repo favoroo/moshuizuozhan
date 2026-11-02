@@ -620,11 +620,50 @@ namespace P1.UI
                     TextAlignmentOptions.MidlineLeft, 2f, FontStyles.Bold);
             }
 
+            // 1.5 标题群：游戏名 Hero 大标题 + 拉丁副标。
+            // 版面表一直保留 TitleFont/LatinFont 两档但构建时未落地，
+            // 导致 Hero 卡中部整片空场、首页失去品牌锚点。标题群落在武器整备卡与 CTA 之间的
+            // 空档，全部左对齐；底部必须让开桌面端 CTA 上方的按键提示区。
+            // 规则速记不放在这里：顶部微标、左下角类型签与 KEYS 浮层已覆盖，再放是冗余。
+            {
+                float slotTopLocal = m.HeroPadding.y + m.TagSize.y + (m.ShowTopButton ? 48f : 68f);
+                float slotBottomLocal = slotTopLocal + MenuLayoutMath.LoadoutCard(m.ShowTopButton).Size.y;
+                float ctaTopLocal = _homeBoard.Height - m.HeroPadding.y - m.CtaSize.y;
+                float hintFont = UITypography.FontSnapped(18f);
+                float bottomLimit = mobile
+                    ? ctaTopLocal - 12f
+                    : ctaTopLocal - hintFont * 1.6f - 8f - 6f;
+                float freeTop = slotBottomLocal + 12f;
+                float freeH = Mathf.Max(0f, bottomLimit - freeTop);
+
+                // 移动端空档浅，×1.28 后的 154 号会同时撞武器卡与 CTA；
+                // 移动端取版面表原值 120（与桌面相等，不违反「移动端不小于桌面」）。
+                float titleFont = mobile ? m.TitleFont : UITypography.FontSnapped(m.TitleFont);
+                float titleBoxH = Mathf.Min(titleFont * 1.3f, freeH);
+                float latinFont = UITypography.FontSnapped(m.LatinFont);
+                float latinH = latinFont * 1.5f;
+                bool withLatin = !mobile && titleBoxH + 8f + latinH <= freeH;
+                float groupH = withLatin ? titleBoxH + 8f + latinH : titleBoxH;
+                float titleY = freeTop + Mathf.Max(0f, (freeH - groupH) * 0.35f);
+                CreateBoardText(card, "HeroTitle", GameVersion.APP_NAME, titleFont, true, ComicStyle.Ink,
+                    new Vector2(m.HeroPadding.x, titleY), new Vector2(innerWidth, titleBoxH),
+                    TextAlignmentOptions.MidlineLeft, 2f, FontStyles.Bold);
+
+                if (withLatin)
+                {
+                    CreateBoardText(card, "HeroLatin", "INK TURF · SPLAT THE DOCK", latinFont, true,
+                        ComicStyle.WithAlpha(ComicStyle.Ink, 0.72f),
+                        new Vector2(m.HeroPadding.x + 4f, titleY + titleBoxH + 8f),
+                        new Vector2(innerWidth - 4f, latinH),
+                        TextAlignmentOptions.MidlineLeft, 6f, FontStyles.Bold | FontStyles.UpperCase);
+                }
+            }
+
             // 2. 中间区域：专为「武器整备卡」预留黄金展示位（由 WeaponSelectView 对齐 HeroWeaponSlot 渲染，白底黑边+硬阴影）
             // 桌面端在 CTA 上方添加极淡极简的操作提示微字，贴心且不喧宾夺主
             if (!mobile)
             {
-                float hintFont = UITypography.FontSnapped(16f);
+                float hintFont = UITypography.FontSnapped(18f);
                 float ctaTop = _homeBoard.Top + _homeBoard.Height - m.HeroPadding.y - m.CtaSize.y;
                 float hintY = (ctaTop - _homeBoard.Top) - hintFont * 1.6f - 8f;
                 CreateBoardText(card, "HeroKeyHint", "SPACE / ENTER TO BATTLE", hintFont, true,
@@ -838,7 +877,11 @@ namespace P1.UI
                 Index = 3,
                 Tag = "UPDATE",
                 Title = "检查更新",
+#if UNITY_WEBGL && !UNITY_EDITOR
+                Info = "查看最新版本与更新记录",
+#else
                 Info = "联网检查新版本 · 当前 " + GameVersion.APP_VERSION_NAME,
+#endif
                 Accent = ComicStyle.Yellow,
                 Interactive = true,
             }, theme, m, mobile, out _, out _);
@@ -1147,9 +1190,11 @@ namespace P1.UI
                     ComicStyle.Ink, ComicStyle.Paper, m.FooterTagFont);
             }
 
+#if !UNITY_WEBGL || UNITY_EDITOR
             CreateFooterTag("HomeVersionTag", m.VersionTag,
                 GameVersion.APP_NAME + " " + GameVersion.APP_VERSION_NAME, theme,
                 ComicStyle.Ink, ComicStyle.Yellow, m.FooterTagFont);
+#endif
         }
 
         private void CreateFooterTag(string name, HomeBox box, string label, UIThemeSO theme,
@@ -2728,7 +2773,12 @@ namespace P1.UI
 
             if (versionText != null)
             {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                // 网页试玩页不展示游戏版本号。
+                versionText.gameObject.SetActive(false);
+#else
                 versionText.text = $"{GameVersion.APP_NAME} {GameVersion.APP_VERSION_NAME}";
+#endif
             }
 
             // 检查更新按钮：透明 Image 只负责射线与旧监听（视觉由首页 UPDATE 卡承担）

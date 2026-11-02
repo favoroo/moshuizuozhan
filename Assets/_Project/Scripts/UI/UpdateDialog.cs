@@ -195,8 +195,11 @@ namespace P1.UI
                 _progressRunning = false;
                 if (_progressBox != null) _progressBox.SetActive(false);
                 SetProgressTarget(0f, immediate: true);
-                if (_actionBtn != null) _actionBtn.interactable = info.hasApk;
-                if (_actionBtnText != null) _actionBtnText.text = info.hasApk ? "立 即 更 新" : "无内置安装包";
+                if (_actionBtn != null) _actionBtn.interactable = info.hasApk && UpdateManager.InAppInstallSupported;
+                if (_actionBtnText != null)
+                    _actionBtnText.text = UpdateManager.InAppInstallSupported
+                        ? (info.hasApk ? "立 即 更 新" : "无内置安装包")
+                        : "前 往 下 载";
             }
         }
 
@@ -226,9 +229,13 @@ namespace P1.UI
             if (_scrollRect != null) _scrollRect.verticalNormalizedPosition = 1f;
 
             // 没有 APK 附件时应用内下载无从谈起，只剩「浏览器下载」这条逃生通道
-            bool canInstallInApp = info.hasApk;
-            if (_actionBtn != null) _actionBtn.interactable = canInstallInApp;
-            if (_actionBtnText != null) _actionBtnText.text = canInstallInApp ? "立 即 更 新" : "无内置安装包";
+            bool canInstallInApp = info.hasApk && UpdateManager.InAppInstallSupported;
+            bool canOpenDownload = canInstallInApp
+                || !string.IsNullOrEmpty(info.releaseUrl)
+                || !string.IsNullOrEmpty(info.downloadUrl);
+            if (_actionBtn != null) _actionBtn.interactable = canOpenDownload;
+            if (_actionBtnText != null)
+                _actionBtnText.text = canInstallInApp ? "立 即 更 新" : "前 往 下 载";
 
             // 上一次已经下好、且缓存包确实属于「这个待安装版本」：直接给安装入口，不必重下几十 MB。
             // 旧实现只问「有没有 APK 文件」，会把上个版本的残留包当成本次更新（点安装必然失败）。
@@ -290,6 +297,13 @@ namespace P1.UI
             }
 
             if (_currentInfo == null) return;
+
+            // 未申请安装权限（TapTap 隐私合规）：主按钮直接打开下载页。
+            if (!UpdateManager.InAppInstallSupported)
+            {
+                UpdateManager.Instance.OpenReleasePage(_currentInfo);
+                return;
+            }
 
             if (!_currentInfo.hasApk)
             {

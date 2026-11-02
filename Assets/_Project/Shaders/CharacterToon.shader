@@ -62,9 +62,10 @@ Shader "P1/CharacterToon"
             #pragma fragment frag
 
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
-            #pragma target 4.5
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma target 3.0
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
 
             // 潜墨隐匿半透明变体：开启时片元输出 albedo.a
             #pragma multi_compile_local_fragment _ _SURFACE_TYPE_TRANSPARENT
@@ -98,9 +99,10 @@ Shader "P1/CharacterToon"
             #pragma fragment ShadowPassFragment
 
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体（shadowmap 同样走 GRD 批处理）
-            #pragma target 4.5
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma target 3.0
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
 
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 

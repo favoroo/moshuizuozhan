@@ -285,6 +285,11 @@ namespace P1.UI
             if (doubleLayer)
             {
                 EnsureFillLayer();
+                if (_fillLayer != null && !_fillLayer.gameObject.activeSelf)
+                {
+                    _fillLayer.gameObject.SetActive(true);
+                }
+
                 _fillLayer.font = source.font;
                 _fillLayer.color = fillColor;
 
@@ -306,8 +311,11 @@ namespace P1.UI
 
             _built = true;
             _dirty = true;
-            SyncFillLayer();
-            ApplyShadowOffset();
+            if (doubleLayer)
+            {
+                SyncFillLayer();
+                ApplyShadowOffset();
+            }
         }
 
         private void EnsureFillLayer()
@@ -345,6 +353,15 @@ namespace P1.UI
                 }
 
                 ApplyUppercase();
+            }
+
+            if (!doubleLayer)
+            {
+                if (_fillLayer != null && _fillLayer.gameObject.activeSelf)
+                {
+                    _fillLayer.gameObject.SetActive(false);
+                }
+                return;
             }
 
             if (!_dirty && !NeedsSync()) return;
@@ -389,7 +406,7 @@ namespace P1.UI
 
         private void SyncFillLayer()
         {
-            if (_fillLayer == null || source == null) return;
+            if (!doubleLayer || _fillLayer == null || source == null) return;
 
             _fillLayer.font = source.font;
             _fillLayer.fontSize = source.fontSize;
@@ -413,7 +430,7 @@ namespace P1.UI
 
         private void ApplyShadowOffset()
         {
-            if (_fillRect == null || source == null) return;
+            if (!doubleLayer || _fillRect == null || source == null) return;
 
             // 像素模式：shadowOffsetPixels 描述「阴影向量」（右下 = 正 x 负 y），
             // 填充层要往阴影的反方向让开，黑色描边才会从右下露出来。
@@ -453,17 +470,36 @@ namespace P1.UI
                 _outlineMaterial.SetFloat(ShaderUtilities.ID_OutlineWidth, Mathf.Clamp01(outlineWidth));
             }
 
-            if (_fillLayer != null && _fillLayer.fontMaterial != null)
+            if (!doubleLayer)
             {
-                _fillLayer.color = fillColor;
-                _fillLayer.outlineColor = fillColor;
-                _fillLayer.outlineWidth = innerOutlineWidth;
+                if (_fillLayer != null && _fillLayer.gameObject.activeSelf)
+                {
+                    _fillLayer.gameObject.SetActive(false);
+                }
             }
-
-            if (_fillMaterial != null)
+            else
             {
-                _fillMaterial.SetColor(ShaderUtilities.ID_OutlineColor, fillColor);
-                _fillMaterial.SetFloat(ShaderUtilities.ID_OutlineWidth, Mathf.Clamp01(innerOutlineWidth));
+                EnsureFillLayer();
+                if (_fillLayer != null && !_fillLayer.gameObject.activeSelf)
+                {
+                    _fillLayer.gameObject.SetActive(true);
+                }
+
+                if (_fillLayer != null && _fillLayer.fontMaterial != null)
+                {
+                    _fillLayer.color = fillColor;
+                    _fillLayer.outlineColor = fillColor;
+                    _fillLayer.outlineWidth = innerOutlineWidth;
+                }
+
+                if (_fillMaterial != null)
+                {
+                    _fillMaterial.SetColor(ShaderUtilities.ID_OutlineColor, fillColor);
+                    _fillMaterial.SetFloat(ShaderUtilities.ID_OutlineWidth, Mathf.Clamp01(innerOutlineWidth));
+                }
+
+                SyncFillLayer();
+                ApplyShadowOffset();
             }
 
             _dirty = true;

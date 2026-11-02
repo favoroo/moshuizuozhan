@@ -4,16 +4,9 @@
   底稿 = Unity 自带模板 PlaybackEngines/AndroidPlayer/Apk/UnityManifest.xml，
   按本项目 androidApplicationEntry = Activity 只保留 UnityPlayerActivity 那一段。
 
-  只追加「应用内更新 → 下载安装 APK」必需的两项声明：
-    1. REQUEST_INSTALL_PACKAGES —— Android 8.0 (API 26) 起安装 APK 必须声明，
-       否则 startActivity 会被系统静默丢弃，表现就是"点了安装没反应"。
-    2. FileProvider —— API 24+ 禁止用 file:// 把文件交给别的应用，
-       安装包必须转成 content:// URI 才能被系统安装器读取；
-       路径表（@xml/p1_update_paths）在 P1UpdateLib.androidlib 里，
-       androidx.core:core 依赖也由该库的 build.gradle 携带。
-
-  authority 固定为 ${applicationId}.fileprovider，
-  与 UpdateManager.FileProviderAuthoritySuffix（Android 侧 packageName + ".fileprovider"）一一对应。
+  TapTap 渠道隐私合规（2026-11）：不再声明 REQUEST_INSTALL_PACKAGES / FileProvider。
+  应用内更新改为「检查更新 → 浏览器打开 Release 页」，由 TapTap 商店或浏览器安装，
+  避免与游戏功能无关的高危安装权限。若将来恢复应用内安装，需同时加回权限与 FileProvider。
 
   注意：本项目 AndroidApplicationEntry = Activity。若将来改成 GameActivity，
   这里必须换成 com.unity3d.player.UnityPlayerGameActivity，否则应用起不来。
@@ -24,10 +17,8 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 检查更新 / 下载安装包需要联网。显式声明，避免自定义主清单挤掉 Unity 默认注入的这条权限 -->
+    <!-- 检查更新需要联网。显式声明，避免自定义主清单挤掉 Unity 默认注入的这条权限 -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- 应用内安装 APK -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application>
         <!--Used when Application Entry is set to Activity, otherwise remove this activity block-->
@@ -39,16 +30,5 @@
             </intent-filter>
             <meta-data android:name="unityplayer.UnityActivity" android:value="true" />
         </activity>
-
-        <!-- 把 persistentDataPath 下下载好的安装包以 content:// 共享给系统安装器 -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/p1_update_paths" />
-        </provider>
     </application>
 </manifest>

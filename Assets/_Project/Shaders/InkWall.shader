@@ -56,9 +56,10 @@ Shader "P1/InkWall"
             #pragma fragment frag
 
             // GPU Resident Drawer (P12-C)：DOTS 实例化变体；GRD 启用时走 BatchRendererGroup 提交，关闭时走原渲染路径
-            #pragma target 4.5
-            #pragma multi_compile _ DOTS_INSTANCING_ON
+            #pragma target 3.0
+                        #if !UNITY_WEBGL
             #pragma multi_compile_instancing
+            #endif
             #pragma multi_compile _ P1_INK_HIGH
 
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN

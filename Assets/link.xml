@@ -1,0 +1,7 @@
+<linker>
+  <!-- GameObject.CreatePrimitive(PrimitiveType.Sphere) 会在运行时隐式创建 SphereCollider。
+       WebGL 的 engine code stripping 看不到这条引用，会剥掉 PhysicsModule，运行时报
+       "Can't add component because class 'SphereCollider' doesn't exist!"（炸弹、风暴云、角色球体）。
+       保留整个 PhysicsModule 体积很小，换回完整的 3D 物理组件。 -->
+  <assembly fullname="UnityEngine.PhysicsModule" preserve="all" />
+</linker>

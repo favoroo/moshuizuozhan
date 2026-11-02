@@ -9,8 +9,12 @@ namespace P1.Player
         [Tooltip("人形态跑速（对齐 Inkwave PLAYER.runSpeed = 6.0）")]
         public float normalMoveSpeed = 6.0f;
         public float firingMoveSpeed = 3.8f;
-        [Tooltip("踩敌方墨水的挣扎移速（对齐 Inkwave PLAYER.enemyInkSpeed = 1.9）")]
-        public float enemyInkMoveSpeed = 1.9f;
+        [Tooltip("踩敌方墨水的挣扎移速（Splatoon 约 40% 跑速 = 2.4；INKWAVE 的 1.9 在 4v4 实战里体感过重，按反馈上调）")]
+        public float enemyInkMoveSpeed = 2.4f;
+        [Tooltip("敌墨中挣扎加速度 (m/s²)（对齐 Inkwave PLAYER.enemyInkAccel = 30）：起步更沉，读出「陷入」感")]
+        public float enemyInkAccel = 30f;
+        [Tooltip("敌墨中减速/惯性衰减 (m/s²)（对齐 Inkwave PLAYER.enemyInkDecel = 30）：踩入敌墨保留短暂前冲，不做硬钳制")]
+        public float enemyInkDecel = 30f;
         [Tooltip("己方墨水中潜行移速（对齐 Inkwave PLAYER.swimSpeed = 11.8）")]
         public float swimMoveSpeed = 11.8f;
         [Tooltip("无墨/干地乌贼形态移速（对齐 Inkwave PLAYER.squidDrySpeed = 2.9）：没涂墨的地面也能按住潜行键保持乌贼形态，但没有潜墨加成（不加速、不隐匿）")]

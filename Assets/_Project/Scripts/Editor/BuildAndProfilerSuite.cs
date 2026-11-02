@@ -139,44 +139,59 @@ namespace P1.Editor
             string outputDir = ResolveWebGLOutputPath();
             Debug.Log($"[WebGL][Build] 开始构建 WebGL 网页试玩包 (产物目录: {outputDir})...");
 
-            EnsureSceneInBuildSettings();
-            ApplyWebGLPlayerSettings();
-
-            if (!EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.WebGL, BuildTarget.WebGL))
+            #pragma warning disable 0618
+            bool prevStaticBatching = PlayerSettings.GetStaticBatchingForPlatform(BuildTarget.WebGL);
+#pragma warning restore 0618
+            bool prevStripUnusedMeshComponents = PlayerSettings.stripUnusedMeshComponents;
+            try
             {
-                Debug.LogError("[WebGL][Build] 切换 WebGL 构建目标失败（WebGL Build Support 模块是否已安装？）。");
+                EnsureSceneInBuildSettings();
+                ApplyWebGLPlayerSettings();
+
+                if (!EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.WebGL, BuildTarget.WebGL))
+                {
+                    Debug.LogError("[WebGL][Build] 切换 WebGL 构建目标失败（WebGL Build Support 模块是否已安装？）。");
+                    ExitBatchOnFailure();
+                    return false;
+                }
+
+                // 哈希文件名会随每次构建变化，旧产物必须清掉，否则会一起进 gh-pages。
+                if (Directory.Exists(outputDir)) Directory.Delete(outputDir, true);
+                EnsureOutputDirectory(outputDir);
+
+                var options = new BuildPlayerOptions
+                {
+                    scenes = new[] { MainScenePath },
+                    locationPathName = outputDir,
+                    target = BuildTarget.WebGL,
+                    options = BuildOptions.None
+                };
+
+                BuildReport report = BuildPipeline.BuildPlayer(options);
+                BuildSummary summary = report.summary;
+
+                if (summary.result == BuildResult.Succeeded)
+                {
+                    Debug.Log($"[WebGL][Build] WebGL 构建成功！\n" +
+                              $"- 产物目录: {outputDir}\n" +
+                              $"- 包体总大小: {summary.totalSize / (1024f * 1024f):F2} MB\n" +
+                              $"- 耗时: {summary.totalTime.TotalSeconds:F2} 秒\n" +
+                              $"- Errors: {summary.totalErrors}, Warnings: {summary.totalWarnings}");
+                    return true;
+                }
+
+                Debug.LogError($"[WebGL][Build] WebGL 构建失败: {summary.result}, Errors: {summary.totalErrors}");
                 ExitBatchOnFailure();
                 return false;
             }
-
-            // 哈希文件名会随每次构建变化，旧产物必须清掉，否则会一起进 gh-pages。
-            if (Directory.Exists(outputDir)) Directory.Delete(outputDir, true);
-            EnsureOutputDirectory(outputDir);
-
-            var options = new BuildPlayerOptions
+            finally
             {
-                scenes = new[] { MainScenePath },
-                locationPathName = outputDir,
-                target = BuildTarget.WebGL,
-                options = BuildOptions.None
-            };
-
-            BuildReport report = BuildPipeline.BuildPlayer(options);
-            BuildSummary summary = report.summary;
-
-            if (summary.result == BuildResult.Succeeded)
-            {
-                Debug.Log($"[WebGL][Build] WebGL 构建成功！\n" +
-                          $"- 产物目录: {outputDir}\n" +
-                          $"- 包体总大小: {summary.totalSize / (1024f * 1024f):F2} MB\n" +
-                          $"- 耗时: {summary.totalTime.TotalSeconds:F2} 秒\n" +
-                          $"- Errors: {summary.totalErrors}, Warnings: {summary.totalWarnings}");
-                return true;
+                // 静态合批是全局 PlayerSetting，构建完恢复，避免影响 Android/桌面构建。
+#pragma warning disable 0618
+                PlayerSettings.SetStaticBatchingForPlatform(BuildTarget.WebGL, prevStaticBatching);
+#pragma warning restore 0618
+                PlayerSettings.stripUnusedMeshComponents = prevStripUnusedMeshComponents;
             }
-
-            Debug.LogError($"[WebGL][Build] WebGL 构建失败: {summary.result}, Errors: {summary.totalErrors}");
-            ExitBatchOnFailure();
-            return false;
         }
 
         /// <summary>批处理模式下构建失败必须以非零码退出，否则 unity build 会把失败当成功。</summary>
@@ -213,6 +228,17 @@ namespace P1.Editor
             PlayerSettings.defaultWebScreenWidth = 1280;
             PlayerSettings.defaultWebScreenHeight = 720;
             PlayerSettings.WebGL.powerPreference = WebGLPowerPreference.HighPerformance;
+
+            // WebGL：静态合批在部分浏览器/驱动上会让整块静态地面不绘制（只看到天空/远景）。
+            // 场地 draw 数量很小，关闭静态合批换取稳定渲染；构建结束由 BuildWebGL 恢复。
+#pragma warning disable 0618
+            PlayerSettings.SetStaticBatchingForPlatform(BuildTarget.WebGL, false);
+#pragma warning restore 0618
+
+            // WebGL：关闭 "Optimize Mesh Data"。它会在打包期剔除"没有任何 shader 使用"的
+            // 顶点通道；自定义 shader 一旦被平台回退，顶点色会被静默删除，容器/远景整片变黑。
+            // 关闭后顶点色/UV 原样进包；构建结束由 BuildWebGL 恢复。
+            PlayerSettings.stripUnusedMeshComponents = false;
 
             AssetDatabase.SaveAssets();
         }

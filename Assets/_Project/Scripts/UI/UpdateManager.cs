@@ -117,6 +117,14 @@ namespace P1.UI
         /// <summary>Android 上安装包要走 FileProvider 共享，authority 必须与 AndroidManifest 里的声明一致。</summary>
         public const string FileProviderAuthoritySuffix = ".fileprovider";
 
+        /// <summary>
+        /// 是否支持应用内下载并调起系统安装器。
+        /// TapTap 隐私合规要求移除与游戏功能无关的高危安装权限（REQUEST_INSTALL_PACKAGES），
+        /// 因此默认关闭：检查更新只负责发现新版本，下载/安装交给 TapTap 商店或浏览器。
+        /// 若将来恢复应用内安装，需要同时把 AndroidManifest 的权限与 FileProvider 加回来。
+        /// </summary>
+        public static bool InAppInstallSupported => false;
+
         private const string ClientUserAgent = "Moshuizuozhan-UnityClient";
 
         public bool IsChecking { get; private set; }
@@ -184,6 +192,9 @@ namespace P1.UI
         /// </summary>
         public void CheckForUpdate(bool manual = false)
         {
+            // 隐私合规：未同意隐私政策前不发起任何网络请求。
+            if (!PrivacyConsentDialog.HasValidConsent) return;
+
             if (IsChecking)
             {
                 if (manual) _lastCheckManual = true;
@@ -641,12 +652,35 @@ namespace P1.UI
         }
 
         /// <summary>
+        /// 打开版本下载页（TapTap 渠道/浏览器安装）。不申请安装权限时，更新入口统一走这里。
+        /// </summary>
+        public void OpenReleasePage(UpdateInfo info = null)
+        {
+            string url = info != null && !string.IsNullOrEmpty(info.releaseUrl)
+                ? info.releaseUrl
+                : GameVersion.GetReleasePageUrl();
+            if (string.IsNullOrEmpty(url) && info != null) url = info.downloadUrl;
+            if (string.IsNullOrEmpty(url))
+            {
+                OnDownloadFailed?.Invoke("没有可用的下载地址");
+                return;
+            }
+            Application.OpenURL(url);
+        }
+
+        /// <summary>
         /// 开始下载 APK 附件。
         /// </summary>
         public void StartDownload(UpdateInfo info)
         {
             if (IsDownloading) return;
             if (info == null) return;
+
+            if (!InAppInstallSupported)
+            {
+                OpenReleasePage(info);
+                return;
+            }
 
             _downloadingInfo = info;
             if (_downloadCoroutine != null) StopCoroutine(_downloadCoroutine);
@@ -925,6 +959,12 @@ namespace P1.UI
         public bool InstallApk(string filePath, string expectedVersion, out string reason)
         {
             reason = "";
+
+            if (!InAppInstallSupported)
+            {
+                reason = "请通过 TapTap 商店或浏览器下载安装";
+                return false;
+            }
 
             if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
             {

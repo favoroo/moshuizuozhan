@@ -299,6 +299,15 @@ namespace P1.Tests
             Assert.AreEqual(HudSpecialGaugeFactory.ReadoutFontSize(),
                 health.Find("HpText").GetComponent<TMPro.TMP_Text>().fontSize, 0.01f);
 
+            // 生命卡单层模式断言：HpText 与 HpBadge 都不应有活跃的 ChunkyFill 重影层
+            Transform hpTextTr = health.Find("HpText");
+            Transform hpFillTr = hpTextTr != null ? hpTextTr.Find("ChunkyFill") : null;
+            Assert.IsTrue(hpFillTr == null || !hpFillTr.gameObject.activeSelf, "HpText 单层模式下不允许存在活跃的 ChunkyFill 重影层");
+
+            Transform hpBadgeTr = health.Find("HpBadge/Label");
+            Transform badgeFillTr = hpBadgeTr != null ? hpBadgeTr.Find("ChunkyFill") : null;
+            Assert.IsTrue(badgeFillTr == null || !badgeFillTr.gameObject.activeSelf, "HpBadge 单层模式下不允许存在活跃的 ChunkyFill 重影层");
+
             // 键鼠提示已迁到暂停菜单：HUD 底部不再出现提示条/小字
             Transform panel = hud.transform.Find("HudSafeArea/BottomStatusPanel");
             if (panel == null) panel = hud.transform.Find("BottomStatusPanel");

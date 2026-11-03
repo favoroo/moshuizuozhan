@@ -7,6 +7,15 @@
 > **不记**：逐项 `Added` / `Changed` / `Verified` 流水账、测试项数与 exit 状态明细、selftest 细节、用户原话、设计推导、临时出图路径。
 > 2026-11-01 之前的条目按 GitHub Release 说明回填（仅版本里程碑）；逐条根因记录自 v0.1.8 起。
 
+## 2026-11-03 #19
+【发布墨水作战 v0.1.18：地面墨色回归队色 + TapTap 无联网变体落地】本版把 #17–#18 一并发出：① `InkGround.shader` 环境反射染色 45%→90%、干墨环境反射基乘 1.15→1.0，修复低机位地面墨色读作「粉橘」的 P31 回归；② TapTap 上架包改为无联网变体（`BuildVariants.OfflineDefine` + 菜单 `P1/构建/13`），GitHub / Gitee 渠道仍打完整联网包。`GameVersion.APP_VERSION` 0.1.18 与 `PlayerSettings.bundleVersion` 0.1.18 / `AndroidBundleVersionCode` 118 三方一致，APK `build/moshuizuozhan-v0.1.18-arm64-v8a.apk`（63.1 MB，SHA-256 `84e8fbefc1ddba125146a7a45662474df24ac7e7f9eef7f5920dd7bb2ae4b52c`）。另：构建时 Unity 把 `Mat_TankGlass_D9EBFF73.mat` 的 `_SrcBlend` 归一化为 1，与已有的 `_ALPHAPREMULTIPLY_ON` 关键字配对（旧的 5 会双重乘 alpha），随包提交。
+
+## 2026-11-03 #18
+【TapTap 上架包改为无联网变体（拒审：安装包含联网功能需补 ICP 核准）】v0.1.17 复审的隐私传感器问题已过，新卡点是「安装包检测到联网功能（检查更新需联网）→ 需补充 ICP 核准信息至资质栏」。新增脚本宏 `P1_OFFLINE`（`Scripts/Core/BuildVariants.cs`）：开启后 `UpdateManager.NetworkFeatureEnabled` 编译为常量 `false`，`CheckForUpdate` 直接返回，首页右下角角签从「检查更新」退回只读版本号（`MatchFlowUI.BuildHomeCornerTags` + `OnCheckUpdateClicked` 双兜底）。新增菜单 `P1/构建/13`（`Scripts/Editor/TapTapBuildSuite.cs`）：临时写宏 → 出包到 `Builds/Android/TapTap/InkTurf-TapTap.apk` → `try/finally` 还原宏。产物 0.1.18 / 118，66.1 MB，SHA-256 `6d3f1562...f55bb6`，包内**零 INTERNET 权限**（仅剩自用 DYNAMIC_RECEIVER）。发版必查清单落在 `Docs/TapTapRelease.md`。Fixed（关键陷阱）：`#if P1_OFFLINE` 在 `P1.Editor` 程序集里**永远为假**——宏只写进 Android 平台 defines，而 Editor 程序集按 Editor 平台编译，首次构建的包因此仍带 INTERNET 权限；`AndroidPrivacyManifestPostprocessor` 改为运行时读 `PlayerSettings.GetScriptingDefineSymbols(NamedBuildTarget.Android)`。另外 `-executeMethod` 只接受无参方法，批处理入口必须另给 `BuildTapTapOfflineBatch()`。陷阱：`release.py build` 会复用 `build/` 里版本匹配的旧包，TapTap 包只能走菜单 13。
+
+## 2026-11-03 #17
+Fixed: 地面墨色发粉 / 变浅——P31 把 `InkGround.shader` 清漆环境反射的墨色染色从 80% 降到 45%，天空反射的冷白直接叠加到队色上，橙色墨蓝通道被抬高读作「粉橘色」（低机位掠射角最明显，墙面因 `InkWall` 走 0.25→1.0 的 `specTint` 且 `_WallEnvSpec` 弱，观感未受影响）。改回 90% 强染色让天空光泽以队色缎面形式呈现，同时把干墨的环境反射基乘 `1.15` 降回 `1.0`（保留 wet/sheen 增强项）。涉及 `Scripts` 无改动，仅 `Shaders/InkGround.shader`。
+
 ## 2026-11-03 #16
 【发布墨水作战 v0.1.17：原生隐私同意启动页 + 画质去廉价感 + 首页检查更新角签】本版把 #12–#15 一并发出：① TapTap 隐私复检要求「同意前不读传感器列表」，故新增原生启动页 `PrivacyActivity`（`tools/android-privacy/` → `Assets/Plugins/Android/privacy-consent.jar`），同意后才拉起 `UnityPlayerActivity`，桌面图标只有隐私页一个入口；② 画质去廉价感（P31）：湿墨 F0 抬到 0.09 并并入 sheen 余晖、环境反射染色降到 45%、雾距 45/135 → 65/210、阴影 strength 0.94 + SSAO 升档、后处理对比/饱和/曝光上调（`InkWetShading.hlsl` / `InkGround.shader` / `ArenaStyleSO` / `ToonStyleInstaller` / `PC_Renderer.asset` / `ArenaPostProfile.asset`）；③ 首页「检查更新」由大卡改成右下角可点小标签（文案在 检查更新 / 检查中 / 新版 vX! / 已是最新版 / 检查失败 间切换），原第 4 张卡改「按键位置」直达触控布局自定义。`GameVersion.APP_VERSION` 0.1.17 与 `PlayerSettings.bundleVersion` 0.1.17 / `AndroidBundleVersionCode` 117 三方一致，APK `build/moshuizuozhan-v0.1.17-arm64-v8a.apk`（63.1 MB，SHA-256 `3cbf8be058e73d790a0351b216ba9e9a8551c820b6cf4634fd0a4bbb8a7f8d47`）。陷阱：`RenderEnvGlobals.EnsureStyle` 走 `Resources.Load("ArenaStyle")` 在编辑器 Play 下必失败（资产在 `ScriptableObjects/` 非 Resources），已补 `#if UNITY_EDITOR` 的 `AssetDatabase` 回退，否则整局走硬编码回退值、风格资产质感参数全部静默不生效。
 

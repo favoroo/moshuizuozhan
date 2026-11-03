@@ -1,6 +1,9 @@
 using System.IO;
 using System.Xml;
+using P1.Core;
+using UnityEditor;
 using UnityEditor.Android;
+using UnityEditor.Build;
 using UnityEngine;
 
 namespace P1.Editor
@@ -47,19 +50,72 @@ namespace P1.Editor
             ns.AddNamespace("android", AndroidNs);
             ns.AddNamespace("tools", ToolsNs);
 
+            bool changed = false;
+
             XmlNode activity = doc.SelectSingleNode(
                 $"/manifest/application/activity[@android:name='{UnityActivity}']", ns);
             if (activity == null)
             {
-                Debug.LogWarning($"{Tag} 生成清单里没有 {UnityActivity}，跳过。");
-                return;
+                Debug.LogWarning($"{Tag} 生成清单里没有 {UnityActivity}，跳过 exported 修正。");
+            }
+            else
+            {
+                SetAndroidAttribute(doc, activity, "exported", "false");
+                RemoveLauncherFilter(activity, ns);
+                changed = true;
+                Debug.Log($"{Tag} 已把 {UnityActivity}.exported 修正为 false（{manifestPath}）");
             }
 
-            SetAndroidAttribute(doc, activity, "exported", "false");
-            RemoveLauncherFilter(activity, ns);
+            // TapTap 上架变体：Unity 会按「使用了网络 API」自动注入 INTERNET 权限，
+            // 自定义主清单里的声明同样会带进来。这里统一摘掉，保证包体零联网能力。
+            //
+            // 注意：不能写 `#if P1_OFFLINE`。宏只写进 Android 平台的 defines，
+            // 而本类是 P1.Editor 程序集（按 Editor 平台编译），条件编译永远为假，
+            // 必须在运行时读 Android 的 defines 才能判断当前是不是离线变体。
+            if (IsOfflineVariant())
+            {
+                int removed = RemovePermission(doc, ns, "android.permission.INTERNET");
+                if (removed > 0)
+                {
+                    changed = true;
+                    Debug.Log($"{Tag} TapTap 上架变体：已移除 {removed} 条 INTERNET 权限声明（{manifestPath}）");
+                }
+            }
 
-            doc.Save(manifestPath);
-            Debug.Log($"{Tag} 已把 {UnityActivity}.exported 修正为 false（{manifestPath}）");
+            if (changed) doc.Save(manifestPath);
+        }
+
+        /// <summary>
+        /// 当前 Android 平台是否开着离线变体宏。
+        /// 只读 Android 的 defines：宏由 <see cref="TapTapBuildSuite"/> 写在该平台，
+        /// 而本类按 Editor 平台编译，自身的条件编译看不到它。
+        /// </summary>
+        static bool IsOfflineVariant()
+        {
+            string defines = PlayerSettings.GetScriptingDefineSymbols(NamedBuildTarget.Android);
+            if (string.IsNullOrEmpty(defines)) return false;
+
+            foreach (string d in defines.Split(';'))
+            {
+                if (d.Trim() == BuildVariants.OfflineDefine) return true;
+            }
+            return false;
+        }
+
+        /// <summary>删掉指定权限的所有 uses-permission 节点，返回删除条数。</summary>
+        static int RemovePermission(XmlDocument doc, XmlNamespaceManager ns, string permissionName)
+        {
+            var nodes = doc.SelectNodes(
+                $"/manifest/uses-permission[@android:name='{permissionName}']", ns);
+            if (nodes == null) return 0;
+
+            int count = 0;
+            foreach (XmlNode node in nodes)
+            {
+                node.ParentNode?.RemoveChild(node);
+                count++;
+            }
+            return count;
         }
 
         static void SetAndroidAttribute(XmlDocument doc, XmlNode node, string name, string value)

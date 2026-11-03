@@ -303,7 +303,7 @@ namespace P1.Editor
             }
         }
 
-        private static void EnsureSceneInBuildSettings()
+        public static void EnsureSceneInBuildSettings()
         {
             var scenes = EditorBuildSettings.scenes;
             bool found = false;

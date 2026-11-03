@@ -1151,7 +1151,14 @@ namespace P1.UI
 
             // 右下角角签不再是只读版本号：改成 t-1 同款的「检查更新」小按钮
             // （版本号仍可在启动页与更新弹窗里看到）。
-            AttachMenuButtonToUpdateTag(checkUpdateButton, m, theme);
+            // TapTap 上架变体（P1_OFFLINE）没有联网能力：这里退回只读版本号签，
+            // 否则玩家点了一颗永远「检查失败」的按钮。
+            if (UpdateManager.NetworkFeatureEnabled)
+                AttachMenuButtonToUpdateTag(checkUpdateButton, m, theme);
+            else
+                CreateFooterTag("HomeVersionTag", m.VersionTag,
+                    $"{GameVersion.APP_NAME} {GameVersion.APP_VERSION_NAME}", theme,
+                    ComicStyle.Ink, ComicStyle.Paper, m.FooterTagFont);
         }
 
         /// <summary>
@@ -2545,6 +2552,14 @@ namespace P1.UI
 #else
             UpdateManager updater = UpdateManager.Instance;
             if (updater == null) return;
+
+            // TapTap 上架变体（P1_OFFLINE）：没有联网能力，也不该出现这颗按钮；
+            // 万一被场景遗留节点调到，直接退回只读文案，不发请求。
+            if (!UpdateManager.NetworkFeatureEnabled)
+            {
+                SetUpdateTagText($"{GameVersion.APP_NAME} {GameVersion.APP_VERSION_NAME}");
+                return;
+            }
 
             // 已经查到待更新版本（标签还停在「新版 vX!」）：再点一下直接重开更新弹窗，
             // 不再白跑一次网络检查（t-1 的 _on_update_pressed 同款分流）。

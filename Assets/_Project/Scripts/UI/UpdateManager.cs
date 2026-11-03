@@ -126,6 +126,27 @@ namespace P1.UI
         /// </summary>
         public static bool InAppInstallSupported => false;
 
+        /// <summary>
+        /// 本包是否完全不带联网能力（TapTap 上架专用变体）。
+        /// 由 <see cref="P1.Core.BuildVariants.Offline"/> 在构建时写入脚本宏 <c>P1_OFFLINE</c>，
+        /// 关闭后「检查更新」入口整体隐藏，APK 也不申请 INTERNET 权限
+        /// （见 <c>Assets/Plugins/Android/AndroidManifest.xml</c> 的 <c>tools:node="remove"</c> 段）。
+        ///
+        /// 为什么需要这个变体：TapTap 审核会在「安装包检测到联网功能」时要求补 ICP 核准信息；
+        /// 上架包去掉联网功能即可绕开该前置资质，而仓库自托管渠道仍保留完整更新链路。
+        /// </summary>
+        public static bool NetworkFeatureEnabled
+        {
+            get
+            {
+#if P1_OFFLINE
+                return false;
+#else
+                return true;
+#endif
+            }
+        }
+
         private const string ClientUserAgent = "Moshuizuozhan-UnityClient";
 
         public bool IsChecking { get; private set; }
@@ -193,6 +214,10 @@ namespace P1.UI
         /// </summary>
         public void CheckForUpdate(bool manual = false)
         {
+            // TapTap 上架变体（P1_OFFLINE）没有任何联网能力，入口已在 UI 隐藏；
+            // 这里再兜一层，避免误调触发 UnityWebRequest（无 INTERNET 权限时只会白等超时）。
+            if (!NetworkFeatureEnabled) return;
+
             // 隐私合规：未同意隐私政策前不发起任何网络请求。
             if (!PrivacyConsentDialog.HasValidConsent) return;
 

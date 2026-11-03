@@ -1,17 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   自定义主清单（Player Settings → Publishing Settings → Custom Main Manifest）。
-  底稿 = Unity 自带模板 PlaybackEngines/AndroidPlayer/Apk/UnityManifest.xml，
-  按本项目 androidApplicationEntry = Activity 只保留 UnityPlayerActivity 那一段。
 
-  TapTap 渠道隐私合规（2026-11）：不再声明 REQUEST_INSTALL_PACKAGES / FileProvider。
-  应用内更新改为「检查更新 → 浏览器打开 Release 页」，由 TapTap 商店或浏览器安装，
-  避免与游戏功能无关的高危安装权限。若将来恢复应用内安装，需同时加回权限与 FileProvider。
+  2026-11-03 TapTap 隐私复检（「同意前读取传感器列表」）：
+  - 启动页改为原生 PrivacyActivity（com.p1studio.inkturfdemo.PrivacyActivity）。
+    它只画隐私弹窗，用户点「同意并继续」之前不创建 UnityPlayer；
+    同意后才显式拉起 UnityPlayerActivity，Unity3d 框架因此不会在同意前初始化。
+  - UnityPlayerActivity 用 tools:node="replace" 覆盖 unityLibrary 的默认声明并去掉
+    MAIN/LAUNCHER，保证桌面图标只有「隐私同意页」一个入口，不能绕过同意直接进游戏。
+    其余属性（configChanges / launchMode / hardwareAccelerated 等）与 Unity 生成值一致。
+  - 不同步声明 REQUEST_INSTALL_PACKAGES / FileProvider：应用内安装已关闭
+    （UpdateManager.InAppInstallSupported = false），更新跳浏览器 / TapTap 商店，
+    避免与游戏功能无关的高危安装权限（v0.1.14 曾因此被拒）。
 
   注意：本项目 AndroidApplicationEntry = Activity。若将来改成 GameActivity，
   这里必须换成 com.unity3d.player.UnityPlayerGameActivity，否则应用起不来。
 
-  自检：菜单「P1/构建/12. 校验 Android 更新安装清单配置」
+  自检：菜单「P1/构建/12. 校验 Android 更新安装清单配置」只覆盖更新安装链路；
+  隐私启动页的产物校验见 tools/build_privacy_activity.sh。
 -->
 <manifest
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -21,14 +27,36 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application>
-        <!--Used when Application Entry is set to Activity, otherwise remove this activity block-->
-        <activity android:name="com.unity3d.player.UnityPlayerActivity"
-                  android:theme="@style/UnityThemeSelector">
+        <!-- 隐私同意启动页：唯一 LAUNCHER 入口，同意前不加载 Unity -->
+        <activity
+            android:name="com.p1studio.inkturfdemo.PrivacyActivity"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:enableOnBackInvokedCallback="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <!-- Unity 引擎页：只能由 PrivacyActivity 拉起；tools:node="replace" 抹掉库清单里的 LAUNCHER -->
+        <activity
+            android:name="com.unity3d.player.UnityPlayerActivity"
+            android:theme="@style/UnityThemeSelector"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:launchMode="singleTask"
+            android:hardwareAccelerated="false"
+            android:resizeableActivity="false"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|fontScale|layoutDirection|density"
+            tools:node="replace">
             <meta-data android:name="unityplayer.UnityActivity" android:value="true" />
+            <meta-data android:name="notch_support" android:value="true" />
+            <layout
+                android:minWidth="400px"
+                android:minHeight="300px" />
         </activity>
     </application>
 </manifest>

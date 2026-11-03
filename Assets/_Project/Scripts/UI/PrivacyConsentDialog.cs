@@ -9,6 +9,10 @@ namespace P1.UI
     /// 首次启动隐私同意弹窗（TapTap 隐私合规）。
     ///
     /// 设计约束：
+    /// - Android 上的主同意入口是原生 <c>PrivacyActivity</c>（tools/android-privacy/）：
+    ///   Unity 引擎会在启动阶段读取传感器列表，C# 弹窗出现时已经晚了；原生页在用户点
+    ///   「同意」之前不创建 UnityPlayer。本类在 Android 上只读取原生 SharedPreferences，
+    ///   作为兜底：若走的是其他入口（原生页缺失 / 桌面平台），仍在这里拦住并弹窗。
     /// - 运行时装配，不改主场景；仅在非编辑器构建中自动弹出，避免打断 PlayMode 测试；
     /// - 未同意前不发起任何网络请求（UpdateManager.CheckForUpdate 也会二次校验）；
     /// - 同意状态按隐私政策版本号存 PlayerPrefs，政策更新后会重新询问；
@@ -25,6 +29,11 @@ namespace P1.UI
         private const string AcceptedKey = "P1.PrivacyConsent.Accepted";
         private const string VersionKey = "P1.PrivacyConsent.Version";
 
+        // 原生 PrivacyActivity 的 SharedPreferences（名字/键名必须与 Java 侧一致）。
+        private const string NativePrefsName = "P1Privacy";
+        private const string NativeAcceptedKey = "accepted";
+        private const string NativeVersionKey = "version";
+
         private static PrivacyConsentDialog _instance;
 
         /// <summary>
@@ -38,10 +47,54 @@ namespace P1.UI
 #if UNITY_EDITOR
                 return true;
 #else
-                return PlayerPrefs.GetInt(AcceptedKey, 0) == 1
-                    && string.Equals(PlayerPrefs.GetString(VersionKey, ""), PolicyVersion, StringComparison.Ordinal);
+                if (PlayerPrefs.GetInt(AcceptedKey, 0) == 1
+                    && string.Equals(PlayerPrefs.GetString(VersionKey, ""), PolicyVersion, StringComparison.Ordinal))
+                    return true;
+
+                return TryAdoptNativeConsent();
 #endif
             }
+        }
+
+        /// <summary>
+        /// Android 原生同意页已经把同意状态写进 SharedPreferences 时，镜像到 PlayerPrefs，
+        /// 避免同一台设备连弹两次；Unity 侧其余逻辑仍只需读 PlayerPrefs。
+        /// </summary>
+        private static bool TryAdoptNativeConsent()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                using (var player = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                using (var activity = player.GetStatic<AndroidJavaObject>("currentActivity"))
+                {
+                    if (activity == null) return false;
+
+                    using (var prefs = activity.Call<AndroidJavaObject>(
+                               "getSharedPreferences", NativePrefsName, 0))
+                    {
+                        if (prefs == null) return false;
+
+                        bool accepted = prefs.Call<bool>("getBoolean", NativeAcceptedKey, false);
+                        string version = prefs.Call<string>("getString", NativeVersionKey, "");
+                        if (!accepted || !string.Equals(version, PolicyVersion, StringComparison.Ordinal))
+                            return false;
+
+                        PlayerPrefs.SetInt(AcceptedKey, 1);
+                        PlayerPrefs.SetString(VersionKey, PolicyVersion);
+                        PlayerPrefs.Save();
+                        return true;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[隐私同意] 读取 Android 原生同意状态失败：" + e.Message);
+                return false;
+            }
+#else
+            return false;
+#endif
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]

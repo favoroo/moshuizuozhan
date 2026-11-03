@@ -287,7 +287,7 @@ namespace P1.Tests
             Assert.IsNotNull(hero, "首页必须有左侧 Hero 大卡");
             Assert.IsNotNull(safe.Find("HomeTile_RECORD"), "首页必须有战绩卡");
             Assert.IsNotNull(safe.Find("HomeTile_SETTINGS"), "首页必须有系统设置卡");
-            Assert.IsNotNull(safe.Find("HomeTile_UPDATE"), "首页必须有检查更新卡");
+            Assert.IsNotNull(safe.Find("HomeTile_LAYOUT"), "首页必须有修改按钮位置卡");
 
             // CTA 宽度取版面表设计值，但在非 16:9 的 Game View 里会被 Hero 卡内宽夹住——
             // 用实际 Hero 卡宽反推期望值，断言不受测试分辨率影响。
@@ -326,7 +326,7 @@ namespace P1.Tests
 
             // 旧实现把 `》`（双书名号 ≈2em 宽）按 1.2em 预留、还放在信息行上，
             // 移动端字号 ×1.28 后必然压字叠字 —— 现在箭头独占标题行右侧走廊。
-            var tileNames = new[] { "HomeTile_RECORD", "HomeTile_SETTINGS", "HomeTile_UPDATE" };
+            var tileNames = new[] { "HomeTile_RECORD", "HomeTile_SETTINGS", "HomeTile_LAYOUT" };
             Transform content = null;
             RectTransform arrow = null;
             TextMeshProUGUI info = null;
@@ -408,7 +408,7 @@ namespace P1.Tests
 
             var hero = safeAfter.Find("HomeHeroCard");
             Assert.IsNotNull(hero, "重建后首页卡片树应完整重建");
-            Assert.IsNotNull(safeAfter.Find("HomeTile_UPDATE"), "重建后 2×2 卡阵应完整重建");
+            Assert.IsNotNull(safeAfter.Find("HomeTile_LAYOUT"), "重建后 2×2 卡阵应完整重建");
         }
 
         [UnityTest]

@@ -39,6 +39,16 @@ namespace P1.UI
         [SerializeField] private Button checkUpdateButton;
         [SerializeField] private Text versionText;
 
+        /// <summary>
+        /// 右下角「检查更新」小标签的文案（t-1 做法：点一下依次变
+        /// 检查更新中… / 新版 vX! / 已是最新版 / 检查失败）。
+        /// </summary>
+        private TextMeshProUGUI _updateTagLabel;
+        private Coroutine _updateTagResetRoutine;
+
+        /// <summary>无结果类状态（已是最新版 / 检查失败）停留多久后自己变回「检查更新」。</summary>
+        private const float UpdateTagResetSeconds = 2.5f;
+
         public Button CheckUpdateButton => checkUpdateButton;
         public Text VersionText => versionText;
 
@@ -212,6 +222,15 @@ namespace P1.UI
             // 设置页改音量/震屏时同步首页设置卡读数（事件由 GameSettingsService 静态广播）
             GameSettingsService.SettingsChanged += RefreshHomeInfo;
             GameSettingsService.BotDifficultyChanged += HandleBotDifficultyChanged;
+
+            // 右下角检查更新标签跟随检查结果换文案（更新弹窗仍由 UpdateManager 自己弹）
+            UpdateManager updater = UpdateManager.Instance;
+            if (updater != null)
+            {
+                updater.OnUpdateAvailable += HandleUpdateAvailableForTag;
+                updater.OnNoUpdateFound += HandleNoUpdateFoundForTag;
+                updater.OnCheckFailed += HandleCheckFailedForTag;
+            }
         }
 
         /// <summary>运行时内容根：SafeArea 容器，桌面/编辑器下等价于全屏。</summary>
@@ -429,7 +448,7 @@ namespace P1.UI
             // 重建时必须先搬回 readyPanel 再销毁旧安全区，否则会跟着 MenuSafeArea 一起被 Destroy：
             // StartButton 的 onClick 只在 Awake 绑一次，一旦销毁 startButton 变 null，
             // PlaceHomeCta 直接 return —— 真机表现就是「首页开始游戏按钮凭空消失、整局开不了」。
-            // （检查更新按钮还被铺进了 HomeTile_UPDATE 的 Content，不先搬出会随卡片销毁。）
+            // （检查更新按钮在首页里被摆成右下角小标签，同样得先搬出再重建。）
             ReparentInto(startButton != null ? startButton.transform : null, readyPanel.transform);
             ReparentInto(checkUpdateButton != null ? checkUpdateButton.transform : null, readyPanel.transform);
             ReparentInto(FindMenuNode("CustomLayoutButton"), readyPanel.transform);
@@ -806,7 +825,7 @@ namespace P1.UI
             StyleStartButtonGeometric(theme, UITypography.FontSnapped(m.CtaFont), mobile);
         }
 
-        /// <summary>右侧 2×2 次级卡：战绩（信息）/ 系统设置（可点）/ 操作指南或键位（信息）/ 检查更新（可点）。</summary>
+        /// <summary>右侧 2×2 次级卡：战绩（信息）/ 系统设置（可点）/ 操作指南或键位（信息）/ 修改按钮位置（可点）。</summary>
         private void BuildHomeTiles(UIThemeSO theme, HomeMenuMetrics m, bool mobile)
         {
             BuildHomeTile(new HomeTileSpec
@@ -842,25 +861,35 @@ namespace P1.UI
                 ClickAction = () => ShowHomeInfo(HomeInfoTab.Controls),
             }, theme, m, mobile, out _homeKeysInfo, out _);
 
-            HomeTileView updateTile = BuildHomeTile(new HomeTileSpec
+            BuildHomeTile(new HomeTileSpec
             {
                 Index = 3,
-                Tag = "UPDATE",
-                Title = "检查更新",
-#if UNITY_WEBGL && !UNITY_EDITOR
-                Info = "查看最新版本与更新记录",
-#else
-                Info = "联网检查新版本 · 当前 " + GameVersion.APP_VERSION_NAME,
-#endif
+                Tag = "LAYOUT",
+                // 标题只放 4 个字：移动端字号 ×1.28 后 6 个字的标题会顶进 `》` 走廊（可用宽 254px）
+                Title = "按键位置",
+                Info = mobile ? "拖动调整触屏按键位置" : "拖动调整按键位置 · 自定义布局",
                 Accent = ComicStyle.Yellow,
                 Interactive = true,
+                ClickAction = OpenLayoutCustomizerFromHome,
             }, theme, m, mobile, out _, out _);
-
-            // 检查更新按钮铺满整张卡（透明 Image 只负责射线），视觉完全交给卡片
-            AttachMenuButtonToTile(checkUpdateButton, updateTile);
 
             // 移动端顶部右侧「自定义按键」小按钮（纸白底 + 墨框 + Button 硬影）
             if (mobile) StyleTopKeyButton(theme, m);
+        }
+
+        /// <summary>
+        /// 首页「修改按钮位置」卡：打开移动端触屏布局自定义器（与右上角「自定义按键」小按钮同一入口）。
+        /// 桌面端没有常驻触屏 UI，自定义器会按需把触屏画布显示出来供预览与拖动。
+        /// </summary>
+        private void OpenLayoutCustomizerFromHome()
+        {
+            var touchUI = FindAnyObjectByType<MobileTouchUI>();
+            if (touchUI == null)
+            {
+                Debug.LogWarning("[MatchFlowUI] 场景里没有 MobileTouchUI，无法打开按钮位置自定义");
+                return;
+            }
+            touchUI.OpenLayoutCustomizer();
         }
 
         private struct HomeTileSpec
@@ -1034,12 +1063,10 @@ namespace P1.UI
 #endif
         }
 
-        /// <summary>整卡可点：自带 Button（音效）或复用的旧按钮（检查更新）都套同一套按压物理。</summary>
+        /// <summary>整卡可点：可点次级卡各自带 clickAction，统一套一套按压物理。</summary>
         private void AttachTileInteraction(GameObject go, UIInkShapeGraphic shape, RectTransform content,
             System.Action clickAction)
         {
-            // 复用旧按钮的卡（检查更新）没有自带 clickAction：按压物理由 AttachMenuButtonToTile
-            // 挂到真正的 Button 上（uGUI 只把指针事件派给最深的 handler）。
             if (clickAction == null) return;
 
             var button = go.AddComponent<Button>();
@@ -1052,44 +1079,6 @@ namespace P1.UI
             jelly.Configure(UIThemeSO.Resolve(uiTheme), button, shape);
             jelly.SetPressContent(content);
             jelly.EnableThemeHardShadow(UIHardShadowLevel.Panel);
-        }
-
-        /// <summary>
-        /// 把旧按钮铺满整张卡（透明 Image 只负责射线 + 旧监听），视觉交给卡片。
-        /// 按压物理挂在按钮自己身上：uGUI 的 ExecuteHierarchy 只把指针事件派给最深的 handler，
-        /// 挂在卡片根节点上的 UIJellyButton 收不到子按钮里按下的事件。
-        /// </summary>
-        private void AttachMenuButtonToTile(Button button, HomeTileView tile)
-        {
-            if (button == null || tile == null || tile.Content == null) return;
-
-            button.transform.SetParent(tile.Content, false);
-            var rect = button.transform as RectTransform;
-            if (rect != null)
-            {
-                rect.anchorMin = Vector2.zero;
-                rect.anchorMax = Vector2.one;
-                rect.offsetMin = Vector2.zero;
-                rect.offsetMax = Vector2.zero;
-            }
-
-            var img = button.GetComponent<Image>();
-            if (img != null)
-            {
-                img.color = new Color(1f, 1f, 1f, 0f);
-                img.raycastTarget = true;
-            }
-
-            var legacyLabel = button.GetComponentInChildren<Text>(true);
-            if (legacyLabel != null) legacyLabel.gameObject.SetActive(false);
-
-            var jelly = button.GetComponent<UIJellyButton>();
-            if (jelly == null) jelly = button.gameObject.AddComponent<UIJellyButton>();
-            jelly.Configure(UIThemeSO.Resolve(uiTheme), button, tile.Shape);
-            jelly.SetPressContent(tile.Content);
-            jelly.EnableThemeHardShadow(UIHardShadowLevel.Panel);
-
-            button.gameObject.SetActive(true);
         }
 
         /// <summary>移动端顶部右侧「自定义按键」小按钮：纸白底 + 3px 墨框 + Button 硬影。</summary>
@@ -1150,7 +1139,7 @@ namespace P1.UI
             node.gameObject.SetActive(true);
         }
 
-        /// <summary>左下 / 右下黑底角签：版本号与社区位，落在卡片区之外（移动端左下设让给整备卡）。</summary>
+        /// <summary>左下 / 右下角签：左「游戏共创」只读、右「检查更新」可点，落在卡片区之外（移动端左下设让给整备卡）。</summary>
         private void BuildHomeCornerTags(UIThemeSO theme, HomeMenuMetrics m, bool mobile)
         {
             HomeBox footer = m.FooterTag;
@@ -1160,11 +1149,130 @@ namespace P1.UI
                     ComicStyle.Ink, ComicStyle.Paper, m.FooterTagFont);
             }
 
-#if !UNITY_WEBGL || UNITY_EDITOR
-            CreateFooterTag("HomeVersionTag", m.VersionTag,
-                GameVersion.APP_NAME + " " + GameVersion.APP_VERSION_NAME, theme,
-                ComicStyle.Ink, ComicStyle.Yellow, m.FooterTagFont);
-#endif
+            // 右下角角签不再是只读版本号：改成 t-1 同款的「检查更新」小按钮
+            // （版本号仍可在启动页与更新弹窗里看到）。
+            AttachMenuButtonToUpdateTag(checkUpdateButton, m, theme);
+        }
+
+        /// <summary>
+        /// 右下角「检查更新」小标签（t-1 做法）：复用场景遗留按钮的节点（透明 Image 只负责射线），
+        /// 视觉改成一颗黄底墨字直角小按钮，按压/悬停走 UIJellyButton 的硬影物理。
+        /// 文案由 <see cref="SetUpdateTagText"/> 驱动：检查中 / 新版 / 已是最新 / 失败。
+        /// </summary>
+        private void AttachMenuButtonToUpdateTag(Button button, HomeMenuMetrics m, UIThemeSO theme)
+        {
+            if (button == null || _menuSafeArea == null) return;
+
+            HomeBox box = m.VersionTag;
+            if (box.IsEmpty) return;
+
+            ReparentInto(button.transform, _menuSafeArea);
+            var rect = button.transform as RectTransform;
+            if (rect == null) return;
+
+            // 与 CreateFooterTag 同一套收边位：右下角签锚右边，刘海屏安全区变窄也不会被推出屏幕。
+            rect.anchorMin = new Vector2(1f, 0f);
+            rect.anchorMax = new Vector2(1f, 0f);
+            rect.pivot = new Vector2(1f, 0f);
+            rect.anchoredPosition = new Vector2(-(MenuLayoutMath.RefWidth - box.Right),
+                MenuLayoutMath.RefHeight - box.Bottom);
+            rect.sizeDelta = box.Size;
+
+            var img = button.GetComponent<Image>();
+            if (img != null)
+            {
+                img.color = new Color(1f, 1f, 1f, 0f);
+                img.raycastTarget = true;
+            }
+
+            var legacyLabel = button.GetComponentInChildren<Text>(true);
+            if (legacyLabel != null) legacyLabel.gameObject.SetActive(false);
+
+            // 节点上已有 Image（透明射线用），不能再 AddComponent<UIInkShapeGraphic>（Graphic 带
+            // DisallowMultipleComponent，会静默返回 null）——背景只能走 CreateChildBackground。
+            var shape = button.GetComponentInChildren<UIInkShapeGraphic>(true);
+            if (shape == null) shape = UIInkShapeGraphic.CreateChildBackground(rect, "GeometricBg");
+            if (shape != null)
+            {
+                shape.Shape = UIInkShape.SharpRect;
+                shape.CornerRadius = ComicStyle.CornerSharp;
+                shape.BorderWidth = ComicStyle.BorderThin;
+                shape.BorderColor = ComicStyle.Ink;
+                shape.color = ComicStyle.Yellow; // 主行动黄：角签里只有这颗可点
+                shape.HardShadow = false;
+                shape.Halftone = false;
+                shape.GlossAlpha = 0f;
+                shape.DrawGloss = false;
+                shape.raycastTarget = false;
+            }
+
+            _updateTagLabel = CreateOrReplaceTmpLabel(rect, "LabelTmp", UpdateTagIdleText,
+                UITypography.FontSnapped(m.FooterTagFont), false, ComicStyle.Ink, TextAlignmentOptions.Center);
+
+            button.targetGraphic = shape != null ? shape : button.targetGraphic;
+            button.transition = Selectable.Transition.None;
+
+            if (shape != null)
+            {
+                var jelly = button.GetComponent<UIJellyButton>();
+                if (jelly == null) jelly = button.gameObject.AddComponent<UIJellyButton>();
+                jelly.Configure(theme, button, shape);
+                if (_updateTagLabel != null) jelly.SetPressContent(_updateTagLabel.rectTransform);
+                jelly.EnableThemeHardShadow(UIHardShadowLevel.Button);
+            }
+
+            button.gameObject.SetActive(true);
+        }
+
+        /// <summary>「检查更新」小标签的常态文案（未在检查、也没有待更新版本）。</summary>
+        private const string UpdateTagIdleText = "检查更新";
+
+        private void SetUpdateTagText(string text)
+        {
+            if (_updateTagLabel != null) _updateTagLabel.text = text;
+        }
+
+        /// <summary>把标签切到某个状态；autoReset = true 的状态会在 2.5 秒后自己变回「检查更新」。</summary>
+        private void SetUpdateTagState(string text, bool autoReset)
+        {
+            SetUpdateTagText(text);
+
+            if (_updateTagResetRoutine != null)
+            {
+                StopCoroutine(_updateTagResetRoutine);
+                _updateTagResetRoutine = null;
+            }
+            if (autoReset && isActiveAndEnabled)
+            {
+                _updateTagResetRoutine = StartCoroutine(ResetUpdateTagAfterDelay());
+            }
+        }
+
+        /// <summary>
+        /// 用 unscaled 等待：更新弹窗可能在 Time.timeScale=0（暂停/结算）时出现，
+        /// 走缩放时间会让标签永远停在「已是最新版」。
+        /// </summary>
+        private System.Collections.IEnumerator ResetUpdateTagAfterDelay()
+        {
+            yield return new WaitForSecondsRealtime(UpdateTagResetSeconds);
+            _updateTagResetRoutine = null;
+            SetUpdateTagText(UpdateTagIdleText);
+        }
+
+        private void HandleUpdateAvailableForTag(UpdateInfo info)
+        {
+            // 有新版本时标签不再自动复位：留着「新版 vX!」提示玩家，点它重新打开更新弹窗。
+            SetUpdateTagState($"新版 {info?.tagName}!", autoReset: false);
+        }
+
+        private void HandleNoUpdateFoundForTag()
+        {
+            SetUpdateTagState("已是最新版", autoReset: true);
+        }
+
+        private void HandleCheckFailedForTag(string _)
+        {
+            SetUpdateTagState("检查失败", autoReset: true);
         }
 
         private void CreateFooterTag(string name, HomeBox box, string label, UIThemeSO theme,
@@ -1671,6 +1779,19 @@ namespace P1.UI
             if (checkUpdateButton != null) checkUpdateButton.onClick.RemoveListener(OnCheckUpdateClicked);
             GameSettingsService.SettingsChanged -= RefreshHomeInfo;
             GameSettingsService.BotDifficultyChanged -= HandleBotDifficultyChanged;
+
+            if (_updateTagResetRoutine != null)
+            {
+                StopCoroutine(_updateTagResetRoutine);
+                _updateTagResetRoutine = null;
+            }
+            UpdateManager updater = UpdateManager.Instance;
+            if (updater != null)
+            {
+                updater.OnUpdateAvailable -= HandleUpdateAvailableForTag;
+                updater.OnNoUpdateFound -= HandleNoUpdateFoundForTag;
+                updater.OnCheckFailed -= HandleCheckFailedForTag;
+            }
         }
 
         public void SetTheme(UIThemeSO themeAsset)
@@ -2330,7 +2451,7 @@ namespace P1.UI
                 if (existingVer != null) versionText = existingVer.GetComponent<Text>();
             }
 
-            // 版本号只作为「数据源」保留（t-1 首页右下角签用 TMP 渲染，见 BuildHomeCornerTags）。
+            // 版本号只作为「数据源」保留（首页右下角签已改成「检查更新」小标签，版本号只在启动页展示）。
             // 这里不再申请 LegacyRuntime 字体：LiberationSans 没有中文字形，旧版版本号在真机上就是 □□□。
             if (versionText == null)
             {
@@ -2360,7 +2481,9 @@ namespace P1.UI
 #endif
             }
 
-            // 检查更新按钮：透明 Image 只负责射线与旧监听（视觉由首页 UPDATE 卡承担）
+            // 检查更新按钮：只是数据/监听载体，视觉与摆位由右下角「检查更新」小标签承担
+            // （BuildHomeCornerTags → AttachMenuButtonToUpdateTag）。首页没建起来时它没有射线，
+            // 避免在 readyPanel 上留一块看不见却吃点击的死区。
             if (checkUpdateButton == null)
             {
                 var btnGo = new GameObject("CheckUpdateButton", typeof(RectTransform), typeof(Image), typeof(Button));
@@ -2373,6 +2496,7 @@ namespace P1.UI
 
                 var img = btnGo.GetComponent<Image>();
                 img.color = new Color(1f, 1f, 1f, 0f);
+                img.raycastTarget = false;
 
                 checkUpdateButton = btnGo.GetComponent<Button>();
                 checkUpdateButton.targetGraphic = img;
@@ -2419,7 +2543,24 @@ namespace P1.UI
             // 浏览器里 DownloadHandlerFile 与 Releases API（跨域/安装包落地）都不可用，直接开 Releases 页。
             Application.OpenURL("https://github.com/favoroo/moshuizuozhan/releases/latest");
 #else
-            UpdateManager.Instance?.CheckForUpdate(manual: true);
+            UpdateManager updater = UpdateManager.Instance;
+            if (updater == null) return;
+
+            // 已经查到待更新版本（标签还停在「新版 vX!」）：再点一下直接重开更新弹窗，
+            // 不再白跑一次网络检查（t-1 的 _on_update_pressed 同款分流）。
+            if (updater.PendingUpdate != null)
+            {
+                SetUpdateTagState($"新版 {updater.PendingUpdate.tagName}!", autoReset: false);
+                UpdateDialog.Instance.PopupUpdate(updater.PendingUpdate);
+                return;
+            }
+
+            SetUpdateTagState("检查更新中...", autoReset: false);
+            updater.CheckForUpdate(manual: true);
+
+            // 未同意隐私政策（或已有一次检查在跑）时 CheckForUpdate 会静默 return，
+            // 标签不能就这么停在「检查更新中...」——没真的跑起来就退回常态文案。
+            if (!updater.IsChecking) SetUpdateTagText(UpdateTagIdleText);
 #endif
         }
 

@@ -44,7 +44,7 @@ MonoBehaviour:
   ambientGround: {r: 0.28, g: 0.22, b: 0.18, a: 1}
   ambientIntensity: 0.88
   reflectionIntensity: 0.35
-  shadowStrength: 0.88
+  shadowStrength: 0.94
   shadeThreshold: 0.5
   shadeSoftness: 0.1
   shadowTint: {r: 0.48, g: 0.5, b: 0.64, a: 1}
@@ -61,8 +61,8 @@ MonoBehaviour:
   characterShadowFloor: 0.55
   fogEnabled: 1
   fogColor: {r: 0.62, g: 0.74, b: 0.86, a: 1}
-  fogStartDistance: 45
-  fogEndDistance: 135
+  fogStartDistance: 65
+  fogEndDistance: 210
   skyTop: {r: 0.16, g: 0.46, b: 0.86, a: 1}
   skyHorizon: {r: 0.8, g: 0.89, b: 0.97, a: 1}
   skyGround: {r: 0.66, g: 0.76, b: 0.84, a: 1}
@@ -75,10 +75,10 @@ MonoBehaviour:
   tonemapMode: 1
   bloomIntensity: 0.45
   bloomThreshold: 1.05
-  colorSaturation: 10
-  colorContrast: 12
+  colorSaturation: 14
+  colorContrast: 16
   vignetteIntensity: 0.18
-  postExposure: 0.08
+  postExposure: 0.12
   ssaoIntensity: 0.9
   sceneOutlineEnabled: 1
   outlineColor: {r: 0.14, g: 0.12, b: 0.18, a: 1}
@@ -91,12 +91,12 @@ MonoBehaviour:
   coverEdgeLineWidth: 0.05
   coverEdgeLineStrength: 0.85
   coverTopLift: 0.09
-  envSpecStrength: 1.2
+  envSpecStrength: 1.35
   envSunDiscPower: 900
   inkGrainScale: 1.6
   inkGrainStrength: 0.35
   inkRoughVarStrength: 0.5
-  coffeeRingStrength: 0.4
+  coffeeRingStrength: 0.55
   surfaceNormalStrength: 0.55
   surfaceAOStrength: 0.45
   surfaceSmoothnessScale: 1
@@ -107,10 +107,10 @@ MonoBehaviour:
   decorationDensity: 1
   buildBackdrop: 1
   postProcessingEnabled: 1
-  inkProbeStrength: 1
-  inkCoatStrength: 1.2
+  inkProbeStrength: 1.15
+  inkCoatStrength: 1.5
   inkCoatRoughness: 0.06
-  inkEdgeRimStrength: 0.55
+  inkEdgeRimStrength: 0.8
   inkEdgeSmoothStrength: 0.7
   inkTopDetailStrength: 1
   wallDripSpeed: 1.3

@@ -572,10 +572,12 @@ Shader "P1/InkGround"
                 float specNorm = (specPower + 8.0) / 8.0;
                 float directSpec = pow(NdotH, specPower) * specNorm * (0.04 + 0.08 * wet);
 
-                // 针对俯视角调优的掠射菲涅尔（保证大角度不发白，锁住纯净鲜艳的队伍墨色）
+                // 针对俯视角调优的掠射菲涅尔（保证大角度不发白，锁住纯净鲜艳的队伍墨色）。
+                // F0 抬到 0.07~0.11：物理 0.035 在本游戏 40°~50° 俯视角下镜面贡献几乎为零，
+                // 干墨读作平涂粉漆；抬 F0 是给墨面"常数缎面光泽"的作弊项（对齐 INKWAVE clearcoat F0 0.055+）。
                 float fresnel = pow(1.0 - NdotV, 3.5);
-                float clearcoatF0 = lerp(0.035, 0.065, wet);
-                float F = clearcoatF0 + (0.35 - clearcoatF0) * fresnel;
+                float clearcoatF0 = lerp(0.07, 0.11, max(wet, sheen * 0.6));
+                float F = clearcoatF0 + (0.38 - clearcoatF0) * fresnel;
                 half3 directTerm = _MainLightColor.rgb * (half)(directSpec * F * NdotL);
 
                 // 双层清漆与薄缘高光（湿润果冻墨质感）
@@ -585,11 +587,11 @@ Shader "P1/InkGround"
 
                 // 环境镜面（桌面端 Cubemap + 解析太阳盘，含掠射角抑制）
                 float3 R = reflect(-V, finalNormalWS);
-                half glanceDamp = (half)(1.0 - 0.75 * pow(saturate(1.0 - NdotV), 2.0));
+                half glanceDamp = (half)(1.0 - 0.55 * pow(saturate(1.0 - NdotV), 2.0));
                 half3 envSpec = P1InkEnvSpecularFull(R, rough, NdotV, teamCol) * glanceDamp;
-                // 湿墨额外增强环境反射：F0 只有 0.04，典型俯视角下反射很弱；
-                // 新墨前几秒把它拉起，读作"刚泼上去的液体"，干后自然回到克制值。
-                envSpec *= (half)(1.0 + 0.70 * wet + 0.25 * sheen);
+                // 湿墨额外增强环境反射；sheen 权重提高——缎面余晖期（数十秒）仍保住可见的天空光泽，
+                // 否则老墨区在俯视角下完全哑光（"廉价平涂"观感的主因之一）。
+                envSpec *= (half)(1.15 + 0.85 * wet + 0.55 * sheen);
 
                 // 漫反射光照（三渲二色阶，重定标下限 0.40）
                 half inkBand = P1ToonTriBand(NdotL, _InkShadeThreshold, _InkShadeSoftness);
@@ -624,9 +626,10 @@ Shader "P1/InkGround"
                 // 扣减重叠交界缝暗影
                 inkColor *= 1.0 - 0.3 * seamShadow * inkMask;
 
-                // 清漆合成（在 inkColor 之后）：环境反射按墨色自身染色 80%（颜料液体的反射
-                // 本就带涂层色，同时锁死队色纯度），太阳直射 glint 保持白色。
-                half3 envTint = lerp(half3(1.0, 1.0, 1.0), saturate(inkColor * 2.2), 0.80);
+                // 清漆合成（在 inkColor 之后）：环境反射按墨色染色 45%（对齐 INKWAVE：反射以中性
+                // 明度为主、轻染颜料色）。旧 80% 染色会把天空反射彻底吞进饱和队色里，湿墨的光泽
+                // 对比全部消失——这是"墨像粉漆不像液体"的根因之一。太阳直射 glint 保持白色。
+                half3 envTint = lerp(half3(1.0, 1.0, 1.0), saturate(inkColor * 2.2), 0.45);
                 half3 finalClearcoat = (directTerm + envSpec * envTint) * (half)(_ClearcoatStrength * inkMask);
 
                 half3 litInkColor = inkColor * diffuseLight + finalClearcoat;

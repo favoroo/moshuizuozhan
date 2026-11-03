@@ -128,14 +128,14 @@ Material:
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
     - _ClearcoatStrength: 1.4
-    - _CoffeeRingStrength: 0.4
-    - _ContactShadowStrength: 0.45
+    - _CoffeeRingStrength: 0.55
+    - _ContactShadowStrength: 0.6
     - _Cull: 2
     - _Cutoff: 0.5
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1
     - _DitherAlpha: 1
-    - _DryGloss: 0.52
+    - _DryGloss: 0.68
     - _DrySmoothness: 0.62
     - _DstBlend: 0
     - _DstBlendAlpha: 0
@@ -159,10 +159,10 @@ Material:
     - _InkRoughVarStrength: 0.5
     - _InkShadeSoftness: 0.1
     - _InkShadeThreshold: 0.48
-    - _InkShadowFloor: 0.62
+    - _InkShadowFloor: 0.55
     - _InkTexelMeters: 0.01
     - _InkYFlip: 1
-    - _LipHeight: 0.014
+    - _LipHeight: 0.018
     - _LipSoftness: 1.7
     - _LipStrength: 2.4
     - _LipThickness: 1
@@ -178,7 +178,7 @@ Material:
     - _SeamShadowStrength: 0.48
     - _ShadeSoftness: 0.1
     - _ShadeThreshold: 0.5
-    - _ShadowFloor: 0.55
+    - _ShadowFloor: 0.46
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1

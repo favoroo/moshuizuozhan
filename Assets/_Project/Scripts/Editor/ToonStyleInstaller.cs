@@ -396,12 +396,12 @@ namespace P1.Editor
             WriteStylePreset(style);
 
             // 2) P18 质感参数（不动基调，只加质感）
-            style.envSpecStrength = 1.2f;
+            style.envSpecStrength = 1.35f;
             style.envSunDiscPower = 900f;
             style.inkGrainScale = 1.6f;
             style.inkGrainStrength = 0.35f;
             style.inkRoughVarStrength = 0.5f;
-            style.coffeeRingStrength = 0.40f;
+            style.coffeeRingStrength = 0.55f;
             style.surfaceNormalStrength = 0.55f;
             style.surfaceAOStrength = 0.45f;
             style.surfaceSmoothnessScale = 1f;
@@ -534,7 +534,7 @@ namespace P1.Editor
             style.sunColor = new Color(1.00f, 0.97f, 0.91f, 1f);
             style.sunIntensity = 1.60f;
             style.sunEuler = new Vector3(52f, -38f, 0f);
-            style.shadowStrength = 0.88f;
+            style.shadowStrength = 0.94f;
             style.ambientSky = new Color(0.36f, 0.50f, 0.76f, 1f);
             style.ambientEquator = new Color(0.56f, 0.54f, 0.50f, 1f);
             style.ambientGround = new Color(0.18f, 0.17f, 0.17f, 1f);
@@ -557,8 +557,9 @@ namespace P1.Editor
             style.characterShadowFloor = 0.55f;
 
             style.fogColor = new Color(0.62f, 0.74f, 0.86f, 1f);
-            style.fogStartDistance = 45f;
-            style.fogEndDistance = 135f;
+            // 雾距外推：45/135 把 60m 外的吊机/楼群洗成奶白，远景没层次（"廉价感"来源之一）
+            style.fogStartDistance = 65f;
+            style.fogEndDistance = 210f;
             style.skyTop = new Color(0.16f, 0.46f, 0.86f, 1f);
             style.skyHorizon = new Color(0.80f, 0.89f, 0.97f, 1f);
             style.skyGround = new Color(0.52f, 0.60f, 0.66f, 1f);
@@ -568,11 +569,11 @@ namespace P1.Editor
             style.bloomIntensity = 0.45f;
             // 与 ArenaStyleSO 默认值保持一致：0.98 会把枪口/命中加法闪光放大成角色白光
             style.bloomThreshold = 1.05f;
-            style.colorSaturation = 18f;
-            style.colorContrast = 10f;
+            style.colorSaturation = 14f;
+            style.colorContrast = 16f;
             style.vignetteIntensity = 0.12f;
-            style.postExposure = 0.08f;
-            style.ssaoIntensity = 0.9f;
+            style.postExposure = 0.12f;
+            style.ssaoIntensity = 1.15f;
 
             style.sceneOutlineEnabled = true;
             style.outlineColor = new Color(0.09f, 0.10f, 0.13f, 1f);
@@ -591,10 +592,10 @@ namespace P1.Editor
 
             // P29 渲染基础设施新字段默认值
             style.postProcessingEnabled = true;
-            style.inkProbeStrength = 1f;
-            style.inkCoatStrength = 1.2f;
+            style.inkProbeStrength = 1.15f;
+            style.inkCoatStrength = 1.5f;
             style.inkCoatRoughness = 0.06f;
-            style.inkEdgeRimStrength = 0.55f;
+            style.inkEdgeRimStrength = 0.8f;
             style.inkEdgeSmoothStrength = 0.7f;
             style.inkTopDetailStrength = 1f;
             style.wallDripSpeed = 1.3f;

@@ -73,10 +73,10 @@ half3 P1InkEnvSpecular(float3 R, float rough, float NdotV)
     // 盘亮度必须随 NdotV 收紧，只保留正上方俯视时的镜面 glitter。
     half3 env = sky + P1InkEnvSunGlint(R, rough, NdotV);
 
-    // 清漆层菲涅尔（F0 = 0.04）。掠射上限压到 0.55：墨水是颜料液体，掠射处若让环境白光
-    // 全额进入，会把俯视角大斜率区域的队色整体洗浅（P18 实测）。
+    // 清漆层菲涅尔。F0 抬到 0.09（物理 0.04 在俯视角下环境反射只剩 ~5%，墨面读作哑光粉漆；
+    // Splatoon 式湿墨靠作弊的常数缎面光泽）；掠射上限压到 0.42，避免掠射白光把队色洗浅（P18 实测）。
     float fres = pow(saturate(1.0 - NdotV), 5.0);
-    half F = (half)(0.04 + 0.51 * fres);
+    half F = (half)(0.09 + 0.42 * fres);
     half3 spec = env * F * (half)_P1EnvSpecStrength;
     // 单通道硬上限：任何角度下环境镜面都不允许把队色整体洗白（只保留 glitter 峰值）
     return min(spec, (half3)1.0);
@@ -100,7 +100,7 @@ half3 P1InkEnvSpecularFull(float3 R, float rough, float NdotV, half3 inkTint)
         half3 env = tinted + P1InkEnvSunGlint(R, rough, NdotV);
 
         float fres = pow(saturate(1.0 - NdotV), 5.0);
-        half F = (half)(0.04 + 0.51 * fres);
+        half F = (half)(0.09 + 0.42 * fres);
         half3 spec = env * F * (half)_P1EnvSpecStrength;
         result = min(spec, (half3)1.5);
     }
@@ -120,14 +120,16 @@ half3 P1InkCoatSpec(float NdotH, float NdotV, float shadowAtten, float wet, floa
     // 注意：不用 (power+8)/8 的 GGX 归一化。roughness≈0.06 时该系数约 170，
     // 叠加 1.2 的强度与 1.6 光强会得到 100+ 的 HDR 单像素 firefly。
     // 这里用有上限的直接权重：峰值 ≈ _P1InkCoatStrength（1.2），足够 Bloom 拾取但不爆白。
-    float wetWeight = saturate(wet);
+    // 干墨保留缎面余晖光泽：Splatoon 的墨落地几十秒后仍是缎面而不是哑光，
+    // 纯 wet 权重会让老墨区高光彻底消失（整片老墨读作平涂粉漆的根因）。
+    float wetWeight = saturate(wet + sheen * 0.6);
     float sharpTerm = pow(NdotH, sharpPower)
                     * (0.35 + 0.65 * wetWeight)
                     * _P1InkCoatStrength
                     * shadowAtten * saturate(NdotV * 1.5);
 
     float sheenPower = exp2(4.0 * (1.0 - rough) + 1.0);
-    float sheenWeight = 0.10 * (saturate(sheen) + saturate(wet) * 0.5);
+    float sheenWeight = 0.13 * (saturate(sheen) + saturate(wet) * 0.5);
     float sheenTerm = pow(NdotH, sheenPower) * sheenWeight * shadowAtten;
 
     half totalSpec = (half)min(sharpTerm + sheenTerm, 1.0);

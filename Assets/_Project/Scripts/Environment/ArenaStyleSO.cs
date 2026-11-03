@@ -58,7 +58,7 @@ namespace P1.Environment
         public Color ambientGround = new Color(0.28f, 0.22f, 0.18f, 1f);
         [Range(0f, 2f)] public float ambientIntensity = 0.88f;
         [Range(0f, 1f)] public float reflectionIntensity = 0.35f;
-        [Range(0f, 1f)] public float shadowStrength = 0.88f;
+        [Range(0f, 1f)] public float shadowStrength = 0.94f;
 
         [Header("三渲二光照")]
         [Range(0.2f, 0.8f)] public float shadeThreshold = 0.50f;
@@ -85,8 +85,8 @@ namespace P1.Environment
         [Header("雾")]
         public bool fogEnabled = true;
         public Color fogColor = new Color(0.62f, 0.74f, 0.86f, 1f);
-        public float fogStartDistance = 45f;
-        public float fogEndDistance = 135f;
+        public float fogStartDistance = 65f;
+        public float fogEndDistance = 210f;
 
         [Header("程序化天空")]
         public Color skyTop = new Color(0.16f, 0.46f, 0.86f, 1f);
@@ -107,10 +107,10 @@ namespace P1.Environment
         // 0.98 低于「角色受光面 + 枪口/命中加法闪光」的亮度（约 1.0），会把每次射击/命中
         // 放大成角色身上一团白光；1.05 是之前的稳定值，只让真正的自发光进入 Bloom。
         [Range(0.5f, 2f)] public float bloomThreshold = 1.05f;
-        [Range(-100f, 100f)] public float colorSaturation = 18f;
-        [Range(-100f, 100f)] public float colorContrast = 10f;
+        [Range(-100f, 100f)] public float colorSaturation = 14f;
+        [Range(-100f, 100f)] public float colorContrast = 16f;
         [Range(0f, 1f)] public float vignetteIntensity = 0.12f;
-        [Range(-2f, 2f)] public float postExposure = 0.08f;
+        [Range(-2f, 2f)] public float postExposure = 0.12f;
         [Range(0f, 1f)] public float ssaoIntensity = 0.9f;
 
         [Header("卡通描边（PC 全屏描边）")]
@@ -138,7 +138,7 @@ namespace P1.Environment
 
         [Header("INKWAVE 质感（P18 画风重做）")]
         [Tooltip("解析环境镜面总强度：湿墨照出天空与周围物体的核心开关，0 = 回到旧扁平观感")]
-        [Range(0f, 3f)] public float envSpecStrength = 1.2f;
+        [Range(0f, 3f)] public float envSpecStrength = 1.35f;
         [Tooltip("环境太阳盘锐度：湿面窄亮（~900），干面由着色器自动拉宽")]
         [Range(64f, 4096f)] public float envSunDiscPower = 900f;
         [Tooltip("墨面颗粒法线平铺密度（周期/米）")]
@@ -148,7 +148,7 @@ namespace P1.Environment
         [Tooltip("墨面粗糙度扰动强度（与颗粒贴图 A 通道配合）")]
         [Range(0f, 2f)] public float inkRoughVarStrength = 0.5f;
         [Tooltip("墨缘咖啡环积墨强度：边缘厚度与饱和度上扬")]
-        [Range(0f, 1f)] public float coffeeRingStrength = 0.45f;
+        [Range(0f, 1f)] public float coffeeRingStrength = 0.55f;
         [Tooltip("场景表面法线强度（混凝土/钢板平铺贴图）")]
         [Range(0f, 1.5f)] public float surfaceNormalStrength = 0.6f;
         [Tooltip("场景表面遮蔽强度（RMO 的 G 通道）")]
@@ -173,13 +173,13 @@ namespace P1.Environment
         [Tooltip("是否启用主相机 URP 后处理")]
         public bool postProcessingEnabled = true;
         [Tooltip("环境 Cubemap 探针反射强度")]
-        [Range(0f, 2f)] public float inkProbeStrength = 1f;
+        [Range(0f, 2f)] public float inkProbeStrength = 1.15f;
         [Tooltip("墨水清漆层反射强度")]
-        [Range(0f, 3f)] public float inkCoatStrength = 1.2f;
+        [Range(0f, 3f)] public float inkCoatStrength = 1.5f;
         [Tooltip("墨水清漆层粗糙度")]
         [Range(0.01f, 0.4f)] public float inkCoatRoughness = 0.06f;
         [Tooltip("墨水边缘光边缘强度")]
-        [Range(0f, 2f)] public float inkEdgeRimStrength = 0.55f;
+        [Range(0f, 2f)] public float inkEdgeRimStrength = 0.8f;
         [Tooltip("墨水边缘平滑过度强度")]
         [Range(0f, 1f)] public float inkEdgeSmoothStrength = 0.7f;
         [Tooltip("墨水顶面微细节强度")]

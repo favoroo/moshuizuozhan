@@ -123,7 +123,7 @@ namespace P1.Core
             Color top = _style != null ? _style.skyTop : FallbackSkyTop;
             Color horizon = _style != null ? _style.skyHorizon : FallbackSkyHorizon;
             Color ground = _style != null ? _style.skyGround : FallbackSkyGround;
-            float spec = _style != null ? _style.envSpecStrength : 1f;
+            float spec = _style != null ? _style.envSpecStrength : 1.35f;
             float sunDisc = _style != null ? _style.envSunDiscPower : 900f;
 
             Shader.SetGlobalColor(SkyTopId, ToLinear(top));
@@ -140,9 +140,9 @@ namespace P1.Core
             }
 
             float probe = _style != null ? _style.inkProbeStrength : (_cubeStrengthOverride >= 0f ? _cubeStrengthOverride : 0f);
-            float coat = _style != null ? _style.inkCoatStrength : 1.2f;
+            float coat = _style != null ? _style.inkCoatStrength : 1.5f;
             float coatRough = _style != null ? _style.inkCoatRoughness : 0.06f;
-            float edgeRim = _style != null ? _style.inkEdgeRimStrength : 0.5f;
+            float edgeRim = _style != null ? _style.inkEdgeRimStrength : 0.8f;
             float edgeSmooth = _style != null ? _style.inkEdgeSmoothStrength : 0.7f;
             float topDetail = _style != null ? _style.inkTopDetailStrength : 1f;
             float dripSpeed = _style != null ? _style.wallDripSpeed : 1.3f;
@@ -181,6 +181,14 @@ namespace P1.Core
             _styleLookupDone = true;
             _style = Resources.Load<ArenaStyleSO>("ArenaStyle");
             if (_style != null) return;
+
+#if UNITY_EDITOR
+            // ArenaStyle.asset 在 ScriptableObjects/（非 Resources），编辑器内 FindObjectsOfTypeAll
+            // 在场景引用加载前可能拾取不到，导致 Play 模式全程用回退默认值（质感参数静默降级）。
+            _style = UnityEditor.AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(
+                "Assets/_Project/ScriptableObjects/ArenaStyle.asset");
+            if (_style != null) return;
+#endif
 
             Object[] found = Object.FindObjectsOfTypeAll(typeof(ArenaStyleSO));
             for (int i = 0; i < found.Length; i++)

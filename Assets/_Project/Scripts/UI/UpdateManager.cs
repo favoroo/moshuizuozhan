@@ -121,7 +121,8 @@ namespace P1.UI
         /// 是否支持应用内下载并调起系统安装器。
         /// TapTap 隐私合规要求移除与游戏功能无关的高危安装权限（REQUEST_INSTALL_PACKAGES），
         /// 因此默认关闭：检查更新只负责发现新版本，下载/安装交给 TapTap 商店或浏览器。
-        /// 若将来恢复应用内安装，需要同时把 AndroidManifest 的权限与 FileProvider 加回来。
+        /// 若将来恢复应用内安装，需要同时把 AndroidManifest 的权限与 FileProvider 加回来
+        /// （但 TapTap 渠道会再次把它判为高危权限，上架包不要开）。
         /// </summary>
         public static bool InAppInstallSupported => false;
 

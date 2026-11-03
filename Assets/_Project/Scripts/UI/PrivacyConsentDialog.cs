@@ -224,7 +224,7 @@ namespace P1.UI
             dim.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.82f);
             dim.raycastTarget = true;
 
-            // 主面板 1000×780：纸白直角 + 6px 墨边 + 弹窗硬影。
+            // 主面板：纸白直角 + 6px 墨边 + 弹窗硬影；高度在正文实测后回填。
             var panelGo = new GameObject("MainPanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             panelGo.transform.SetParent(_root.transform, false);
             _panelRect = panelGo.GetComponent<RectTransform>();
@@ -232,7 +232,7 @@ namespace P1.UI
             _panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             _panelRect.pivot = new Vector2(0.5f, 0.5f);
             _panelRect.anchoredPosition = Vector2.zero;
-            _panelRect.sizeDelta = new Vector2(1000f, 780f);
+            _panelRect.sizeDelta = new Vector2(1000f, 780f); // 占位，正文测量后回填
 
             var panelShape = panelGo.GetComponent<UIInkShapeGraphic>();
             panelShape.Shape = UIInkShape.SharpRect;
@@ -246,14 +246,40 @@ namespace P1.UI
             panelShape.raycastTarget = true;
             Theme.ApplyHardShadow(panelShape, UIHardShadowLevel.Dialog);
 
+            // 正文摘要：先按 880 宽度实测总高度，标题条与其余控件自上而下链式排布。
+            // 旧版正文框固定 260px 高，实际文案约 370px，TMP 溢出绘制压到下方控件。
+            var body = CreateText("BodyText", panelGo.transform, BuildBodyText(),
+                UITypography.FontSnapped(22f), ComicStyle.Ink, false, TextAlignmentOptions.TopLeft);
+            var bodyRt = body.rectTransform;
+            bodyRt.anchorMin = new Vector2(0.5f, 0.5f);
+            bodyRt.anchorMax = new Vector2(0.5f, 0.5f);
+            bodyRt.anchoredPosition = Vector2.zero;
+            bodyRt.sizeDelta = new Vector2(880f, 2f);
+            body.textWrappingMode = TextWrappingModes.Normal;
+            body.raycastTarget = false;
+            float bodyH = Mathf.Max(100f, Mathf.Ceil(body.preferredHeight));
+
+            const float titleH = 76f, topMargin = 28f, gapTitleBody = 24f;
+            const float linkH = 48f, gapBodyLinks = 30f, gapLinksCheck = 18f, checkH = 48f;
+            const float gapCheckBtns = 26f, btnH = 72f, bottomMargin = 30f;
+            float bodyTop = topMargin + titleH + gapTitleBody;
+            float linksTop = bodyTop + bodyH + gapBodyLinks;
+            float checkTop = linksTop + linkH + gapLinksCheck;
+            float btnTop = checkTop + checkH + gapCheckBtns;
+            float panelH = Mathf.Max(780f, btnTop + btnH + bottomMargin);
+            float half = panelH * 0.5f;
+            float Y(float topDist) => half - topDist; // 距面板顶部的距离 → 中心锚点 Y
+
+            _panelRect.sizeDelta = new Vector2(1000f, panelH);
+
             // 顶部黑色标题条。
             var titleBarGo = new GameObject("TitleBar", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             titleBarGo.transform.SetParent(panelGo.transform, false);
             var titleBarRt = titleBarGo.GetComponent<RectTransform>();
             titleBarRt.anchorMin = new Vector2(0.5f, 0.5f);
             titleBarRt.anchorMax = new Vector2(0.5f, 0.5f);
-            titleBarRt.anchoredPosition = new Vector2(0f, 322f);
-            titleBarRt.sizeDelta = new Vector2(620f, 76f);
+            titleBarRt.anchoredPosition = new Vector2(0f, Y(topMargin + titleH * 0.5f));
+            titleBarRt.sizeDelta = new Vector2(620f, titleH);
             var titleBarShape = titleBarGo.GetComponent<UIInkShapeGraphic>();
             titleBarShape.Shape = UIInkShape.SharpRect;
             titleBarShape.CornerRadius = ComicStyle.CornerSharp;
@@ -266,26 +292,19 @@ namespace P1.UI
                 UITypography.FontSnapped(32f), ComicStyle.Paper, true);
             Stretch(title.rectTransform);
 
-            // 正文摘要。
-            var body = CreateText("BodyText", panelGo.transform, BuildBodyText(),
-                UITypography.FontSnapped(22f), ComicStyle.Ink, false, TextAlignmentOptions.TopLeft);
-            var bodyRt = body.rectTransform;
-            bodyRt.anchorMin = new Vector2(0.5f, 0.5f);
-            bodyRt.anchorMax = new Vector2(0.5f, 0.5f);
-            bodyRt.anchoredPosition = new Vector2(0f, 138f);
-            bodyRt.sizeDelta = new Vector2(880f, 260f);
-            body.textWrappingMode = TextWrappingModes.Normal;
-            body.raycastTarget = false;
+            // 正文落到实测高度。
+            bodyRt.anchoredPosition = new Vector2(0f, Y(bodyTop) - bodyH * 0.5f);
+            bodyRt.sizeDelta = new Vector2(880f, bodyH);
 
             // 政策 / 协议链接。
             var policyBtn = CreateButton("PolicyBtn", panelGo.transform, "《隐私政策》",
-                new Vector2(-220f, -28f), new Vector2(400f, 48f),
+                new Vector2(-220f, Y(linksTop) - linkH * 0.5f), new Vector2(400f, linkH),
                 ComicStyle.Paper, ComicStyle.Ink, UITypography.FontSnapped(22f),
                 out _);
             policyBtn.onClick.AddListener(OpenPolicyPage);
 
             var termsBtn = CreateButton("TermsBtn", panelGo.transform, "《用户协议》",
-                new Vector2(220f, -28f), new Vector2(400f, 48f),
+                new Vector2(220f, Y(linksTop) - linkH * 0.5f), new Vector2(400f, linkH),
                 ComicStyle.Paper, ComicStyle.Ink, UITypography.FontSnapped(22f),
                 out _);
             termsBtn.onClick.AddListener(OpenTermsPage);
@@ -296,8 +315,8 @@ namespace P1.UI
             var checkRowRt = checkRowGo.GetComponent<RectTransform>();
             checkRowRt.anchorMin = new Vector2(0.5f, 0.5f);
             checkRowRt.anchorMax = new Vector2(0.5f, 0.5f);
-            checkRowRt.anchoredPosition = new Vector2(0f, -88f);
-            checkRowRt.sizeDelta = new Vector2(880f, 48f);
+            checkRowRt.anchoredPosition = new Vector2(0f, Y(checkTop) - checkH * 0.5f);
+            checkRowRt.sizeDelta = new Vector2(880f, checkH);
             var checkRowImg = checkRowGo.GetComponent<Image>();
             checkRowImg.color = new Color(0f, 0f, 0f, 0f);
             checkRowImg.raycastTarget = true;
@@ -340,7 +359,7 @@ namespace P1.UI
 
             // 底部按钮：同意（绿） / 不同意（白）。
             _agreeBtn = CreateButton("AgreeBtn", panelGo.transform, "同意并继续",
-                new Vector2(-220f, -168f), new Vector2(400f, 72f),
+                new Vector2(-220f, Y(btnTop) - btnH * 0.5f), new Vector2(400f, btnH),
                 ComicStyle.PaperAlt, ComicStyle.WithAlpha(ComicStyle.Ink, 0.45f),
                 UITypography.FontSnapped(26f), out _agreeLabel);
             _agreeShape = _agreeBtn.GetComponent<UIInkShapeGraphic>();
@@ -348,7 +367,7 @@ namespace P1.UI
             _agreeBtn.onClick.AddListener(CloseAndAccept);
 
             var declineBtn = CreateButton("DeclineBtn", panelGo.transform, "不同意并退出",
-                new Vector2(220f, -168f), new Vector2(400f, 72f),
+                new Vector2(220f, Y(btnTop) - btnH * 0.5f), new Vector2(400f, btnH),
                 ComicStyle.Paper, ComicStyle.Ink, UITypography.FontSnapped(26f),
                 out _);
             declineBtn.onClick.AddListener(DeclineAndQuit);
@@ -374,7 +393,7 @@ namespace P1.UI
             if (_panelRect == null) return;
             float safeRatio = Screen.height > 0 ? Screen.safeArea.height / Screen.height : 1f;
             float available = 1080f * safeRatio;
-            const float targetHeight = 780f;
+            float targetHeight = _panelRect.sizeDelta.y;
             float scale = available < targetHeight ? Mathf.Clamp(available / targetHeight, 0.55f, 1f) : 1f;
             _panelRect.localScale = new Vector3(scale, scale, 1f);
         }

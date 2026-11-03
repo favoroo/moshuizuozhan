@@ -3515,12 +3515,19 @@ namespace P1.UI
                 string text = playerWon ? "VICTORY" : "DEFEAT";
                 victoryBadgeText.text = text;
                 Color fill = playerWon ? ComicStyle.Yellow : ComicStyle.Paper;
-                victoryBadgeText.color = fill;
                 var font = resolved.ResolveFont(true, text);
                 if (font != null) victoryBadgeText.font = font;
 
-                // 双层描边字的填充色单独走 UIChunkyText：直接改 TMP 颜色只会把"描边层"染色
-                if (_victoryBadgeChunky != null) _victoryBadgeChunky.SetFillColor(fill);
+                // 双层描边字的填充色只能走 UIChunkyText：直接改 TMP 颜色会把底层的
+                // 墨色描边/硬影层也染成填充色，两层黄字错开 4px 就会读成「重影」。
+                if (_victoryBadgeChunky != null)
+                {
+                    _victoryBadgeChunky.SetFillColor(fill);
+                }
+                else
+                {
+                    victoryBadgeText.color = fill;
+                }
             }
 
             victoryBadgeRoot.gameObject.SetActive(true);

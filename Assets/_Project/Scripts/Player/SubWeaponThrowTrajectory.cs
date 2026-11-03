@@ -6,9 +6,9 @@ using UnityEngine;
 namespace P1.Player
 {
     /// <summary>
-    /// 副武器手雷弹道预测线与预测落点爆炸预警圈（旧「按住瞄准」预览）：
-    /// 手雷现已改为一键直投，玩家链路不再调用本组件；组件与两个更新接口保留，
-    /// 供旧测试 / 编辑器工具 / 后续可选预览功能使用。
+    /// 副武器手雷弹道预测线与预测落点爆炸预警圈：
+    /// 玩家按住副武器键时由 PlayerController 每帧驱动（inkwave 式按住瞄准），
+    /// 预览与 InkBombPool 实飞共用同一套初速/重力/反弹常数，落点 100% 重合。
     /// </summary>
     public class SubWeaponThrowTrajectory : MonoBehaviour
     {
@@ -225,7 +225,7 @@ namespace P1.Player
         /// <summary>
         /// inkwave 弹道预览：以与 InkBombPool 实飞完全相同的初速/重力/反弹做 64 点仿真积分，
         /// 虚线 = 预测飞行轨迹，落点环 = 预测首个接触面（仅在预览窗口内落地时显示）。
-        /// 远近由相机俯仰决定，所见即所得；缺墨时虚线与环变灰闪烁。
+        /// 初速由准星落点反解，落点环贴合法线；冷却/缺墨时虚线与环变灰闪烁。
         /// </summary>
         public void UpdateTrajectorySim(
             Vector3 startPos,
@@ -246,9 +246,15 @@ namespace P1.Player
                 _innerFillRenderer.enabled = true;
             }
 
-            // 1. 仿真弹道（与实飞同常数）：未落地时虚线悬空截断，环隐藏
+            // 1. 仿真弹道（与实飞同常数）：未落地时虚线悬空截断，环隐藏；落点环按命中面法线贴放
             bool landed = InkBombTrajectoryUtility.SimulateThrow(
-                startPos, throwVelocity, config, transform.root, _trajectoryBuffer, out Vector3 hitPoint);
+                startPos,
+                throwVelocity,
+                config,
+                transform.root,
+                _trajectoryBuffer,
+                out Vector3 hitPoint,
+                out Vector3 hitNormal);
             _currentLandingPos = landed ? hitPoint : _trajectoryBuffer[_trajectoryBuffer.Length - 1];
             _lineRenderer.SetPositions(_trajectoryBuffer);
 
@@ -298,7 +304,10 @@ namespace P1.Player
                 float pulse = 1.0f + Mathf.Sin(Time.time * 8f) * 0.035f;
                 float dynamicRadius = splatRadius * pulse;
 
-                _landingRingRoot.position = new Vector3(_currentLandingPos.x, _currentLandingPos.y + 0.038f, _currentLandingPos.z);
+                // 落点环贴在命中面上：打地面时保持水平，打墙/斜坡时随法线旋转
+                Vector3 ringNormal = hitNormal.sqrMagnitude > 0.0001f ? hitNormal.normalized : Vector3.up;
+                _landingRingRoot.position = hitPoint + ringNormal * 0.04f;
+                _landingRingRoot.rotation = Quaternion.FromToRotation(Vector3.up, ringNormal);
                 _landingRingRoot.localScale = new Vector3(dynamicRadius, 1f, dynamicRadius);
 
                 _ringBlock.SetColor(BaseColorProp, ringOuterColor);

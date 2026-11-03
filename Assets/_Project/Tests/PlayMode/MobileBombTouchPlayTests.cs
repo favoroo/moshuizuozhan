@@ -12,7 +12,7 @@ namespace P1.Tests
 {
     /// <summary>
     /// 触屏手雷真实链路测试：不关 MobileTouchUI，用 ExecuteEvents 驱动手雷按钮的
-    /// pointer-down / pointer-up，回归「按下即投、松开不补投」。
+    /// pointer-down / pointer-up，回归「按住瞄准（显示弹道预览）、松手投出」。
     /// 同时验证手雷与墨水脱钩（设计变更：只受冷却限制）与拒绝显性反馈。
     /// </summary>
     public class MobileBombTouchPlayTests
@@ -107,7 +107,7 @@ namespace P1.Tests
         }
 
         [UnityTest]
-        public IEnumerator TouchBombButton_Hold_ThrowsOnceOnPress_NoExtraOnRelease()
+        public IEnumerator TouchBombButton_HoldAims_ReleaseThrowsOnce()
         {
             yield return LoadPlayingMatch();
 
@@ -122,20 +122,23 @@ namespace P1.Tests
             yield return null;
             yield return null;
 
-            Assert.AreEqual(before + 1, InkBombPool.Instance.ActiveBombCount, "按下即投：pointer-down 后立刻投出一颗");
-            Assert.IsFalse(player.IsAimingBomb, "新版手雷不再有瞄准态");
-            Assert.IsFalse(player.TouchBombHeld, "按住不再进入瞄准态");
+            Assert.AreEqual(before, InkBombPool.Instance.ActiveBombCount, "按下只进入瞄准，不得立刻投出");
+            Assert.IsTrue(player.IsAimingBomb, "按住手雷键应处于瞄准态");
+            Assert.IsTrue(player.TouchBombHeld, "触屏按住状态应传递给玩家");
+            Assert.IsTrue(player.SubTrajectory.IsShowing, "按住期间应显示弹道预览");
 
-            // 继续按住 0.3s 再松开：不得补投第二颗
+            // 继续按住 0.3s：不得投出
             yield return new WaitForSeconds(0.3f);
-            Assert.AreEqual(before + 1, InkBombPool.Instance.ActiveBombCount, "按住期间不得连投");
+            Assert.AreEqual(before, InkBombPool.Instance.ActiveBombCount, "按住期间不得投出");
+            Assert.IsTrue(player.IsAimingBomb, "按住期间保持瞄准态");
 
             ExecuteEvents.Execute(bombGo, ped, ExecuteEvents.pointerUpHandler);
             yield return null;
             yield return null;
 
-            Assert.AreEqual(before + 1, InkBombPool.Instance.ActiveBombCount, "松开不得补投第二颗");
-            Assert.IsFalse(player.IsAimingBomb, "松开后仍无瞄准态");
+            Assert.AreEqual(before + 1, InkBombPool.Instance.ActiveBombCount, "松手必须投出一颗");
+            Assert.IsFalse(player.IsAimingBomb, "松开后退出瞄准态");
+            Assert.IsFalse(player.SubTrajectory.IsShowing, "投出后收起弹道预览");
         }
 
         [UnityTest]

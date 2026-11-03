@@ -267,20 +267,24 @@ namespace P1.Weapons
         public float bombInkCost = 0f;
         [Tooltip("投掷冷却（秒）：默认 6s。手雷不再受墨水限制，用冷却防刷")]
         public float bombCooldown = 6f;
-        [Tooltip("出手初速（米/秒）：inkwave SUB.bomb.throwSpeed = 13.5。远近由瞄准俯仰决定：平视约 8m、抬头约 30° 最远约 10m、低头贴脚丢")]
+        [Tooltip("（旧俯仰模型）出手初速（米/秒）：inkwave SUB.bomb.throwSpeed = 13.5。现行玩家链路按准星落点反解动态初速，本字段仅供旧 API/兼容测试")]
         public float bombThrowSpeed = 13.5f;
-        [Tooltip("手雷飞行重力（米/秒²）：inkwave 炸弹积分器 = 24（角色重力 25）")]
+        [Tooltip("手雷飞行重力（米/秒²）：inkwave 炸弹积分器 = 24（角色重力 25），预览与实飞共用")]
         public float bombThrowGravity = 24f;
-        [Tooltip("出手固定向上加成（米/秒）：inkwave throwVelocity 的 +1.5，保证平抛也有柔和上抛弧")]
+        [Tooltip("（旧俯仰模型）出手固定向上加成（米/秒）：inkwave throwVelocity 的 +1.5，保留供旧 API/兼容测试")]
         public float bombThrowUpBoost = 1.5f;
-        [Tooltip("俯仰偏移（度）：实际出手俯仰 = 瞄准俯仰（正 = 抬头）+ 该值（inkwave +0.28rad ≈ 16°），平视也有柔和上抛弧")]
+        [Tooltip("（旧俯仰模型）俯仰偏移（度）：瞄准俯仰 + 该值，保留供旧 API/兼容测试")]
         public float bombThrowPitchOffsetDegrees = 16f;
-        [Tooltip("出手俯仰下限（度）：inkwave clamp 下限 -0.3rad ≈ -17.2°，再低头也不会垂直砸脚")]
+        [Tooltip("（旧俯仰模型）出手俯仰下限（度）：inkwave clamp 下限 -0.3rad ≈ -17.2°，保留供旧 API/兼容测试")]
         public float bombThrowPitchMinDegrees = -17.2f;
-        [Tooltip("出手俯仰上限（度）：inkwave clamp 上限 1.1rad ≈ 63°；45° 附近射程最大，抬得更高弧线更高但落点更近")]
+        [Tooltip("（旧俯仰模型）出手俯仰上限（度）：inkwave clamp 上限 1.1rad ≈ 63°，保留供旧 API/兼容测试")]
         public float bombThrowPitchMaxDegrees = 63f;
-        [Tooltip("（旧字段，弹道模型已废弃）落点钳制距离：现行模型远近由俯仰物理决定，无钳制，保留供旧调用兼容")]
-        public float bombMaxThrowDistance = 12f;
+        [Tooltip("准星最远投掷距离（米）：手雷落点跟随屏幕中心准星，超出该距离时取最远落点。默认 22m（40×56 场地）")]
+        public float bombMaxThrowDistance = 22f;
+        [Tooltip("准星投掷弧线的飞行时间（近距，秒）：越短越干脆")]
+        public float bombThrowFlightTimeNear = 0.5f;
+        [Tooltip("准星投掷弧线的飞行时间（最远距离，秒）：越长弧线越高、滞空感越强")]
+        public float bombThrowFlightTimeFar = 1.2f;
         [Tooltip("（旧字段）固定弧高，已由 bombArcHeightNear/Far 按落点距离动态计算取代，保留供旧调用兼容")]
         public float bombArcHeight = 2.6f;
         [Tooltip("（旧字段）固定飞行时长，已由 bombFlightSpeed 按距离换算取代，保留供旧调用兼容")]
@@ -700,7 +704,7 @@ namespace P1.Weapons
             Debug.Log($"[WeaponConfigSO] P3-B 大招/副武器配置已同步到 {applied} 份武器资产");
         }
 
-        /// <summary>副武器 Splat Bomb 规范：与墨水脱钩（0 耗墨）、6s 冷却、最远投掷 12m、落地 0.95s 引信、核心 180 秒杀、涂地 2.7m。</summary>
+        /// <summary>副武器 Splat Bomb 规范：与墨水脱钩（0 耗墨）、6s 冷却、准星最远 22m、落地 0.95s 引信、核心 180 秒杀、涂地 2.7m。</summary>
         public static void ApplyBombSpec(WeaponConfigSO config)
         {
             config.bombInkCost = 0f;
@@ -711,7 +715,9 @@ namespace P1.Weapons
             config.bombThrowPitchOffsetDegrees = 16f;
             config.bombThrowPitchMinDegrees = -17.2f;
             config.bombThrowPitchMaxDegrees = 63f;
-            config.bombMaxThrowDistance = 12f;
+            config.bombMaxThrowDistance = 22f;
+            config.bombThrowFlightTimeNear = 0.5f;
+            config.bombThrowFlightTimeFar = 1.2f;
             config.bombArcHeight = 2.6f;
             config.bombFlightDuration = 0.38f;
             config.bombArcHeightNear = 1.6f;

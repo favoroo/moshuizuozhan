@@ -7,6 +7,21 @@
 > **不记**：逐项 `Added` / `Changed` / `Verified` 流水账、测试项数与 exit 状态明细、selftest 细节、用户原话、设计推导、临时出图路径。
 > 2026-11-01 之前的条目按 GitHub Release 说明回填（仅版本里程碑）；逐条根因记录自 v0.1.8 起。
 
+## 2026-11-03 #06
+【发布墨水作战 v0.1.15：手雷准星落点投掷 + 结算大字重影/隐私弹窗修复】本版把 #02–#05 一并发出：手雷改为「按住瞄准 → 松手按准星落点投出」，投掷前实时显示虚线弹道与贴合法线的落点预警圈，最远投掷距离 12→22m；结算页 VICTORY/DEFEAT 大字重影修复、隐私同意弹窗正文与按钮重叠修复、移动端射击键改实心圆点图标；`PlayerSettings` 版本 0.1.15 / bundleVersionCode 115 与 `GameVersion.APP_VERSION` 三方一致。涉及 `Scripts/Core/GameVersion.cs`、`ProjectSettings/ProjectSettings.asset`、`build/moshuizuozhan-v0.1.15-arm64-v8a.apk`。陷阱：`tools/run_tests.sh all` 的 PlayMode 卡死检测阈值是 90s，而本项目 PlayMode 实测需约 140s，脚本会误判「运行器卡死」并取消重跑——判定回归前先直接跑 `"$U" command test run --mode PlayMode --async_tests` 再轮询 `test status` 取真实结果。
+
+## 2026-11-03 #05
+【手雷改为「按住瞄准 → 松手按准星落点投出」】Fixed: 旧实现把相机 pitch 直接映射成出手俯仰（13.5 m/s、重力 24、满射程约 10m），准星指到 15m 外地面时手雷只落 6~8m，玩家体感「投不远且不跟准星」——现改为按屏幕中心射线命中的世界点做弹道反解：`InkBombTrajectoryUtility.ResolveThrowTarget` 把准星点钳制到 `bombMaxThrowDistance`（默认 22m，超距自动贴地），`ComputeThrowVelocityToLandAt(..., out flightTime)` 用近 0.5s / 远 1.2s 插值飞行时间反推初速（并预扣 `0.5*g*SimDt` 抵消半隐式欧拉偏高），预览与 `InkBombPool` 实飞共用同一初速；`SubBombThrowArbiter.Advance` 新增 inkwave 式按住瞄准/松手投状态机（旧 `Tick` 保留），按住时 `SubWeaponThrowTrajectory.UpdateTrajectorySim` 实时画 64 点虚线 + 按命中面法线贴放的落点环，松手投出；触屏手雷键同步改为 pointer-down 瞄准、pointer-up 投出并支持按住拖动转视角。涉及 `Scripts/Weapons/{InkBombTrajectoryUtility,WeaponConfigSO,WeaponController}.cs`、`Scripts/Player/{PlayerController,SubBombThrowArbiter,SubWeaponThrowTrajectory}.cs`、`Scripts/UI/MobileTouchUI.cs`、`Scripts/Editor/ProjectScaffolder.cs`、`Tests/{EditMode,PlayMode}`。陷阱：菜单同步配置时若刚保存过 `.cs`，`script.recompile_status` 可能仍报旧程序集的 completed，资产会按旧默认值写回；先 `script.eval` 读一个新常量确认程序集已更新，再跑 `P1/构建/7`。
+
+## 2026-11-03 #04
+Fixed: 结算页 VICTORY / DEFEAT 判定大字「重影」——`MatchFlowUI.TriggerVictoryBadge` 里 `victoryBadgeText.color = fill` 把 `UIChunkyText` 的**底层描边/硬影层**也染成填充色，上下两层同色错开 4px（`chunkyShadowOffsetPixels`）就读成双字重影；现填充色只走 `UIChunkyText.SetFillColor`（单层模式才回落到直接染 TMP）。同时在 `UIChunkyText.SetFillColor` 内加护栏：双层模式下无论外部怎么染底层，一律拉回 `outlineColor`，避免其他调用方再犯。涉及 `Scripts/UI/MatchFlowUI.cs`、`Scripts/UI/Core/UIChunkyText.cs`、`Tests/PlayMode/UIChunkyTextPlayTests.cs`。
+
+## 2026-11-03 #03
+移动端射击键（含左开火键）图标由具象武器小图（`weapon_shooter`）改为功能色实心圆点（复用运行时 `_circleFillSprite`，按下仍随既有反馈翻墨黑）；`fireIcon` 字段与加载逻辑保留未删以便回退。涉及 `Scripts/UI/MobileTouchUI.cs`。
+
+## 2026-11-03 #02
+Fixed: 隐私同意弹窗正文与链接/勾选/按钮重叠——`PrivacyConsentDialog.EnsureUI` 原把正文框写死 880×260，但 TMP 实测渲染约 292（设备端字体回退换行更多），TopLeft 溢出绘制压住下方控件；改为运行时先按 `preferredHeight` 实测正文高度，标题条/链接/勾选行/底部按钮自上而下链式排布并回填面板高度（`ApplyResponsiveScale` 目标高度同步改用实际面板高度）。涉及 `Scripts/UI/PrivacyConsentDialog.cs`。陷阱：`script.recompile_status` 报 completed 可能是编辑器自动刷新在编辑中途编译的旧程序集，进 PlayMode 前务必 `unity recompile` 并核对 `Library/ScriptAssemblies/P1.Game.dll` 时间戳，否则运行的是改前代码。
+
 ## 2026-11-03 #01
 【发布墨水作战 v0.1.14：TapTap 隐私合规 + WebGL 网页试玩 + 手感与观感修复】本版把 #26–#36 一并发出：首启隐私同意弹窗并移除未使用的计费/统计依赖与安装权限（合规审核用）、介绍页接入 WebGL 网页试玩并修复网页端全黑/粉块渲染、手雷投掷俯仰符号修正与敌墨减速手感（1.9→2.4 m/s）、场景精修档 P32、角色受击顿挫与眼神灵动、顶部战况条/生命值重影等多处 UI 修复；`PlayerSettings` 版本 0.1.14 / bundleVersionCode 114 与 `GameVersion.APP_VERSION` 三方一致。涉及 `ProjectSettings/ProjectSettings.asset`、`build/moshuizuozhan-v0.1.14-arm64-v8a.apk`。陷阱：上一个会话已 bump 到 0.1.14 并出包但未提交/发布，本次直接复用该 APK（`release.py build` 经 aapt2 包内校验通过）。
 

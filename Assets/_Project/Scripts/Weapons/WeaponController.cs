@@ -623,8 +623,25 @@ namespace P1.Weapons
         public float BombCooldownDuration => config != null ? config.bombCooldown : 0.6f;
 
         /// <summary>
-        /// 副武器手雷投掷（inkwave 弹道模型）：以指定初速从出手点真实抛出，
-        /// 远近与反弹全部由物理决定。玩家链路（相机俯仰 → 初速）由此进入。
+        /// 当前是否满足投掷条件（存活 / 非大招演出 / 不在冷却 / 终场前 / 墨水足够）：
+        /// 弹道预览用它决定虚线是否变灰闪烁，与 <see cref="TryThrowSubBombBallistic"/> 的门禁保持一致。
+        /// </summary>
+        public bool CanThrowSubBombNow
+        {
+            get
+            {
+                if (_health == null || !_health.IsAlive || IsPerformingSpecial)
+                    return false;
+                if (_bombCooldown > 0f || !MatchManager.CombatSettlementAllowed)
+                    return false;
+                float bombCost = config != null ? config.bombInkCost : 0f;
+                return bombCost <= 0f || (_motor != null && _motor.CurrentInk >= bombCost);
+            }
+        }
+
+        /// <summary>
+        /// 副武器手雷投掷（真实弹道）：以指定初速从出手点抛出，远近与反弹全部由物理决定。
+        /// 玩家链路由准星落点反解初速（指哪落哪）；旧俯仰制 API 仍可传入任意初速。
         /// </summary>
         public bool TryThrowSubBombBallistic(Vector3 throwVelocity)
         {

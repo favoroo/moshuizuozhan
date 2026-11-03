@@ -40,6 +40,12 @@ MonoBehaviour:
   rollInkPerMeter: 1.1
   rollMinInkToStart: 0.5
   rollPaintRadius: 0.34
+  rollMaxStepMeters: 1.5
+  rollStartSpeedFactor: 0.5
+  rollAccelTime: 0.45
+  flickWindupMoveFactor: 0.45
+  flickRecoverMoveTime: 0.18
+  flickRecoverMoveFactor: 0.6
   flickInterval: 0.62
   flickWindup: 0.22
   flickInkCost: 9
@@ -97,7 +103,9 @@ MonoBehaviour:
   bombThrowPitchOffsetDegrees: 16
   bombThrowPitchMinDegrees: -17.2
   bombThrowPitchMaxDegrees: 63
-  bombMaxThrowDistance: 12
+  bombMaxThrowDistance: 22
+  bombThrowFlightTimeNear: 0.5
+  bombThrowFlightTimeFar: 1.2
   bombArcHeight: 2.6
   bombFlightDuration: 0.38
   bombArcHeightNear: 1.6
@@ -147,3 +155,5 @@ MonoBehaviour:
   projectileVisualScale: 0
   trailVisualScale: 0
   impactRippleScale: 0
+  feelSpringOmega: 0
+  cameraKickDecayRate: 0

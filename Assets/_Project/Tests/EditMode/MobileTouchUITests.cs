@@ -174,7 +174,7 @@ namespace P1.Tests
         }
 
         [Test]
-        public void BombButton_PressTriggersImmediately_ReleaseDoesNotRepeat()
+        public void BombButton_PressAims_ReleaseThrowsOnce()
         {
             var go = new GameObject("TestBombHost", typeof(RectTransform));
             var btn = MobileActionButton.Create(
@@ -182,25 +182,30 @@ namespace P1.Tests
                 new Vector2(-100f, 100f), 100f, Color.white,
                 null, null, null, MobileButtonMode.BombTapOrHoldAim);
 
-            Assert.IsFalse(btn.ConsumeTap(), "初始状态不应有未消费的 Tap");
+            Assert.IsFalse(btn.ConsumeTap(), "初始状态不应有未消费的按下事件");
+            Assert.IsFalse(btn.ConsumeRelease(), "初始状态不应有未消费的松手事件");
 
-            // 按下 → 立刻产生投掷事件，不等松开
+            // 按下 → 进入瞄准，尚未投出
             btn.OnPointerDown(new PointerEventData(EventSystem.current));
-            Assert.IsTrue(btn.ConsumeTap(), "按下必须立刻产生一次投掷事件");
-            Assert.IsFalse(btn.ConsumeTap(), "投掷事件只能被消费一次");
+            Assert.IsTrue(btn.ConsumeTap(), "按下必须产生一次瞄准起始事件");
+            Assert.IsFalse(btn.ConsumeTap(), "按下事件只能被消费一次");
+            Assert.IsTrue(btn.IsAimingHeld, "按下后进入按住瞄准态");
+            Assert.IsFalse(btn.ConsumeRelease(), "按下时不得投出");
 
-            // 松开 → 只复原状态，绝不再补投
+            // 松开 → 产生一次投掷事件
             btn.OnPointerUp(new PointerEventData(EventSystem.current));
-            Assert.IsFalse(btn.ConsumeTap(), "松开不得补投第二颗");
-            Assert.IsFalse(btn.IsAimingHeld, "新版不再有瞄准态");
+            Assert.IsTrue(btn.ConsumeRelease(), "松手必须产生一次投掷事件");
+            Assert.IsFalse(btn.ConsumeRelease(), "松手事件只能被消费一次");
+            Assert.IsFalse(btn.ConsumeTap(), "松开不得补一次按下事件");
+            Assert.IsFalse(btn.IsAimingHeld, "松开后退出瞄准态");
 
             Object.DestroyImmediate(go);
         }
 
         [Test]
-        public void BombButton_TwoCompletePresses_TriggersTwice()
+        public void BombButton_TwoCompleteGestures_AimAndReleaseTwice()
         {
-            // 回归：OnPointerDown 必须清理上次手势残留的 _tapped/_isAimingHeld。
+            // 回归：OnPointerDown 必须清理上次手势残留的 _tapped/_isAimingHeld/_released。
             // 旧实现丢失 pointer-up（系统手势/切后台）后状态永久卡死，手雷键彻底失灵。
             var go = new GameObject("TestBombHost2", typeof(RectTransform));
             var btn = MobileActionButton.Create(
@@ -211,18 +216,21 @@ namespace P1.Tests
             for (int i = 0; i < 2; i++)
             {
                 btn.OnPointerDown(new PointerEventData(EventSystem.current));
-                Assert.IsTrue(btn.ConsumeTap(), $"第 {i + 1} 次按下必须产生恰好一次投掷事件");
+                Assert.IsTrue(btn.ConsumeTap(), $"第 {i + 1} 次按下必须产生恰好一次瞄准事件");
+                Assert.IsTrue(btn.IsAimingHeld, $"第 {i + 1} 次按下后应进入瞄准");
                 btn.OnPointerUp(new PointerEventData(EventSystem.current));
-                Assert.IsFalse(btn.ConsumeTap(), $"第 {i + 1} 次松开不得补投");
+                Assert.IsTrue(btn.ConsumeRelease(), $"第 {i + 1} 次松开必须产生恰好一次投掷事件");
+                Assert.IsFalse(btn.ConsumeRelease(), $"第 {i + 1} 次松手事件只能消费一次");
             }
 
-            Assert.IsFalse(btn.ConsumeTap(), "不应有多余的投掷事件");
+            Assert.IsFalse(btn.ConsumeTap(), "不应有多余的按下事件");
+            Assert.IsFalse(btn.ConsumeRelease(), "不应有多余的松手事件");
 
             Object.DestroyImmediate(go);
         }
 
         [Test]
-        public void BombButton_HoldThenRelease_DoesNotDoubleTrigger_AndClearsAiming()
+        public void BombButton_HoldAndDrag_AimsWithoutThrowing_ReleaseThrowsOnce()
         {
             var go = new GameObject("TestBombHost3", typeof(RectTransform));
             var btn = MobileActionButton.Create(
@@ -231,15 +239,20 @@ namespace P1.Tests
                 null, null, null, MobileButtonMode.BombTapOrHoldAim);
 
             btn.OnPointerDown(new PointerEventData(EventSystem.current));
-            Assert.IsTrue(btn.ConsumeTap(), "按下即投：第一帧就应产生投掷事件");
+            Assert.IsTrue(btn.ConsumeTap(), "按下进入瞄准");
+            Assert.IsTrue(btn.IsAimingHeld, "按住期间保持瞄准态");
 
-            // 按住拖动不应进入瞄准态（旧长按瞄准已移除）
-            btn.OnDrag(new PointerEventData(EventSystem.current) { delta = new Vector2(4f, 2f) });
-            Assert.IsFalse(btn.IsAimingHeld, "按住拖动不得进入瞄准态");
+            // 按住拖动 = 瞄准转视角：累计 look delta，不产生投掷
+            var drag = new PointerEventData(EventSystem.current) { delta = new Vector2(4f, 2f) };
+            btn.OnDrag(drag);
+            Assert.IsTrue(btn.IsAimingHeld, "按住拖动应保持瞄准态");
+            Assert.AreEqual(new Vector2(4f, 2f), btn.ConsumeLookDelta(), "拖动增量应交给视角链路");
+            Assert.IsFalse(btn.ConsumeRelease(), "拖动期间不得投出");
 
             btn.OnPointerUp(new PointerEventData(EventSystem.current));
-            Assert.IsFalse(btn.ConsumeTap(), "长按后松开不得补投第二颗");
-            Assert.IsFalse(btn.IsAimingHeld, "松开后仍无瞄准态");
+            Assert.IsTrue(btn.ConsumeRelease(), "松手投出一次");
+            Assert.IsFalse(btn.ConsumeTap(), "长按后松开不得补一次按下事件");
+            Assert.IsFalse(btn.IsAimingHeld, "松开后退出瞄准态");
 
             Object.DestroyImmediate(go);
         }

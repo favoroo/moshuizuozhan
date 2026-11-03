@@ -6,8 +6,8 @@ using UnityEngine;
 namespace P1.Tests
 {
     /// <summary>
-    /// 副武器手雷 inkwave 弹道模型回归：
-    /// 出手初速由相机俯仰物理决定（clamp 偏移映射）、0.4× 自身速度继承、
+    /// 副武器手雷弹道模型回归：
+    /// 准星落点制反解（指哪落哪、超距钳制 22m）、旧俯仰公式兼容（clamp 偏移映射、0.4× 速度继承）、
     /// 预览仿真与实飞同常数（重力 24 / 反弹 1.35）、穿透投掷者自身。
     /// 仿真场地架在 y=1000 空中平台，与编辑器当前加载场景的真实碰撞体隔离；
     /// 所有测试对象必须 TearDown 回收，否则残留挡板会拦截后续用例的弹道。
@@ -171,7 +171,7 @@ namespace P1.Tests
         [Test]
         public void ComputeThrowVelocityToLandAt_FarTarget_LandsWithinCoreRadius()
         {
-            // 8m 接近满射程（平抛约 8m）：低弧反解仍应命中
+            // 8m 接近平抛射程：落点制反解仍应命中
             Vector3 target = new Vector3(Origin.x, GroundY, Origin.z + 8f);
             Vector3 vel = InkBombTrajectoryUtility.ComputeThrowVelocityToLandAt(Origin, target, _config);
 
@@ -181,6 +181,61 @@ namespace P1.Tests
             Assert.IsTrue(landed, "反解弹道应落地");
             float miss = new Vector2(hit.x - target.x, hit.z - target.z).magnitude;
             Assert.Less(miss, 0.6f, "远距低弧反解仍应命中目标点");
+        }
+
+        [Test]
+        public void ComputeThrowVelocityToLandAt_ReticleTargets_AllLandWithinCoreRadius(
+            [Values(4f, 10f, 16f, 20f)] float distance)
+        {
+            // 准星落点制：4/10/16/20m 都必须落在目标点 0.6m 内（核心秒杀圈 1.2m 的一半）
+            Vector3 target = new Vector3(Origin.x, GroundY, Origin.z + distance);
+            Vector3 vel = InkBombTrajectoryUtility.ComputeThrowVelocityToLandAt(
+                Origin, target, _config, out float flightTime);
+
+            var points = new Vector3[InkBombTrajectoryUtility.TrajectoryPointCount];
+            bool landed = InkBombTrajectoryUtility.SimulateThrow(Origin, vel, _config, null, points, out Vector3 hit);
+
+            Assert.IsTrue(landed, $"{distance}m 目标应能在预览窗口内落地");
+            float miss = new Vector2(hit.x - target.x, hit.z - target.z).magnitude;
+            Assert.Less(miss, 0.6f, $"{distance}m 目标应指哪落哪（实际偏差 {miss:0.00}m）");
+            Assert.That(flightTime, Is.InRange(0.45f, 1.25f), "飞行时间应在近/远配置之间插值");
+        }
+
+        [Test]
+        public void ComputeThrowVelocityToLandAt_BeyondMaxRange_ClampsToMaxDistance()
+        {
+            Vector3 target = new Vector3(Origin.x, GroundY, Origin.z + 40f);
+            Vector3 vel = InkBombTrajectoryUtility.ComputeThrowVelocityToLandAt(Origin, target, _config);
+
+            var points = new Vector3[InkBombTrajectoryUtility.TrajectoryPointCount];
+            bool landed = InkBombTrajectoryUtility.SimulateThrow(Origin, vel, _config, null, points, out Vector3 hit);
+
+            Assert.IsTrue(landed, "超距目标也应落地（取最远射程）");
+            float flat = new Vector2(hit.x - Origin.x, hit.z - Origin.z).magnitude;
+            Assert.That(flat, Is.InRange(20.5f, 22.5f), "超距目标必须被钳制在 bombMaxThrowDistance ≈ 22m");
+        }
+
+        [Test]
+        public void ResolveThrowTarget_SkyAim_ClampsHorizontallyAndSnapsToGround()
+        {
+            // 准星指向 40m 外的天空：落点应取 22m 最远距离并贴地，而不是飞向空中
+            Vector3 skyAim = new Vector3(Origin.x, GroundY + 30f, Origin.z + 40f);
+            Vector3 target = InkBombTrajectoryUtility.ResolveThrowTarget(Origin, skyAim, _config);
+
+            float flat = new Vector2(target.x - Origin.x, target.z - Origin.z).magnitude;
+            Assert.AreEqual(22f, flat, 0.1f, "超距准星应钳制到最远投掷距离");
+            Assert.AreEqual(GroundY, target.y, 0.05f, "超距目标应贴地");
+        }
+
+        [Test]
+        public void ResolveThrowTarget_FeetAim_KeepsMinimumForwardDistance()
+        {
+            // 准星几乎垂直指脚下：保留 0.9m 前抛距离，避免垂直砸脚
+            Vector3 feetAim = new Vector3(Origin.x, GroundY, Origin.z + 0.1f);
+            Vector3 target = InkBombTrajectoryUtility.ResolveThrowTarget(Origin, feetAim, _config);
+
+            float flat = new Vector2(target.x - Origin.x, target.z - Origin.z).magnitude;
+            Assert.AreEqual(InkBombTrajectoryUtility.MinThrowFlatDistance, flat, 0.01f);
         }
 
         [Test]

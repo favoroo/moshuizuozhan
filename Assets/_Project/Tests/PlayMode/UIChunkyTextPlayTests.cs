@@ -67,6 +67,15 @@ namespace P1.Tests
             Assert.IsNotNull(fillChild, "双层模式下 ChunkyFill 节点必须存在");
             Assert.IsTrue(fillChild.gameObject.activeSelf, "双层模式下 ChunkyFill 必须保持激活");
 
+            // 底层是墨色描边层：即使外部按旧写法给 TMP 染色，SetFillColor 也必须拉回描边色，
+            // 否则上下两层同色 + 4px 硬影偏移会读成「重影」。
+            var tmp = go.GetComponent<TextMeshProUGUI>();
+            tmp.color = ComicStyle.Yellow;
+            chunky.SetFillColor(ComicStyle.Yellow);
+            yield return null;
+            Assert.AreEqual(UIThemeSO.Fallback.outlineColor, tmp.color,
+                "双层模式下底层 TMP 必须保持墨色描边，不能跟随填充色");
+
             Object.Destroy(canvas);
             yield return null;
         }

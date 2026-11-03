@@ -211,7 +211,7 @@ namespace P1.Tests
         }
 
         [UnityTest]
-        public IEnumerator Player_TouchBombPress_ThrowsImmediately_NoAiming()
+        public IEnumerator Player_TouchBombPress_AimsAndReleaseThrows()
         {
             yield return LoadPlaybox();
 
@@ -229,22 +229,30 @@ namespace P1.Tests
             var player = PlayerController.LocalPlayer;
             player.Health.IsInvulnerable = true; // 避免测试期间被 Bot 击杀打断
             var motor = player.Motor;
-            // 手雷与墨水脱钩（设计变更）：空墨也必须能按下即投
+            // 手雷与墨水脱钩（设计变更）：空墨也必须能按住瞄准并投出
             motor.TryConsumeInk(motor.CurrentInk);
             float inkBefore = motor.CurrentInk;
             int bombsBefore = InkBombPool.Instance.ActiveBombCount;
 
-            // 触屏 pointer-down 注入 → 同一帧立即投掷，不进入瞄准态
+            // 触屏 pointer-down 注入 → 进入瞄准，不投出
             player.TouchBombTriggered = true;
+            player.TouchBombHeld = true;
+            yield return null;
+            yield return null;
+
+            Assert.AreEqual(bombsBefore, InkBombPool.Instance.ActiveBombCount, "按下只进入瞄准，不得立刻投出");
+            Assert.IsTrue(player.IsAimingBomb, "按住手雷键应进入瞄准态");
+
+            // pointer-up 注入 → 松手投出
+            player.TouchBombHeld = false;
+            player.TouchBombReleased = true;
             yield return null;
             yield return null;
 
             Assert.AreEqual(bombsBefore + 1, InkBombPool.Instance.ActiveBombCount,
-                "按下即投：注入投掷事件后必须立刻投出一颗");
-            Assert.IsFalse(player.IsAimingBomb, "新版手雷不再有瞄准态");
-            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.01f, "按下即投不扣墨（手雷与墨水脱钩）");
-
-            player.TouchBombHeld = false;
+                "松手必须投出一颗手雷");
+            Assert.IsFalse(player.IsAimingBomb, "投出后退出瞄准态");
+            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.01f, "投掷不扣墨（手雷与墨水脱钩）");
         }
 
         [UnityTest]

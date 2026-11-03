@@ -31,7 +31,6 @@ namespace P1.Player
         private InkCharacterMotor _motor;
         private WeaponController _weapon;
         private CombatantHealth _health;
-        private CharacterController _cc;
 
         private Vector3 _aimPoint;
         private Vector3 _aimGroundPoint;
@@ -54,6 +53,7 @@ namespace P1.Player
         private readonly SwimFormInputArbiter _swimInput = new SwimFormInputArbiter();
         private readonly SubBombThrowArbiter _bombArbiter = new SubBombThrowArbiter();
         private readonly RaycastHit[] _aimHits = new RaycastHit[8];
+        private bool _bombHeldLastFrame;
 
         // 供移动端虚拟摇杆/滑屏注入的输入
         public Vector2 TouchMoveInput { get; set; }
@@ -67,19 +67,22 @@ namespace P1.Player
         public bool TouchFireHeld { get; set; }
         public bool TouchSwimHeld { get; set; }
         public bool TouchJumpTriggered { get; set; }
+
+        /// <summary>触屏手雷键 pointer-down 注入（进入瞄准）。</summary>
         public bool TouchBombTriggered { get; set; }
 
-        /// <summary>保留旧接口：手雷已改为一键直投，不再读取按住状态。</summary>
+        /// <summary>触屏手雷键是否按住（按住期间显示弹道预览）。</summary>
         public bool TouchBombHeld { get; set; }
+
+        /// <summary>触屏手雷键 pointer-up 注入（松手投出）。</summary>
+        public bool TouchBombReleased { get; set; }
+
         public bool TouchSpecialTriggered { get; set; }
 
         public bool GameplayInputEnabled { get; set; } = true;
 
-        /// <summary>
-        /// 保留旧接口：手雷已改为一键直投，不再有「按住瞄准」态，恒为 false。
-        /// 准星 / 相机 / 旧测试仍可安全读取。
-        /// </summary>
-        public bool IsAimingBomb => false;
+        /// <summary>是否正按住手雷瞄准（显示弹道预览 / 相机微收）。</summary>
+        public bool IsAimingBomb => _bombArbiter.IsAiming;
         public InkCharacterMotor Motor => _motor;
         public WeaponController Weapon => _weapon;
         public CombatantHealth Health => _health;
@@ -136,7 +139,6 @@ namespace P1.Player
             _motor = GetComponent<InkCharacterMotor>();
             _weapon = GetComponent<WeaponController>();
             _health = GetComponent<CombatantHealth>();
-            _cc = GetComponent<CharacterController>();
             _propBlock = new MaterialPropertyBlock();
             _subTrajectory = gameObject.AddComponent<SubWeaponThrowTrajectory>();
             MovementAudioDriver.EnsureDriver(gameObject);
@@ -248,7 +250,9 @@ namespace P1.Player
                 TouchJumpTriggered = false;
                 TouchBombTriggered = false;
                 TouchBombHeld = false;
+                TouchBombReleased = false;
                 TouchSpecialTriggered = false;
+                _bombHeldLastFrame = false;
                 _motor.SetFrameIntent(Vector3.zero, _aimDirection, false, false, false, _weapon.IsPerformingSpecial);
                 if (_reticleTransform != null) _reticleTransform.gameObject.SetActive(false);
                 return;
@@ -266,29 +270,46 @@ namespace P1.Player
             bool fireHeld = ReadFireHeld();
             bool wantsJump = ReadJumpPressed();
             bool bombPressed = ReadBombPressed();
-            // 触屏按下即投：MobileTouchUI 在 pointer-down 注入 TouchBombTriggered
-            bool touchBombThrow = TouchBombTriggered;
+            bool bombHeld = ReadBombHeld();
+            bool bombReleased = _bombHeldLastFrame && !bombHeld;
+            _bombHeldLastFrame = bombHeld;
+
+            // 触屏手雷键：pointer-down = 进入瞄准，pointer-up = 松手投出
+            bool touchBombPressed = TouchBombTriggered;
+            bool touchBombHeld = TouchBombHeld;
+            bool touchBombReleased = TouchBombReleased;
             TouchBombTriggered = false;
+            TouchBombReleased = false;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (VerboseBombDebug && touchBombThrow)
+            if (VerboseBombDebug && (touchBombPressed || touchBombReleased))
             {
-                Debug.Log($"[Bomb] 触屏投掷注入: special={_weapon.IsPerformingSpecial}");
+                Debug.Log($"[Bomb] 触屏注入: press={touchBombPressed} release={touchBombReleased} held={touchBombHeld} special={_weapon.IsPerformingSpecial}");
             }
 #endif
             bool specialReadyPressed = ReadSpecialPressed() && _weapon.IsSpecialReady;
 
-            // 副武器手雷一键直投：按下沿 / 触屏按下注入立即投出，无瞄准态、无弹道预览
-            bool executeBombThrow = _bombArbiter.Tick(
-                bombPressed,
-                false,
-                false,
-                touchBombThrow,
-                _weapon.IsPerformingSpecial);
-
-            // 4. 屏幕中心射线瞄准（地面落点仍供小地图朝向与风暴大招落点使用）
+            // 4. 屏幕中心射线瞄准（必须先于手雷仲裁：手雷落点 = 准星命中的世界点）
             UpdateAimPoint();
 
-            // 4.1 枪口与身体姿态跟随视角俯仰：抬头时枪口指天，胸腔只分担一小部分，身体保持直立
+            // 4.1 手雷：按住瞄准（显示弹道预览）、松手按准星落点投出（inkwave 手感）
+            SubBombThrowArbiter.Intent bombIntent = _bombArbiter.Advance(
+                bombPressed,
+                bombHeld,
+                bombReleased,
+                touchBombPressed,
+                touchBombHeld,
+                touchBombReleased,
+                _weapon.IsPerformingSpecial);
+
+            // 预览与实飞共用同一初速：本帧瞄准/投掷只解算一次，所见即所得
+            Vector3 bombThrowVelocity = default;
+            if (bombIntent.IsAiming || bombIntent.ExecuteThrow)
+            {
+                bombThrowVelocity = ComputeBombThrowVelocity();
+            }
+            UpdateBombAimPreview(bombIntent.IsAiming, bombThrowVelocity);
+
+            // 4.2 枪口与身体姿态跟随视角俯仰：抬头时枪口指天，胸腔只分担一小部分，身体保持直立
             CharacterVisualController visual = _motor != null ? _motor.VisualController : null;
             if (visual != null && TopDownCameraFollow.Instance != null)
             {
@@ -296,7 +317,7 @@ namespace P1.Player
             }
 
             // 5. 形态仲裁：最后一次按下的键决定形态，射击与潜行可随时互切
-            bool wantsBombIntent = executeBombThrow;
+            bool wantsBombIntent = bombIntent.StartedAiming;
             // 对齐 Inkwave：乌贼形态不再要求脚下有己方墨 —— 无墨地面也可进入（干地慢速蹦行）；
             // 潜墨加成（高速/回墨/回血/隐匿）由 Motor 内部按脚下墨色单独判定
             bool swimAvailable = true;
@@ -348,16 +369,16 @@ namespace P1.Player
                 _weapon.TryActivateSpecial();
                 isFiringOrActing = true;
             }
-            else if (executeBombThrow)
+            else if (bombIntent.ExecuteThrow)
             {
                 // 投掷仲裁占用了本帧：同样抑制主武器，避免蓄力狙自动开炮、滚筒多挥一次。
                 _weapon.SetTriggerSuppressed();
 
-                // inkwave 弹道模型：以相机俯仰解算的初速真实抛出，准星方向即投掷方向
-                bool thrown = _weapon.TryThrowSubBombBallistic(ComputeBombThrowVelocity());
+                // 准星落点反解：手雷落在屏幕中心命中的地面上（超距取最远 22m）
+                bool thrown = _weapon.TryThrowSubBombBallistic(bombThrowVelocity);
                 if (!thrown)
                 {
-                    // 冷却中按下立刻给显性反馈（触屏手雷键闪红 / 桌面冷却条保持显示），不再静默
+                    // 冷却中松手立刻给显性反馈（触屏手雷键闪红 / 桌面冷却条保持显示），不再静默
                     LastSubBombDenyReason = !_health.IsAlive
                         ? SubBombDenyReason.Dead
                         : _weapon.IsPerformingSpecial
@@ -371,7 +392,7 @@ namespace P1.Player
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     if (VerboseBombDebug)
                     {
-                        Debug.Log($"[Bomb] 投掷被拒: reason={LastSubBombDenyReason} touch={touchBombThrow} cooldownRemaining={_weapon.BombCooldownRemaining:0.00}");
+                        Debug.Log($"[Bomb] 投掷被拒: reason={LastSubBombDenyReason} touchRelease={touchBombReleased} cooldownRemaining={_weapon.BombCooldownRemaining:0.00}");
                     }
 #endif
                 }
@@ -382,17 +403,6 @@ namespace P1.Player
                 // 3D 瞄准点：弹道反解会从枪口解到准星命中的墙面/敌人/地面
                 _weapon.TryFireMainWeapon(_aimDirection, _aimPoint);
                 isFiringOrActing = true;
-            }
-
-            // 7. 手雷已改为一键直投：不再显示抛物线预览 / 落点圈 / 副武器相机瞄准。
-            //    SubWeaponThrowTrajectory 组件保留在物体上以兼容旧调用方，但确保任何时候都不残留显示。
-            if (_subTrajectory != null && _subTrajectory.IsShowing)
-            {
-                _subTrajectory.Hide();
-            }
-            if (TopDownCameraFollow.Instance != null && TopDownCameraFollow.Instance.IsSubAimActive)
-            {
-                TopDownCameraFollow.Instance.SetSubAimActive(false);
             }
 
             _motor.SetFrameIntent(
@@ -603,25 +613,47 @@ namespace P1.Player
         }
 
         /// <summary>
-        /// 按「相机俯仰 + 水平瞄准方向」解算手雷出手初速（inkwave throwVelocity 公式）：
-        /// 平抛约 8m、满仰角最远约 10.5m、低头贴脚丢；附带 0.4× 自身水平速度继承，
-        /// 跑动中投掷会顺势丢得更远。预览与实飞都走这里，保证所见即所得。
+        /// 按「准星命中的世界点」反解手雷出手初速（指哪落哪）：
+        /// 准星命中点先经 <see cref="InkBombTrajectoryUtility.ResolveThrowTarget"/> 钳制到最远投掷距离并贴地，
+        /// 再由飞行时间反解初速；预览与实飞使用同一个结果，保证所见即所得。
         /// </summary>
         private Vector3 ComputeBombThrowVelocity()
         {
-            TopDownCameraFollow cameraFollow = TopDownCameraFollow.Instance;
-            // 相机俯仰正数 = 低头（TopDownCameraFollow 约定），投掷公式正数 = 抬头（inkwave 约定）：
-            // 必须翻转符号，否则「朝天瞄」会被解成向下的负仰角，手雷直接砸在脚边。
-            float aimPitchDegrees = cameraFollow != null
-                ? InkBombTrajectoryUtility.CameraPitchToAimPitchDegrees(cameraFollow.PitchDegrees)
-                : 0f;
-            Vector3 carry = Vector3.zero;
-            if (_cc != null)
+            Vector3 startPos = _weapon.GetSubBombMuzzlePosition();
+            Vector3 targetPos = InkBombTrajectoryUtility.ResolveThrowTarget(startPos, _aimPoint, _weapon.Config);
+            return InkBombTrajectoryUtility.ComputeThrowVelocityToLandAt(startPos, targetPos, _weapon.Config);
+        }
+
+        /// <summary>
+        /// 手雷按住瞄准的预览与相机状态：瞄准时实时显示虚线弹道 + 落点预警圈，
+        /// 松手/取消时立刻收起。预览的初速与实飞完全相同，落点圈贴合法线。
+        /// </summary>
+        private void UpdateBombAimPreview(bool aiming, Vector3 throwVelocity)
+        {
+            TopDownCameraFollow camera = TopDownCameraFollow.Instance;
+
+            if (aiming)
             {
-                carry = _cc.velocity;
-                carry.y = 0f;
+                if (camera != null)
+                    camera.SetSubAimActive(true);
+
+                if (_subTrajectory != null)
+                {
+                    // 冷却/缺墨时 hasEnoughInk=false：虚线变灰红闪烁，松手会走拒绝反馈
+                    _subTrajectory.UpdateTrajectorySim(
+                        _weapon.GetSubBombMuzzlePosition(),
+                        throwVelocity,
+                        _weapon.Config,
+                        _weapon.CanThrowSubBombNow,
+                        _health.Team);
+                }
+                return;
             }
-            return InkBombTrajectoryUtility.ComputeThrowVelocity(_aimDirectionFlat, aimPitchDegrees, carry, _weapon.Config);
+
+            if (_subTrajectory != null && _subTrajectory.IsShowing)
+                _subTrajectory.Hide();
+            if (camera != null && camera.IsSubAimActive)
+                camera.SetSubAimActive(false);
         }
 
         private static bool IsStealthed(CombatantHealth target)
@@ -858,9 +890,16 @@ namespace P1.Player
 
         private bool ReadBombPressed()
         {
-            // 仅桌面端按下沿；触屏「按下即投」由 TouchBombTriggered 承载，在副武器仲裁处单独消费
+            // 仅桌面端按下沿；触屏 press 由 TouchBombTriggered 承载，在副武器仲裁处单独消费
             if (DesktopKeyBindingService.WasActionPressedThisFrame(DesktopAction.SubWeapon)) return true;
             if (Gamepad.current != null && Gamepad.current.rightShoulder.wasPressedThisFrame) return true;
+            return false;
+        }
+
+        private bool ReadBombHeld()
+        {
+            if (DesktopKeyBindingService.IsActionPressed(DesktopAction.SubWeapon)) return true;
+            if (Gamepad.current != null && Gamepad.current.rightShoulder.isPressed) return true;
             return false;
         }
 

@@ -52,7 +52,9 @@ namespace P1.Editor
             weaponCfg.maxRange = 12f;
             weaponCfg.trailDropDistance = 1.05f;
             weaponCfg.projectileSpeed = 34f;
-            weaponCfg.bombMaxThrowDistance = 12f;
+            weaponCfg.bombMaxThrowDistance = 22f;
+            weaponCfg.bombThrowFlightTimeNear = 0.5f;
+            weaponCfg.bombThrowFlightTimeFar = 1.2f;
             EditorUtility.SetDirty(weaponCfg);
 
             gameCfg.usePerspective = true;

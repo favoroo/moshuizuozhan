@@ -445,12 +445,16 @@ namespace P1.UI
                 player.TouchJumpTriggered = true;
             }
 
-            // 5. 手雷
+            // 5. 手雷：pointer-down = 进入瞄准（弹道预览），pointer-up = 松手投出
             if (_bombButton != null)
             {
                 if (_bombButton.ConsumeTap())
                 {
                     player.TouchBombTriggered = true;
+                }
+                if (_bombButton.ConsumeRelease())
+                {
+                    player.TouchBombReleased = true;
                 }
                 player.TouchBombHeld = _bombButton.IsAimingHeld;
 
@@ -553,11 +557,14 @@ namespace P1.UI
             var bombCfg = DefaultLayout[3];
             var specialCfg = DefaultLayout[4];
 
+            // 射击键图标 = 功能色实心圆点（复用 _circleFillSprite），不再用具象武器小图标；
+            // 按下时底盘翻功能色、圆点翻墨黑，与既有按压反馈体系一致。
+            var fireDotIcon = _circleFillSprite;
             _fireButton = MobileActionButton.Create(
                 _safeArea, "FireButton", fireCfg.label,
                 fireCfg.pos, fireCfg.size,
                 ComicStyle.FromHex(0xFF7314), // 队伍橙（射击）
-                fireIcon, _circleFillSprite, _actionRingSprite,
+                fireDotIcon, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.HoldWithAimDrag);
 
             _swimButton = MobileActionButton.Create(
@@ -594,7 +601,7 @@ namespace P1.UI
                 _safeArea, "LeftFireButton", "射击",
                 MobileLayoutPresets.ThreeFingerLeftFirePos, MobileLayoutPresets.LeftFireSize,
                 ComicStyle.FromHex(0xFF7314),
-                fireIcon, _circleFillSprite, _actionRingSprite,
+                fireDotIcon, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.Hold, new Vector2(0f, 0f));
             _leftFireButton.gameObject.SetActive(false);
 
@@ -1343,7 +1350,7 @@ namespace P1.UI
     /// 3. 标签字号走 UITypography.FontSnapped(max(24, size*0.20))，物理极佳可读；
     /// 4. 图标安全查找，缺失时隐藏并由中文标签兜底，绝无白块；
     /// 5. 支持像素级圆形命中测试，防止误触透明角落；
-    /// 6. 支持开火按住、滑拽瞄准、手雷按下即投、大招就绪状态。
+    /// 6. 支持开火按住、滑拽瞄准、手雷按住瞄准/松手投、大招就绪状态。
     /// </summary>
     public class MobileActionButton : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
     {
@@ -1367,6 +1374,7 @@ namespace P1.UI
         private Vector2 _shadowOffset = Vector2.zero;
         private bool _isHeld;
         private bool _tapped;
+        private bool _released;
         private float _pointerDownTime;
         private bool _isAimingHeld;
         private Vector2 _lookDelta;
@@ -1386,7 +1394,7 @@ namespace P1.UI
 
         // 多指/丢 pointer-up 加固：只跟踪按下时的那根手指
         private int _activePointerId = int.MinValue;
-        // 保留旧字段：手雷已改为一键直投，不再有按住瞄准阈值（属性仍可写以兼容旧测试）
+        // 手雷按住瞄准阈值：保留旧字段/属性以兼容旧测试，现行逻辑按下即进入瞄准
         private float _aimHoldSeconds = DefaultAimHoldSeconds;
         // 手雷冷却显示（硬切径向扇形 + 按钮标签倒计时）与拒绝闪红
         private Image _cooldownFillImage;
@@ -1395,7 +1403,7 @@ namespace P1.UI
         private float _denyFlashUntil;
         private int _lastCooldownTenths = int.MinValue;
 
-        /// <summary>保留旧常量：手雷已改为一键直投，不再读取该阈值。</summary>
+        /// <summary>保留旧常量：手雷按下即进入瞄准，不再依赖按住时长阈值。</summary>
         private const float DefaultAimHoldSeconds = 0.15f;
         private const float DenyFlashSeconds = 0.2f;
         private static readonly Color DenyFlashColor = new Color(0.94f, 0.22f, 0.22f, 1f);
@@ -1407,7 +1415,7 @@ namespace P1.UI
         public float BaseScale => _baseScale;
         public float BaseAlpha => _baseAlpha;
 
-        /// <summary>保留旧接口：手雷已改为一键直投，该阈值不再参与判定。</summary>
+        /// <summary>保留旧接口：现行手雷按下即进入瞄准，该阈值不再参与判定。</summary>
         public float AimHoldSeconds
         {
             get => _aimHoldSeconds;
@@ -1452,6 +1460,16 @@ namespace P1.UI
         {
             if (!_tapped) return false;
             _tapped = false;
+            return true;
+        }
+
+        /// <summary>
+        /// 消费一次「手雷键松手」事件（BombTapOrHoldAim 模式）：按下进入瞄准，松手才真正投出。
+        /// </summary>
+        public bool ConsumeRelease()
+        {
+            if (!_released) return false;
+            _released = false;
             return true;
         }
 
@@ -1732,6 +1750,7 @@ namespace P1.UI
             // 上一根手指丢失 pointer-up（系统手势/切后台/来电话）会留下 _tapped/_isAimingHeld 残留，
             // 不清理会让一次残留事件被重复消费或按钮状态卡死
             _tapped = false;
+            _released = false;
             _isAimingHeld = false;
             _denyFlashUntil = 0f;
 
@@ -1742,11 +1761,16 @@ namespace P1.UI
             _rectTransform.localScale = Vector3.one * (_baseScale * ComicStyle.PressScale);
             ApplyPressedVisual();
 
-            if (_mode == MobileButtonMode.Tap || _mode == MobileButtonMode.Special ||
-                _mode == MobileButtonMode.BombTapOrHoldAim)
+            if (_mode == MobileButtonMode.Tap || _mode == MobileButtonMode.Special)
             {
-                // 手雷一键直投：pointer-down 即产生一次性投掷事件，不等松开
                 _tapped = true;
+            }
+            else if (_mode == MobileButtonMode.BombTapOrHoldAim)
+            {
+                // inkwave 式手雷：pointer-down 进入瞄准（显示弹道预览），pointer-up 才投出。
+                // ConsumeTap 作为「按下」事件注入 PlayerController，ConsumeRelease 作为「松手投掷」。
+                _tapped = true;
+                _isAimingHeld = true;
             }
         }
 
@@ -1768,8 +1792,10 @@ namespace P1.UI
             }
             else if (_mode == MobileButtonMode.BombTapOrHoldAim)
             {
-                // 手雷一键直投：按住拖动不再进入瞄准/转视角，投掷已在 pointer-down 发生
-                _isAimingHeld = false;
+                // 按住手雷键拖动 = 瞄准：累计像素增量交给 MobileTouchUI 统一换算成视角转角，
+                // 松开前可以边拖边看弹道预览落到准星处。
+                _lookDelta += eventData.delta;
+                _isAimingHeld = true;
             }
         }
 
@@ -1794,9 +1820,9 @@ namespace P1.UI
             }
             else if (_mode == MobileButtonMode.BombTapOrHoldAim)
             {
-                // 投掷已在 pointer-down 发生；松开只负责复原视觉，绝不补投第二颗。
-                // 旧逻辑在 pointer-up 注入投掷事件，配合「按下不投」造成明显的松手延迟感。
+                // 松手 = 投出：产生一次 release 事件，PlayerController 按当前准星落点抛出
                 _isAimingHeld = false;
+                _released = true;
             }
         }
 
@@ -1889,6 +1915,7 @@ namespace P1.UI
         {
             _isHeld = false;
             _tapped = false;
+            _released = false;
             _isAimingHeld = false;
             HasDragAim = false;
             _lookDelta = Vector2.zero;

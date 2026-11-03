@@ -160,7 +160,11 @@ namespace P1.UI
                 if (_fillLayer.fontMaterial != null) _fillLayer.outlineColor = color;
             }
 
-            if (!doubleLayer && source != null) source.color = color;
+            if (source == null) return;
+
+            // 双层模式下底层是墨色描边/硬影层：外部先给 TMP 染了填充色也要拉回来，
+            // 否则两层同色 + 4px 偏移会读成「重影」。
+            source.color = doubleLayer ? outlineColor : color;
         }
 
         public void SetOutlineColor(Color color)

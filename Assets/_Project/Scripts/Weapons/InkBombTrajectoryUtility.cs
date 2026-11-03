@@ -190,7 +190,25 @@ namespace P1.Weapons
             Vector3[] outPoints,
             out Vector3 firstHitPoint)
         {
+            return SimulateThrow(
+                startPos, velocity, config, ignoreRoot, outPoints, out firstHitPoint, out _);
+        }
+
+        /// <summary>
+        /// 同 <see cref="SimulateThrow(Vector3,Vector3,WeaponConfigSO,Transform,Vector3[],out Vector3)"/>，
+        /// 额外输出首个命中面的法线：落点预警环按法线贴放，打墙时不再悬空水平放置。
+        /// </summary>
+        public static bool SimulateThrow(
+            Vector3 startPos,
+            Vector3 velocity,
+            WeaponConfigSO config,
+            Transform ignoreRoot,
+            Vector3[] outPoints,
+            out Vector3 firstHitPoint,
+            out Vector3 firstHitNormal)
+        {
             firstHitPoint = startPos;
+            firstHitNormal = Vector3.up;
             if (outPoints == null || outPoints.Length == 0)
                 return false;
 
@@ -214,6 +232,7 @@ namespace P1.Weapons
                 {
                     pos = hit.point;
                     firstHitPoint = hit.point;
+                    firstHitNormal = hit.normal.sqrMagnitude > 0.0001f ? hit.normal.normalized : Vector3.up;
                     landed = true;
                     break;
                 }
@@ -233,52 +252,126 @@ namespace P1.Weapons
             return landed;
         }
 
+        /// <summary>准星投掷的最近水平距离（米）：目标贴脚时也留出一点前抛距离，避免垂直砸脚。</summary>
+        public const float MinThrowFlatDistance = 0.9f;
+
         /// <summary>
-        /// 弹道学反解：给定固定初速与重力，求命中目标点的低弧出手速度（旧落点制契约专用）。
-        /// 玩家链路走 <see cref="ComputeThrowVelocity"/>（俯仰决定远近）；本方法服务于
-        /// Bot 与旧 API——「投到 targetGroundPos」的语义必须保持。
-        /// 初速够不到目标时退化为 45° 全力抛（最大射程）。
+        /// 把「准星命中的世界点」解析成手雷实际要砸的目标点：
+        /// 水平距离钳制在 bombMaxThrowDistance 内；超距（准星指向天空/射程外）时取最远水平落点并贴地，
+        /// 避免手雷飞向空中。近距保底 <see cref="MinThrowFlatDistance"/>。
         /// </summary>
+        public static Vector3 ResolveThrowTarget(Vector3 startPos, Vector3 aimPoint, WeaponConfigSO config)
+        {
+            float maxDist = config != null && config.bombMaxThrowDistance > 0.1f
+                ? config.bombMaxThrowDistance
+                : 22f;
+            maxDist = Mathf.Max(maxDist, MinThrowFlatDistance);
+
+            Vector3 flat = aimPoint - startPos;
+            flat.y = 0f;
+            float distance = flat.magnitude;
+            Vector3 planar = distance > 0.0001f ? flat / distance : Vector3.forward;
+            bool clamped = distance > maxDist;
+            float targetDistance = Mathf.Clamp(distance, MinThrowFlatDistance, maxDist);
+
+            Vector3 target = startPos + planar * targetDistance;
+            target.y = aimPoint.y;
+
+            if (clamped)
+            {
+                // 准星指向天空 / 射程外：水平取最远点后向下找地面，落点仍然可读
+                if (Physics.Raycast(
+                        new Vector3(target.x, startPos.y + 8f, target.z),
+                        Vector3.down,
+                        out RaycastHit groundHit,
+                        40f,
+                        GameLayers.WorldMask,
+                        QueryTriggerInteraction.Ignore))
+                {
+                    target.y = groundHit.point.y;
+                }
+                else
+                {
+                    target.y = startPos.y - 0.5f;
+                }
+            }
+
+            return target;
+        }
+
+        /// <summary>
+        /// 弹道学反解：按固定重力求「精确命中目标点」的出手速度（指哪落哪）。
+        /// 飞行时间随水平距离在 bombThrowFlightTimeNear/Far 间插值：近投干脆、远投有滞空弧线，
+        /// 再由 T 反推水平速度与垂直初速，确保落点与准星一致。
+        /// 这是玩家链路与 Bot 共用的落点制入口；旧的俯仰制 <see cref="ComputeThrowVelocity"/> 保留兼容。
+        /// </summary>
+        public static Vector3 ComputeThrowVelocityToLandAt(
+            Vector3 startPos,
+            Vector3 targetGroundPos,
+            WeaponConfigSO config,
+            out float flightTime)
+        {
+            float g = config != null && config.bombThrowGravity > 0.1f ? config.bombThrowGravity : 24f;
+            float maxDist = config != null && config.bombMaxThrowDistance > 0.1f
+                ? config.bombMaxThrowDistance
+                : 22f;
+            maxDist = Mathf.Max(maxDist, MinThrowFlatDistance);
+            float nearTime = config != null && config.bombThrowFlightTimeNear > 0.01f
+                ? config.bombThrowFlightTimeNear
+                : 0.5f;
+            float farTime = config != null && config.bombThrowFlightTimeFar > nearTime
+                ? config.bombThrowFlightTimeFar
+                : Mathf.Max(nearTime, 1.2f);
+
+            Vector3 flat = targetGroundPos - startPos;
+            flat.y = 0f;
+            float distance = flat.magnitude;
+            Vector3 planar = distance > 0.0001f ? flat / distance : Vector3.forward;
+
+            // 超距目标：只保留最大水平距离（垂直目标高度保留，供高台/墙面落点）
+            if (distance > maxDist)
+            {
+                distance = maxDist;
+                targetGroundPos = new Vector3(
+                    startPos.x + planar.x * maxDist,
+                    targetGroundPos.y,
+                    startPos.z + planar.z * maxDist);
+            }
+
+            // 贴脚目标：水平距离保底，方向沿准星水平朝向
+            if (distance < MinThrowFlatDistance)
+            {
+                distance = MinThrowFlatDistance;
+                targetGroundPos = new Vector3(
+                    startPos.x + planar.x * distance,
+                    targetGroundPos.y,
+                    startPos.z + planar.z * distance);
+            }
+
+            float t = Mathf.Clamp01(distance / maxDist);
+            flightTime = Mathf.Lerp(nearTime, farTime, t);
+
+            float dy = targetGroundPos.y - startPos.y;
+            float vy = (dy + 0.5f * g * flightTime * flightTime) / flightTime;
+
+            // 预览仿真与实飞都走半隐式欧拉（先加速度后位移），同一步长下弹道会比解析解略高；
+            // 这里预扣半步重力，保证「预览线落点 = 准星点」而不是系统性偏近/偏高。
+            vy -= 0.5f * g * SimDt;
+
+            float horizontalSpeed = distance / flightTime;
+            return new Vector3(
+                planar.x * horizontalSpeed,
+                vy,
+                planar.z * horizontalSpeed);
+        }
+
+        /// <summary>旧落点制签名（Bot / 既有测试）：忽略飞行时间输出。</summary>
         public static Vector3 ComputeThrowVelocityToLandAt(
             Vector3 startPos,
             Vector3 targetGroundPos,
             WeaponConfigSO config)
         {
-            float speed = config != null && config.bombThrowSpeed > 0.1f ? config.bombThrowSpeed : 13.5f;
-            float g = config != null && config.bombThrowGravity > 0.1f ? config.bombThrowGravity : 24f;
-
-            Vector3 flat = targetGroundPos - startPos;
-            flat.y = 0f;
-            float d = flat.magnitude;
-            Vector3 planar = d > 0.0001f ? flat / d : Vector3.forward;
-
-            float v2 = speed * speed;
-            float dy = targetGroundPos.y - startPos.y;
-            float disc = v2 * v2 - g * (g * d * d + 2f * dy * v2);
-
-            float sinTheta, cosTheta;
-            if (d < 0.05f)
-            {
-                // 目标贴脚：以俯仰下限温柔丢出（反解在 d→0 时发散）
-                float minRad = (config != null ? config.bombThrowPitchMinDegrees : -17.2f) * Mathf.Deg2Rad;
-                sinTheta = Mathf.Sin(minRad);
-                cosTheta = Mathf.Cos(minRad);
-            }
-            else if (disc < 0f)
-            {
-                // 初速够不到目标：45° 全力抛
-                sinTheta = cosTheta = Mathf.Sqrt(0.5f);
-            }
-            else
-            {
-                // 低弧解（tanθ 取小根）：弹道更平、落地更快，贴近 inkwave 的利落手感
-                float tanTheta = (v2 - Mathf.Sqrt(disc)) / (g * d);
-                float denom = Mathf.Sqrt(1f + tanTheta * tanTheta);
-                cosTheta = 1f / denom;
-                sinTheta = tanTheta / denom;
-            }
-
-            return new Vector3(planar.x * cosTheta * speed, sinTheta * speed, planar.z * cosTheta * speed);
+            return ComputeThrowVelocityToLandAt(startPos, targetGroundPos, config, out _);
         }
         /// <summary>
         /// 单段弹道射线：命中最近的世界表面，跳过投掷者自身与触发器。

@@ -104,6 +104,45 @@ namespace P1.UI
             {
                 percentTextB.fontSize = UITypography.FontSnapped(ComicStyle.FontH2);
             }
+
+            ApplyFinalMinuteBannerMetrics(blobSize);
+        }
+
+        /// <summary>
+        /// 决战横幅跟着计时球的真实高度重新落位：
+        /// 旧实现把 y 固定成 -190（按桌面 112 高球体算的 8px 间距），
+        /// 移动端球体加高到 124 后横幅顶边会压进 Hero 硬影与球体 4~11px。
+        /// 这里以「球顶 -70 + 球高 + 16 呼吸位」推导，桌面/移动端都不会再叠。
+        /// </summary>
+        private void ApplyFinalMinuteBannerMetrics(Vector2 blobSize)
+        {
+            if (finalMinuteBannerRoot != null)
+            {
+                finalMinuteBannerRoot.anchoredPosition = new Vector2(0f, -(70f + blobSize.y + 16f));
+                finalMinuteBannerRoot.sizeDelta = _isMobileLayout
+                    ? new Vector2(540f, 100f)
+                    : new Vector2(460f, 84f);
+            }
+
+            if (bannerText != null)
+            {
+                float maxFont = UITypography.FontSnapped(26f);
+                bannerText.enableAutoSizing = true;
+                bannerText.fontSizeMin = UITypography.FontSnapped(18f);
+                bannerText.fontSizeMax = maxFont;
+                bannerText.fontSize = maxFont;
+                bannerText.textWrappingMode = TextWrappingModes.NoWrap;
+                bannerText.overflowMode = TextOverflowModes.Overflow;
+                // 左侧 10px 黄条 + 12px 呼吸位；右侧留 18px，文字永不贴边。
+                bannerText.rectTransform.offsetMin = new Vector2(26f, 6f);
+                bannerText.rectTransform.offsetMax = new Vector2(-18f, -6f);
+            }
+
+            var self = transform as RectTransform;
+            if (self != null)
+            {
+                self.sizeDelta = new Vector2(580f, _isMobileLayout ? 340f : 310f);
+            }
         }
 
         private void Awake()
@@ -520,9 +559,30 @@ namespace P1.UI
                 finalMinuteBannerRoot.anchorMin = new Vector2(0.5f, 1f);
                 finalMinuteBannerRoot.anchorMax = new Vector2(0.5f, 1f);
                 finalMinuteBannerRoot.pivot = new Vector2(0.5f, 1f);
-                // 计时黑块（-70 起、112 高）之下留 8px 间距，Hero 硬影不会压到横幅
-                finalMinuteBannerRoot.anchoredPosition = new Vector2(0f, -190f);
-                finalMinuteBannerRoot.sizeDelta = new Vector2(380f, 60f);
+                // 初值只作占位：BuildHierarchy 末尾会按真实球高重算（桌面 198 / 移动 210）。
+                finalMinuteBannerRoot.anchoredPosition = new Vector2(0f, -198f);
+                finalMinuteBannerRoot.sizeDelta = new Vector2(460f, 84f);
+
+                // 左侧行动黄竖条：让横幅从「一条红条」变成有层级的通知卡（与 HUD 卡色带同语言）。
+                var accentGo = new GameObject("BannerAccent", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                accentGo.transform.SetParent(finalMinuteBannerRoot, false);
+                var accentRect = accentGo.GetComponent<RectTransform>();
+                accentRect.anchorMin = new Vector2(0f, 0f);
+                accentRect.anchorMax = new Vector2(0f, 1f);
+                accentRect.pivot = new Vector2(0f, 0.5f);
+                accentRect.anchoredPosition = new Vector2(0f, 0f);
+                accentRect.sizeDelta = new Vector2(10f, -ComicStyle.Border * 2f);
+                var accentGraphic = accentGo.GetComponent<UIInkShapeGraphic>();
+                accentGraphic.Shape = UIInkShape.SharpRect;
+                accentGraphic.CornerRadius = ComicStyle.CornerSharp;
+                accentGraphic.BorderWidth = 0f;
+                accentGraphic.HardShadow = false;
+                accentGraphic.Halftone = false;
+                accentGraphic.GlossAlpha = 0f;
+                accentGraphic.DrawGloss = false;
+                accentGraphic.InnerRimAlpha = 0f;
+                accentGraphic.color = ComicStyle.Yellow;
+                accentGraphic.raycastTarget = false;
 
                 bannerMotion = bannerGo.GetComponent<UISpringMotion>();
                 bannerMotion.SetTheme(resolvedTheme);
@@ -546,18 +606,22 @@ namespace P1.UI
                 var bannerTxtRect = bannerTxtGo.GetComponent<RectTransform>();
                 bannerTxtRect.anchorMin = Vector2.zero;
                 bannerTxtRect.anchorMax = Vector2.one;
-                bannerTxtRect.sizeDelta = Vector2.zero;
+                bannerTxtRect.offsetMin = new Vector2(26f, 6f);
+                bannerTxtRect.offsetMax = new Vector2(-18f, -6f);
 
                 bannerText = bannerTxtGo.GetComponent<TextMeshProUGUI>();
-                bannerText.font = resolvedTheme.ResolveFont(true, "【 1:00 FINAL MINUTE! 】");
-                bannerText.fontSize = UITypography.FontSnapped(28f);
+                bannerText.font = resolvedTheme.ResolveFont(true, "1:00 · FINAL MINUTE!");
+                bannerText.fontSize = UITypography.FontSnapped(26f);
                 bannerText.fontStyle = FontStyles.Bold;
                 bannerText.alignment = TextAlignmentOptions.Center;
                 bannerText.color = ComicStyle.Paper;
-                bannerText.text = "【 1:00 FINAL MINUTE! 】";
+                bannerText.text = "1:00 · FINAL MINUTE!";
 
                 finalMinuteBannerRoot.gameObject.SetActive(false);
             }
+
+            // 横幅尺寸 / 字号 / 与计时球的间距统一走同一入口（桌面与移动端各一套几何）。
+            ApplyFinalMinuteBannerMetrics(blobSize);
         }
     }
 }

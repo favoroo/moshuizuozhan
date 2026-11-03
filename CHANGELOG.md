@@ -7,6 +7,18 @@
 > **不记**：逐项 `Added` / `Changed` / `Verified` 流水账、测试项数与 exit 状态明细、selftest 细节、用户原话、设计推导、临时出图路径。
 > 2026-11-01 之前的条目按 GitHub Release 说明回填（仅版本里程碑）；逐条根因记录自 v0.1.8 起。
 
+## 2026-11-03 #10
+【发布墨水作战 v0.1.16：结算页极简化 + 战斗 HUD 通知重排 + 触控图标重做】本版把 #07–#09 一并发出：结算页移除 4v4 明细台账 / 勋章 chips / 胜差贴纸 / 拔河覆盖率条，只留「涂地 / 击杀 / 阵亡 + 等级经验」；最后 1 分钟横幅、手雷冷却徽标、击杀卡第二行、战况播报等通知类 UI 改为按实测文本宽度动态排布并开启 TMP 自动缩字，根治移动端字号放大后的溢出与互压；移动端触控键图标改用 `MobileControlGlyphFactory` 程序化几何字形（准星 / 墨滴 / 上箭头 / 手雷 / 下砸箭头 / 四向箭头）替换说明插画与手柄图标。`PlayerSettings` 版本 0.1.16 / bundleVersionCode 116 与 `GameVersion.APP_VERSION` 三方一致，APK `build/moshuizuozhan-v0.1.16-arm64-v8a.apk`（63.1 MB）。涉及 `Scripts/UI/{MatchFlowUI,CenterTimerView,WeaponReticleUI,KillCardView,KillFeedView,MatchCalloutView,MatchBannerView,MobileTouchUI}.cs`、`Scripts/UI/Core/MobileControlGlyphFactory.cs`、`Scripts/Core/GameVersion.cs`、`ProjectSettings/ProjectSettings.asset`。
+
+## 2026-11-03 #09
+【战斗 HUD 通知类 UI 重排：文字溢出 / 重叠 / 看不清】Fixed: ① 最后 1 分钟横幅 `CenterTimerView.FinalMinuteBanner` 原 380×60 面板塞 407×74 的文字（移动端字号 ×1.28 更严重），且 y 固定 -190 在移动端会压进计时球 Hero 硬影——现按「球顶 -70 + 球高 + 16」推导位置，桌面 460×84 / 移动 540×100，26 号（移动 34）TMP 自动缩字，文案去掉全角括号改 `1:00 · FINAL MINUTE!`，左侧加 10px 行动黄竖条。② 手雷冷却徽标 `SubAimBadge` 原 220×36 三等分框，桌面 18 号 "BOMB" 已比 60px 框宽 2.5px、移动端 24 号直接压进进度条——现胶囊 292×40 / 340×48，进度条吃掉两侧读数剩余宽度，移动端标签改「手雷」，冷却结束整条翻黄显示「手雷就绪」（桌面 `BOMB READY · E`）1.8s。③ 击杀卡第二行标签锁死 106 宽、受害者固定 196 起，移动端 30 号 "CRUSHED!" 实测 181 宽会压到受害者名——`KillCardView.ApplyRowLayout` 改按 `preferredWidth` 动态排布，移动端该行收 24 号；`KillFeedView` 移动端最多 3 张卡，避免第 4 张压住右下角手雷键。④ `MatchCalloutView` 主/副标题改 TMP 自动缩字 + 24px 内边距，杜绝移动端大字顶破 6px 墨边。⑤ `MatchBannerView` 副标题原本锚在面板外 -28px（飘在天空上），改为面板内下部 32%，主/副标题统一走自动缩字（该 View 当前在场景里停用，属潜在链路修复）。涉及 `Scripts/UI/{CenterTimerView,WeaponReticleUI,KillCardView,KillFeedView,MatchCalloutView,MatchBannerView}.cs`；新增 `KillCard_ActionTagAndVictimName_DoNotOverlap`、`CenterTimer_FinalMinuteBanner_TextFitsInsidePanel_AndClearsTimerBlob`、`SubAimBadge_TextFitsItsBoxes` 三条 EditMode 回归。陷阱：`TMP_Text.preferredWidth` 在 `Bind` 里写完 `font`/`text` 后即可读，但比较不同锚点（左锚 vs 右锚）的矩形必须先换算到同一局部坐标，否则会出现「-80 vs 202」的假失败。
+
+## 2026-11-03 #08
+移动端触控键图标重做：射击/潜行/跳跃/手雷/大招与摇杆把手改用 `MobileControlGlyphFactory` 程序化几何字形（准星 / 墨滴 / 上箭头 / 手雷 / 下砸箭头 / 四向箭头），替换掉「射击实心圆点」、规则说明插画（`rule_swim`/`rule_climb`）与手柄图标（`glyph_gamepad`）；图标仍走 `Image.color` 染色，按下翻墨黑不变，图标/标签锚点同步调整避免互压。涉及 `Scripts/UI/Core/MobileControlGlyphFactory.cs`、`Scripts/UI/MobileTouchUI.cs`。陷阱：动作键图标不能复用 `UIIconLibrary` 的 Rules/Weapons 插画——那套是深描边 + 内部细节线的说明图，缩到 60~80px 会糊成一坨；动作键需要单一粗剪影。Inspector 显式赋值的 Sprite 仍优先，便于单独换皮。
+
+## 2026-11-03 #07
+【结算页改为极简中文版：比分 + 个人战绩】`MatchFlowUI` 结算页移除 4v4 明细台账（TURF / K.O. / DOWN、YOU / ALLY / ENEMY 名）、勋章 chips、胜差贴纸（PHOTO FINISH / LANDSLIDE）、拔河覆盖率条与背景装饰；判定大牌改「胜利 / 失败」，新战报卡只留「涂地 / 击杀 / 阵亡 + 等级 / 经验条 / 本局经验」，升级页签改「升级 · 等级 N」。`PopulateMedals` / `RebuildRosterRows` / `CreateRosterHeader` / `CreateCoverFill` 等整段退场，`MatchAwards` 纯逻辑保留但结算页不再消费。涉及 `Scripts/UI/MatchFlowUI.cs`。
+
 ## 2026-11-03 #06
 【发布墨水作战 v0.1.15：手雷准星落点投掷 + 结算大字重影/隐私弹窗修复】本版把 #02–#05 一并发出：手雷改为「按住瞄准 → 松手按准星落点投出」，投掷前实时显示虚线弹道与贴合法线的落点预警圈，最远投掷距离 12→22m；结算页 VICTORY/DEFEAT 大字重影修复、隐私同意弹窗正文与按钮重叠修复、移动端射击键改实心圆点图标；`PlayerSettings` 版本 0.1.15 / bundleVersionCode 115 与 `GameVersion.APP_VERSION` 三方一致。涉及 `Scripts/Core/GameVersion.cs`、`ProjectSettings/ProjectSettings.asset`、`build/moshuizuozhan-v0.1.15-arm64-v8a.apk`。陷阱：`tools/run_tests.sh all` 的 PlayMode 卡死检测阈值是 90s，而本项目 PlayMode 实测需约 140s，脚本会误判「运行器卡死」并取消重跑——判定回归前先直接跑 `"$U" command test run --mode PlayMode --async_tests` 再轮询 `test status` 取真实结果。
 

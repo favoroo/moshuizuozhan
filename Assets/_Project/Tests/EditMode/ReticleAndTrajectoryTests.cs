@@ -185,6 +185,52 @@ namespace P1.Tests
             Object.DestroyImmediate(canvasGo);
         }
 
+        /// <summary>
+        /// 回归：手雷冷却徽标的三块文字都必须放进自己的框里。
+        /// 旧版 220×36 胶囊 + 60px 标签框，"BOMB" 在 18 号已溢出 2.5px，移动端 24 号会压进进度条。
+        /// </summary>
+        [Test]
+        public void SubAimBadge_TextFitsItsBoxes()
+        {
+            var canvasGo = new GameObject("TestCanvas", typeof(Canvas), typeof(RectTransform));
+            ((RectTransform)canvasGo.transform).sizeDelta = new Vector2(1920f, 1080f);
+
+            var reticleGo = new GameObject("TestReticleUI", typeof(RectTransform));
+            reticleGo.transform.SetParent(canvasGo.transform, false);
+            var reticleUI = reticleGo.AddComponent<P1.UI.WeaponReticleUI>();
+            reticleUI.EnsureInitialized();
+
+            var badge = reticleGo.transform.Find("SubAimBadge") as RectTransform;
+            Assert.IsNotNull(badge, "SubAimBadge container should exist");
+
+            var label = badge.Find("Text").GetComponent<TMPro.TMP_Text>();
+            var time = badge.Find("TimeText").GetComponent<TMPro.TMP_Text>();
+            var ready = badge.Find("ReadyText").GetComponent<TMPro.TMP_Text>();
+            Assert.IsNotNull(label);
+            Assert.IsNotNull(time);
+            Assert.IsNotNull(ready);
+
+            Assert.LessOrEqual(label.preferredWidth, label.rectTransform.rect.width + 0.5f,
+                "左侧标签必须放在自己的框内");
+            Assert.LessOrEqual(time.preferredWidth, time.rectTransform.rect.width + 0.5f,
+                "右侧倒计时必须放在自己的框内");
+
+            ready.gameObject.SetActive(true);
+            Canvas.ForceUpdateCanvases();
+            Assert.LessOrEqual(ready.preferredWidth, ready.rectTransform.rect.width + 0.5f,
+                "就绪文案必须放在胶囊内");
+
+            // 进度条右缘不得越过右侧倒计时框的左缘。
+            // 进度条锚在左边（pivot 0），倒计时锚在右边（pivot 1），先统一到徽标局部坐标再比。
+            var barBg = badge.Find("BarBg") as RectTransform;
+            Assert.IsNotNull(barBg);
+            float timeLeft = badge.rect.width + time.rectTransform.anchoredPosition.x - time.rectTransform.rect.width;
+            Assert.LessOrEqual(barBg.anchoredPosition.x + barBg.rect.width + 0.5f, timeLeft,
+                "进度条不得压到右侧倒计时");
+
+            Object.DestroyImmediate(canvasGo);
+        }
+
         [Test]
         public void TopDownCameraFollow_SetSubAimActive_ModifiesLookAheadState()
         {

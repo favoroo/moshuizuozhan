@@ -149,6 +149,94 @@ namespace P1.Tests
             Assert.AreEqual(MatchBannerType.None, flow.BannerView.CurrentType);
         }
 
+        /// <summary>
+        /// 回归：击杀卡第二行「标签 + 受害者名」不得重叠。
+        /// 旧版标签框锁死 106、受害者从 196 起；移动端 30 号 "CRUSHED!" 实测 181 宽，
+        /// 会压到受害者名上。现在按 preferredWidth 动态排布，两者之间必须留出间距。
+        /// </summary>
+        [Test]
+        public void KillCard_ActionTagAndVictimName_DoNotOverlap()
+        {
+            var canvasGo = new GameObject("Canvas", typeof(Canvas), typeof(RectTransform));
+            canvasGo.transform.SetParent(_rootGo.transform, false);
+
+            var cardGo = new GameObject("Card", typeof(RectTransform));
+            cardGo.transform.SetParent(canvasGo.transform, false);
+            ((RectTransform)cardGo.transform).sizeDelta = new Vector2(400f, 88f);
+
+            var card = cardGo.AddComponent<KillCardView>();
+            card.EnsureBuilt();
+            card.Bind(new KillFeedEvent
+            {
+                KillerName = "ALLY 03",
+                KillerTeam = Team.TeamA,
+                VictimName = "ENEMY 03",
+                VictimTeam = Team.TeamB,
+                WeaponKind = WeaponKind.Shooter,
+                IsLocalPlayerKiller = true,
+                Timestamp = 1f
+            }, null, null, null);
+
+            Canvas.ForceUpdateCanvases();
+
+            var tag = cardGo.transform.Find("ActionTag").GetComponent<TMPro.TMP_Text>();
+            var victim = cardGo.transform.Find("VictimText").GetComponent<TMPro.TMP_Text>();
+            Assert.IsNotNull(tag);
+            Assert.IsNotNull(victim);
+
+            float tagRight = tag.rectTransform.anchoredPosition.x + tag.rectTransform.rect.width;
+            Assert.LessOrEqual(tagRight + 0.5f, victim.rectTransform.anchoredPosition.x,
+                "标签右缘必须停在受害者名起点之前（10px 间距）");
+            Assert.LessOrEqual(tag.preferredWidth, tag.rectTransform.rect.width + 0.5f,
+                "标签框必须容纳实测文字宽度，不能靠溢出画到别人身上");
+            Assert.LessOrEqual(victim.preferredWidth, victim.rectTransform.rect.width + 0.5f,
+                "受害者名框必须容纳常见名字（超长才允许 Truncate）");
+
+            Object.DestroyImmediate(canvasGo);
+        }
+
+        /// <summary>
+        /// 回归：最后 1 分钟横幅的文字必须完整落在红底面板内，且与计时球留出呼吸位。
+        /// 旧版 380×60 面板塞 407×74 的文字（移动端更严重），并固定 -190 在移动端压住计时球。
+        /// </summary>
+        [Test]
+        public void CenterTimer_FinalMinuteBanner_TextFitsInsidePanel_AndClearsTimerBlob()
+        {
+            var canvasGo = new GameObject("Canvas", typeof(Canvas), typeof(RectTransform));
+            canvasGo.transform.SetParent(_rootGo.transform, false);
+
+            var timerGo = new GameObject("Timer", typeof(RectTransform));
+            timerGo.transform.SetParent(canvasGo.transform, false);
+            var timer = timerGo.AddComponent<CenterTimerView>();
+            timer.EnsureTimerBuilt(true);
+            timer.SetTime(61f);
+            timer.SetTime(59f);
+
+            Canvas.ForceUpdateCanvases();
+
+            var banner = timerGo.transform.Find("FinalMinuteBanner") as RectTransform;
+            var blob = timerGo.transform.Find("TimerBlob") as RectTransform;
+            Assert.IsNotNull(banner, "最后 1 分钟横幅应已构建");
+            Assert.IsNotNull(blob, "计时球应已构建");
+            Assert.IsTrue(banner.gameObject.activeSelf, "跨过 60s 后横幅应显示");
+
+            var text = banner.Find("BannerText").GetComponent<TMPro.TMP_Text>();
+            Assert.IsNotNull(text);
+            Assert.LessOrEqual(text.preferredWidth, text.rectTransform.rect.width + 0.5f,
+                "横幅文字宽度必须落在内边距内");
+            Assert.LessOrEqual(text.preferredHeight, text.rectTransform.rect.height + 0.5f,
+                "横幅文字高度必须落在面板内");
+
+            var bannerCorners = new Vector3[4];
+            var blobCorners = new Vector3[4];
+            banner.GetWorldCorners(bannerCorners);
+            blob.GetWorldCorners(blobCorners);
+            Assert.GreaterOrEqual(blobCorners[0].y - bannerCorners[2].y, 12f,
+                "横幅顶边与计时球底边至少留 12px（Hero 硬影 7px 也不得压住）");
+
+            Object.DestroyImmediate(canvasGo);
+        }
+
         [Test]
         public void MinimapView_EnsureBuilt_InstantiatesMarkers()
         {

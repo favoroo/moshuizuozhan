@@ -107,8 +107,13 @@ namespace P1.UI
             EnsureBuilt();
             LoadIconsIfNeeded();
 
-            // 若活跃卡片超出上限，让最老的一张立即淡出并移出活跃列表
-            while (_activeCards.Count >= maxVisibleCards)
+            // 若活跃卡片超出上限，让最老的一张立即淡出并移出活跃列表。
+            // 移动端只留 3 张：第 4 张底边会压到右下角手雷键（实测 132px 键心 y≈355，
+            // 卡片区 304~388），且手机横向可视高度更紧。
+            int visibleCap = UITypography.IsMobileLike
+                ? Mathf.Min(maxVisibleCards, 3)
+                : maxVisibleCards;
+            while (_activeCards.Count >= visibleCap)
             {
                 var oldest = _activeCards[0];
                 _activeCards.RemoveAt(0);

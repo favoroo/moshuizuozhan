@@ -218,15 +218,28 @@ namespace P1.UI
 
             if (mainText != null)
             {
+                // 移动端 52×1.28≈66 号时，"WIPEOUT!" 这类大字在 76px 高的主行里会纵向溢出；
+                // TMP 自动缩字在「不超过设计字号」的前提下自适配到当前行高/行宽。
+                float mainFontSize = UITypography.FontSnapped(result.IsBig ? 52f : 38f);
+                mainText.enableAutoSizing = true;
+                mainText.fontSizeMin = UITypography.FontSnapped(22f);
+                mainText.fontSizeMax = mainFontSize;
+                mainText.fontSize = mainFontSize;
+                mainText.textWrappingMode = TextWrappingModes.NoWrap;
+                mainText.overflowMode = TextOverflowModes.Overflow;
                 mainText.text = result.MainText;
-                float mainFontSize = result.IsBig ? 52f : 38f;
-                mainText.fontSize = UITypography.FontSnapped(mainFontSize);
             }
 
             if (subText != null)
             {
+                float subFontSize = UITypography.FontSnapped(18f);
+                subText.enableAutoSizing = true;
+                subText.fontSizeMin = UITypography.FontSnapped(16f);
+                subText.fontSizeMax = subFontSize;
+                subText.fontSize = subFontSize;
+                subText.textWrappingMode = TextWrappingModes.NoWrap;
+                subText.overflowMode = TextOverflowModes.Overflow;
                 subText.text = result.SubText;
-                subText.fontSize = UITypography.FontSnapped(18f);
                 subText.gameObject.SetActive(hasSub);
             }
 
@@ -248,8 +261,17 @@ namespace P1.UI
                     _mainRect.anchorMin = Vector2.zero;
                     _mainRect.anchorMax = Vector2.one;
                 }
-                _mainRect.offsetMin = Vector2.zero;
-                _mainRect.offsetMax = Vector2.zero;
+                // 左右 24px 内边距：大字永不贴住 6px 墨边（旧版直接拉到边缘，截图里像“字撑破了板”）。
+                _mainRect.offsetMin = new Vector2(24f, 4f);
+                _mainRect.offsetMax = new Vector2(-24f, -4f);
+            }
+
+            if (_subRect != null)
+            {
+                _subRect.anchorMin = new Vector2(0f, 0f);
+                _subRect.anchorMax = new Vector2(1f, hasSub ? 0.36f : 0f);
+                _subRect.offsetMin = new Vector2(24f, 4f);
+                _subRect.offsetMax = new Vector2(-24f, 0f);
             }
 
             // 配色方案（几何大胆风 token）

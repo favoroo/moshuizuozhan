@@ -14,7 +14,8 @@ namespace P1.UI
     /// 2. 右侧：动作键群 = 墨黑半透明底 + 功能色 4~5px 描边 + 功能色图标 + 纸白标签，
     ///    按下才整块翻功能色实底（功能色只做编码，不再铺 5 块高饱和大色饼）；
     /// 3. 右半屏：滑屏转视角感应区（每帧触摸增量驱动相机 Yaw/Pitch）；
-    /// 4. 图标库统一走 UIIconLibrary，缺失时安全隐藏并由文字兜底，绝无白方块；
+    /// 4. 动作键 / 摇杆把手图标走程序化几何字形（MobileControlGlyphFactory），缺失时安全隐藏并由文字兜底；
+    ///    Inspector 显式赋值的 Sprite 仍优先，便于单独换皮；
     /// 5. 尺寸与排布默认值统一暴露为 DefaultLayout，便于运行时与测试共享；
     /// 6. 支持 DPI 物理毫米自适应与自定义键位持久化；
     /// 7. 3/4 指方案提供左上角独立左开火键，并与 2/3/4 指预设、固定摇杆、辅助瞄准档位联动。
@@ -47,7 +48,7 @@ namespace P1.UI
         [SerializeField] private float moveDeadZone = 8f;
         [SerializeField] private Vector2 moveStickDefaultPos = new Vector2(200f, 200f);
 
-        [Header("按键图标资产引用（为空时自动从 UIIconLibrary 加载）")]
+        [Header("按键图标覆盖（为空时使用程序化几何字形）")]
         [SerializeField] private Sprite fireIcon;
         [SerializeField] private Sprite swimIcon;
         [SerializeField] private Sprite jumpIcon;
@@ -351,7 +352,6 @@ namespace P1.UI
         public void EnsureBuilt()
         {
             if (_canvas != null) return;
-            LoadIconsIfNeeded();
             Build();
         }
 
@@ -378,26 +378,6 @@ namespace P1.UI
                 player.TouchJumpTriggered = false;
                 player.TouchSpecialTriggered = false;
             }
-        }
-
-        private void LoadIconsIfNeeded()
-        {
-            if (fireIcon == null) fireIcon = UIIconLibrary.Get("weapon_shooter");
-            if (swimIcon == null) swimIcon = UIIconLibrary.Get("rule_swim");
-            if (jumpIcon == null) jumpIcon = UIIconLibrary.Get("rule_climb");
-            if (bombIcon == null) bombIcon = UIIconLibrary.Get("sub_bomb");
-            if (specialIcon == null) specialIcon = UIIconLibrary.Get("special_slam");
-            if (joystickKnobIcon == null) joystickKnobIcon = UIIconLibrary.Get("glyph_gamepad");
-
-#if UNITY_EDITOR
-            const string iconRoot = "Assets/_Project/Art/Sprites/Icons/";
-            if (fireIcon == null) fireIcon = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(iconRoot + "Weapons/weapon_shooter.png");
-            if (swimIcon == null) swimIcon = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(iconRoot + "Rules/rule_swim.png");
-            if (jumpIcon == null) jumpIcon = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(iconRoot + "Rules/rule_climb.png");
-            if (bombIcon == null) bombIcon = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(iconRoot + "Subs/sub_bomb.png");
-            if (specialIcon == null) specialIcon = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(iconRoot + "Specials/special_slam.png");
-            if (joystickKnobIcon == null) joystickKnobIcon = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(iconRoot + "Glyphs/glyph_gamepad.png");
-#endif
         }
 
         private void Update()
@@ -538,6 +518,10 @@ namespace P1.UI
             _aimSwipeZone = RightAimSwipeZone.Create(_safeArea);
 
             // 2. 左侧半屏动态浮动摇杆（半径 170）
+            //    把手字形用四向箭头，明确「移动/方向」；旧版手柄图标看像外设而不是摇杆功能。
+            Sprite moveGlyph = joystickKnobIcon != null
+                ? joystickKnobIcon
+                : MobileControlGlyphFactory.Get(MobileControlGlyph.MovePad);
             _floatingJoystick = DynamicFloatingJoystick.Create(
                 _safeArea,
                 moveStickDefaultPos,
@@ -545,7 +529,7 @@ namespace P1.UI
                 moveDeadZone,
                 _circleFillSprite,
                 _circleRingSprite,
-                joystickKnobIcon);
+                moveGlyph);
             _floatingJoystick.FixedBase = GameSettingsService.FixedJoystick;
 
             // 3. 右下角 t-1 人体工学操作按键群
@@ -557,35 +541,50 @@ namespace P1.UI
             var bombCfg = DefaultLayout[3];
             var specialCfg = DefaultLayout[4];
 
-            // 射击键图标 = 功能色实心圆点（复用 _circleFillSprite），不再用具象武器小图标；
-            // 按下时底盘翻功能色、圆点翻墨黑，与既有按压反馈体系一致。
-            var fireDotIcon = _circleFillSprite;
+            // 动作键字形：默认用程序化几何剪影（准星 / 墨滴 / 上箭头 / 手雷 / 下砸），
+            // Inspector 里显式赋值的 Sprite 仍优先，便于单独换皮。
+            Sprite fireGlyph = fireIcon != null
+                ? fireIcon
+                : MobileControlGlyphFactory.Get(MobileControlGlyph.Crosshair);
+            Sprite swimGlyph = swimIcon != null
+                ? swimIcon
+                : MobileControlGlyphFactory.Get(MobileControlGlyph.InkDrop);
+            Sprite jumpGlyph = jumpIcon != null
+                ? jumpIcon
+                : MobileControlGlyphFactory.Get(MobileControlGlyph.Jump);
+            Sprite bombGlyph = bombIcon != null
+                ? bombIcon
+                : MobileControlGlyphFactory.Get(MobileControlGlyph.Bomb);
+            Sprite specialGlyph = specialIcon != null
+                ? specialIcon
+                : MobileControlGlyphFactory.Get(MobileControlGlyph.Slam);
+
             _fireButton = MobileActionButton.Create(
                 _safeArea, "FireButton", fireCfg.label,
                 fireCfg.pos, fireCfg.size,
                 ComicStyle.FromHex(0xFF7314), // 队伍橙（射击）
-                fireDotIcon, _circleFillSprite, _actionRingSprite,
+                fireGlyph, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.HoldWithAimDrag);
 
             _swimButton = MobileActionButton.Create(
                 _safeArea, "SwimButton", swimCfg.label,
                 swimCfg.pos, swimCfg.size,
                 ComicStyle.Blue, // 队伍蓝（潜行）
-                swimIcon, _circleFillSprite, _actionRingSprite,
+                swimGlyph, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.Hold);
 
             _jumpButton = MobileActionButton.Create(
                 _safeArea, "JumpButton", jumpCfg.label,
                 jumpCfg.pos, jumpCfg.size,
                 ComicStyle.Green, // 语义绿（跳跃）
-                jumpIcon, _circleFillSprite, _actionRingSprite,
+                jumpGlyph, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.Tap);
 
             _bombButton = MobileActionButton.Create(
                 _safeArea, "BombButton", bombCfg.label,
                 bombCfg.pos, bombCfg.size,
                 new Color(0.58f, 0.28f, 0.95f, 1f), // 荧光紫（副武器）
-                bombIcon, _circleFillSprite, _actionRingSprite,
+                bombGlyph, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.BombTapOrHoldAim,
                 hitPadding: BombButtonHitPadding);
 
@@ -593,7 +592,7 @@ namespace P1.UI
                 _safeArea, "SpecialButton", specialCfg.label,
                 specialCfg.pos, specialCfg.size,
                 ComicStyle.Yellow, // 主行动金（大招）
-                specialIcon, _circleFillSprite, _actionRingSprite,
+                specialGlyph, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.Special);
 
             // 3b. 左开火键（3/4 指方案专用，2 指方案默认隐藏；左上角锚定，便于左食指开火）
@@ -601,7 +600,7 @@ namespace P1.UI
                 _safeArea, "LeftFireButton", "射击",
                 MobileLayoutPresets.ThreeFingerLeftFirePos, MobileLayoutPresets.LeftFireSize,
                 ComicStyle.FromHex(0xFF7314),
-                fireDotIcon, _circleFillSprite, _actionRingSprite,
+                fireGlyph, _circleFillSprite, _actionRingSprite,
                 MobileButtonMode.Hold, new Vector2(0f, 0f));
             _leftFireButton.gameObject.SetActive(false);
 
@@ -1057,7 +1056,7 @@ namespace P1.UI
             knobRt.anchorMax = new Vector2(0.5f, 0.5f);
             knobRt.pivot = new Vector2(0.5f, 0.5f);
             knobRt.anchoredPosition = Vector2.zero;
-            knobRt.sizeDelta = new Vector2(radius * 0.85f, radius * 0.85f);
+            knobRt.sizeDelta = new Vector2(radius * 0.92f, radius * 0.92f);
 
             var knobImg = knobGo.GetComponent<Image>();
             knobImg.sprite = fillSprite;
@@ -1083,8 +1082,9 @@ namespace P1.UI
                 var iconGo = new GameObject("KnobIcon", typeof(RectTransform), typeof(Image));
                 iconGo.transform.SetParent(knobRt, false);
                 var iconRt = iconGo.GetComponent<RectTransform>();
-                iconRt.anchorMin = new Vector2(0.2f, 0.2f);
-                iconRt.anchorMax = new Vector2(0.8f, 0.8f);
+                // 四向箭头占把手 76%，比旧手柄图标放大一档：摇杆是高频控件，方向必须一眼读出。
+                iconRt.anchorMin = new Vector2(0.12f, 0.12f);
+                iconRt.anchorMax = new Vector2(0.88f, 0.88f);
                 iconRt.offsetMin = Vector2.zero;
                 iconRt.offsetMax = Vector2.zero;
                 var iconImg = iconGo.GetComponent<Image>();
@@ -1618,8 +1618,10 @@ namespace P1.UI
                 var iconGo = new GameObject("Icon", typeof(RectTransform), typeof(Image));
                 iconGo.transform.SetParent(contentRt, false);
                 var iconRt = iconGo.GetComponent<RectTransform>();
-                iconRt.anchorMin = new Vector2(0.20f, 0.28f);
-                iconRt.anchorMax = new Vector2(0.80f, 0.88f);
+                // 图标占上半区 64%×60%，下方留给中文标签；程序化字形主体只到 ±0.8，
+                // 四周留白保证自定义缩放 / 高 DPI 下也不会压到描边或标签。
+                iconRt.anchorMin = new Vector2(0.18f, 0.36f);
+                iconRt.anchorMax = new Vector2(0.82f, 0.96f);
                 iconRt.offsetMin = Vector2.zero;
                 iconRt.offsetMax = Vector2.zero;
 
@@ -1634,8 +1636,8 @@ namespace P1.UI
             var textGo = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             textGo.transform.SetParent(contentRt, false);
             var textRt = textGo.GetComponent<RectTransform>();
-            textRt.anchorMin = new Vector2(0.04f, 0.06f);
-            textRt.anchorMax = new Vector2(0.96f, 0.38f);
+            textRt.anchorMin = new Vector2(0.04f, 0.05f);
+            textRt.anchorMax = new Vector2(0.96f, 0.35f);
             textRt.offsetMin = Vector2.zero;
             textRt.offsetMax = Vector2.zero;
 

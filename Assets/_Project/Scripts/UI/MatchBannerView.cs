@@ -125,10 +125,12 @@ namespace P1.UI
                 var mainTextGo = new GameObject("MainText", typeof(RectTransform), typeof(TextMeshProUGUI));
                 mainTextGo.transform.SetParent(bannerRoot, false);
                 var mtRect = mainTextGo.GetComponent<RectTransform>();
-                mtRect.anchorMin = Vector2.zero;
+                // 主标题占面板上部 68%，副标题在面板内下部 32%——旧版副标题锚在面板外 -28px，
+                // 会飘在游戏画面/天空上（OneMinute 的纸白副标题直接看不见）。
+                mtRect.anchorMin = new Vector2(0f, 0.32f);
                 mtRect.anchorMax = Vector2.one;
-                mtRect.offsetMin = Vector2.zero;
-                mtRect.offsetMax = Vector2.zero;
+                mtRect.offsetMin = new Vector2(28f, 4f);
+                mtRect.offsetMax = new Vector2(-28f, -4f);
 
                 bannerMainText = mainTextGo.GetComponent<TextMeshProUGUI>();
                 if (bannerFont != null) bannerMainText.font = bannerFont;
@@ -142,11 +144,10 @@ namespace P1.UI
                 var subTextGo = new GameObject("SubText", typeof(RectTransform), typeof(TextMeshProUGUI));
                 subTextGo.transform.SetParent(bannerRoot, false);
                 var stRect = subTextGo.GetComponent<RectTransform>();
-                stRect.anchorMin = new Vector2(0f, 0f);
-                stRect.anchorMax = new Vector2(1f, 0f);
-                stRect.pivot = new Vector2(0.5f, 0f);
-                stRect.anchoredPosition = new Vector2(0f, -28f);
-                stRect.sizeDelta = new Vector2(0f, 36f);
+                stRect.anchorMin = Vector2.zero;
+                stRect.anchorMax = new Vector2(1f, 0.32f);
+                stRect.offsetMin = new Vector2(28f, 8f);
+                stRect.offsetMax = new Vector2(-28f, 0f);
 
                 bannerSubText = subTextGo.GetComponent<TextMeshProUGUI>();
                 if (bannerFont != null) bannerSubText.font = bannerFont;
@@ -197,26 +198,14 @@ namespace P1.UI
 
                 bannerRoot.anchoredPosition = new Vector2(0f, 60f);
                 bannerRoot.localRotation = Quaternion.identity;
-                bannerRoot.sizeDelta = new Vector2(360f, 260f);
+                bannerRoot.sizeDelta = new Vector2(360f, 280f);
 
                 if (bannerSplatBg != null)
                 {
                     bannerSplatBg.color = ComicStyle.Paper;
                 }
 
-                if (bannerMainText != null)
-                {
-                    bannerMainText.fontSize = UITypography.FontSnapped(140f);
-                    bannerMainText.text = number.ToString();
-                    bannerMainText.color = ComicStyle.Ink;
-                }
-
-                if (bannerSubText != null)
-                {
-                    bannerSubText.fontSize = UITypography.FontSnapped(24f);
-                    bannerSubText.text = "READY...";
-                    bannerSubText.color = ComicStyle.Ink;
-                }
+                ApplyBannerText(number.ToString(), 140f, "READY...", 24f, ComicStyle.Ink, ComicStyle.Ink);
 
                 if (actionLinesGraphic != null)
                 {
@@ -246,26 +235,14 @@ namespace P1.UI
 
             bannerRoot.anchoredPosition = new Vector2(0f, 60f);
             bannerRoot.localRotation = Quaternion.identity;
-            bannerRoot.sizeDelta = new Vector2(720f, 280f);
+            bannerRoot.sizeDelta = new Vector2(720f, 300f);
 
             if (bannerSplatBg != null)
             {
                 bannerSplatBg.color = ComicStyle.Yellow;
             }
 
-            if (bannerMainText != null)
-            {
-                bannerMainText.fontSize = UITypography.FontSnapped(140f);
-                bannerMainText.text = "GO!";
-                bannerMainText.color = ComicStyle.Ink;
-            }
-
-            if (bannerSubText != null)
-            {
-                bannerSubText.fontSize = UITypography.FontSnapped(24f);
-                bannerSubText.text = "TURF RIOT START!";
-                bannerSubText.color = ComicStyle.Ink;
-            }
+            ApplyBannerText("GO!", 140f, "TURF RIOT START!", 24f, ComicStyle.Ink, ComicStyle.Ink);
 
             if (actionLinesGraphic != null)
             {
@@ -280,6 +257,11 @@ namespace P1.UI
             }
         }
 
+        /// <summary>
+        /// 1:00 决战横幅。当前正式流程的 1:00 提示由 <see cref="CenterTimerView"/> 负责
+        /// （MatchFlowUI 仍会调用本方法，但场景里的 MatchBannerView 是停用状态，不会显示）。
+        /// 若以后重新启用本 View，务必同步移除 MatchFlowUI 的 1:00 触发，否则会出现两条重复提示。
+        /// </summary>
         public void ShowOneMinute()
         {
             EnsureBuilt();
@@ -290,26 +272,15 @@ namespace P1.UI
 
             bannerRoot.anchoredPosition = new Vector2(0f, 120f);
             bannerRoot.localRotation = Quaternion.identity;
-            bannerRoot.sizeDelta = new Vector2(620f, 110f);
+            bannerRoot.sizeDelta = new Vector2(620f, 130f);
 
             if (bannerSplatBg != null)
             {
                 bannerSplatBg.color = ComicStyle.Red;
             }
 
-            if (bannerMainText != null)
-            {
-                bannerMainText.fontSize = UITypography.FontSnapped(52f);
-                bannerMainText.text = "1:00 LEFT!";
-                bannerMainText.color = ComicStyle.Paper;
-            }
-
-            if (bannerSubText != null)
-            {
-                bannerSubText.fontSize = UITypography.FontSnapped(22f);
-                bannerSubText.text = "FINAL MINUTE · TURF NOW!";
-                bannerSubText.color = ComicStyle.Paper;
-            }
+            ApplyBannerText("1:00 LEFT!", 52f, "FINAL MINUTE · TURF NOW!", 22f,
+                ComicStyle.Paper, ComicStyle.Paper);
 
             if (actionLinesGraphic != null)
             {
@@ -334,26 +305,14 @@ namespace P1.UI
 
             bannerRoot.anchoredPosition = new Vector2(0f, 60f);
             bannerRoot.localRotation = Quaternion.identity;
-            bannerRoot.sizeDelta = new Vector2(760f, 260f);
+            bannerRoot.sizeDelta = new Vector2(760f, 300f);
 
             if (bannerSplatBg != null)
             {
                 bannerSplatBg.color = ComicStyle.Ink;
             }
 
-            if (bannerMainText != null)
-            {
-                bannerMainText.fontSize = UITypography.FontSnapped(140f);
-                bannerMainText.text = "FINISH!";
-                bannerMainText.color = ComicStyle.Paper;
-            }
-
-            if (bannerSubText != null)
-            {
-                bannerSubText.fontSize = UITypography.FontSnapped(24f);
-                bannerSubText.text = "TIME'S UP!";
-                bannerSubText.color = ComicStyle.Yellow;
-            }
+            ApplyBannerText("FINISH!", 140f, "TIME'S UP!", 24f, ComicStyle.Paper, ComicStyle.Yellow);
 
             if (actionLinesGraphic != null)
             {
@@ -365,6 +324,41 @@ namespace P1.UI
             {
                 springMotion.SnapHome();
                 springMotion.PlayIn(0f);
+            }
+        }
+
+        /// <summary>
+        /// 统一写主/副标题：字号上限取设计值，TMP 自动缩字保证永远落在面板内边距里。
+        /// 旧版每处 Show 各写一套 fontSize，长文案（如「FINAL MINUTE · TURF NOW!」）
+        /// 在移动端 ×1.28 后会撑出面板，副标题更是直接挂在面板外面。
+        /// </summary>
+        private void ApplyBannerText(string main, float mainSize, string sub, float subSize,
+            Color mainColor, Color subColor)
+        {
+            if (bannerMainText != null)
+            {
+                float maxFont = UITypography.FontSnapped(mainSize);
+                bannerMainText.enableAutoSizing = true;
+                bannerMainText.fontSizeMin = UITypography.FontSnapped(24f);
+                bannerMainText.fontSizeMax = maxFont;
+                bannerMainText.fontSize = maxFont;
+                bannerMainText.textWrappingMode = TextWrappingModes.NoWrap;
+                bannerMainText.overflowMode = TextOverflowModes.Overflow;
+                bannerMainText.text = main;
+                bannerMainText.color = mainColor;
+            }
+
+            if (bannerSubText != null)
+            {
+                float maxFont = UITypography.FontSnapped(subSize);
+                bannerSubText.enableAutoSizing = true;
+                bannerSubText.fontSizeMin = UITypography.FontSnapped(14f);
+                bannerSubText.fontSizeMax = maxFont;
+                bannerSubText.fontSize = maxFont;
+                bannerSubText.textWrappingMode = TextWrappingModes.NoWrap;
+                bannerSubText.overflowMode = TextOverflowModes.Overflow;
+                bannerSubText.text = sub;
+                bannerSubText.color = subColor;
             }
         }
 

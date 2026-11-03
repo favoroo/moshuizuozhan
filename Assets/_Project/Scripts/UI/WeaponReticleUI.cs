@@ -58,10 +58,15 @@ namespace P1.UI
         // 副武器冷却微胶囊组件（旧名 SubAimBadge，保留节点名以兼容旧测试/装配）
         private RectTransform _subAimBadge;
         private CanvasGroup _subAimCanvasGroup;
+        private UIInkShapeGraphic _subAimBg;
         private Image _subAimFill;
+        private RectTransform _subAimBarBg;
+        private TMP_Text _subAimLabelText;
         private TMP_Text _subAimTimeText;
+        private TMP_Text _subAimReadyText;
         private float _bombReadyFlashTimer;
         private bool _bombWasCooling;
+        private bool _subAimMobile;
         private int _lastBombCooldownTenths = int.MinValue;
 
         // 程序化生成的 UI 贴图与 Sprite
@@ -620,16 +625,30 @@ namespace P1.UI
 
         /// <summary>
         /// 手雷冷却徽标（旧名 SubAimBadge）：准星下方一条几何风读数——
-        /// 「BOMB █████░░ 5.4s」。手雷投出后显示 6s 冷却倒计时，结束时短促翻黄显示 READY 再隐藏。
-        /// 不再承担「按住瞄准 / 耗墨就绪」的旧语义（手雷已改为一键直投）。
+        /// 冷却中「手雷 █████░░ 5.4s」，就绪时整条翻黄显示「手雷就绪」，1.8s 后收起。
+        ///
+        /// 旧版固定 220×36 + 三块等分文字框：桌面 18 号的 "BOMB" 已比 60px 框宽 2.5px，
+        /// 移动端放大到 24 号后 "BOMB" 会直接压进进度条、"READY" 也会顶出胶囊。
+        /// 现在按平台算出胶囊宽度、进度条吃掉两侧读数之外的剩余宽度，并给就绪态单独的整条黄底文案。
         /// </summary>
         private void BuildSubAimBadge()
         {
+            _subAimMobile = Application.isMobilePlatform || MobileTouchUI.IsTouchSimulationActive;
+
+            float badgeWidth = _subAimMobile ? 340f : 292f;
+            float badgeHeight = _subAimMobile ? 48f : 40f;
+            float pad = 14f;
+            float labelWidth = _subAimMobile ? 88f : 70f;
+            float timeWidth = _subAimMobile ? 78f : 66f;
+            float gap = 10f;
+
             var badgeGo = new GameObject("SubAimBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             badgeGo.transform.SetParent(transform, false);
             _subAimBadge = badgeGo.GetComponent<RectTransform>();
-            _subAimBadge.sizeDelta = new Vector2(220f, 36f);
-            _subAimBadge.anchoredPosition = new Vector2(0f, -64f);
+            _subAimBadge.anchorMin = _subAimBadge.anchorMax = new Vector2(0.5f, 0.5f);
+            _subAimBadge.pivot = new Vector2(0.5f, 0.5f);
+            _subAimBadge.sizeDelta = new Vector2(badgeWidth, badgeHeight);
+            _subAimBadge.anchoredPosition = new Vector2(0f, _subAimMobile ? -84f : -68f);
             _subAimCanvasGroup = badgeGo.AddComponent<CanvasGroup>();
             _subAimCanvasGroup.alpha = 1f;
             _subAimCanvasGroup.blocksRaycasts = false;
@@ -637,6 +656,7 @@ namespace P1.UI
 
             // 底板：墨黑实心 + 纸白硬边（几何大胆风，无圆角 / 无渐变 / 无阴影）
             var bg = badgeGo.GetComponent<UIInkShapeGraphic>();
+            _subAimBg = bg;
             bg.raycastTarget = false;
             bg.Shape = UIInkShape.SharpRect;
             bg.CornerRadius = ComicStyle.CornerSharp;
@@ -650,20 +670,26 @@ namespace P1.UI
             bg.DrawGloss = false;
             bg.InnerRimAlpha = 0f;
 
-            // 左侧标签 "BOMB"（拉丁全大写，18px 粗体，满足 HUD 小字下限）
-            CreateBadgeText("Text", new Vector2(-76f, 0f), new Vector2(60f, 30f),
-                TextAnchor.MiddleLeft, "BOMB", ComicStyle.Paper);
+            // 左侧标签：桌面 "BOMB"（拉丁全大写），移动端 "手雷"（避免真机中文界面里孤零零一串英文）。
+            _subAimLabelText = CreateBadgeText("Text", new Vector2(pad, 0f),
+                new Vector2(labelWidth, badgeHeight), TextAnchor.MiddleLeft,
+                _subAimMobile ? "手雷" : "BOMB", ComicStyle.Paper);
 
-            // 中部冷却进度条：白色 18% 轨道 + 黄色填充（充能式，越满越接近就绪）
-            var barBgGo = new GameObject("BarBg", typeof(Image));
+            // 中部冷却进度条：宽度吃掉「左标签 + 右读数」之外的剩余空间，任何平台都不会挤字。
+            float barX = pad + labelWidth + gap;
+            float barWidth = Mathf.Max(64f, badgeWidth - barX - pad - timeWidth - gap);
+
+            var barBgGo = new GameObject("BarBg", typeof(RectTransform), typeof(Image));
             barBgGo.transform.SetParent(_subAimBadge, false);
+            _subAimBarBg = barBgGo.GetComponent<RectTransform>();
             var barBg = barBgGo.GetComponent<Image>();
             UIFlatSprite.MakeFlat(barBg);
             barBg.color = new Color(1f, 1f, 1f, 0.18f);
             barBg.raycastTarget = false;
-            var barBgRect = barBgGo.GetComponent<RectTransform>();
-            barBgRect.sizeDelta = new Vector2(86f, 10f);
-            barBgRect.anchoredPosition = new Vector2(0f, 0f);
+            _subAimBarBg.anchorMin = _subAimBarBg.anchorMax = new Vector2(0f, 0.5f);
+            _subAimBarBg.pivot = new Vector2(0f, 0.5f);
+            _subAimBarBg.sizeDelta = new Vector2(barWidth, 10f);
+            _subAimBarBg.anchoredPosition = new Vector2(barX, 0f);
 
             var barFillGo = new GameObject("BarFill", typeof(Image));
             barFillGo.transform.SetParent(barBgGo.transform, false);
@@ -678,16 +704,38 @@ namespace P1.UI
             barFillRect.offsetMin = Vector2.zero;
             barFillRect.offsetMax = Vector2.zero;
 
-            // 右侧倒计时 / READY
-            _subAimTimeText = CreateBadgeText("TimeText", new Vector2(76f, 0f), new Vector2(62f, 30f),
-                TextAnchor.MiddleRight, "6.0s", ComicStyle.Yellow);
+            // 右侧倒计时
+            _subAimTimeText = CreateBadgeText("TimeText", new Vector2(-pad, 0f),
+                new Vector2(timeWidth, badgeHeight), TextAnchor.MiddleRight,
+                "6.0s", ComicStyle.Yellow);
+
+            // 就绪态：整条黄底 + 墨字，替换掉冷却中的三块读数（比原来只在右侧写一个 READY 更醒目）。
+            var readyGo = new GameObject("ReadyText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            readyGo.transform.SetParent(_subAimBadge, false);
+            var readyRect = readyGo.GetComponent<RectTransform>();
+            readyRect.anchorMin = Vector2.zero;
+            readyRect.anchorMax = Vector2.one;
+            readyRect.offsetMin = new Vector2(10f, 2f);
+            readyRect.offsetMax = new Vector2(-10f, -2f);
+            _subAimReadyText = readyGo.GetComponent<TextMeshProUGUI>();
+            _subAimReadyText.font = UIThemeSO.ResolveGlobalFont(true, _subAimMobile);
+            _subAimReadyText.fontSize = UITypography.FontSnapped(20f);
+            _subAimReadyText.fontStyle = FontStyles.Bold;
+            _subAimReadyText.alignment = TextAlignmentOptions.Center;
+            _subAimReadyText.color = ComicStyle.Ink;
+            _subAimReadyText.text = _subAimMobile ? "手雷就绪" : "BOMB READY · E";
+            _subAimReadyText.raycastTarget = false;
+            _subAimReadyText.textWrappingMode = TextWrappingModes.NoWrap;
+            _subAimReadyText.overflowMode = TextOverflowModes.Overflow;
+            _subAimReadyText.gameObject.SetActive(false);
 
             badgeGo.SetActive(false);
         }
 
         /// <summary>
-        /// 副武器徽标文字（BOMB / 冷却秒数 / READY）：走 TMP + 主题 display 字体，
+        /// 副武器徽标文字（BOMB / 冷却秒数）：走 TMP + 主题 display 字体，
         /// 不再用 LegacyRuntime.ttf（Arial 兜底字在真机缺字形且没有 SDF 描边）。
+        /// 传入的 pos 按 TextAnchor 指定的一侧吸附（左/中/右），边框内留白由调用方给。
         /// </summary>
         private TMP_Text CreateBadgeText(string name, Vector2 pos, Vector2 size,
             TextAnchor anchor, string text, Color color)
@@ -705,6 +753,23 @@ namespace P1.UI
             txt.textWrappingMode = TextWrappingModes.NoWrap;
             txt.overflowMode = TextOverflowModes.Overflow;
             var rect = txtGo.GetComponent<RectTransform>();
+            bool right = anchor == TextAnchor.MiddleRight || anchor == TextAnchor.UpperRight || anchor == TextAnchor.LowerRight;
+            bool center = anchor == TextAnchor.MiddleCenter || anchor == TextAnchor.UpperCenter || anchor == TextAnchor.LowerCenter;
+            if (right)
+            {
+                rect.anchorMin = rect.anchorMax = new Vector2(1f, 0.5f);
+                rect.pivot = new Vector2(1f, 0.5f);
+            }
+            else if (center)
+            {
+                rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+            }
+            else
+            {
+                rect.anchorMin = rect.anchorMax = new Vector2(0f, 0.5f);
+                rect.pivot = new Vector2(0f, 0.5f);
+            }
             rect.sizeDelta = size;
             rect.anchoredPosition = pos;
             return txt;
@@ -1492,10 +1557,10 @@ namespace P1.UI
             float duration = Mathf.Max(0.01f, weapon.BombCooldownDuration);
             bool cooling = remaining > 0.001f;
 
-            // 冷却结束瞬间：短促「READY」硬切提示（1.2s 后隐藏），不做慢淡出
+            // 冷却结束瞬间：整条翻黄显示「手雷就绪」，1.8s 后隐藏（旧版只换右侧 READY 小字，1.2s 常被错过）。
             if (_bombWasCooling && !cooling)
             {
-                _bombReadyFlashTimer = 1.2f;
+                _bombReadyFlashTimer = 1.8f;
             }
             _bombWasCooling = cooling;
 
@@ -1518,6 +1583,8 @@ namespace P1.UI
 
             if (cooling)
             {
+                SetBombBadgeReadyState(false);
+
                 // 充能式进度：0 → 1 表示剩余冷却逐渐恢复；数字同步倒计时
                 _subAimFill.fillAmount = 1f - Mathf.Clamp01(remaining / duration);
                 _subAimFill.color = ComicStyle.Yellow;
@@ -1532,14 +1599,42 @@ namespace P1.UI
             }
             else
             {
+                SetBombBadgeReadyState(true);
                 _subAimFill.fillAmount = 1f;
                 _subAimFill.color = ComicStyle.Yellow;
-                if (_lastBombCooldownTenths != -1)
-                {
-                    _lastBombCooldownTenths = -1;
-                    _subAimTimeText.text = "READY";
-                    _subAimTimeText.color = ComicStyle.Yellow;
-                }
+                // 归位到「未写秒数」状态：下一次投出时第一帧就会刷新倒计时。
+                _lastBombCooldownTenths = int.MinValue;
+            }
+        }
+
+        /// <summary>
+        /// 切换徽标的「冷却中 / 就绪」两态：
+        /// 冷却 = 墨底 + 左标签 + 进度条 + 秒数；就绪 = 整条行动黄底 + 墨色「手雷就绪」。
+        /// 两态子物体固定，只切 activeSelf / 颜色，不重建节点（零 GC）。
+        /// </summary>
+        private void SetBombBadgeReadyState(bool ready)
+        {
+            if (_subAimBg != null)
+            {
+                _subAimBg.color = ready ? ComicStyle.Yellow : ComicStyle.Ink;
+                _subAimBg.BorderColor = ready ? ComicStyle.Ink : ComicStyle.Paper;
+            }
+
+            if (_subAimLabelText != null && _subAimLabelText.gameObject.activeSelf == ready)
+            {
+                _subAimLabelText.gameObject.SetActive(!ready);
+            }
+            if (_subAimBarBg != null && _subAimBarBg.gameObject.activeSelf == ready)
+            {
+                _subAimBarBg.gameObject.SetActive(!ready);
+            }
+            if (_subAimTimeText != null && _subAimTimeText.gameObject.activeSelf == ready)
+            {
+                _subAimTimeText.gameObject.SetActive(!ready);
+            }
+            if (_subAimReadyText != null && _subAimReadyText.gameObject.activeSelf != ready)
+            {
+                _subAimReadyText.gameObject.SetActive(ready);
             }
         }
 

@@ -137,8 +137,8 @@ namespace P1.UI
                 tRect.anchorMin = new Vector2(0f, 0.5f);
                 tRect.anchorMax = new Vector2(0f, 0.5f);
                 tRect.pivot = new Vector2(0f, 0.5f);
-                tRect.anchoredPosition = new Vector2(78f, -16f);
-                tRect.sizeDelta = new Vector2(106f, 28f);
+                tRect.anchoredPosition = new Vector2(78f, -20f);
+                tRect.sizeDelta = new Vector2(106f, 34f);
 
                 actionTagText = tagGo.GetComponent<TextMeshProUGUI>();
                 actionTagText.fontSize = UITypography.FontSnapped(24f);
@@ -160,7 +160,8 @@ namespace P1.UI
                 vRect.anchorMax = new Vector2(0f, 0.5f);
                 vRect.pivot = new Vector2(0f, 0.5f);
                 // SPLAT 框右缘 184 + 12px 间距 → 受害者从 196 起，长名字截断不挤压
-                vRect.anchoredPosition = new Vector2(196f, -16f);
+                // （真实起点由 Bind 末尾的 ApplyRowLayout 按标签实测宽度重排）
+                vRect.anchoredPosition = new Vector2(196f, -20f);
                 vRect.sizeDelta = new Vector2(192f, 40f);
 
                 victimText = victimGo.GetComponent<TextMeshProUGUI>();
@@ -233,6 +234,10 @@ namespace P1.UI
 
             // 3. 文字（击杀卡档 24，移动端走 UITypography ×1.28）
             float fontSize = UITypography.FontSnapped(24f);
+            // 第二行（标签 + 受害者）在移动端若跟 24×1.28=30 号，"CRUSHED!" 实测宽 181px，
+            // 会从 78px 的起点一路压到受害者名（196px 起）上。这里把该行收到 24 号：
+            // 桌面不变（仍是 24），移动端仍高于 20px 下限，且给受害者名留出 157px。
+            float rowFontSize = UITypography.IsMobileLike ? UITypography.FontSnapped(19f) : fontSize;
 
             if (killerText != null)
             {
@@ -250,7 +255,7 @@ namespace P1.UI
                 string tag = ev.IsLocalPlayerKiller ? "CRUSHED!" : "SPLAT!";
                 actionTagText.font = resolved.ResolveFont(true, tag);
                 actionTagText.text = tag;
-                actionTagText.fontSize = fontSize;
+                actionTagText.fontSize = rowFontSize;
                 actionTagText.color = ev.IsLocalPlayerVictim ? ComicStyle.Yellow : ComicStyle.Yellow;
             }
 
@@ -258,16 +263,61 @@ namespace P1.UI
             {
                 victimText.font = resolved.ResolveFont(false, ev.VictimName);
                 victimText.text = ev.VictimName;
-                victimText.fontSize = fontSize;
+                victimText.fontSize = rowFontSize;
                 victimText.overflowMode = TextOverflowModes.Truncate;
                 victimText.color = ComicStyle.Paper;
             }
 
+            ApplyRowLayout();
             gameObject.SetActive(true);
             if (springMotion != null)
             {
                 springMotion.SnapHome();
                 springMotion.PlayIn(0f);
+            }
+        }
+
+        /// <summary>
+        /// 第二行动态排版：标签按实测 preferredWidth 取宽，受害者名从标签右缘 + 10 起，
+        /// 剩余宽度全部给它（Truncate 兜底）。旧版把标签锁死 106 宽、受害者锁死 196 起，
+        /// 移动端 30 号 "CRUSHED!" 实测 181 宽，会和受害者名重叠 60px。
+        /// </summary>
+        private void ApplyRowLayout()
+        {
+            if (_rectTransform == null) _rectTransform = GetComponent<RectTransform>();
+            float cardWidth = _rectTransform != null && _rectTransform.rect.width > 1f
+                ? _rectTransform.rect.width
+                : 400f;
+
+            const float textLeft = 78f;
+            const float rightPadding = 10f;
+            const float tagGap = 10f;
+            const float minTagWidth = 96f;
+
+            float tagWidth = actionTagText != null
+                ? Mathf.Max(minTagWidth, Mathf.Ceil(actionTagText.preferredWidth) + 2f)
+                : minTagWidth;
+
+            if (actionTagText != null)
+            {
+                var tagRect = actionTagText.rectTransform;
+                tagRect.sizeDelta = new Vector2(tagWidth, tagRect.sizeDelta.y);
+            }
+
+            float victimX = textLeft + tagWidth + tagGap;
+            float victimWidth = Mathf.Max(80f, cardWidth - victimX - rightPadding);
+
+            if (victimText != null)
+            {
+                var victimRect = victimText.rectTransform;
+                victimRect.anchoredPosition = new Vector2(victimX, victimRect.anchoredPosition.y);
+                victimRect.sizeDelta = new Vector2(victimWidth, victimRect.sizeDelta.y);
+            }
+
+            if (killerText != null)
+            {
+                var killerRect = killerText.rectTransform;
+                killerRect.sizeDelta = new Vector2(cardWidth - textLeft - rightPadding, killerRect.sizeDelta.y);
             }
         }
 

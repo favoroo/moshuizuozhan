@@ -7,6 +7,9 @@
 > **不记**：逐项 `Added` / `Changed` / `Verified` 流水账、测试项数与 exit 状态明细、selftest 细节、用户原话、设计推导、临时出图路径。
 > 2026-11-01 之前的条目按 GitHub Release 说明回填（仅版本里程碑）；逐条根因记录自 v0.1.8 起。
 
+## 2026-11-04 #01
+【发布墨水作战 v0.1.19：Slam 空翻演出 + 混音重配平 + 涂地实时显色】本版把 #20–#26 一并发出：① Slam 大招整套表演（`SlamPoseSolver` 前空翻/团身/砸地姿态 + `TopDownCameraFollow` 三拍镜头）；② 混音重配平（`AudioMixConfigSO` 音量阶梯 + 战斗 ducking + Bot 远场开火 `PlayWeaponShotAt`）；③ 弹着涂地实时显色（`atlasMipmaps=false` 去掉 0.5s mip 重建延迟，`atlasGrowShrinkMeters` 0.4→0.18）；④ 角色领口封口修复；⑤ 网页跑动减颠 + dt 钳制（`VisualMotionMath`）。发版前门禁发现 `FontCoverageTests` 红（Tooltip 新增字「争危床荐险」），跑 `tools/font_charset.py` 重生成账本 + 字体三连菜单（0→1→11）后 EditMode 704 全绿、PlayMode UI 重跑 66/66。`GameVersion.APP_VERSION` 0.1.19 与 `PlayerSettings.bundleVersion` 0.1.19 / `AndroidBundleVersionCode` 119 三方一致，APK `build/moshuizuozhan-v0.1.19-arm64-v8a.apk`（64.3 MB，SHA-256 `78febe099023421e67dfc9ba4b04325037d68aba21701b68198641156f514243`），双端 Release 已发布。
+
 ## 2026-11-03 #26
 【弹着涂地二次定位：真正「命中后才出现墨」的根因是地面图集 mip 链每 0.5s 才重建（覆盖 #24 里「mip 不回退」的结论）】实测证据（同一冻结帧 A/B，只改采样）：把 `SplatAtlas.Atlas.mipMapBias` 压到 −4（等价只采 mip0）后，原本完全看不见的落墨立刻整片显色；把 `atlasMipmaps` 关掉重进 Play，6m / 20m 两处新墨在落地当帧同时可见，而 mips 开启时两处都是灰白/不可见（`cmd` 仍每帧递增、`pend=0`，证明写入没问题）。机理：图集 2985×4096（1.44cm/texel）带 mip，第三人称机位只有 3.2m 高、斜视地面，10m 处深度方向像素足迹约 5cm（LOD≈1~2）、20m 处约 13cm（LOD≈3）；新墨只画进 mip0，而 `GenerateMips` 受 `atlasMipIntervalSeconds=0.5` 节流，所以「网格和图集都已经是新墨，画面却要等下一次 mip 重建才实心」——墙面图集是 `Texture2D(..., mipChain:false)`，所以只有地面/顶面有这个延迟。修复：`InkGridConfigSO.atlasMipmaps` 默认改 false 并写入 `InkGridConfig.asset`（地面直接采 mip0，墨色也不再被 mip 平均成灰白），顺带消掉 15ms 级 GenerateMips 尖刺；`atlasMipIntervalSeconds` 字段保留但仅在开关为 true 时生效。取舍：远景墨迹失去 mip 过滤，可能有轻微闪烁；如果实机觉得闪，回退路径是 `atlasMipmaps=true` + `atlasMipIntervalSeconds≈0.15`（有尖刺），或后续给「新落墨」单独开一张非 mip 小图集、老墨走带 mip 的主图集。涉及 `Scripts/Ink/InkGridConfigSO.cs`、`ScriptableObjects/InkGridConfig.asset`。
 

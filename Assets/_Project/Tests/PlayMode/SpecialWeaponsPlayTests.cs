@@ -28,6 +28,11 @@ namespace P1.Tests
         [TearDown]
         public void TearDown()
         {
+            // 大招落地会触发全局微定格（HitstopService.Pulse）：若用例没等它恢复就结束，
+            // 下一条用例会在 Time.timeScale < 1 下运行，凭空造出别处的时间相关假红。
+            HitstopService.Cancel();
+            Time.timeScale = 1f;
+
             for (int i = 0; i < _spawned.Count; i++)
             {
                 if (_spawned[i] != null)
@@ -103,6 +108,81 @@ namespace P1.Tests
 
             float coverageAfter = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
             Assert.Greater(coverageAfter, coverageBefore + 0.5f, "落地应在 5m 半径内涂出巨大墨斑");
+        }
+
+        /// <summary>
+        /// P38 起跳表演验收：Slam 只抬升视觉根节点，角色 Transform 全程贴地，
+        /// 贴地步态不会自己切到滞空分支 —— 旧版观感是「站直的人被吊上去」。
+        /// 本用例逐帧采样 KidRoot 旋转与腿部骨骼，断言：
+        /// 1) 升空期间确实发生前空翻（KidRoot 绕 X 转过大半圈）；
+        /// 2) 落地后 KidRoot 精确回到装配基准（一整圈 = 单位旋转，不留歪头）；
+        /// 3) 落地收势段确实做了深蹲（髋下沉 + 屈膝），不是站直着结算。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Slam_PlaysLeapPerformance_AndReturnsRigToRest()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            var weapon = player.Weapon;
+            weapon.ResetAllWeaponState();
+            weapon.AddSpecialPointsRaw(500);
+
+            // 存档武器可能是 Storm，克隆一份改成 Slam 保证用例与存档无关
+            WeaponConfigSO slamConfig = Object.Instantiate(weapon.Config);
+            slamConfig.specialKind = SpecialKind.Slam;
+            weapon.EquipWeapon(slamConfig);
+            weapon.AddSpecialPointsRaw(500);
+
+            CharacterVisualController visual = player.Motor.VisualController;
+            Assert.IsNotNull(visual, "本地玩家应有程序化视觉控制器");
+            Transform kidRoot = visual.KidRoot.transform;
+            Assert.IsNotNull(kidRoot);
+
+            Quaternion restRot = kidRoot.localRotation;
+            Vector3 restKidPos = kidRoot.localPosition;
+            Transform hips = visual.HipsTransform;
+            float restHipY = hips != null ? hips.localPosition.y : 0f;
+
+            Assert.IsTrue(weapon.TryActivateSpecial(), "满充能时应能释放 Slam");
+
+            float minUpDot = 1f;
+            float minHipY = float.MaxValue;
+            int frames = 0;
+
+            // 采到「空中 + 落地收势」两段：深蹲发生在 IsSlamAirborne 结束之后，
+            // 只扫空中阶段会漏掉落地姿态。给 1.2s 真实时间窗覆盖 hold + recover。
+            float deadline = Time.realtimeSinceStartup + 1.2f;
+            while (Time.realtimeSinceStartup < deadline && frames < 600)
+            {
+                yield return null;
+                frames++;
+
+                minUpDot = Mathf.Min(minUpDot, Vector3.Dot(kidRoot.up, Vector3.up));
+                if (hips != null)
+                    minHipY = Mathf.Min(minHipY, hips.localPosition.y);
+            }
+
+            Assert.Greater(frames, 10, "Slam 演出应持续若干帧");
+
+            // 前空翻用「角色 up 向量」判定，而不是 Quaternion.Angle：
+            // Angle 最大只到 180°，转满一圈看起来和转半圈一样，无法证明真的翻过去了。
+            // upDot 从 +1 走到 -1 表示角色完全倒转，是空翻唯一可靠的判据。
+            Assert.Less(minUpDot, -0.85f,
+                $"升空期间应发生前空翻（角色应完全倒转），实际 upDot 最低 {minUpDot:0.00}");
+            Assert.Less(minHipY, restHipY - 0.02f,
+                $"落地深蹲应把髋部明显压下去，实际最低 {minHipY:0.000}m（基准 {restHipY:0.000}m）");
+
+            // 等收势演完，再断言骨骼回位
+            yield return new WaitForSecondsRealtime(0.5f);
+
+            float restDelta = Quaternion.Angle(restRot, kidRoot.localRotation);
+            Assert.Less(restDelta, 1f,
+                $"演出结束后 KidRoot 必须精确回到装配基准，实际偏差 {restDelta:0.00}°");
+            Assert.Less(Mathf.Abs(kidRoot.localPosition.y - restKidPos.y), 0.01f,
+                "演出结束后 KidRoot 不应残留位移");
+
+            Object.Destroy(slamConfig);
         }
 
         [UnityTest]

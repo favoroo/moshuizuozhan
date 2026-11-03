@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using P1.Core;
 using P1.Player;
@@ -236,6 +237,109 @@ namespace P1.Tests
             Assert.AreEqual(ShadowCastingMode.On, footRend.shadowCastingMode, "鞋壳必须投影");
             Assert.AreEqual(ShadowCastingMode.Off, soleRend.shadowCastingMode, "鞋底贴条不应重复投影");
             Assert.AreEqual(ShadowCastingMode.Off, toeRend.shadowCastingMode, "鞋头包边不应重复投影");
+        }
+
+        [Test]
+        public void TeeNeckline_IsClosedAndWiderThanNeck()
+        {
+            Mesh tee = CharacterVisualAssembler.CreateTeeMesh();
+            Assert.IsNotNull(tee, "T 恤网格必须生成");
+            Assert.Greater(tee.bounds.max.y, CharacterMetrics.TeeNecklineY - 0.005f,
+                "T 恤必须做到领口上沿高度（肩线以上要有锥形领口）");
+            Assert.Greater(CharacterMetrics.TeeNecklineHalfWidth, CharacterMetrics.NeckRadius,
+                "领口环必须比颈筒宽，封口环才能始终罩住脖子");
+
+            // 开放边（只被一个三角形使用的边）：领口高度附近若存在开放边，说明顶面没封口，
+            // 俯视会直接看穿空心 T 恤 —— 这正是"脖子下面是空的"的根因。
+            // 按【顶点位置】而不是顶点索引统计：管体在 θ=0 处有一列重复顶点（接缝），按索引会把
+            // 接缝与封口扇的环绕边误判成开放边。
+            Vector3[] verts = tee.vertices;
+            int[] tris = tee.triangles;
+            var edgeUse = new Dictionary<EdgeKey, int>();
+            for (int i = 0; i < tris.Length; i += 3)
+            {
+                RegisterEdge(edgeUse, verts[tris[i]], verts[tris[i + 1]]);
+                RegisterEdge(edgeUse, verts[tris[i + 1]], verts[tris[i + 2]]);
+                RegisterEdge(edgeUse, verts[tris[i + 2]], verts[tris[i]]);
+            }
+
+            float rimMinY = CharacterMetrics.TeeNecklineY - 0.005f;
+            int openRimEdges = 0;
+            foreach (var kv in edgeUse)
+            {
+                if (kv.Value != 1) continue;
+                if (kv.Key.YA > rimMinY && kv.Key.YB > rimMinY) openRimEdges++;
+            }
+
+            Assert.AreEqual(0, openRimEdges, "T 恤领口顶面必须封闭：领口环上不允许有开放边");
+        }
+
+        [Test]
+        public void NeckJunction_CollarRibRidesSpine_AndNeckIsSocketed()
+        {
+            Transform kid = _controller.KidRoot.transform;
+            Transform spine = kid.Find("Hips/BodySquash/Spine");
+            Assert.IsNotNull(spine, "Spine 必须存在");
+
+            // 领圈必须与 T 恤同枢轴（Spine）：挂在 Neck 骨上会随头部转动漂出领口
+            Transform rib = spine.Find("CollarRib");
+            Assert.IsNotNull(rib, "领口螺纹条必须挂在 Spine 下");
+            var ribFilter = rib.GetComponent<MeshFilter>();
+            Assert.IsNotNull(ribFilter, "领口螺纹条必须有 MeshFilter");
+            Assert.IsNotNull(ribFilter.sharedMesh, "领口螺纹条网格必须生成");
+            Assert.Greater(ribFilter.sharedMesh.bounds.size.y, 0.005f, "领口螺纹条必须有可见高度");
+
+            // 颈筒加粗并埋进上下两端：可见段只从领口到下巴
+            Transform neckSkin = kid.Find("Hips/BodySquash/Spine/Chest/Neck/NeckSkin");
+            Assert.IsNotNull(neckSkin, "颈筒必须挂在 Neck 骨下");
+            Assert.AreEqual(CharacterMetrics.NeckRadius * 2f, neckSkin.localScale.x, 0.001f, "颈筒直径必须符合 NeckRadius");
+            Assert.AreEqual(CharacterMetrics.NeckLength * 0.5f, neckSkin.localScale.y, 0.001f,
+                "颈筒半高必须符合 NeckLength（圆柱基元高 = 2×scale.y）");
+            Assert.AreEqual(CharacterMetrics.NeckSkinCenterY, neckSkin.localPosition.y, 0.001f,
+                "颈筒中心必须下沉到 NeckSkinCenterY");
+        }
+
+        private static void RegisterEdge(Dictionary<EdgeKey, int> edges, Vector3 a, Vector3 b)
+        {
+            var key = new EdgeKey(a, b);
+            edges.TryGetValue(key, out int count);
+            edges[key] = count + 1;
+        }
+
+        /// <summary>按位置量化的无向边（0.1mm 精度），把接缝重复顶点归并成同一条边。</summary>
+        private readonly struct EdgeKey : System.IEquatable<EdgeKey>
+        {
+            private readonly int _x0, _y0, _z0, _x1, _y1, _z1;
+
+            public EdgeKey(Vector3 a, Vector3 b)
+            {
+                const float scale = 10000f;
+                int ax = Mathf.RoundToInt(a.x * scale), ay = Mathf.RoundToInt(a.y * scale), az = Mathf.RoundToInt(a.z * scale);
+                int bx = Mathf.RoundToInt(b.x * scale), by = Mathf.RoundToInt(b.y * scale), bz = Mathf.RoundToInt(b.z * scale);
+                bool swap = ax > bx || (ax == bx && (ay > by || (ay == by && az > bz)));
+                _x0 = swap ? bx : ax; _y0 = swap ? by : ay; _z0 = swap ? bz : az;
+                _x1 = swap ? ax : bx; _y1 = swap ? ay : by; _z1 = swap ? az : bz;
+            }
+
+            public float YA => _y0 / 10000f;
+            public float YB => _y1 / 10000f;
+
+            public bool Equals(EdgeKey other)
+                => _x0 == other._x0 && _y0 == other._y0 && _z0 == other._z0
+                && _x1 == other._x1 && _y1 == other._y1 && _z1 == other._z1;
+
+            public override bool Equals(object obj) => obj is EdgeKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int h = 17;
+                    h = h * 31 + _x0; h = h * 31 + _y0; h = h * 31 + _z0;
+                    h = h * 31 + _x1; h = h * 31 + _y1; h = h * 31 + _z1;
+                    return h;
+                }
+            }
         }
 
         [Test]

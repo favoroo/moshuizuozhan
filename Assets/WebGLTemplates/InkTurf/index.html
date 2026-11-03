@@ -126,6 +126,10 @@
 #endif
           streamingAssetsUrl: "StreamingAssets",
           fullscreenElementID: "unity-fullscreen-container",
+          // 渲染分辨率锁 1×：Unity WebGL 默认按 window.devicePixelRatio 建画布后备缓冲，
+          // Retina(DPR=2) 下像素量是 4 倍 —— 单线程 WebGL + URP 后处理会直接掉帧。
+          // 网页试玩优先流畅：后备缓冲按 CSS 尺寸渲染，由浏览器放大到物理像素。
+          devicePixelRatio: 1,
           companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
           productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
           productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},

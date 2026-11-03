@@ -56,11 +56,6 @@ namespace P1.Weapons
             if (AudioManager.Instance == null || _weapon == null)
                 return;
 
-            // 只有本地玩家触发前台射击音；Bot/队友的声音由各自位置的音效通道负责，
-            // 避免 4v4 中多名队友同时开火把单发音效池刷爆。
-            if (!CombatantHealth.IsLocalPlayer(_health))
-                return;
-
             // P28：滚筒推地由推地循环音承担，不能再每帧叠一发 flick 音
             if (_weapon.IsRolling)
                 return;
@@ -69,6 +64,15 @@ namespace P1.Weapons
             if (Time.frameCount == _lastShotFrame)
                 return;
             _lastShotFrame = Time.frameCount;
+
+            // P30：本地玩家走前台全量射击音；Bot/队友走远场衰减音（音量上限远低于本地、
+            // 全局节流防音墙），4v4 不再是「全场只有自己一把枪在响」。
+            if (!CombatantHealth.IsLocalPlayer(_health))
+            {
+                AudioManager.Instance.PlayWeaponShotAt(
+                    _weapon.transform.position, _weapon.CurrentWeaponKind, _weapon.LastShotStrength01);
+                return;
+            }
 
             AudioManager.Instance.PlayWeaponShot(_weapon.CurrentWeaponKind, _weapon.LastShotStrength01);
         }

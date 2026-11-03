@@ -36,19 +36,24 @@ namespace P1.Ink
         [Range(0f, 120f)]
         public float inkSheenSeconds = 22f;
 
-        [Tooltip("单个墨斑铺开动画时长（秒）；0 = 立即出现")]
+        [Tooltip("单个墨斑铺开动画时长（秒）；0 = 立即出现。" +
+                 "注意图集 G 通道时间戳只有 8bit（周期/256 ≈ 0.125s/级），动画时长接近或短于量化步长时" +
+                 "时间戳误差会吃掉大半动画，读起来就是「落地后隔一下才看到墨」，所以保持 ≤0.1s")]
         [Range(0f, 0.5f)]
-        public float splatGrowSeconds = 0.12f;
+        public float splatGrowSeconds = 0.08f;
 
         [Tooltip("墨迹图集湿润时间戳回绕周期（秒）：G 通道存 frac(落墨时刻/周期)，8bit 精度 = 周期/256。"+
                  "默认 32s → 0.125s/级（湿润度量化步长约 0.02）；周期越大回绕伪影越少但时间戳越粗")]
         [Range(8f, 120f)]
         public float atlasWetClockPeriod = 32f;
 
-        [Tooltip("生长动画片元侧侵蚀的最大回缩距离（米）：新墨斑以最终形态写入图集，可见边缘从最终轮廓"+
-                 "向内回缩这么多再随时间松开（近似旧版从 0.4R 放大到 R 的铺开观感）")]
+        [Tooltip("生长动画片元侧侵蚀的最大回缩距离（米）：新墨斑以最终形态写入图集，可见边缘从最终轮廓" +
+                 "向内回缩这么多再随时间松开。**按绝对米数回缩**，所以对小块墨斑杀伤极大：" +
+                 "墨迹半径 0.44m（沿途滴墨）时 0.4m 回缩会让它落地瞬间几乎不可见，" +
+                 "弹丸落点的有机形状（射线/飞溅小点）也要等 0.1s 后才长出来（读作「涂地有延迟」）。" +
+                 "0.18m 下落地即见 65%~77% 尺寸，观感与 INKWAVE「主体从 40% 铺开」一致")]
         [Range(0f, 2f)]
-        public float atlasGrowShrinkMeters = 0.4f;
+        public float atlasGrowShrinkMeters = 0.18f;
 
         [Tooltip("每个墨斑的色调微差强度：0 = 完全纯色，1 = 参考实现默认")]
         [Range(0f, 2f)]
@@ -58,10 +63,15 @@ namespace P1.Ink
         [Range(32, 384)]
         public int maxSplatsPerFrame = 192;
 
-        [Tooltip("图集是否生成 mipmap（远景不闪烁，代价是定期一次 mip 重建）")]
-        public bool atlasMipmaps = true;
+        [Tooltip("图集是否生成 mipmap。默认关闭：mip 链受 atlasMipIntervalSeconds 节流（0.5s），" +
+                 "而第三人称斜视地面时落点附近的采样 LOD 已经在 1~3，新墨只写进 mip0 —— " +
+                 "子弹落地后要等下一次 mip 重建（最多 0.5s）才完全显墨，读作「涂地有延迟」。" +
+                 "关闭后地面直接采 mip0（墨色不再被平均成灰白），代价是远景墨迹可能轻微闪烁；" +
+                 "如果远景闪烁不可接受，改回 true 并把 atlasMipIntervalSeconds 降到 ~0.15s（会有重建尖刺）")]
+        public bool atlasMipmaps = false;
 
-        [Tooltip("墨迹图集 mip 重建最小间隔（秒）：只在有新落墨时重建，间隔越大越省 GPU 尖刺")]
+        [Tooltip("墨迹图集 mip 重建最小间隔（秒）：只在有新落墨时重建，间隔越大越省 GPU 尖刺。" +
+                 "仅在 atlasMipmaps=true 时生效")]
         [Range(0.1f, 2f)]
         public float atlasMipIntervalSeconds = 0.5f;
 

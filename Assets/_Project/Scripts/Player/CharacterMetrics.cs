@@ -60,6 +60,19 @@ namespace P1.Player
         public const float TankCenterY = 0.700f;        // 墨罐罐心（背驮）
         public const float TankBackZ = 0.163f;          // 墨罐中心到身体表面的横向距离
 
+        // ---- 领口与颈筒（P35 颈部衔接）：肩线以上收成锥形领口并封闭顶面 ----
+        // 旧版顶环 0.078m 宽且两端敞口，脖子只有 0.038m 粗：俯视时领口露出 3~4cm 的空心筒，
+        // 表现为"脖子下面是空的"。现在顶环收到 0.050m 且封口，前领窝从 0.038 收到 0.014。
+        public const float TeeNecklineY = 0.212f;           // 领口上沿（Spine 空间）→ 世界 0.817
+        public const float TeeNecklineHalfWidth = 0.050f;   // 领口环半宽：必须 > NeckRadius，封口环才能始终罩住脖子
+        public const float TeeNecklineHalfDepth = 0.048f;   // 领口环半深
+        public const float TeeNecklineZShift = 0.006f;      // 领口环向颈轴（z≈0.008）前移，脖子不从领圈前侧穿出
+        public const float TeeCollarDip = 0.014f;           // 前领窝下沉（旧 0.038 挖到胸口，脖子露出一大截）
+        public const float NeckRadius = 0.040f;             // 颈筒半径（旧 0.038 偏细，像一根棍子）
+        public const float NeckLength = 0.150f;             // 颈筒总长：下端埋进胸腔、上端埋进馒头头
+        public const float NeckSkinCenterY = -0.065f;       // NeckSkin 圆柱中心（Neck 骨局部 → 世界 0.815）
+        public const float CollarRibHeight = 0.010f;        // 领口螺纹条上凸高度
+
         // ---- 躯干枢轴（历史兼容：P33 起 Chest 不再贴地，保留常量防旧引用编译失败）----
         public const float ChestPivotY = 0.05f;
 

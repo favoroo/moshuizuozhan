@@ -26,6 +26,7 @@ namespace P1.Player
         private static Mesh _mochiHeadMesh;
         private static Mesh _scalpCapMesh;
         private static Mesh _teeMesh;
+        private static Mesh _collarRibMesh;
         private static Mesh _shortsMesh;
         private static Mesh _waistbandMesh;
         private static Mesh _hairSeg1Mesh;
@@ -38,6 +39,7 @@ namespace P1.Player
             _mochiHeadMesh = null;
             _scalpCapMesh = null;
             _teeMesh = null;
+            _collarRibMesh = null;
             _shortsMesh = null;
             _waistbandMesh = null;
             _hairSeg1Mesh = null;
@@ -561,6 +563,8 @@ namespace P1.Player
                 // 腰带是 ~8mm 饰带、袜口是贴腿小环：主体 T 恤 / 小腿已投出相同轮廓，
                 // 重复投影只增加阴影 draw，并在细级联下放大自阴影噪声。
                 partName == "Waistband" ||
+                // 领口螺纹条只有 1cm 高、贴在领口环上：T 恤本体已投出同一圈轮廓
+                partName == "CollarRib" ||
                 partName == "SockCuff_L" ||
                 partName == "SockCuff_R" ||
                 // 球鞋分层件（白中底/鞋头包边/后跟饰片）随 Foot 鞋壳轮廓投影即可
@@ -789,19 +793,103 @@ namespace P1.Player
         /// <summary>
         /// 盒型 T 恤（INKWAVE "boxy kid tee"）：超椭圆环堆叠（指数 2.3，方中带圆真实衣物布量感）。
         /// 网格锚在 Spine 节点（世界 y = 0.605）：下摆 y -0.015（世界 0.590，紧扣腰带上沿）→
-        /// 腰腹 0.050 → 胸膛 0.105 → 落肩 0.145 → 肩线 0.170（世界 0.775，与肩关节 0.762m 协调）。
-        /// 顶端圆领向下挖弧 0.038m（前领窝世界 0.737m），开领口（openCaps: 3），露出一截清爽精神的肤色小脖子。
+        /// 腰腹 0.050 → 胸膛 0.105 → 落肩 0.145 → 肩线 0.170（世界 0.775）→ 领口锥 0.190 / 0.202 →
+        /// 领口上沿 0.212（世界 0.817，CharacterMetrics.TeeNecklineY）。
+        /// 肩线以上收向脖子（顶环 0.050×0.048）并封闭顶面（openCaps: 1 = 只开下摆），前领窝只挖 0.014 浅弧：
+        /// 旧版顶环 0.078 宽且两端敞口，俯视时能直接看穿空心筒内部（"脖子下面是空的"）。
         /// </summary>
         public static Mesh CreateTeeMesh()
         {
             if (_teeMesh != null) return _teeMesh;
 
             var profile = new SuperellipseProfile(
-                new float[] { -0.015f, 0.050f, 0.105f, 0.145f, 0.170f },
-                new float[] { 0.100f, 0.108f, 0.116f, 0.124f, 0.078f },
-                new float[] { 0.080f, 0.086f, 0.088f, 0.084f, 0.060f });
-            _teeMesh = BuildSuperellipseTube(profile, "TeeMesh", 0.0f, 3, 2.3f, frontCollarDip: 0.038f);
+                new float[] { -0.015f, 0.050f, 0.105f, 0.145f, 0.170f, 0.190f, 0.202f, CharacterMetrics.TeeNecklineY },
+                new float[] { 0.100f, 0.108f, 0.116f, 0.124f, 0.078f, 0.064f, 0.054f, CharacterMetrics.TeeNecklineHalfWidth },
+                new float[] { 0.080f, 0.086f, 0.088f, 0.084f, 0.060f, 0.052f, 0.049f, CharacterMetrics.TeeNecklineHalfDepth });
+            _teeMesh = BuildSuperellipseTube(profile, "TeeMesh", 0.0f, 1, 2.3f,
+                CharacterMetrics.TeeCollarDip, CharacterMetrics.TeeNecklineZShift);
             return _teeMesh;
+        }
+
+        /// <summary>
+        /// 领口螺纹条（rib crew collar，对齐 INKWAVE addTeeCollar）：沿 T 恤领口环立起的窄带，
+        /// 上端向脖子内倾，外圈压住领口接缝、内圈露出白 T 恤封口环。闭合小截面（无单面片），不会背面透光。
+        /// </summary>
+        public static Mesh CreateCollarRibMesh()
+        {
+            if (_collarRibMesh != null) return _collarRibMesh;
+
+            const int segs = 32;
+            const float exponent = 2.3f;
+            const float lean = 0.28f;                       // 上端向颈轴内倾（弧度）
+            float w = CharacterMetrics.TeeNecklineHalfWidth + 0.0015f;
+            float d = CharacterMetrics.TeeNecklineHalfDepth + 0.0015f;
+            float zShift = CharacterMetrics.TeeNecklineZShift;
+            float baseY = CharacterMetrics.TeeNecklineY;
+            float h = CharacterMetrics.CollarRibHeight;
+
+            // 截面 (径向偏移, 向上偏移)：外下 → 外上 → 顶弧 → 内上 → 内下（闭合）。
+            // 顺序决定绕序（与管体一致，法线朝外）；下缘半径压在 T 恤领口面以内，接缝不外露。
+            var cross = new[]
+            {
+                new Vector2(0.0018f, -0.005f),
+                new Vector2(0.0018f, h * 0.42f),
+                new Vector2(0.0008f, h),
+                new Vector2(-0.0020f, h * 0.38f),
+                new Vector2(-0.0020f, -0.005f),
+            };
+
+            float sinLean = Mathf.Sin(lean);
+            float cosLean = Mathf.Cos(lean);
+            int rings = cross.Length;
+
+            var verts = new List<Vector3>(rings * segs);
+            var tris = new List<int>(rings * segs * 6);
+
+            for (int j = 0; j < rings; j++)
+            {
+                Vector2 cv = cross[j];
+                for (int s = 0; s < segs; s++)
+                {
+                    float theta = 2f * Mathf.PI * (float)s / segs;
+                    float c = Mathf.Cos(theta);
+                    float sn = Mathf.Sin(theta);
+                    float e = 2f / exponent;
+                    float x = Mathf.Sign(c) * Mathf.Pow(Mathf.Abs(c), e) * w;
+                    float z = Mathf.Sign(sn) * Mathf.Pow(Mathf.Abs(sn), e) * d;
+                    float y = baseY - CharacterMetrics.TeeCollarDip * Mathf.Clamp01(sn);
+
+                    Vector3 outward = new Vector3(x, 0f, z);
+                    if (outward.sqrMagnitude < 1e-8f) outward = Vector3.forward;
+                    outward.Normalize();
+                    Vector3 up = new Vector3(0f, cosLean, 0f) - outward * sinLean;
+
+                    verts.Add(new Vector3(x, y, z + zShift) + outward * cv.x + up * cv.y);
+                }
+            }
+
+            for (int j = 0; j < rings; j++)
+            {
+                int jn = (j + 1) % rings;
+                for (int s = 0; s < segs; s++)
+                {
+                    int snNext = (s + 1) % segs;
+                    int a = j * segs + s;
+                    int b = j * segs + snNext;
+                    int c2 = jn * segs + s;
+                    int d2 = jn * segs + snNext;
+                    tris.Add(a); tris.Add(c2); tris.Add(b);
+                    tris.Add(b); tris.Add(c2); tris.Add(d2);
+                }
+            }
+
+            var mesh = new Mesh { name = "CollarRibMesh" };
+            mesh.SetVertices(verts);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            _collarRibMesh = mesh;
+            return mesh;
         }
 
         /// <summary>
@@ -867,9 +955,11 @@ namespace P1.Player
         /// <summary>
         /// 通用超椭圆管体网格（T 恤 / 短裤 / 腰带共用）：沿 Y 采样 profile，
         /// 每环用 |cos|^(2/n)、|sin|^(2/n) 生成方中带圆的截面；上下端盖面（openCaps:bit0=底 bit1=顶，1=开放）。
+        /// <paramref name="topZShift"/>：顶段环心向 +Z 平滑前移（T 恤领口收向颈轴用，默认 0 = 旧行为）。
         /// </summary>
         private static Mesh BuildSuperellipseTube(
-            SuperellipseProfile profile, string name, float offset, int openCaps, float exponent, float frontCollarDip = 0f)
+            SuperellipseProfile profile, string name, float offset, int openCaps, float exponent,
+            float frontCollarDip = 0f, float topZShift = 0f)
         {
             const int rings = 20;
             const int segs = 32;
@@ -883,6 +973,7 @@ namespace P1.Player
                 Vector2 wd = profile.Sample(u);
                 float w = wd.x + offset;
                 float d = wd.y + offset;
+                float zShift = topZShift * Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.70f, 1f, u));
                 for (int s = 0; s <= segs; s++)
                 {
                     float theta = 2f * Mathf.PI * (float)s / segs;
@@ -902,7 +993,7 @@ namespace P1.Player
                     verts.Add(new Vector3(
                         Mathf.Sign(c) * Mathf.Pow(Mathf.Abs(c), e) * w,
                         y,
-                        Mathf.Sign(sn) * Mathf.Pow(Mathf.Abs(sn), e) * d));
+                        Mathf.Sign(sn) * Mathf.Pow(Mathf.Abs(sn), e) * d + zShift));
                 }
             }
 
@@ -1170,6 +1261,14 @@ namespace P1.Player
             teeGo.AddComponent<MeshFilter>().sharedMesh = CreateTeeMesh();
             teeGo.AddComponent<MeshRenderer>().sharedMaterial = p.Shirt;
 
+            // 2.15 领口螺纹条：与 T 恤同一个动画枢轴（Spine），压住领口接缝、给脖子一个明确的领圈；
+            //      旧版螺纹圈挂在 Neck 骨上（世界 0.785、半径 0.084），脖子一转就漂出领口，且盖不住敞口。
+            var collarRibGo = new GameObject("CollarRib");
+            collarRibGo.transform.SetParent(spine, false);
+            collarRibGo.transform.localPosition = Vector3.zero;
+            collarRibGo.AddComponent<MeshFilter>().sharedMesh = CreateCollarRibMesh();
+            collarRibGo.AddComponent<MeshRenderer>().sharedMaterial = p.Dark;
+
             var shortsGo = new GameObject("KidShorts");
             shortsGo.transform.SetParent(hips, false);
             shortsGo.transform.localPosition = Vector3.zero;
@@ -1188,10 +1287,13 @@ namespace P1.Player
             neckGo.transform.localPosition = new Vector3(0f, CharacterMetrics.NeckLocalY, 0.006f);
             neck = neckGo.transform;
 
-            // 真实可见的少年肤色小脖子：从 T 恤领口（世界 0.73m）稳稳延伸到下巴（世界 0.88m），露出一截清爽精神的颈部
-            CreateCylinder(neck, "NeckSkin", new Vector3(0f, -0.055f, 0.002f), new Vector3(0.076f, 0.060f, 0.076f), p.Skin);
-            // T 恤圆领螺纹领圈（Crew Collar Ribbing）：勾勒出精致时尚的圆领轮廓
-            CreateCylinder(neck, "NeckCollarRib", new Vector3(0f, -0.095f, 0.002f), new Vector3(0.084f, 0.008f, 0.080f), p.Dark);
+            // 少年肤色颈筒：下端埋进胸腔（世界 0.740）、上端埋进馒头头（世界 0.890），
+            // 只从 T 恤领口（世界 0.817）往上露出 2~4cm —— 不再是半截悬空的细棍。
+            CreateCylinder(neck, "NeckSkin",
+                new Vector3(0f, CharacterMetrics.NeckSkinCenterY, 0.002f),
+                new Vector3(CharacterMetrics.NeckRadius * 2f, CharacterMetrics.NeckLength * 0.5f,
+                            CharacterMetrics.NeckRadius * 2f),
+                p.Skin);
 
             var headGo = new GameObject("Head");
             headGo.transform.SetParent(neck, false);

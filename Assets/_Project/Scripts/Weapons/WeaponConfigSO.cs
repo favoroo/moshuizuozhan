@@ -338,6 +338,8 @@ namespace P1.Weapons
         public float specialOuterFalloffWeight = 0.3f;
         [Tooltip("落地震屏 Trauma")]
         public float specialImpactTrauma = 1f;
+        [Tooltip("落地瞬间的全局微定格时长（秒）：0 = 关闭。仅本地玩家触发，与击杀 Hitstop 取较长者")]
+        public float specialImpactHitstopSeconds = 0.045f;
 
         [Header("大招：Ink Tempest 墨水风暴云")]
         [Tooltip("云层存在时间（秒）：6.5s")]

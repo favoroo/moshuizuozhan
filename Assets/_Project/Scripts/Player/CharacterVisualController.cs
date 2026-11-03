@@ -189,6 +189,9 @@ namespace P1.Player
         private float _gaitPhase;
         private float _jelly;
         private float _jellyVel;
+        // P37 骨盆竖向低通状态（几何贴地下沉的 6Hz 方波平滑写出，避免整个上半身含头跟着抖）
+        private float _hipsBobSmoothed;
+        private float _hipsBobSmoothedVel;
         // 起跳瞬间的水平速度（>3 才做"跑步起跳"前后腿劈开）
         private float _jumpRunSpeed;
 
@@ -209,6 +212,16 @@ namespace P1.Player
         private Transform _lastCachedHips;
         private Vector3 _defaultHipsPos;
         private Quaternion _defaultHipsRot = Quaternion.identity;
+
+        // P38 大招 Slam 起跳表演状态（四段权重由 SlamPoseSolver 采样；落地收势段由视觉层自己计时，
+        // 因为 WeaponController 在落地帧就把 _slamPhase 归零并退出演出）
+        private bool _slamPerforming;
+        private int _slamLastPhase = -1;
+        private float _slamImpactElapsed = -1f;
+        private Quaternion _defaultKidRootRot = Quaternion.identity;
+        // 演出期间武器过顶/砸地的挂点偏移（在 UpdateRecoilKick 里与后坐力、滚筒位移同帧合成）
+        private float _slamWeaponLift;
+        private float _slamWeaponPitchDeg;
 
         // P29 脚步锁相：步态相位每跨过一次触地点发一次事件（左右交替），供脚步音效与视觉同步
         private int _lastStepIndex = int.MinValue;
@@ -1050,6 +1063,8 @@ namespace P1.Player
             if (kidRoot != null)
             {
                 _defaultKidRootScale = kidRoot.transform.localScale;
+                // P38 大招前空翻写回基准：装配期 KidRoot 无旋转，这里捕获一次供演出叠加
+                _defaultKidRootRot = kidRoot.transform.localRotation;
             }
             if (squidRoot != null)
             {
@@ -1530,7 +1545,11 @@ namespace P1.Player
 
         private void LateUpdate()
         {
-            float dt = Time.deltaTime;
+            // P37 视觉层帧间隔钳制：读盘 / GC / 切后台 / 首帧着色器编译会造出几十~上百毫秒的假帧，
+            // 而步态相位是 _gaitPhase += π·cadence·dt，一次假帧就能把相位推进大半圈，
+            // 姿态直接跳到随机相位（观感「人抽一下」，低帧率下更像头在乱跳）。
+            // 只截断 ≥100ms 的真卡顿，常规掉帧不介入，避免与移动层的时间基准解耦。
+            float dt = VisualMotionMath.SanitizeFrameDt(Time.deltaTime);
             if (dt <= 0f) return;
 
             SampleMotion(dt);
@@ -1551,6 +1570,9 @@ namespace P1.Player
             {
                 // 乌贼潜行姿态：身体起伏 + 转向侧倾 + 保体积拉伸 + 逐根触须行波
                 UpdateSwimPosture(dt);
+                // 潜行期不跑步态：清掉骨盆低通状态，免得下次浮出时从中途的旧值续上
+                _hipsBobSmoothed = 0f;
+                _hipsBobSmoothedVel = 0f;
             }
 
             UpdateWeaponMechanics(dt);
@@ -1812,6 +1834,8 @@ namespace P1.Player
                 _jelly = 0f;
                 _jellyVel = 0f;
                 _lastAirVelY = 0f;
+                _hipsBobSmoothed = 0f;
+                _hipsBobSmoothedVel = 0f;
             }
             // 关键：步态必须用真实位移速度，而不是 motor.CurrentMoveSpeed（那是当前形态的速度上限，站立时也为 6）。
             // 旧写法导致角色一落地就永远在走弹跳步态，原地站着也一蹦一蹦。
@@ -1889,7 +1913,15 @@ namespace P1.Player
 
             // 骨盆竖向：几何下沉 + 步频起伏已合成在 gait.BobY；按 kidHipDropMaxMeters 封顶
             // —— 大摆幅高频帧的全幅下沉会读成上下抖动，残余脚底悬浮 ≤2cm 由鞋底与接触阴影掩盖。
-            float bob = Mathf.Max(gait.BobY * gaitWeight, -cfg.kidHipDropMaxMeters);
+            float bobTarget = Mathf.Max(gait.BobY * gaitWeight, -cfg.kidHipDropMaxMeters);
+            // P37 低通：4.5m/s 以上这条曲线约 40% 相位贴住封顶，是 6 步/秒的方波；直接写回 Hips
+            // 会让整个上半身（含头）跟着 6Hz 上下跳，低帧率采样时更会混叠成不规则乱跳。
+            // 帧率自适应时间常数把它压成缓波：高帧率只削高频抖动、保留跑姿微沉，掉帧时基本停跳；
+            // 均值仍贴近几何下沉量，支撑脚贴地感保留，落差由鞋底与接触阴影掩盖。
+            float bobSmoothTime = VisualMotionMath.BobSmoothTime(dt, cfg.hipsBobSmoothTime, cfg.hipsBobSmoothTimeLowFps);
+            _hipsBobSmoothed = Mathf.SmoothDamp(
+                _hipsBobSmoothed, bobTarget, ref _hipsBobSmoothedVel, bobSmoothTime, Mathf.Infinity, dt);
+            float bob = _hipsBobSmoothed;
             float squashY = Mathf.Lerp(1f, gait.SquashY, gaitWeight);
             float squashXZ = Mathf.Lerp(1f, gait.SquashXZ, gaitWeight);
             float rock = gait.RockDeg * gaitWeight;
@@ -2075,6 +2107,73 @@ namespace P1.Player
                 tuckFoot = 8f;
             }
 
+            // --- 7.5 大招 Slam 起跳表演（P38）：角色本体全程贴地（IsGrounded 恒真），
+            //     贴地步态不会自己切到滞空分支，所以这里按 WeaponController 的阶段+计时单独接管姿态。
+            //     四段权重与时间窗全部来自 SlamPoseSolver（对齐 INKWAVE _poseLeap / _poseSlam）。
+            SlamPerformance slam = SampleSlamPerformance(dt, cfg, out float slamBlend);
+            float slamExtraPitch = 0f;
+            if (slamBlend > 0.001f)
+            {
+                // 步态/待机层让位：演出一旦接管，腿不再按地面速度摆动
+                float keep = 1f - slamBlend;
+                gaitWeight *= keep;
+                leftThigh *= keep;
+                rightThigh *= keep;
+                leftKnee *= keep;
+                rightKnee *= keep;
+                leftFoot *= keep;
+                rightFoot *= keep;
+                armSwing *= keep;
+                rock *= keep;
+                bob *= keep;
+
+                // 腿：蹬伸（伸直角 + 绷脚尖）/ 团身（收腿屈膝）/ 顶点（微开）/ 俯冲（绷直）/ 落地（深蹲）
+                float legW = slam.TotalWeight > 1f ? 1f / slam.TotalWeight : 1f;
+                float sLaunch = slam.LaunchW * legW;
+                float sTuck = slam.TuckW * legW;
+                float sHang = slam.HangW * legW;
+                float sDive = slam.DiveW * legW;
+                float sImpact = slam.ImpactW * legW;
+
+                tuckThigh += sLaunch * cfg.slamLaunchThighDeg
+                    - sTuck * cfg.slamTuckThighDeg
+                    + sDive * cfg.slamDiveThighDeg;
+                tuckKnee += sTuck * cfg.slamTuckKneeDeg
+                    + sImpact * cfg.slamImpactKneeDeg;
+                tuckFoot += sLaunch * cfg.slamLaunchFootDeg;
+
+                // 顶点举枪时双腿分开（左右各一半），落地收拢
+                float hangSplit = sHang * cfg.slamHangLegSplitDeg;
+                leftThigh -= hangSplit * 0.5f;
+                rightThigh += hangSplit * 0.5f;
+                // 落地深蹲：髋下沉 + 双腿外分站稳
+                bob -= sImpact * cfg.slamImpactHipDropMeters;
+                leftThigh -= sImpact * 6f;
+                rightThigh += sImpact * 6f;
+
+                // 躯干：蹬伸背弓（后仰）→ 团身前卷 → 顶点后仰举枪 → 落地深压
+                slamExtraPitch = slamBlend * (
+                    sLaunch * cfg.slamLaunchSpineDeg
+                    + sTuck * cfg.slamTuckSpineDeg
+                    + sHang * cfg.slamHangChestDeg
+                    + sImpact * cfg.slamImpactSpineDeg);
+
+                // 挤压：蹬伸拉长、团身缩、落地压扁（与果冻弹簧叠加，钳制在写回段）
+                squashY *= 1f + slamBlend * (sLaunch * 0.10f + sDive * 0.06f - sTuck * 0.05f - sImpact * 0.16f);
+                squashXZ *= 1f + slamBlend * (sTuck * 0.04f + sImpact * 0.10f);
+
+                // 武器：顶点举枪过顶（上抬 + 枪口朝上）→ 俯冲甩到身前 → 落地砸进地里（下压 + 枪口朝下）
+                _slamWeaponLift = slamBlend * (
+                    sLaunch * 0.06f + sHang * 0.22f - sImpact * 0.20f);
+                _slamWeaponPitchDeg = slamBlend * (
+                    sLaunch * -18f + sHang * -62f + sDive * 30f + sImpact * 48f);
+            }
+            else
+            {
+                _slamWeaponLift = 0f;
+                _slamWeaponPitchDeg = 0f;
+            }
+
             // --- 8. 骨骼链写回（P33 真骨骼版）---
             // 8.1 全身挤压（果冻/滞空/滚筒/待机）只作用 BodySquash；武器挂胸腔骨之下会跟着被缩放，
             //     在武器根逐帧做等量反缩放抵消 —— 枪永远不压扁（对齐 INKWAVE：skid 形变不进武器骨骼）。
@@ -2109,7 +2208,8 @@ namespace P1.Player
                 + _aimPitchCurrent * chestAimWeight + _landPitchKickDeg
                 + _rollerBodyPitchDeg     // 滚筒蓄力后仰/砸地前压/拖地前倾
                 + _wieldBodyPitchDeg      // P35 蓄力后仰/泼桶甩出/爆破后坐/架枪前压
-                + _flinchPitchSpring.Value; // P36 受击后仰顿挫
+                + _flinchPitchSpring.Value // P36 受击后仰顿挫
+                + slamExtraPitch;         // P38 大招起跳：蹬伸背弓/团身/落地深压
             float dynRoll = _currentRoll + _leanRollSpring.Value + _wieldBodyRollDeg
                 + _flinchRollSpring.Value; // P36 受击侧让顿挫
             float rollMix = dynRoll + rock * 0.6f;
@@ -2235,6 +2335,122 @@ namespace P1.Player
                     rightAnklePivot.localRotation = _defaultRightAnkleRot * Quaternion.Euler(rightFoot + tuckFoot, 0f, 0f);
                 }
             }
+        }
+
+        /// <summary>
+        /// P38 大招 Slam 起跳表演采样：把 <see cref="WeaponController"/> 的 Slam 阶段 + 阶段计时
+        /// 翻译成 <see cref="SlamPoseSolver"/> 的四段权重，并驱动 KidRoot 的前空翻。
+        ///
+        /// 为什么必须单独一层：Slam 只抬升「视觉根节点」，角色 Transform 一直贴地，
+        /// <c>_groundedNow</c> 恒为真 → 贴地步态与待机姿态全程接管，观感是「站直的人被吊上去」。
+        ///
+        /// 落地收势段由本层自己计时：WeaponController 在落地帧就把 _slamPhase 归零并退出演出，
+        /// 若跟着它走，深蹲姿态会在落地当帧被抹掉。
+        /// </summary>
+        private SlamPerformance SampleSlamPerformance(float dt, CharacterAnimConfigSO cfg, out float blend)
+        {
+            blend = 0f;
+            WeaponController weapon = _weaponController;
+
+            // 新一次 Slam 已经开始：立刻打断上一轮的落地收势，否则收势分支会抢在起跳前面
+            // （大招充能只需再涂一枪就能再满，落地余韵期间再放一次是真实可能的操作）
+            if (weapon != null && weapon.SlamPhase >= 0 && _slamImpactElapsed >= 0f)
+            {
+                _slamImpactElapsed = -1f;
+                _slamLastPhase = -1;
+                ApplySlamFlip(0f);
+            }
+
+            // 落地收势段：落地后继续演 hold + recover，然后彻底退出
+            if (_slamImpactElapsed >= 0f)
+            {
+                _slamImpactElapsed += dt;
+                float total = cfg.slamImpactHoldSeconds + cfg.slamImpactRecoverSeconds;
+                SlamPerformance tail = SlamPoseSolver.Sample(
+                    SlamPoseSolver.PhaseImpact, _slamImpactElapsed,
+                    cfg.slamImpactHoldSeconds, 0f, 0f,
+                    cfg.slamImpactHoldSeconds, cfg.slamImpactRecoverSeconds,
+                    cfg.slamFlipDegrees);
+                blend = tail.Blend01;
+                if (_slamImpactElapsed >= total)
+                {
+                    _slamImpactElapsed = -1f;
+                    _slamPerforming = false;
+                    ApplySlamFlip(0f);
+                }
+                else
+                {
+                    ApplySlamFlip(tail.FlipRadians);
+                }
+                return tail;
+            }
+
+            int phase = weapon != null ? weapon.SlamPhase : -1;
+            if (phase < 0)
+            {
+                if (_slamPerforming)
+                {
+                    // WeaponController 在落地帧就退出演出并把 _slamPhase 归零：
+                    // 「上一阶段是下砸」= 正常落地，转进落地收势段；否则是异常中断，立刻复位
+                    if (_slamLastPhase == SlamPoseSolver.PhaseFall)
+                    {
+                        _slamLastPhase = SlamPoseSolver.PhaseImpact;
+                        _slamImpactElapsed = 0f;
+                        SlamPerformance landed = SlamPoseSolver.Sample(
+                            SlamPoseSolver.PhaseImpact, 0f,
+                            0f, 0f, 0f,
+                            cfg.slamImpactHoldSeconds, cfg.slamImpactRecoverSeconds,
+                            cfg.slamFlipDegrees);
+                        blend = landed.Blend01;
+                        ApplySlamFlip(landed.FlipRadians);
+                        return landed;
+                    }
+
+                    _slamPerforming = false;
+                    _slamLastPhase = -1;
+                    ResetSlamFlip();
+                }
+                return SlamPerformance.None;
+            }
+
+            _slamPerforming = true;
+            _slamLastPhase = phase;
+
+            WeaponConfigSO weaponConfig = weapon.Config;
+            float rise = weaponConfig != null ? weaponConfig.specialWindupDuration : 0.55f;
+            float hang = weaponConfig != null ? weaponConfig.specialHangDuration : 0.25f;
+            float fall = weaponConfig != null ? weaponConfig.specialFallDuration : 0.1f;
+
+            SlamPerformance pose = SlamPoseSolver.Sample(
+                phase, weapon.SlamPhaseElapsed, rise, hang, fall,
+                cfg.slamImpactHoldSeconds, cfg.slamImpactRecoverSeconds,
+                cfg.slamFlipDegrees);
+
+            blend = pose.Blend01;
+            ApplySlamFlip(pose.FlipRadians);
+            return pose;
+        }
+
+        /// <summary>
+        /// 前空翻写回：绕角色横轴（KidRoot 局部 X）旋转。一整圈结束时角度自然回到 0，
+        /// 因此不会被下一次演出继承；异常中断时由 <see cref="ResetSlamFlip"/> 精确归位。
+        /// </summary>
+        private void ApplySlamFlip(float radians)
+        {
+            if (kidRoot == null)
+                return;
+
+            kidRoot.transform.localRotation = radians <= 0.0001f
+                ? _defaultKidRootRot
+                : _defaultKidRootRot * Quaternion.Euler(radians * Mathf.Rad2Deg, 0f, 0f);
+        }
+
+        /// <summary>演出结束时把 KidRoot 旋转归位（一整圈本来就回到原点，这里是异常中断的兜底）。</summary>
+        private void ResetSlamFlip()
+        {
+            _slamImpactElapsed = -1f;
+            if (kidRoot != null)
+                kidRoot.transform.localRotation = _defaultKidRootRot;
         }
 
         /// <summary>
@@ -2726,10 +2942,12 @@ namespace P1.Player
             float recoilYaw = Mathf.Clamp(_recoilYawSpring.Value, -4f, 4f);
 
             // P27 滚筒砸地/拖地挂点下压与前推合成进同一位置（非滚筒武器两项恒为 0）
+            // P38 大招 Slam：举枪过顶/砸地的挂点偏移与后坐力同帧合成，避免两条写入互相覆盖
             weaponRoot.transform.localPosition = _weaponRootBasePos
-                + new Vector3(0f, -(_rollerPoseDrop + _wieldDrop),
+                + new Vector3(0f, -(_rollerPoseDrop + _wieldDrop) + _slamWeaponLift,
                     recoilZ + _rollerPoseForward + _wieldForward);
-            weaponRoot.transform.localRotation = Quaternion.Euler(-recoilPitch, recoilYaw, 0f);
+            weaponRoot.transform.localRotation = Quaternion.Euler(
+                -recoilPitch + _slamWeaponPitchDeg, recoilYaw, 0f);
         }
 
         /// <summary>

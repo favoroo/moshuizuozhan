@@ -233,14 +233,17 @@ namespace P1.Core
                 var src = child.AddComponent<AudioSource>();
                 src.playOnAwake = false;
                 src.spatialBlend = 0f;
+                // P30 优先级阶梯：SFX(96) > 循环(128) > BGM(180)，语音 0。
+                // 默认 128 会让 SFX 在发声数超限时不合理地先于 BGM 被抢占。
+                src.priority = 96;
                 _pool[i] = src;
             }
         }
 
         private void BuildMusicSources()
         {
-            _musicMainSource = CreatePersistentSource("BGM_Main", true, 96);
-            _musicFinalSource = CreatePersistentSource("BGM_Final", true, 96);
+            _musicMainSource = CreatePersistentSource("BGM_Main", true, 180);
+            _musicFinalSource = CreatePersistentSource("BGM_Final", true, 180);
             _voiceSource = CreatePersistentSource("AnnouncerVoice", false, 0);
         }
 
@@ -250,7 +253,7 @@ namespace P1.Core
             for (int i = 0; i < kinds.Length; i++)
             {
                 LoopSfxKind kind = kinds[i];
-                var src = CreatePersistentSource($"LoopVoice_{kind}", true, 80);
+                var src = CreatePersistentSource($"LoopVoice_{kind}", true, 128);
                 _loopChannels[kind] = new LoopChannel
                 {
                     Kind = kind,
@@ -548,7 +551,7 @@ namespace P1.Core
 
         public void PlayShot()
         {
-            PlayRandom(shotClips, 0.42f, 0.94f, 1.08f);
+            PlayRandom(shotClips, Mix.shotVolume, 0.94f, 1.08f);
         }
 
         public void PlayInkHitGround(float volumeScale = 1f)
@@ -636,7 +639,7 @@ namespace P1.Core
 
             float heavy01 = Mathf.Clamp01((damage - 30f) / 60f);
             float pitch = Mathf.Lerp(1.05f, 0.80f, heavy01);
-            float volume = 0.42f * (0.25f + 0.9f * attenuation);
+            float volume = Mix.hitBodyVolume * (0.25f + 0.9f * attenuation);
             PlayRandom(hitEnemyClips, volume, pitch * 0.99f, pitch * 1.01f);
         }
 
@@ -720,11 +723,16 @@ namespace P1.Core
         public void PlayWeaponShot(WeaponKind kind, float strength01)
         {
             float strength = Mathf.Clamp01(strength01);
+
+            // P30 战斗 ducking：持续开火期间把 BGM 稳定压低一档（默认 -18%），停火后自动恢复。
+            // 与播报/大招 duck 取 min 合并，不会互相抵消。
+            Duck(Mix.combatDuckAmount, Mix.combatDuckHoldSeconds);
+
             switch (kind)
             {
                 case WeaponKind.Roller:
                     if (rollerFlickClips != null && rollerFlickClips.Length > 0)
-                        PlayRandom(rollerFlickClips, 0.45f, 0.94f, 1.06f);
+                        PlayRandom(rollerFlickClips, Mix.rollerFlickVolume, 0.94f, 1.06f);
                     else
                         PlayShot();
                     break;
@@ -734,7 +742,7 @@ namespace P1.Core
                     {
                         PlayOne(
                             chargerShotClip,
-                            Mathf.Lerp(0.42f, 0.58f, strength),
+                            Mathf.Lerp(Mix.chargerShotVolumeMin, Mix.chargerShotVolumeMax, strength),
                             Mathf.Lerp(1.06f, 0.94f, strength),
                             Mathf.Lerp(1.08f, 0.96f, strength));
                     }
@@ -744,14 +752,14 @@ namespace P1.Core
 
                 case WeaponKind.Blaster:
                     if (blasterShotClips != null && blasterShotClips.Length > 0)
-                        PlayRandom(blasterShotClips, 0.48f, 0.94f, 1.06f);
+                        PlayRandom(blasterShotClips, Mix.blasterShotVolume, 0.94f, 1.06f);
                     else
                         PlayShot();
                     break;
 
                 case WeaponKind.Slosher:
                     if (sloshThrowClip != null)
-                        PlayOne(sloshThrowClip, 0.45f, 0.95f, 1.05f);
+                        PlayOne(sloshThrowClip, Mix.sloshThrowVolume, 0.95f, 1.05f);
                     else
                         PlayShot();
                     break;
@@ -763,6 +771,63 @@ namespace P1.Core
                     PlayShot();
                     break;
             }
+        }
+
+        // ---------------------------------------------------------------- Bot 远场开火（P30）
+
+        private float _lastBotShotTime = -99f;
+
+        /// <summary>
+        /// Bot/队友的远场开火音：按与本地玩家距离做平方衰减，超出 <see cref="AudioMixConfigSO.botShotMaxDistance"/> 不播；
+        /// 全局节流（默认 50ms）保证 7 个 Bot 齐射也不会叠成音墙。
+        /// 音量上限（默认 0.30）严格低于本地开火（0.58~0.72），只提供战场方位感与氛围。
+        /// </summary>
+        public void PlayWeaponShotAt(Vector3 worldPos, WeaponKind kind, float strength01 = 1f)
+        {
+            P1.Player.PlayerController player = P1.Player.PlayerController.LocalPlayer;
+            if (player == null)
+                return;
+
+            float distance = Vector3.Distance(worldPos, player.transform.position);
+            if (distance > Mix.botShotMaxDistance)
+                return;
+
+            if (Time.unscaledTime - _lastBotShotTime < Mix.botShotThrottleSeconds)
+                return;
+
+            _lastBotShotTime = Time.unscaledTime;
+
+            float attenuation = 1f - distance / Mix.botShotMaxDistance;
+            attenuation *= attenuation;
+            float volume = Mix.botShotVolume * (0.20f + 0.80f * attenuation);
+
+            AudioClip clip = PickShotClip(kind);
+            if (clip == null)
+                return;
+
+            // 远场音高整体微降（距离感的低成本近似），强度越大越沉
+            float pitch = Random.Range(0.94f, 1.02f) * Mathf.Lerp(1.02f, 0.96f, Mathf.Clamp01(strength01));
+            PlayOne(clip, volume, pitch, pitch * 1.01f);
+        }
+
+        private AudioClip PickShotClip(WeaponKind kind)
+        {
+            switch (kind)
+            {
+                case WeaponKind.Roller: return PickRandom(rollerFlickClips);
+                case WeaponKind.Charger: return chargerShotClip != null ? chargerShotClip : PickRandom(shotClips);
+                case WeaponKind.Blaster: return PickRandom(blasterShotClips);
+                case WeaponKind.Slosher: return sloshThrowClip != null ? sloshThrowClip : PickRandom(shotClips);
+                default: return PickRandom(shotClips);
+            }
+        }
+
+        private static AudioClip PickRandom(AudioClip[] clips)
+        {
+            if (clips == null || clips.Length == 0)
+                return null;
+
+            return clips[Random.Range(0, clips.Length)];
         }
 
         public void PlayBombThrow()
@@ -812,22 +877,22 @@ namespace P1.Core
 
         public void PlayJump()
         {
-            PlayOne(jumpClip, 0.50f, 0.97f, 1.03f);
+            PlayOne(jumpClip, Mix.jumpVolume, 0.97f, 1.03f);
         }
 
         public void PlayLand()
         {
-            PlayOne(landClip, 0.55f, 0.96f, 1.04f);
+            PlayOne(landClip, Mix.landVolume, 0.96f, 1.04f);
         }
 
         public void PlaySquidIn()
         {
-            PlayOne(squidInClip, 0.60f, 0.98f, 1.02f);
+            PlayOne(squidInClip, Mix.squidTransformVolume, 0.98f, 1.02f);
         }
 
         public void PlaySquidOut()
         {
-            PlayOne(squidOutClip, 0.60f, 0.98f, 1.02f);
+            PlayOne(squidOutClip, Mix.squidTransformVolume, 0.98f, 1.02f);
         }
 
         public void PlayFootstep(bool onInk, bool onEnemyInk)
@@ -838,11 +903,11 @@ namespace P1.Core
             _lastFootstepTime = Time.unscaledTime;
 
             if (onEnemyInk)
-                PlayRandom(stepEnemyClips, 0.40f, 0.95f, 1.05f);
+                PlayRandom(stepEnemyClips, Mix.stepEnemyInkVolume, 0.95f, 1.05f);
             else if (onInk)
-                PlayRandom(stepInkBubbleClips, 0.35f, 0.95f, 1.05f);
+                PlayRandom(stepInkBubbleClips, Mix.stepInkVolume, 0.95f, 1.05f);
             else
-                PlayRandom(stepDryClips, 0.30f, 0.92f, 1.08f);
+                PlayRandom(stepDryClips, Mix.stepDryVolume, 0.92f, 1.08f);
         }
 
         public void PlaySwimSplash()
@@ -851,7 +916,7 @@ namespace P1.Core
                 return;
 
             _lastSwimSplashTime = Time.unscaledTime;
-            PlayRandom(swimSplashClips, 0.45f, 0.95f, 1.05f);
+            PlayRandom(swimSplashClips, Mix.swimSplashVolume, 0.95f, 1.05f);
         }
 
         public void PlayHitMarker()
@@ -860,7 +925,7 @@ namespace P1.Core
                 return;
 
             _lastHitMarkerTime = Time.unscaledTime;
-            PlayRandom(hitMarkerClips, 0.65f, 0.98f, 1.02f);
+            PlayRandom(hitMarkerClips, Mix.hitMarkerVolume, 0.98f, 1.02f);
         }
 
         /// <summary>

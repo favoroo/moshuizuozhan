@@ -19,14 +19,17 @@ MonoBehaviour:
   inkAtlasResolutionMobile: 1024
   inkDryingSeconds: 6
   inkSheenSeconds: 22
-  splatGrowSeconds: 0.12
+  splatGrowSeconds: 0.08
   atlasWetClockPeriod: 32
-  atlasGrowShrinkMeters: 0.4
+  atlasGrowShrinkMeters: 0.18
   splatToneStrength: 1
   maxSplatsPerFrame: 192
-  atlasMipmaps: 1
+  atlasMipmaps: 0
+  atlasMipIntervalSeconds: 0.5
   atlasVisualMargin: 1.5
   minimapRefreshHz: 12
+  rippleSyncHz: 30
+  wallFlushHz: 30
   neutralGroundColor: {r: 0.22, g: 0.24, b: 0.28, a: 0}
   teamAColor: {r: 1, g: 0.44, b: 0.06, a: 1}
   teamBColor: {r: 0.15, g: 0.42, b: 1, a: 1}

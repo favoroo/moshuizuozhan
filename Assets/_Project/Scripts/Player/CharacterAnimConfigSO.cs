@@ -209,6 +209,12 @@ namespace P1.Player
         [Tooltip("Hips 反向俯仰抵消胸口前倾/后仰的比例")]
         [Range(0f, 1f)]
         public float hipsCounterPitchShare = 1.0f;
+        [Tooltip("骨盆竖向起伏低通时间（秒，≥45FPS 档）：贴地下沉在 4.5m/s 以上是 6 步/秒方波，直接写回会让整个上半身跟着抖")]
+        [Range(0.01f, 0.3f)]
+        public float hipsBobSmoothTime = 0.07f;
+        [Tooltip("骨盆竖向起伏低通时间（秒，≤18FPS 档）：掉帧时把起伏压成缓波，防止低帧率采样混叠成「头一直上下跳」")]
+        [Range(0.05f, 0.6f)]
+        public float hipsBobSmoothTimeLowFps = 0.28f;
 
         // ---- 历史兼容别名属性（便于旧单测平滑迁移）----
         public float gaitCadenceMax { get => kidCadenceMax; set => kidCadenceMax = value; }
@@ -266,6 +272,38 @@ namespace P1.Player
         public float landVfxMinFallSpeed = 3.5f;
         [Tooltip("落地墨花规模（SpawnInkSplat 半径参数）")]
         public float landVfxSize = 0.45f;
+
+        [Header("大招 Slam 起跳表演 (Tidal Slam Leap，对齐 Inkwave _poseLeap / _poseSlam)")]
+        [Tooltip("前空翻总角度（度）：0 = 关闭。360 = 升空期间转满一圈，落地回到正向")]
+        public float slamFlipDegrees = 360f;
+        [Tooltip("蹬伸段：双腿向后下伸直角（度）")]
+        public float slamLaunchThighDeg = 14f;
+        [Tooltip("蹬伸段：脚尖下压角（度）")]
+        public float slamLaunchFootDeg = 26f;
+        [Tooltip("蹬伸段：上身后仰角（度，负 = 后仰）")]
+        public float slamLaunchSpineDeg = -10f;
+        [Tooltip("团身段：双腿收向胸口角（度）")]
+        public float slamTuckThighDeg = 42f;
+        [Tooltip("团身段：屈膝角（度）")]
+        public float slamTuckKneeDeg = 78f;
+        [Tooltip("团身段：脊柱前弯角（度）")]
+        public float slamTuckSpineDeg = 30f;
+        [Tooltip("顶点段：举枪过顶时胸腔后仰角（度）")]
+        public float slamHangChestDeg = -12f;
+        [Tooltip("顶点段：双腿分开角（度，左右各一半）")]
+        public float slamHangLegSplitDeg = 12f;
+        [Tooltip("俯冲段：双腿伸直向下的过伸角（度）")]
+        public float slamDiveThighDeg = 8f;
+        [Tooltip("落地段：髋部下沉量（米）—— INKWAVE 用 0.25，蛋形角色按腿长缩到 0.18")]
+        public float slamImpactHipDropMeters = 0.18f;
+        [Tooltip("落地段：脊柱前压角（度）")]
+        public float slamImpactSpineDeg = 34f;
+        [Tooltip("落地段：屈膝角（度）")]
+        public float slamImpactKneeDeg = 62f;
+        [Tooltip("落地段：蹲姿保持时长（秒）")]
+        public float slamImpactHoldSeconds = 0.18f;
+        [Tooltip("落地段：蹲姿回到常态的时长（秒）")]
+        public float slamImpactRecoverSeconds = 0.26f;
 
         [Header("惯性倾斜 (Lean Springs，参考 Inkwave character.js L1642-1657)")]
         [Tooltip("加速度量程钳制（m/s²）：起步/刹车帧差分远超此值，钳制后弹簧才有平滑余量")]

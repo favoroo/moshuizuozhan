@@ -69,6 +69,8 @@ namespace P1.Tests
                 _mgr.PlayFootstep(false, false);
                 _mgr.PlaySwimSplash();
                 _mgr.PlayHitMarker();
+                _mgr.PlayWeaponShotAt(Vector3.zero, WeaponKind.Shooter);
+                _mgr.PlayWeaponShotAt(new Vector3(100f, 0f, 100f), WeaponKind.Blaster, 0.5f);
 
                 for (int i = 0; i <= (int)UiSoundKind.Error; i++)
                 {
@@ -137,6 +139,45 @@ namespace P1.Tests
             Assert.IsTrue(_mix.hurtThrottleSeconds > 0.05f, "受击节流至少 50ms");
             Assert.IsTrue(_mix.hitMarkerThrottleSeconds > 0.02f, "打击标记节流至少 20ms");
             Assert.IsTrue(_mix.uiThrottleSeconds > 0.01f, "UI 节流至少 10ms");
+        }
+
+        [Test]
+        public void MixConfig_P30Ladder_PriorityOrderingHolds()
+        {
+            // 优先级阶梯：音乐 < 环境/循环 < 动作 < 武器命中 < 关键反馈
+            Assert.Less(_mix.bgmVolume, _mix.shotVolume, "BGM 必须显著低于开火音");
+            Assert.Less(_mix.stepDryVolume, _mix.shotVolume, "脚步必须低于开火音");
+            Assert.Less(_mix.swimLoopVolume * _mix.loopMasterVolume, _mix.shotVolume, "潜游循环必须低于开火音");
+            Assert.Greater(_mix.hitMarkerVolume, _mix.hitBodyVolume, "命中 tick（关键反馈）必须高于墨拍身体");
+            Assert.Greater(_mix.hitMarkerVolume, _mix.stepEnemyInkVolume, "命中 tick 必须高于踩敌墨脚步");
+
+            // 开火音按 Inkwave 增益表排序：通用射击 > 滚筒/泼桶 ≈ 爆炸狙 > 蓄力狙下限
+            Assert.Greater(_mix.shotVolume, _mix.rollerFlickVolume);
+            Assert.Greater(_mix.shotVolume, _mix.blasterShotVolume);
+            Assert.Greater(_mix.chargerShotVolumeMax, _mix.chargerShotVolumeMin);
+
+            // Bot 远场开火严格低于本地开火，且距离/节流参数合法
+            Assert.Less(_mix.botShotVolume, _mix.chargerShotVolumeMin, "Bot 开火上限必须低于任何本地开火");
+            Assert.Greater(_mix.botShotMaxDistance, 5f);
+            Assert.Greater(_mix.botShotThrottleSeconds, 0.01f);
+
+            // 战斗 ducking：温和档，不与播报/阵亡 duck 冲突
+            Assert.Greater(_mix.combatDuckAmount, 0f);
+            Assert.Less(_mix.combatDuckAmount, _mix.announcementDuckAmount, "战斗 duck 应弱于播报 duck");
+            Assert.LessOrEqual(_mix.combatDuckAmount, 0.5f);
+            Assert.Greater(_mix.combatDuckHoldSeconds, 0f);
+        }
+
+        [Test]
+        public void BotFarShot_BeyondMaxDistance_DoesNotConsumePool()
+        {
+            // 无本地玩家时 PlayWeaponShotAt 直接返回（LocalPlayer 为空），不应抛异常；
+            // 有玩家但超距时也应静默。此处仅验证空玩家路径不炸。
+            Assert.DoesNotThrow(() =>
+            {
+                _mgr.PlayWeaponShotAt(new Vector3(1000f, 0f, 0f), WeaponKind.Shooter, 1f);
+                _mgr.PlayWeaponShotAt(Vector3.zero, WeaponKind.Roller, 0f);
+            });
         }
 
         [Test]

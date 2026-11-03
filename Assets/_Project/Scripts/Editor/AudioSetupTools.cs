@@ -60,6 +60,29 @@ namespace P1.Editor
             MediaTools.ReportMedia();
         }
 
+        /// <summary>
+        /// P30：把 AudioMixConfig.asset 的全部字段重置为代码默认值（推荐混音阶梯）。
+        /// 旧资产里序列化了 bgmVolume=0.34 等过期数值，改 C# 默认值不会生效，必须显式写入。
+        /// 不手改 .asset YAML（AGENTS.md 规则 1）。
+        /// </summary>
+        [MenuItem("P1/音频/3. 写入推荐混音数值 (P30 音量阶梯)", false, 22)]
+        public static void ApplyRecommendedMixValues()
+        {
+            AudioMixConfigSO config = LoadOrCreateConfig();
+
+            AudioMixConfigSO fresh = ScriptableObject.CreateInstance<AudioMixConfigSO>();
+            EditorUtility.CopySerialized(fresh, config);
+            Object.DestroyImmediate(fresh);
+
+            EditorUtility.SetDirty(config);
+            AssetDatabase.SaveAssets();
+
+            Debug.Log($"[P30] 已写入推荐混音数值：bgmVolume={config.bgmVolume:F2}，" +
+                      $"shot={config.shotVolume:F2}，hitBody={config.hitBodyVolume:F2}，" +
+                      $"combatDuck={config.combatDuckAmount:F2}/{config.combatDuckHoldSeconds:F2}s，" +
+                      $"botShot={config.botShotVolume:F2}@{config.botShotMaxDistance:F0}m。资产：{ConfigPath}");
+        }
+
         private static AudioManager FindManager()
         {
             GameObject managers = GameObject.Find("_Managers");

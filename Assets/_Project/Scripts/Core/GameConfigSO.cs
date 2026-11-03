@@ -64,6 +64,29 @@ namespace P1.Core
         [Tooltip("FOV 速度拉伸起始速度 (m/s)：低于该速度不叠加")]
         public float tpsSpeedFovStartSpeed = 6f;
 
+        [Header("大招：Tidal Slam 镜头演出（仅本地玩家）")]
+        [Tooltip("起跳时相机枢轴额外抬升（米）：角色视觉体升空 4.2m，枢轴抬高 + 吊臂外拉才能把人留在画面内")]
+        public float slamCameraPivotRise = 2f;
+        [Tooltip("起跳时吊臂额外外拉（米）：拉开后脚下 5.2m 落点预警圈才读得出范围")]
+        public float slamCameraDistanceBonus = 3f;
+        [Tooltip("起跳时 FOV 加宽（度）")]
+        public float slamCameraFovBonus = 4f;
+        [Tooltip("起跳展开耗时（秒）：缓出到广角机位")]
+        public float slamCameraBlendOutSeconds = 0.22f;
+        [Tooltip("下砸阶段收回高机位的耗时（秒）：跟随角色俯冲，越短越强")]
+        public float slamCameraFallBlendSeconds = 0.12f;
+        [Tooltip("落地后回到默认机位的耗时（秒）")]
+        public float slamCameraRecoverSeconds = 0.4f;
+        [Tooltip("落地瞬间快速推近量（米）：在吊臂基础上再向枢轴推近")]
+        public float slamCameraImpactPush = 0.9f;
+        [Tooltip("落地瞬间 FOV 收紧量（度）：与推近叠加制造冲击")]
+        public float slamCameraImpactFov = 2.5f;
+        [Tooltip("落地冲击弹簧角频率（rad/s）：越小推近越持久")]
+        public float slamCameraImpactSpringOmega = 14f;
+        [Tooltip("落地冲击弹簧阻尼比：1=无回弹，<1 会有轻微回弹抖动")]
+        [Range(0.3f, 1f)]
+        public float slamCameraImpactDamping = 0.65f;
+
         [Header("俯视倾斜相机参数（旧版，保留序列化兼容，P9 起不再使用）")]
         [Tooltip("旧版俯视参数：是否启用透视模式")]
         public bool usePerspective = true;

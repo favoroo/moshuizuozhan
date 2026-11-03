@@ -238,7 +238,7 @@ namespace P1.Ink
 
             int atlasRes = config != null ? config.GetPlatformAtlasResolution() : 4096;
             bool mipmaps = config == null || config.atlasMipmaps;
-            float growSeconds = config != null ? config.splatGrowSeconds : 0.12f;
+            float growSeconds = config != null ? config.splatGrowSeconds : 0.08f;
             float dryingSeconds = config != null ? config.inkDryingSeconds : 6f;
             float wetClockPeriod = config != null ? config.atlasWetClockPeriod : InkSplatAtlas.DefaultWetClockPeriod;
 
@@ -576,8 +576,8 @@ namespace P1.Ink
             // 环境镜面全局 + 平台画质档位（P18）：地面/顶面/墙面/墨体共享同一套湿润反光参数。
             // 这些值只随 ArenaStyleSO / 平台档位变化，按 1Hz 节流即可（旧版每帧推 14 个全局 uniform）。
             RenderEnvGlobals.PumpThrottled();
-            Shader.SetGlobalFloat(GrowSecondsProp, config != null ? config.splatGrowSeconds : 0.12f);
-            Shader.SetGlobalFloat(GrowShrinkMetersProp, config != null ? config.atlasGrowShrinkMeters : 0.4f);
+            Shader.SetGlobalFloat(GrowSecondsProp, config != null ? config.splatGrowSeconds : 0.08f);
+            Shader.SetGlobalFloat(GrowShrinkMetersProp, config != null ? config.atlasGrowShrinkMeters : 0.18f);
             Shader.SetGlobalFloat(GrowActiveProp, _atlas != null && _atlas.HasGrowingSplats() ? 1f : 0f);
         }
 

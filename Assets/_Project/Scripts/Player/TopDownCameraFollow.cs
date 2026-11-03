@@ -65,6 +65,20 @@ namespace P1.Player
         private float _shotKickDecayRate = 8.5f;
         private float _shotKickSpringOmega = 30f;
 
+        // ---------------------------------------------------------------- Slam 镜头演出
+        // 本地玩家释放 Tidal Slam 时只有「视觉体」离地 4.2m，Transform 与相机枢轴留在地面。
+        // 默认机位（4.5m 吊臂 / 52° FOV / 6° 俯角）下顶点角色的纵向屏幕坐标约 1.17~1.50，
+        // 整个人在画面上方之外 —— 这就是「放完大招看不见人跳到哪」的根因。
+        // 演出只做「枢轴抬高 + 吊臂外拉 + FOV」三种不改照射轴的偏移，落地再用弹簧推近。
+        private float _slamWeight;
+        private float _slamWeightFrom;
+        private float _slamWeightTo;
+        private float _slamWeightElapsed;
+        private float _slamWeightDuration;
+        private int _slamStage; // 0=idle 1=wide 2=fall 3=impact-recover
+        private AnimSpring1D _slamPushSpring = new AnimSpring1D(0f);
+        private AnimSpring1D _slamFovSpring = new AnimSpring1D(0f);
+
         private readonly RaycastHit[] _castHits = new RaycastHit[8];
 
         public Camera CameraComponent => _cam;
@@ -244,6 +258,125 @@ namespace P1.Player
         /// <summary>当前开火 FOV 冲击量（度），调试/测试可读。</summary>
         public float ShotKickFov => _shotFovSpring.Value;
 
+        /// <summary>当前 Slam 镜头演出权重（0=默认机位，1=完全展开），调试/测试可读。</summary>
+        public float SlamPresentationWeight => _slamWeight;
+
+        /// <summary>相机当前跟随的角色：大招演出只对「被跟随的本地玩家」生效。</summary>
+        public Transform FollowTarget => target;
+
+        /// <summary>
+        /// Tidal Slam 起跳：缓出到广角机位（枢轴抬高 + 吊臂外拉 + FOV 加宽），
+        /// 让 4.2m 升空的角色与脚下 5.2m 预警圈同时留在画面内。
+        /// 只接受被跟随者本人的请求，Bot 大招不抢镜头。
+        /// </summary>
+        public void BeginSlamPresentation(Transform caster)
+        {
+            if (!IsSlamCaster(caster))
+                return;
+
+            _slamStage = 1;
+            _slamPushSpring.Reset();
+            _slamFovSpring.Reset();
+            BlendSlamWeight(1f, SlamBlendOutSeconds);
+        }
+
+        /// <summary>下砸开始：快速收回高机位，镜头跟着角色俯冲。</summary>
+        public void BeginSlamFall(Transform caster)
+        {
+            if (!IsSlamCaster(caster) || _slamStage == 0)
+                return;
+
+            _slamStage = 2;
+            // 收回到接近默认机位：落地帧角色已回到地面，镜头不能还吊在 3.5m 高
+            BlendSlamWeight(0.1f, SlamFallBlendSeconds);
+        }
+
+        /// <summary>落地：机位回默认 + 弹簧快速推近/FOV 收紧，配合震屏形成冲击。</summary>
+        public void PlaySlamImpact(Transform caster)
+        {
+            if (!IsSlamCaster(caster))
+                return;
+
+            _slamStage = 3;
+            BlendSlamWeight(0f, SlamRecoverSeconds);
+
+            float omega = Mathf.Clamp(SlamImpactSpringOmega, 4f, 40f);
+            float damping = Mathf.Clamp(SlamImpactDamping, 0.3f, 1f);
+            _slamPushSpring.Kick(AnimSpring1D.ImpulseForPeak(
+                Mathf.Max(0f, SlamImpactPush), omega, damping));
+            _slamFovSpring.Kick(AnimSpring1D.ImpulseForPeak(
+                Mathf.Max(0f, SlamImpactFov), omega * 1.1f, damping));
+        }
+
+        /// <summary>
+        /// 异常收尾（终场哨 / 被取消）：快速回到默认机位。
+        /// 落地后的恢复段（stage=3）不在这里截断，否则会把冲击推近吃掉。
+        /// </summary>
+        public void EndSlamPresentation(Transform caster)
+        {
+            if (!IsSlamCaster(caster) || _slamStage >= 3)
+                return;
+
+            _slamStage = 0;
+            BlendSlamWeight(0f, 0.12f);
+        }
+
+        private bool IsSlamCaster(Transform caster)
+        {
+            return caster != null && target != null && caster == target;
+        }
+
+        private void BlendSlamWeight(float targetWeight, float duration)
+        {
+            _slamWeightFrom = _slamWeight;
+            _slamWeightTo = Mathf.Clamp01(targetWeight);
+            _slamWeightElapsed = 0f;
+            _slamWeightDuration = Mathf.Max(0.01f, duration);
+        }
+
+        /// <summary>
+        /// 推进 Slam 演出包络（真实时间）：权重用 smoothstep 缓入缓出，
+        /// 落地冲击走 AnimSpring1D，Hitstop 定格期间镜头仍在动。
+        /// </summary>
+        private void StepSlamPresentation(float dt)
+        {
+            if (dt <= 0f)
+                return;
+
+            if (_slamWeightDuration > 0f)
+            {
+                _slamWeightElapsed += dt;
+                float t = Mathf.Clamp01(_slamWeightElapsed / _slamWeightDuration);
+                float eased = t * t * (3f - 2f * t);
+                _slamWeight = Mathf.Lerp(_slamWeightFrom, _slamWeightTo, eased);
+                if (t >= 1f)
+                {
+                    _slamWeight = _slamWeightTo;
+                    _slamWeightDuration = 0f;
+                }
+            }
+
+            float omega = Mathf.Clamp(SlamImpactSpringOmega, 4f, 40f);
+            float damping = Mathf.Clamp(SlamImpactDamping, 0.3f, 1f);
+            _slamPushSpring.Step(0f, omega, damping, dt);
+            _slamFovSpring.Step(0f, omega * 1.1f, damping, dt);
+
+            // 安全钳制：允许一丁点回弹，但绝不把吊臂/视野拉飞
+            _slamPushSpring.Value = Mathf.Clamp(_slamPushSpring.Value, -0.15f, 1.6f);
+            _slamFovSpring.Value = Mathf.Clamp(_slamFovSpring.Value, -0.3f, 6f);
+        }
+
+        private float SlamPivotRise => gameConfig != null ? Mathf.Max(0f, gameConfig.slamCameraPivotRise) : 2f;
+        private float SlamDistanceBonus => gameConfig != null ? Mathf.Max(0f, gameConfig.slamCameraDistanceBonus) : 3f;
+        private float SlamFovBonus => gameConfig != null ? Mathf.Max(0f, gameConfig.slamCameraFovBonus) : 4f;
+        private float SlamBlendOutSeconds => gameConfig != null ? Mathf.Max(0.01f, gameConfig.slamCameraBlendOutSeconds) : 0.22f;
+        private float SlamFallBlendSeconds => gameConfig != null ? Mathf.Max(0.01f, gameConfig.slamCameraFallBlendSeconds) : 0.12f;
+        private float SlamRecoverSeconds => gameConfig != null ? Mathf.Max(0.01f, gameConfig.slamCameraRecoverSeconds) : 0.4f;
+        private float SlamImpactPush => gameConfig != null ? Mathf.Max(0f, gameConfig.slamCameraImpactPush) : 0.9f;
+        private float SlamImpactFov => gameConfig != null ? Mathf.Max(0f, gameConfig.slamCameraImpactFov) : 2.5f;
+        private float SlamImpactSpringOmega => gameConfig != null ? gameConfig.slamCameraImpactSpringOmega : 14f;
+        private float SlamImpactDamping => gameConfig != null ? gameConfig.slamCameraImpactDamping : 0.65f;
+
         private void StepShotKick(float unscaledDt)
         {
             if (unscaledDt <= 0f)
@@ -297,6 +430,14 @@ namespace P1.Player
             _shotRollSpring.Reset();
             _shotFovSpring.Reset();
             _shotKickHeat = 0f;
+            _slamWeight = 0f;
+            _slamWeightFrom = 0f;
+            _slamWeightTo = 0f;
+            _slamWeightElapsed = 0f;
+            _slamWeightDuration = 0f;
+            _slamStage = 0;
+            _slamPushSpring.Reset();
+            _slamFovSpring.Reset();
             _yaw = Mathf.Repeat(target.eulerAngles.y + 180f, 360f) - 180f;
             _pitch = gameConfig != null
                 ? ThirdPersonCameraMath.ClampPitch(gameConfig.tpsPitchDefault, gameConfig.tpsPitchMin, gameConfig.tpsPitchMax)
@@ -341,6 +482,8 @@ namespace P1.Player
 
             // 开火冲击始终按真实时间回弹：Hitstop 定格期间也要把镜头拉回来，否则会「卡住」
             StepShotKick(Time.unscaledDeltaTime);
+            // Slam 演出同理：落地微定格期间镜头推近/震屏要继续播完
+            StepSlamPresentation(Time.unscaledDeltaTime);
 
             // ---- 枢轴跟随：水平/垂直统一平滑 + 少量速度前馈，减少高速移动时的落后感
             Vector3 targetPosition = target.position;
@@ -358,7 +501,8 @@ namespace P1.Player
             _lastTargetPosition = targetPosition;
 
             float smoothTime = gameConfig != null ? Mathf.Max(0.01f, gameConfig.tpsPivotSmoothTime) : 0.06f;
-            Vector3 pivotTarget = targetPosition + Vector3.up * GetPivotHeight() + feedForward;
+            float pivotHeight = GetPivotHeight() + _slamWeight * SlamPivotRise;
+            Vector3 pivotTarget = targetPosition + Vector3.up * pivotHeight + feedForward;
             if (dt > 0.0001f)
             {
                 _pivot = Vector3.SmoothDamp(
@@ -384,6 +528,9 @@ namespace P1.Player
                 targetDistance -= charge01 * (gameConfig != null ? gameConfig.tpsChargerZoomDistance : 0.6f);
             if (_isSubAimActive)
                 targetDistance += gameConfig != null ? gameConfig.tpsSubAimDistanceKick : 0.35f;
+            // Slam 起跳外拉：与枢轴抬升配合，把升空角色与落点圈一起装进画面
+            if (_slamWeight > 0f)
+                targetDistance += _slamWeight * SlamDistanceBonus;
 
             float allowedDistance = ResolveBoomDistance(_pivot, forward, targetDistance);
             if (dt > 0.0001f)
@@ -424,6 +571,8 @@ namespace P1.Player
 
             // 沿视轴后拉：相机原点在中心射线上滑动，射线本身不变 → 弹道落点严格不变
             position -= forward * _shotDistanceSpring.Value;
+            // 落地推近：同样沿视轴滑动，不改变屏幕中心射线
+            position += forward * _slamPushSpring.Value;
 
             // 二次夹紧：震屏位移、右肩偏移与开火后拉都发生在死角解算之后，
             // 贴墙 + 高 trauma 时可能把相机推出几何体（看到墙外/黑面）。这里沿枢轴→相机方向再查一次。
@@ -439,6 +588,9 @@ namespace P1.Player
                 targetFov -= charge01 * (gameConfig != null ? gameConfig.tpsChargerZoomFov : 14f);
             if (_isSubAimActive)
                 targetFov -= gameConfig != null ? gameConfig.tpsSubAimFovKick : 4f;
+            // Slam 起跳：FOV 轻微加宽，配合吊臂外拉强化「拉出去」的演出感
+            if (_slamWeight > 0f)
+                targetFov += _slamWeight * SlamFovBonus;
             if (gameConfig != null && gameConfig.tpsSpeedFovKick > 0f && _motor != null)
             {
                 // 速度感：以人形跑速为起点、潜墨全速为终点做 0~1 归一，保守拉伸 FOV（INKWAVE 无速度线，速度感靠本体+镜头）
@@ -455,7 +607,7 @@ namespace P1.Player
                 _smoothedFov = targetFov;
 
             if (_cam != null)
-                _cam.fieldOfView = Mathf.Clamp(_smoothedFov + _shotFovSpring.Value, 25f, 90f);
+                _cam.fieldOfView = Mathf.Clamp(_smoothedFov + _shotFovSpring.Value - _slamFovSpring.Value, 25f, 90f);
         }
 
         /// <summary>

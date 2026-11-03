@@ -140,6 +140,21 @@ namespace P1.Weapons
         /// <summary>Tidal Slam 是否处于空中（升空/滞空/下砸），调试可观测。</summary>
         public bool IsSlamAirborne => _isPerformingSpecial && _activeSpecialKind == SpecialKind.Slam;
 
+        /// <summary>
+        /// Slam 表演阶段（0 升空 / 1 滞空 / 2 下砸 / 3 落地收势 / -1 未在演出）：
+        /// 视觉层按阶段 + <see cref="SlamPhaseElapsed"/> 采样起跳表演姿态，
+        /// 因为角色本体的 IsGrounded 在整段演出中恒为真，贴地步态不会自己切到滞空分支。
+        /// </summary>
+        public int SlamPhase => _isPerformingSpecial && _activeSpecialKind == SpecialKind.Slam
+            ? _slamPhase
+            : -1;
+
+        /// <summary>当前 Slam 阶段已过秒数（阶段切换时归零），供视觉层驱动分段表演。</summary>
+        public float SlamPhaseElapsed => _slamPhaseElapsed;
+
+        /// <summary>Slam 整段演出已过秒数（从起跳开始累加），供预警圈等按总进度取值。</summary>
+        public float SlamElapsed => _specialElapsed;
+
         /// <summary>Slam 起跳时锁定的落点中心（预警圈/伤害/涂地同源），测试与调试可观测。</summary>
         public Vector3 SpecialGroundCenter => _specialGroundCenter;
 
@@ -745,6 +760,10 @@ namespace P1.Weapons
             float radius = config != null ? config.specialSplatRadius : 5.2f;
             ShowSpecialWarningRing(radius * 0.35f);
 
+            // 本地玩家专属：起跳拉开镜头，让 4.2m 升空的角色与脚下预警圈同时可见。
+            // Bot 的 _playerController 为 null，不会抢玩家镜头。
+            LocalSlamCamera()?.BeginSlamPresentation(transform);
+
             return true;
         }
 
@@ -970,6 +989,8 @@ namespace P1.Weapons
                 {
                     _slamPhase = 2;
                     _slamPhaseElapsed = 0f;
+                    // 下砸开始：镜头跟着俯冲，快速收回高机位
+                    LocalSlamCamera()?.BeginSlamFall(transform);
                 }
             }
             else
@@ -1080,6 +1101,17 @@ namespace P1.Weapons
                     config != null ? config.specialImpactTrauma : 1f,
                     config != null ? Mathf.Max(damageRadius * 2.5f, 8f) : 14f);
             }
+
+            // 本地玩家落地：镜头弹簧推近 + 微定格。Bot 的砸地只走震屏/音效，不抢镜头、不冻结玩家时间。
+            TopDownCameraFollow slamCamera = LocalSlamCamera();
+            if (slamCamera != null)
+            {
+                slamCamera.PlaySlamImpact(transform);
+                if (config != null && config.specialImpactHitstopSeconds > 0f)
+                {
+                    HitstopService.Pulse(config.specialImpactHitstopSeconds);
+                }
+            }
         }
 
         private void ShowSpecialWarningRing(float radius)
@@ -1131,12 +1163,28 @@ namespace P1.Weapons
             _specialWarningRing.localScale = new Vector3(radius, 1f, radius);
         }
 
+        /// <summary>
+        /// 仅本地玩家返回当前相机，且要求相机确实跟随自己（Bot 或观战相机返回 null）：
+        /// Slam 镜头演出只属于操作者，4v4 里 Bot 放大招不应该抢玩家的机位。
+        /// </summary>
+        private TopDownCameraFollow LocalSlamCamera()
+        {
+            if (_playerController == null)
+                return null;
+
+            TopDownCameraFollow cam = TopDownCameraFollow.Instance;
+            return cam != null && cam.FollowTarget == transform ? cam : null;
+        }
+
         private void CancelSpecialImmediate(float invulnerabilityGrace = 0f)
         {
             _isPerformingSpecial = false;
             _specialActionLock = 0f;
             _slamPhase = 0;
             _slamPhaseElapsed = 0f;
+
+            // 异常收尾（终场哨/取消）把镜头快速拉回；正常落地（stage=3 恢复段）由 PlaySlamImpact 自己收尾
+            LocalSlamCamera()?.EndSlamPresentation(transform);
 
             if (_health != null)
             {

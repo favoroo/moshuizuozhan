@@ -27,7 +27,14 @@ namespace P1.Editor
         /// <summary>
         /// 构建场内地表道具与边界墙横幅，合并为 4 个材质子网格 + 1 个横幅网格。
         /// </summary>
-        public static GameObject Build(Transform parent, ArenaStyleSO style, ArenaMaterialSet mats, List<Collider> blockedColliders = null)
+        public static GameObject Build(
+            Transform parent,
+            ArenaStyleSO style,
+            ArenaMaterialSet mats,
+            List<Collider> blockedColliders = null,
+            IReadOnlyList<ArenaLayoutV2.ArenaPropSpec> props = null,
+            string meshPrefix = "arena_decor",
+            bool includeInArenaDecor = true)
         {
             var decorRoot = new GameObject("Arena_Decor");
             if (parent != null)
@@ -53,7 +60,7 @@ namespace P1.Editor
             InkGridConfigSO inkCfg = AssetDatabase.LoadAssetAtPath<InkGridConfigSO>(InkConfigPath);
             int proxySerial = 0;
 
-            foreach (var prop in ArenaLayoutV2.Props)
+            foreach (var prop in props ?? ArenaLayoutV2.Props)
             {
                 // 出生区道具、路灯与旗杆始终保留；移动端低密度下跳过部分小装饰
                 bool isPreserved = prop.Kind == ArenaLayoutV2.ArenaPropKind.LampPost
@@ -126,22 +133,25 @@ namespace P1.Editor
 
             // 1.1 场内轻量纯装饰增强（贴墙配电箱、走线管、死角电缆盘、售卖亭圆凳与垃圾桶）
             // 全走 MeshCombiner，无 Collider、无 InkWallSurface，严守通道与坡道安全。
-            BuildInArenaDecorations(matteDecorBucket, metalDecorBucket, density, pal);
+            if (includeInArenaDecor)
+            {
+                BuildInArenaDecorations(matteDecorBucket, metalDecorBucket, density, pal);
+            }
 
             // 2. 生成并保存 6 个合并网格资产
-            Mesh matteMesh = matteSolidBucket.BuildMesh("arena_decor_matte");
-            Mesh metalMesh = metalSolidBucket.BuildMesh("arena_decor_metal");
-            Mesh matteDecorMesh = matteDecorBucket.BuildMesh("arena_decor_matte_thin");
-            Mesh metalDecorMesh = metalDecorBucket.BuildMesh("arena_decor_metal_thin");
-            Mesh emissiveMesh = emissiveBucket.BuildMesh("arena_decor_emissive");
-            Mesh clothMesh = clothBucket.BuildMesh("arena_decor_cloth");
+            Mesh matteMesh = matteSolidBucket.BuildMesh(meshPrefix + "_matte");
+            Mesh metalMesh = metalSolidBucket.BuildMesh(meshPrefix + "_metal");
+            Mesh matteDecorMesh = matteDecorBucket.BuildMesh(meshPrefix + "_matte_thin");
+            Mesh metalDecorMesh = metalDecorBucket.BuildMesh(meshPrefix + "_metal_thin");
+            Mesh emissiveMesh = emissiveBucket.BuildMesh(meshPrefix + "_emissive");
+            Mesh clothMesh = clothBucket.BuildMesh(meshPrefix + "_cloth");
 
-            SaveAsset(matteMesh, $"{MeshFolder}/arena_decor_matte.asset");
-            SaveAsset(metalMesh, $"{MeshFolder}/arena_decor_metal.asset");
-            SaveAsset(matteDecorMesh, $"{MeshFolder}/arena_decor_matte_thin.asset");
-            SaveAsset(metalDecorMesh, $"{MeshFolder}/arena_decor_metal_thin.asset");
-            SaveAsset(emissiveMesh, $"{MeshFolder}/arena_decor_emissive.asset");
-            SaveAsset(clothMesh, $"{MeshFolder}/arena_decor_cloth.asset");
+            SaveAsset(matteMesh, $"{MeshFolder}/{meshPrefix}_matte.asset");
+            SaveAsset(metalMesh, $"{MeshFolder}/{meshPrefix}_metal.asset");
+            SaveAsset(matteDecorMesh, $"{MeshFolder}/{meshPrefix}_matte_thin.asset");
+            SaveAsset(metalDecorMesh, $"{MeshFolder}/{meshPrefix}_metal_thin.asset");
+            SaveAsset(emissiveMesh, $"{MeshFolder}/{meshPrefix}_emissive.asset");
+            SaveAsset(clothMesh, $"{MeshFolder}/{meshPrefix}_cloth.asset");
 
             // 3. 创建子渲染对象 (近景装饰阴影开启；碰撞与涂墨由每个实体道具的盒代理负责)
             CreateRendererChild(decorRoot.transform, "Decor_Matte", matteMesh, mats?.propMatte ?? mats?.concrete, true, false);
@@ -153,7 +163,7 @@ namespace P1.Editor
 
             // 4. 边界墙内侧图集横幅 (12 个 Banner，含折角造型与安装挂梁)
             Mesh bannersMesh = BuildWallBannersMesh(metalDecorBucket, pal);
-            SaveAsset(bannersMesh, $"{MeshFolder}/arena_banners.asset");
+            SaveAsset(bannersMesh, $"{MeshFolder}/{meshPrefix}_banners.asset");
             CreateRendererChild(decorRoot.transform, "Banners", bannersMesh, mats?.bannerAtlas ?? mats?.propMatte, false);
 
             return decorRoot;
@@ -163,7 +173,7 @@ namespace P1.Editor
         /// 构建港口远景（码头基座、水面、集装箱堆场、岸桥、货船、悬索桥、城市绿丘剪影）。
         /// 无 Collider、无阴影投放与接收、静态合批。
         /// </summary>
-        public static GameObject BuildBackdrop(Transform parent, ArenaStyleSO style, ArenaMaterialSet mats)
+        public static GameObject BuildBackdrop(Transform parent, ArenaStyleSO style, ArenaMaterialSet mats, string meshPrefix = "arena_backdrop")
         {
             if (style != null && !style.buildBackdrop)
             {
@@ -182,7 +192,7 @@ namespace P1.Editor
 
             // 1. 水面单独网格 (240x240m Quad, y=-1.35)
             Mesh waterMesh = BuildWaterMesh(240f, -1.35f);
-            SaveAsset(waterMesh, $"{MeshFolder}/arena_backdrop_water.asset");
+            SaveAsset(waterMesh, $"{MeshFolder}/{meshPrefix}_water.asset");
             CreateRendererChild(backdropRoot.transform, "Backdrop_Water", waterMesh, mats?.water, false);
 
             // 2. 远景按 Matte / Metal 材质合并
@@ -208,11 +218,11 @@ namespace P1.Editor
             BuildCityAndHills(matteBucket, metalBucket, palette);
 
             // 3. 保存合并资产并创建子物体
-            Mesh matteMesh = matteBucket.BuildMesh("arena_backdrop_matte");
-            Mesh metalMesh = metalBucket.BuildMesh("arena_backdrop_metal");
+            Mesh matteMesh = matteBucket.BuildMesh(meshPrefix + "_matte");
+            Mesh metalMesh = metalBucket.BuildMesh(meshPrefix + "_metal");
 
-            SaveAsset(matteMesh, $"{MeshFolder}/arena_backdrop_matte.asset");
-            SaveAsset(metalMesh, $"{MeshFolder}/arena_backdrop_metal.asset");
+            SaveAsset(matteMesh, $"{MeshFolder}/{meshPrefix}_matte.asset");
+            SaveAsset(metalMesh, $"{MeshFolder}/{meshPrefix}_metal.asset");
 
             CreateRendererChild(backdropRoot.transform, "Backdrop_Matte", matteMesh, mats?.propMatte ?? mats?.concrete, false);
             CreateRendererChild(backdropRoot.transform, "Backdrop_Metal", metalMesh, mats?.propMetal ?? mats?.steel, false);

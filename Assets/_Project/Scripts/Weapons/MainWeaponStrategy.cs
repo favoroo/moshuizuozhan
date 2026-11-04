@@ -172,6 +172,13 @@ namespace P1.Weapons
         /// <summary>当前有效射程（米）：HUD 准星据此判断是否超出射程。默认取配置 maxRange。</summary>
         public virtual float EffectiveRange => Config != null ? Mathf.Max(0.1f, Config.maxRange) : 0f;
 
+        /// <summary>
+        /// 打出下一发所需的最低墨水：HUD 准星据此显示「没子弹」预警。
+        /// 默认取单发消耗；蓄力狙 / 加特林 / 滚筒这类有起射门槛的武器在子类重写，
+        /// 保证准星预警与实际开火门槛一致（不会出现「准星说没墨，却还能打」）。
+        /// </summary>
+        public virtual float InkRequiredToFire => Config != null ? Mathf.Max(0f, Config.inkCostPerShot) : 0f;
+
         /// <summary>蓄力进度 0~1；非蓄力武器为 0。</summary>
         public virtual float Charge01 => 0f;
 

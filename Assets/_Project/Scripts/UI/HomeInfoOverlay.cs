@@ -35,18 +35,19 @@ namespace P1.UI
         private int _lastScreenHeight;
         private Rect _lastSafeArea;
 
-        public static HomeInfoOverlay Show(RectTransform host, UIThemeSO theme, HomeInfoTab tab)
+        public static HomeInfoOverlay Show(RectTransform host, UIThemeSO theme, HomeInfoTab tab, int sortingOrder = 50)
         {
             if (host == null) return null;
 
             CloseActive();
 
-            // 独立 Overlay Canvas（sortingOrder 50）：必须高于武器抽屉画布（15）与 HUD（10），
+            // 独立 Overlay Canvas（默认 sortingOrder 50）：必须高于武器抽屉画布（15）与 HUD（10），
             // 否则首页左下「武器整备」卡会浮在遮罩之上、还能被点开抽屉。
+            // 从暂停设置页打开指南时传 110，必须高于暂停 Canvas（100），否则会被设置面板盖住。
             var go = new GameObject("HomeInfoOverlay");
             var canvas = go.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 50;
+            canvas.sortingOrder = sortingOrder;
 
             var scaler = go.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;

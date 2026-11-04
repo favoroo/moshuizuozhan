@@ -22,6 +22,7 @@ MonoBehaviour:
   paintSweepDegrees: 26
   paintSweepSpeed: 1.6
   repathInterval: 0.55
+  perceptionInterval: 0.15
   arriveDistance: 1.3
   paintGoalRefresh: 7
   paintGoalSamples: 20
@@ -56,6 +57,7 @@ MonoBehaviour:
   splatlingReleaseCharge: 0.9
   splatlingPaintReleaseCharge: 0.6
   weaponSightMargin: 2
+  sightRangeScale: 1
   ownInkPathCost: 0.5
   neutralPathCost: 1
   enemyInkPathCost: 3

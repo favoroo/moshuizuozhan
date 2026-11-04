@@ -40,6 +40,9 @@ namespace P1.UI
         /// <summary>锁定敌人时的整体缩放（INKWAVE 为 1.14）。</summary>
         public const float TargetScale = 1.14f;
 
+        /// <summary>空墨警告的方波闪烁频率（Hz）：硬切亮/暗，不用正弦呼吸（几何大胆风）。</summary>
+        public const float EmptyBlinkHz = 3.5f;
+
         public readonly struct State
         {
             public readonly bool OutOfRange;
@@ -54,6 +57,46 @@ namespace P1.UI
                 Alpha = alpha;
                 Scale = scale;
             }
+        }
+
+        /// <summary>
+        /// 空墨/没子弹状态（纯数据）：准星据此决定是否红闪、是否显示中央禁止叉。
+        /// </summary>
+        public readonly struct InkState
+        {
+            /// <summary>当前墨水不足以打出下一发（各武器门槛见 <c>MainWeaponStrategy.InkRequiredToFire</c>）。</summary>
+            public readonly bool OutOfInk;
+
+            /// <summary>打出下一发所需墨水（原样回传，调试/HUD 可读）。</summary>
+            public readonly float RequiredInk;
+
+            /// <summary>方波闪烁的亮相位：true = 亮，false = 暗；有墨时恒为 true。</summary>
+            public readonly bool BlinkOn;
+
+            public InkState(bool outOfInk, float requiredInk, bool blinkOn)
+            {
+                OutOfInk = outOfInk;
+                RequiredInk = requiredInk;
+                BlinkOn = blinkOn;
+            }
+        }
+
+        /// <summary>
+        /// 空墨判定：<paramref name="currentInk"/> 低于打出下一发所需墨水即为「没子弹」。
+        /// 门槛 ≤ 0 的武器永不判空，避免零消耗武器准星常亮红。
+        /// 闪烁相位用 <see cref="Mathf.Repeat"/> 方波（前 50% 亮、后 50% 暗），与 HUD 墨水罐的硬切节奏一致。
+        /// </summary>
+        /// <param name="currentInk">当前墨水（绝对值，与配置同单位）。</param>
+        /// <param name="requiredInk">打出下一发所需最低墨水。</param>
+        /// <param name="time">用于闪烁的无缩放时间（秒）；有墨时不影响结果。</param>
+        /// <param name="blinkHz">闪烁频率，默认 <see cref="EmptyBlinkHz"/>。</param>
+        public static InkState ComputeInk(float currentInk, float requiredInk, float time, float blinkHz = EmptyBlinkHz)
+        {
+            float required = Mathf.Max(0f, requiredInk);
+            bool outOfInk = required > 0.0001f && currentInk < required;
+            bool blinkOn = !outOfInk ||
+                           Mathf.Repeat(time * Mathf.Max(0.01f, blinkHz), 1f) < 0.5f;
+            return new InkState(outOfInk, required, blinkOn);
         }
 
         /// <param name="aimFlatDistance">瞄准点到玩家的水平距离（米），与弹丸水平射程判定一致。</param>

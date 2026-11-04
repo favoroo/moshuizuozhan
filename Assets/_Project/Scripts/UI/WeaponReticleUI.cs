@@ -161,6 +161,20 @@ namespace P1.UI
         /// <summary>准星当前是否锁定敌人（染红 + 放大）。</summary>
         public bool IsOnTarget => _targetWeight > 0.5f;
 
+        /// <summary>准星当前是否处于「墨水不够下一发」状态（准星染红 + 中央禁止叉）。</summary>
+        public bool IsOutOfInk => _isOutOfInk;
+
+        /// <summary>
+        /// 空打冲击进度 0~1（1 = 刚拒射）：红叉弹跳 + 刻度反向收拢共用这条曲线。
+        /// </summary>
+        public float EmptyPunch01 => _emptyPunch;
+
+        /// <summary>「弹药耗尽」toast 是否正在显示（调试 / 自动化测试用）。</summary>
+        public bool IsEmptyToastVisible => _emptyToastTimer > 0f;
+
+        /// <summary>toast 文案（自动化测试断言用；正常恒为「弹药耗尽」）。</summary>
+        public string EmptyToastText => _emptyToastText != null ? _emptyToastText.text : string.Empty;
+
         /// <summary>手雷冷却徽标当前是否可见（调试 / 自动化测试用）。</summary>
         public bool IsBombCooldownBadgeVisible =>
             _subAimBadge != null && _subAimBadge.gameObject.activeSelf;
@@ -176,6 +190,37 @@ namespace P1.UI
         private float _chargerWeight = 0f;
         private float _farWeight;
         private float _targetWeight;
+
+        // 空墨/没子弹反馈（P36）：准星染红 + 中央禁止红叉 + 扣扳机空打震颤 + 底部短 toast
+        private RectTransform _emptyInkWarningRoot;
+        private CanvasGroup _emptyInkWarningGroup;
+        private readonly OutlinedBar[] _emptyInkBars = new OutlinedBar[2];
+        private RectTransform _emptyToastRoot;
+        private CanvasGroup _emptyToastGroup;
+        private TMP_Text _emptyToastText;
+        private int _lastEmptyFeedbackStamp = -1;
+        private bool _isOutOfInk;
+        private bool _emptyBlinkOn = true;
+        private float _emptyPunch;
+        private float _emptyShake;
+        private Vector2 _emptyShakeOffset;
+        private float _emptyToastTimer;
+        private float _emptyToastCanvasHeight = -1f;
+
+        /// <summary>空打 red-X 冲击的衰减速度（1/s）：约 0.18s 读完，短促不拖沓。</summary>
+        private const float EmptyPunchDecayPerSecond = 5.5f;
+
+        /// <summary>空打震颤衰减速度（1/s）：约 0.22s。</summary>
+        private const float EmptyShakeDecayPerSecond = 4.5f;
+
+        /// <summary>空打震颤最大像素位移。</summary>
+        private const float EmptyShakeAmplitude = 5f;
+
+        /// <summary>「弹药耗尽」toast 总时长（秒）：很短，扣扳机才出现。</summary>
+        private const float EmptyToastDuration = 0.9f;
+
+        /// <summary>toast 距离画布底边的高度（参考像素）：落在底部三卡（顶边约 144）之上，不挡准星视野。</summary>
+        private const float EmptyToastBottomOffset = 176f;
 
         private void Awake()
         {
@@ -228,6 +273,7 @@ namespace P1.UI
             BuildChargerUI();
             BuildSubAimBadge();
             BuildHitMarker();
+            BuildEmptyInkFeedback();
             BuildDamageArcLayer();
 
             _initComplete = rootCanvas != null && _rectTransform.parent == rootCanvas.transform;
@@ -1051,6 +1097,164 @@ namespace P1.UI
             return 1f - inv * inv * inv;
         }
 
+        // ================================================================ 空墨 / 没子弹反馈 (P36)
+
+        /// <summary>
+        /// 空墨反馈层（没子弹时，P36）：
+        /// 1. 中央禁止红叉（两根 45° 粗刻度）——没墨时常驻并按 3.5Hz 方波硬闪，扣扳机被拒时弹跳；
+        /// 2. 底部居中的短 toast「弹药耗尽」——只在拒射瞬间弹出 0.9s，落在底部三卡之上，不挡准星视野。
+        /// 全部几何风：硬切、直角色块、无渐变，与 HUD 墨水罐的警告节奏一致。
+        /// </summary>
+        private void BuildEmptyInkFeedback()
+        {
+            var xGo = new GameObject("EmptyInkX", typeof(RectTransform), typeof(CanvasGroup));
+            xGo.transform.SetParent(transform, false);
+            _emptyInkWarningRoot = xGo.GetComponent<RectTransform>();
+            _emptyInkWarningRoot.anchorMin = _emptyInkWarningRoot.anchorMax = new Vector2(0.5f, 0.5f);
+            _emptyInkWarningRoot.pivot = new Vector2(0.5f, 0.5f);
+            _emptyInkWarningRoot.anchoredPosition = Vector2.zero;
+            _emptyInkWarningRoot.sizeDelta = new Vector2(64f, 64f);
+            _emptyInkWarningGroup = xGo.GetComponent<CanvasGroup>();
+            _emptyInkWarningGroup.alpha = 0f;
+            _emptyInkWarningGroup.blocksRaycasts = false;
+            _emptyInkWarningGroup.interactable = false;
+
+            float[] angles = { 45f, 135f };
+            for (int i = 0; i < _emptyInkBars.Length; i++)
+            {
+                _emptyInkBars[i] = CreateOutlinedBar(_emptyInkWarningRoot, $"EmptyBar_{i}",
+                    new Vector2(5f, 32f), angles[i]);
+                _emptyInkBars[i].SetCoreColor(ComicStyle.Red);
+                _emptyInkBars[i].SetBackingColor(ComicStyle.Ink);
+            }
+            xGo.SetActive(false);
+
+            // toast：墨底 + 红色硬边 + 纸白字，尺寸压在 128×24；底部三卡顶边约 144，
+            // 这里落在 176，既不挡准星中心射线，也不和墨水卡/大招卡/生命卡打架。
+            var toastGo = new GameObject("EmptyInkToast",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            toastGo.transform.SetParent(transform, false);
+            _emptyToastRoot = toastGo.GetComponent<RectTransform>();
+            _emptyToastRoot.anchorMin = _emptyToastRoot.anchorMax = new Vector2(0.5f, 0.5f);
+            _emptyToastRoot.pivot = new Vector2(0.5f, 0.5f);
+            _emptyToastRoot.sizeDelta = new Vector2(128f, 24f);
+
+            var toastBg = toastGo.GetComponent<UIInkShapeGraphic>();
+            toastBg.raycastTarget = false;
+            toastBg.Shape = UIInkShape.SharpRect;
+            toastBg.CornerRadius = ComicStyle.CornerSharp;
+            toastBg.BorderWidth = ComicStyle.BorderThin;
+            toastBg.BorderColor = ComicStyle.Red;
+            toastBg.color = ComicStyle.Ink;
+            toastBg.HardShadow = false;
+            toastBg.ShadowOffset = Vector2.zero;
+            toastBg.Halftone = false;
+            toastBg.GlossAlpha = 0f;
+            toastBg.DrawGloss = false;
+            toastBg.InnerRimAlpha = 0f;
+
+            _emptyToastGroup = toastGo.AddComponent<CanvasGroup>();
+            _emptyToastGroup.alpha = 0f;
+            _emptyToastGroup.blocksRaycasts = false;
+            _emptyToastGroup.interactable = false;
+
+            var txtGo = new GameObject("Text",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            txtGo.transform.SetParent(_emptyToastRoot, false);
+            _emptyToastText = txtGo.GetComponent<TextMeshProUGUI>();
+            _emptyToastText.font = UIThemeSO.ResolveGlobalFont(true, true);
+            _emptyToastText.fontSize = UITypography.FontSnapped(15f);
+            _emptyToastText.fontStyle = FontStyles.Bold;
+            _emptyToastText.alignment = TextAlignmentOptions.Center;
+            _emptyToastText.color = ComicStyle.Paper;
+            _emptyToastText.text = "弹药耗尽";
+            _emptyToastText.raycastTarget = false;
+            _emptyToastText.textWrappingMode = TextWrappingModes.NoWrap;
+            _emptyToastText.overflowMode = TextOverflowModes.Overflow;
+            var txtRect = txtGo.GetComponent<RectTransform>();
+            txtRect.anchorMin = txtRect.anchorMax = new Vector2(0.5f, 0.5f);
+            txtRect.pivot = new Vector2(0.5f, 0.5f);
+            txtRect.sizeDelta = new Vector2(120f, 24f);
+            txtRect.anchoredPosition = Vector2.zero;
+
+            PositionEmptyToast();
+            toastGo.SetActive(false);
+        }
+
+        /// <summary>
+        /// toast 贴画布底边居中：画布高度/宽高比变化时重新落位，保证永远待在底部三卡上方，
+        /// 不进入屏幕中心的瞄准视野（锚点是父级中心，所以要按画布高度换算成相对中心的 Y）。
+        /// </summary>
+        private void PositionEmptyToast()
+        {
+            if (_emptyToastRoot == null || _canvasRect == null) return;
+            float height = _canvasRect.rect.height;
+            if (height <= 1f || Mathf.Approximately(height, _emptyToastCanvasHeight)) return;
+            _emptyToastCanvasHeight = height;
+            _emptyToastRoot.anchoredPosition = new Vector2(0f, EmptyToastBottomOffset - height * 0.5f);
+        }
+
+        /// <summary>扣扳机被拒（空墨）：红叉弹跳 + 准星震颤 + 弹出「弹药耗尽」toast。</summary>
+        private void TriggerEmptyPunch()
+        {
+            _emptyPunch = 1f;
+            _emptyShake = 1f;
+            _emptyToastTimer = EmptyToastDuration;
+        }
+
+        /// <summary>
+        /// 空墨反馈每帧推进：红叉显隐 / 方波硬闪 / 空打弹跳，toast 的淡入淡出与自动收起。
+        /// 全部走真实时间，Hitstop 期间也完整播放。
+        /// </summary>
+        private void UpdateEmptyInkFeedback(float unscaledDt)
+        {
+            PositionEmptyToast();
+
+            if (_emptyInkWarningRoot != null)
+            {
+                bool showX = _isOutOfInk || _emptyPunch > 0.001f;
+                if (_emptyInkWarningRoot.gameObject.activeSelf != showX)
+                    _emptyInkWarningRoot.gameObject.SetActive(showX);
+
+                if (showX)
+                {
+                    // 亮相位拉满、暗相位压到 0.35；空打瞬间无视相位直接拉满，保证一定被看到。
+                    float blink = _isOutOfInk && !_emptyBlinkOn ? 0.35f : 1f;
+                    _emptyInkWarningGroup.alpha = Mathf.Clamp01(blink + _emptyPunch * 0.8f);
+                    float pop = 1f + 0.5f * _emptyPunch;
+                    _emptyInkWarningRoot.localScale = new Vector3(pop, pop, 1f);
+                }
+            }
+
+            if (_emptyToastTimer <= 0f || _emptyToastRoot == null)
+                return;
+
+            if (!_emptyToastRoot.gameObject.activeSelf)
+                _emptyToastRoot.gameObject.SetActive(true);
+
+            _emptyToastTimer = Mathf.Max(0f, _emptyToastTimer - unscaledDt);
+            float elapsed = EmptyToastDuration - _emptyToastTimer;
+            float fadeIn = Mathf.Clamp01(elapsed / 0.06f);
+            float fadeOut = Mathf.Clamp01(_emptyToastTimer / 0.18f);
+            _emptyToastGroup.alpha = Mathf.Min(fadeIn, fadeOut);
+            float toastPop = Mathf.Lerp(0.92f, 1f, Mathf.Clamp01(elapsed / 0.08f));
+            _emptyToastRoot.localScale = new Vector3(toastPop, toastPop, 1f);
+
+            if (_emptyToastTimer <= 0f)
+            {
+                _emptyToastGroup.alpha = 0f;
+                _emptyToastRoot.gameObject.SetActive(false);
+            }
+        }
+
+        private void HideEmptyInkToast()
+        {
+            _emptyToastTimer = 0f;
+            if (_emptyToastGroup != null) _emptyToastGroup.alpha = 0f;
+            if (_emptyToastRoot != null && _emptyToastRoot.gameObject.activeSelf)
+                _emptyToastRoot.gameObject.SetActive(false);
+        }
+
         // ================================================================ 定向受击指示弧 (Damage Direction Arcs)
 
         private void BuildDamageArcLayer()
@@ -1325,6 +1529,7 @@ namespace P1.UI
             {
                 _canvasGroup.alpha = Mathf.MoveTowards(_canvasGroup.alpha, 0f, Time.deltaTime * 6f);
                 HideBombCooldownBadge();
+                HideEmptyInkToast();
                 return;
             }
 
@@ -1364,6 +1569,32 @@ namespace P1.UI
             _lastShotsFired = shotsFired;
             _shotPunch = Mathf.MoveTowards(_shotPunch, 0f, unscaledDt * 7f);
 
+            // 3.2 空墨 / 没子弹（P36）：墨水低于「下一发门槛」→ 准星整体染红 + 中央禁止叉；
+            //     扣扳机被拒（EmptyFeedbackStamp 递增）→ 红叉弹跳 + 准星短震颤 + 底部「弹药耗尽」toast。
+            //     门槛走 MainWeaponStrategy.InkRequiredToFire，蓄力狙/加特林/滚筒的起射条件与准星一致。
+            ReticleStateMath.InkState inkState = ReticleStateMath.ComputeInk(
+                player.Motor != null ? player.Motor.CurrentInk : 0f,
+                weapon.InkRequiredToFire,
+                Time.unscaledTime);
+            _isOutOfInk = inkState.OutOfInk;
+            _emptyBlinkOn = inkState.BlinkOn;
+
+            int emptyStamp = weapon.EmptyFeedbackStamp;
+            if (_lastEmptyFeedbackStamp < 0)
+            {
+                // 首帧只记录基线，避免把装配前的旧戳记当成一次真实拒射。
+                _lastEmptyFeedbackStamp = emptyStamp;
+            }
+            else if (emptyStamp != _lastEmptyFeedbackStamp)
+            {
+                _lastEmptyFeedbackStamp = emptyStamp;
+                TriggerEmptyPunch();
+            }
+
+            _emptyPunch = Mathf.MoveTowards(_emptyPunch, 0f, unscaledDt * EmptyPunchDecayPerSecond);
+            _emptyShake = Mathf.MoveTowards(_emptyShake, 0f, unscaledDt * EmptyShakeDecayPerSecond);
+            _emptyShakeOffset = Random.insideUnitCircle * (EmptyShakeAmplitude * _emptyShake);
+
             float dt = Time.deltaTime;
 
             // 武器类型 → 准星形状（唯一映射源 ReticleStateMath.ShapeFor）：
@@ -1394,6 +1625,9 @@ namespace P1.UI
 
             // 副武器冷却徽标更新
             UpdateSubAim(player);
+
+            // 空墨红叉 / 空打震颤 / 「弹药耗尽」toast
+            UpdateEmptyInkFeedback(unscaledDt);
         }
 
         private void UpdateShooter(WeaponController weapon, Color teamColor)
@@ -1405,11 +1639,14 @@ namespace P1.UI
                 float alpha = _shooterWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
                 float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
                 _shooterContainer.localScale = Vector3.one * (_shooterWeight * lockScale);
+                _shooterContainer.anchoredPosition = _emptyShakeOffset * _shooterWeight;
 
                 // 散布 Bloom: 1.2° ~ 5.5° 映射到 16px ~ 38px 刻度距离（静止收在环带内侧，开火越过环带）；
                 // 开火再叠一层短促外扩。0 散布武器（泼桶 / 双枪架枪）按 1.2° 下限计算，避免刻度叠在中心点上。
+                // 空打（没子弹扣扳机）反向收拢 4px：与正常击发的向外弹跳形成相反手感。
                 float spreadDeg = ReticleStateMath.ClampSpread(weapon.CurrentSpreadDegrees);
-                float tickOffset = 16f + (spreadDeg - 1.2f) * 5.2f + _shotPunch * 5f;
+                float tickOffset = 16f + (spreadDeg - 1.2f) * 5.2f + _shotPunch * 5f - _emptyPunch * 4f;
+                tickOffset = Mathf.Max(10f, tickOffset);
 
                 // 4 个刻度沿自身角度向外偏移
                 _shooterBars[0].Root.anchoredPosition = new Vector2(0f, tickOffset);
@@ -1422,6 +1659,7 @@ namespace P1.UI
                 _shooterRing.rectTransform.localScale = Vector3.one * ringScale;
 
                 Color tint = Color.Lerp(Color.white, ComicStyle.Red, _targetWeight);
+                if (_isOutOfInk) tint = Color.Lerp(tint, ComicStyle.Red, 0.9f);
                 tint.a = alpha;
                 _shooterCenterDot.color = tint;
                 _shooterCenterDot.rectTransform.localScale = Vector3.one *
@@ -1484,10 +1722,16 @@ namespace P1.UI
                 float alpha = _rollerWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
                 float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
                 _rollerContainer.localScale = Vector3.one * (_rollerWeight * lockScale);
+                _rollerContainer.anchoredPosition = _emptyShakeOffset * _rollerWeight;
 
                 Color tint = Color.Lerp(Color.white, ComicStyle.Red, _targetWeight);
+                if (_isOutOfInk) tint = Color.Lerp(tint, ComicStyle.Red, 0.9f);
                 tint.a = alpha;
                 _rollerBarImage.color = tint;
+
+                // 空打：推地条横向收窄，与枪形的刻度内收同语义（没墨推不动）。
+                float clench = 1f - 0.08f * _emptyPunch;
+                _rollerBarImage.rectTransform.localScale = new Vector3(clench, 1f, 1f);
             }
             else if (_rollerContainer.gameObject.activeSelf)
             {
@@ -1504,6 +1748,7 @@ namespace P1.UI
                 float alpha = _chargerWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
                 float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
                 _chargerContainer.localScale = Vector3.one * (_chargerWeight * lockScale);
+                _chargerContainer.anchoredPosition = _emptyShakeOffset * _chargerWeight;
 
                 float ch01 = weapon.Charge01;
                 _chargerFillRing.fillAmount = ch01;
@@ -1513,6 +1758,7 @@ namespace P1.UI
                 if (_chargerTrackRing.sprite != trackSprite) _chargerTrackRing.sprite = trackSprite;
 
                 Color tint = Color.Lerp(Color.white, ComicStyle.Red, _targetWeight);
+                if (_isOutOfInk) tint = Color.Lerp(tint, ComicStyle.Red, 0.9f);
                 Color trackColor = tint;
                 trackColor.a = 0.3f * alpha;
                 _chargerTrackRing.color = trackColor;
@@ -1533,7 +1779,8 @@ namespace P1.UI
                 }
 
                 // 左右两条收紧线：从 ±42px 靠拢到 ±32px (对应 Inkwave var(--ch, 0) 收 10px)
-                float lineOffset = Mathf.Lerp(42f, 32f, ch01);
+                // 空打时再向内收 3px：没墨扣扳机的「落空感」与正常蓄力收束区分开。
+                float lineOffset = Mathf.Lerp(42f, 32f, ch01) - _emptyPunch * 3f;
                 if (_chargerLineLeftBar != null) _chargerLineLeftBar.Root.anchoredPosition = new Vector2(-lineOffset, 0f);
                 if (_chargerLineRightBar != null) _chargerLineRightBar.Root.anchoredPosition = new Vector2(lineOffset, 0f);
 
@@ -1551,7 +1798,7 @@ namespace P1.UI
                 {
                     _chargerFillRing.rectTransform.localScale = Vector3.one;
                     Color fillColor = Color.Lerp(teamColor, Color.white, ch01 * 0.7f);
-                    fillColor = Color.Lerp(fillColor, ComicStyle.Red, _targetWeight);
+                    fillColor = Color.Lerp(fillColor, ComicStyle.Red, Mathf.Max(_targetWeight, _isOutOfInk ? 0.8f : 0f));
                     fillColor.a = alpha;
                     _chargerFillRing.color = fillColor;
                     _chargerCenterDot.color = lineColor;

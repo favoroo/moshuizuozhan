@@ -276,6 +276,16 @@ namespace P1.Player
         private bool _rollerModelBaseCaptured;
         private Vector3 _rollerModelBaseLocalPos;
 
+        // P39 滚筒接地阴影：鼓体底缘被圆柱侧面挡住，只靠轴心贴地仍会读作"悬浮"。
+        // 复用 CharacterContactShadow 的共享 quad/材质，逐帧跟随鼓轴正下方的真实地面。
+        private const string RollerContactShadowName = "RollerContactShadow";
+        private const float RollerShadowGroundOffset = 0.004f;
+        private static readonly int RollerShadowColorId = Shader.PropertyToID("_Color");
+        private static readonly int RollerShadowBaseColorId = Shader.PropertyToID("_BaseColor");
+        private Transform _rollerShadowTransform;
+        private MeshRenderer _rollerShadowRenderer;
+        private MaterialPropertyBlock _rollerShadowBlock;
+
         // P35 通用武器持握/动作层帧值（非滚筒武器；滚筒恒为 0，由 RollerWieldSolver 全权接管）。
         // 由 UpdateWeaponWieldPose 采样，在 UpdateAimPose / UpdateRecoilKick / UpdateBodyPose 合成写回。
         private float _wieldPitchDeg;
@@ -3003,8 +3013,10 @@ namespace P1.Player
                         Color sprayColor = InkSurfaceController.Instance != null
                             ? InkSurfaceController.Instance.GetTeamColor(_team)
                             : Color.white;
+                        // P39 墨雾落点压到真实接触线（鼓轴 - 半径 + 1cm）：旧版 0.6R 只有 4cm 高，
+                        // 侧视看仍是"鼓下方一团雾"；贴地出墨才把"压着推"钉在墨面上。
                         Vector3 sprayPos = rollerDrumTransform.position
-                            + Vector3.down * (RollerWieldSolver.DrumRadiusMeters * 0.6f);
+                            + Vector3.down * (RollerWieldSolver.DrumRadiusMeters - 0.01f);
                         VfxPool.Instance.SpawnInkSplat(sprayPos, sprayColor, 0.3f, 3);
                     }
                 }
@@ -3087,6 +3099,7 @@ namespace P1.Player
             if (!_weaponMap.TryGetValue(WeaponKind.Roller, out GameObject rollerModel) || rollerModel == null)
             {
                 _rollerContactWeight = 0f;
+                HideRollerContactShadow();
                 return;
             }
 
@@ -3103,6 +3116,7 @@ namespace P1.Player
                 rollerDrumTransform == null)
             {
                 _rollerContactWeight = 0f;
+                HideRollerContactShadow();
                 return;
             }
 
@@ -3114,12 +3128,18 @@ namespace P1.Player
                 : Mathf.Max(0.01f, cfg.rollerGroundContactOutRate);
             _rollerContactWeight += (target - _rollerContactWeight) * (1f - Mathf.Exp(-rate * dt));
             if (_rollerContactWeight < 0.002f)
+            {
+                HideRollerContactShadow();
                 return;
+            }
 
             Vector3 drumAxis = rollerDrumTransform.position;
             float lever = Vector3.Dot(drumAxis - model.position, model.forward);
             if (lever <= 0.02f)
+            {
+                HideRollerContactShadow();
                 return;
+            }
 
             float groundY = ResolveRollerGroundY(drumAxis);
             float targetAxisY = RollerWieldSolver.GroundContactTargetAxisY(groundY, cfg.rollerGroundPenetration);
@@ -3163,6 +3183,90 @@ namespace P1.Player
                     model.position += Vector3.down * correction;
                 }
             }
+
+            // P39 最后一笔：鼓轴贴地后再补一块贴地暗斑。圆柱侧面把底缘挡住，尤其第三人称俯视时，
+            // 数学上贴地的鼓仍会读作"悬着一块横板"；暗斑把接触点钉在地上。
+            UpdateRollerContactShadow(drumAxis, groundY);
+        }
+
+        /// <summary>
+        /// P39 滚筒接地阴影：沿鼓轴方向略宽、前进方向略窄的软边椭圆，位置 = 鼓轴正下方真实地面，
+        /// 不透明度 = 配置值 × 贴地权重（挥击抡起/滞空/换枪时自然消失）。
+        /// 网格/材质复用 <see cref="CharacterContactShadow"/> 的共享资源，零额外资产、不额外建材质。
+        /// </summary>
+        private void UpdateRollerContactShadow(Vector3 drumAxis, float groundY)
+        {
+            CharacterAnimConfigSO cfg = AnimConfig;
+            if (cfg == null || !cfg.rollerContactShadowEnabled ||
+                _rollerContactWeight < 0.02f || _formAmount >= 0.5f)
+            {
+                HideRollerContactShadow();
+                return;
+            }
+
+            if (_rollerShadowRenderer == null || _rollerShadowBlock == null || _rollerShadowTransform == null)
+                EnsureRollerContactShadow();
+
+            if (_rollerShadowRenderer == null || _rollerShadowBlock == null || _rollerShadowTransform == null)
+            {
+                HideRollerContactShadow();
+                return;
+            }
+
+            _rollerShadowTransform.SetPositionAndRotation(
+                new Vector3(drumAxis.x, groundY + RollerShadowGroundOffset, drumAxis.z),
+                Quaternion.Euler(0f, transform.eulerAngles.y, 0f));
+            _rollerShadowTransform.localScale = new Vector3(
+                Mathf.Max(0.05f, cfg.rollerContactShadowWidth),
+                1f,
+                Mathf.Max(0.05f, cfg.rollerContactShadowDepth));
+
+            float alpha = Mathf.Clamp01(cfg.rollerContactShadowOpacity) * Mathf.Clamp01(_rollerContactWeight);
+            if (alpha < 0.01f)
+            {
+                HideRollerContactShadow();
+                return;
+            }
+
+            Color color = Color.black;
+            color.a = alpha;
+            _rollerShadowBlock.SetColor(RollerShadowColorId, color);
+            _rollerShadowBlock.SetColor(RollerShadowBaseColorId, color);
+            _rollerShadowRenderer.SetPropertyBlock(_rollerShadowBlock);
+            _rollerShadowRenderer.enabled = true;
+        }
+
+        /// <summary>懒创建鼓下阴影物体（挂在角色根下，独立于脚底 ContactShadow，避免抢同一 transform）。</summary>
+        private void EnsureRollerContactShadow()
+        {
+            Transform actorRoot = transform.parent != null ? transform.parent : transform;
+            Transform existing = actorRoot.Find(RollerContactShadowName);
+            GameObject go = existing != null ? existing.gameObject : new GameObject(RollerContactShadowName);
+            if (existing == null)
+                go.transform.SetParent(actorRoot, false);
+
+            var mf = go.GetComponent<MeshFilter>();
+            if (mf == null) mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = CharacterContactShadow.SharedQuadMesh;
+
+            _rollerShadowRenderer = go.GetComponent<MeshRenderer>();
+            if (_rollerShadowRenderer == null) _rollerShadowRenderer = go.AddComponent<MeshRenderer>();
+            _rollerShadowRenderer.sharedMaterial = CharacterContactShadow.SharedShadowMaterial;
+            _rollerShadowRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            _rollerShadowRenderer.receiveShadows = false;
+            _rollerShadowRenderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+            _rollerShadowRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            _rollerShadowRenderer.motionVectorGenerationMode = UnityEngine.MotionVectorGenerationMode.ForceNoMotion;
+            _rollerShadowRenderer.enabled = false;
+
+            _rollerShadowTransform = go.transform;
+            _rollerShadowBlock = new MaterialPropertyBlock();
+        }
+
+        private void HideRollerContactShadow()
+        {
+            if (_rollerShadowRenderer != null)
+                _rollerShadowRenderer.enabled = false;
         }
 
         /// <summary>

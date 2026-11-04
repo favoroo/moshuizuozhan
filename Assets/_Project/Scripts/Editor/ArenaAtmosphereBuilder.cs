@@ -60,6 +60,15 @@ namespace P1.Editor
 
         public static void Apply(ArenaStyleSO style)
         {
+            Apply(style, null);
+        }
+
+        /// <summary>
+        /// 多地图入口：允许传入本图专属的天空/水面/出生盘材质，避免把共享材质改成另一张图的配色。
+        /// 传 null 的字段回退到既有共享材质路径。
+        /// </summary>
+        public static void Apply(ArenaStyleSO style, ArenaMaterialSet mats)
+        {
             if (style == null)
             {
                 Debug.LogWarning("[ArenaAtmosphereBuilder] 未提供 ArenaStyleSO，跳过日光/雾/天空/水面/后处理。");
@@ -68,9 +77,9 @@ namespace P1.Editor
 
             ApplySunAndEnvironment(style);
             ApplyFog(style);
-            ApplySkybox(style);
-            ApplyWater(style);
-            ApplySpawnPads(style);
+            ApplySkybox(style, mats?.skybox);
+            ApplyWater(style, mats?.water);
+            ApplySpawnPads(style, mats);
             ApplyPostProcess(style);
             EnsureCameraData(style);
 
@@ -147,9 +156,11 @@ namespace P1.Editor
             RenderSettings.fogEndDistance = style.fogEndDistance;
         }
 
-        private static void ApplySkybox(ArenaStyleSO style)
+        private static void ApplySkybox(ArenaStyleSO style, Material skyOverride = null)
         {
-            Material sky = AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Materials/Mat_Skybox.mat");
+            Material sky = skyOverride != null
+                ? skyOverride
+                : AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Materials/Mat_Skybox.mat");
             if (sky == null) return;
 
             sky.SetColor(SkyTopId, Linear(style.skyTop));
@@ -188,9 +199,11 @@ namespace P1.Editor
             RenderSettings.skybox = sky;
         }
 
-        private static void ApplyWater(ArenaStyleSO style)
+        private static void ApplyWater(ArenaStyleSO style, Material waterOverride = null)
         {
-            Material water = AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Materials/Mat_Water.mat");
+            Material water = waterOverride != null
+                ? waterOverride
+                : AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Materials/Mat_Water.mat");
             if (water == null) return;
 
             water.SetColor(WaterShallowColorId, Linear(style.waterShallow));
@@ -213,8 +226,18 @@ namespace P1.Editor
             EditorUtility.SetDirty(water);
         }
 
-        private static void ApplySpawnPads(ArenaStyleSO style)
+        private static void ApplySpawnPads(ArenaStyleSO style, ArenaMaterialSet mats = null)
         {
+            if (mats != null && mats.spawnPadA != null)
+            {
+                ConfigureSpawnPadMaterial(mats.spawnPadA, style, style.teamAPad, 1.0f);
+                if (mats.spawnPadB != null)
+                {
+                    ConfigureSpawnPadMaterial(mats.spawnPadB, style, style.teamBPad, -1.0f);
+                }
+                return;
+            }
+
             ConfigureSpawnPadMaterial("Assets/_Project/Materials/Mat_SpawnPad_TeamA.mat", style, style.teamAPad, 1.0f);
             ConfigureSpawnPadMaterial("Assets/_Project/Materials/Mat_SpawnPad_TeamB.mat", style, style.teamBPad, -1.0f);
             ConfigureSpawnPadMaterial("Assets/_Project/Materials/Mat_SpawnPad.mat", style, style.hazardYellow, 1.0f);
@@ -223,6 +246,14 @@ namespace P1.Editor
         private static void ConfigureSpawnPadMaterial(string path, ArenaStyleSO style, Color teamColor, float forwardSign)
         {
             Material mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat != null)
+            {
+                ConfigureSpawnPadMaterial(mat, style, teamColor, forwardSign);
+            }
+        }
+
+        private static void ConfigureSpawnPadMaterial(Material mat, ArenaStyleSO style, Color teamColor, float forwardSign)
+        {
             if (mat == null) return;
 
             // 嵌板钢灰：必须与 ProjectScaffolder.CreateOrUpdateSpawnPadMaterial 的 steelCol 同值。

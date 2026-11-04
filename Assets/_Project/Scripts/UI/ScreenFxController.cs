@@ -20,6 +20,7 @@ namespace P1.UI
         private static readonly int ChromaAmountId = Shader.PropertyToID("_ChromaAmount");
 
         private Material _material;
+        private bool _ownsMaterial;
         private float _chroma;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -56,6 +57,7 @@ namespace P1.UI
                     return;
                 }
                 _material = new Material(shader);
+                _ownsMaterial = true;
             }
             _material.SetFloat(ChromaAmountId, 0f);
         }
@@ -98,11 +100,14 @@ namespace P1.UI
 
         private void OnDestroy()
         {
-            if (_material != null)
+            // Resources 里的 Mat_ScreenFx 是共享资产：切场景时 Destroy 资产会报
+            // 「Destroying assets is not permitted」，只回收自己 new 出来的拷贝。
+            if (_material != null && _ownsMaterial)
             {
                 Destroy(_material);
-                _material = null;
             }
+            _material = null;
+            _ownsMaterial = false;
         }
     }
 }

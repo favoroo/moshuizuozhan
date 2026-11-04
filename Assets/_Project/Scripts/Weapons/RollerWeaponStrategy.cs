@@ -24,6 +24,10 @@ namespace P1.Weapons
 
         public override WeaponKind Kind => WeaponKind.Roller;
 
+        /// <summary>起射门槛：低于推地起步墨水时滚筒既不能推地也不能挥击（准星按推地条语义预警）。</summary>
+        public override float InkRequiredToFire =>
+            Config != null ? Mathf.Max(0.01f, Config.rollMinInkToStart) : 0.5f;
+
         public override bool IsRolling => _isRolling;
 
         /// <summary>挥击前摇期间为 true（表现层据此把滚筒抡过肩）；Tick 走完前摇的同一帧回到 false。</summary>

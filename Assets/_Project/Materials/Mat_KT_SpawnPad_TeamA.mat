@@ -1,0 +1,42 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Mat_KT_SpawnPad_TeamA
+  m_Shader: {fileID: 4800000, guid: 37ba747e68e524b52a94d36ebaab7ed3, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _ForwardSign: 1
+    - _GlowStrength: 0.25
+    - _PulseSpeed: 1.6
+    - _ShadeSoftness: 0.1
+    - _ShadowFloor: 0.5
+    - _TeamTintBlend: 0.8
+    m_Colors:
+    - _BaseColor: {r: 0.21404114, g: 0.23302203, b: 0.26327342, a: 1}
+    - _ChevronColor: {r: 0.5225216, g: 0.2956998, b: 0.0173891, a: 1}
+    - _PlatformColor: {r: 0.2956998, g: 0.33034378, b: 0.33034378, a: 1}
+    - _RingColor: {r: 0.827571, g: 0.86889946, b: 0.95510465, a: 1}
+    - _ShadowTint: {r: 0.19599415, g: 0.21404114, b: 0.3672465, a: 1}
+    - _TeamColor: {r: 1, g: 0.19599415, b: 0.0071944073, a: 1}
+  m_BuildTextureStacks: []
+  m_AllowLocking: 1

@@ -55,6 +55,29 @@ namespace P1.Core
         private static float _cubeStrengthOverride = -1f;
         private static float _nextPumpTime;
 
+        /// <summary>
+        /// 显式指定本场景使用的画风资产（多地图场景由场景内 <c>ArenaStyleSceneAnchor</c> 调用）。
+        /// 一旦设置，后续 <see cref="Pump"/> 都以此资产为准，不再回退到固定路径的 ArenaStyle.asset。
+        /// </summary>
+        public static void SetStyle(ArenaStyleSO style)
+        {
+            if (style == null) return;
+            _style = style;
+            _styleLookupDone = true;
+            Pump();
+        }
+
+        /// <summary>
+        /// 多地图切回默认场景时清掉上一张图的样式，强制走回退默认值。
+        /// 回退值已与 ArenaStyleSO.asset 对齐；只在场景载入阶段调用。
+        /// </summary>
+        public static void ResetStyleToDefault()
+        {
+            _style = null;
+            _styleLookupDone = true;
+            Pump();
+        }
+
         /// <summary>当前已加载的环境风格资产（惰性拾取，未找到时返回 null）。</summary>
         public static ArenaStyleSO CurrentStyle
         {

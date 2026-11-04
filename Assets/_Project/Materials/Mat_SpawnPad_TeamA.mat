@@ -44,7 +44,7 @@ Material:
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _ForwardSign: 1
-    - _GlowStrength: 0.25
+    - _GlowStrength: 0.18
     - _PulseSpeed: 1.6
     - _QueueOffset: 0
     - _SampleGI: 0
@@ -61,7 +61,7 @@ Material:
     - _ChevronColor: {r: 0.5225216, g: 0.2956998, b: 0.0173891, a: 1}
     - _Color: {r: 0.21404114, g: 0.23302203, b: 0.26327342, a: 1}
     - _PlatformColor: {r: 0.42003334, g: 0.3931232, b: 0.33034378, a: 1}
-    - _RingColor: {r: 0.827571, g: 0.86889946, b: 0.95510465, a: 1}
+    - _RingColor: {r: 0.78741235, g: 0.8073461, b: 0.827571, a: 1}
     - _ShadowTint: {r: 0.19599415, g: 0.21404114, b: 0.3672465, a: 1}
     - _TeamColor: {r: 1, g: 0.19599415, b: 0.0071944073, a: 1}
   m_BuildTextureStacks: []

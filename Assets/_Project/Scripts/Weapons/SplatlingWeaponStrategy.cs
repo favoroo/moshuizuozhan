@@ -27,6 +27,10 @@ namespace P1.Weapons
 
         public override WeaponKind Kind => WeaponKind.Splatling;
 
+        /// <summary>起射门槛：蓄力启动需要 5 发子弹的墨水（与 OnTriggerHeld 的判定一致）。</summary>
+        public override float InkRequiredToFire =>
+            Config != null ? Mathf.Max(0f, Config.inkCostPerShot) * 5f : 0f;
+
         public override bool IsCharging => _isCharging;
 
         public bool IsStreaming => _isStreaming;

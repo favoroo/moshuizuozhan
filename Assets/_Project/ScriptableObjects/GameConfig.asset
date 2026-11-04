@@ -39,6 +39,16 @@ MonoBehaviour:
   tpsSubAimDistanceKick: 0.35
   tpsSpeedFovKick: 3.5
   tpsSpeedFovStartSpeed: 6
+  slamCameraPivotRise: 2
+  slamCameraDistanceBonus: 3
+  slamCameraFovBonus: 4
+  slamCameraBlendOutSeconds: 0.22
+  slamCameraFallBlendSeconds: 0.12
+  slamCameraRecoverSeconds: 0.4
+  slamCameraImpactPush: 0.9
+  slamCameraImpactFov: 2.5
+  slamCameraImpactSpringOmega: 14
+  slamCameraImpactDamping: 0.65
   usePerspective: 1
   cameraFov: 40
   cameraOrthoSize: 4.4

@@ -104,12 +104,14 @@ namespace P1.Player
     public static class RollerWieldSolver
     {
         // ---- 持握 / 挥击角度（度）----
-        /// <summary>待机持握俯仰：滚筒压低斜提（旧版 -28° 把主鼓抬到胸口，正面整个挡住身体和视野）。</summary>
-        public const float CarryPitchDeg = 16f;
-        /// <summary>待机持握偏航：向右前方微偏 15°，让出身体正前与准星视野。</summary>
-        public const float CarryYawDeg = 15f;
-        /// <summary>待机持握滚转：向右侧微倾 12°，两手握杆自然贴身。</summary>
-        public const float CarryRollDeg = -12f;
+        /// <summary>待机持握俯仰：滚筒压低斜提（旧版 -28° 把主鼓抬到胸口，正面整个挡住身体和视野）。
+        /// P39 对齐 INKWAVE HOLD.roller.carry（0.8rad ≈ 46°）后取 28°：鼓体悬在膝下，不再像"横在胯间的浮板"；
+        /// 仍保留 8° 余量，跑动起伏/坡道不会把鼓体插进地面。</summary>
+        public const float CarryPitchDeg = 28f;
+        /// <summary>待机持握偏航：向右前方微偏 10°，让出身体正前与准星视野。</summary>
+        public const float CarryYawDeg = 10f;
+        /// <summary>待机持握滚转：向右侧微倾 8°，两手握杆自然贴身。</summary>
+        public const float CarryRollDeg = -8f;
         /// <summary>挥击抡起角：滚筒举过肩（INKWAVE _poseFlick 蓄力 -2.30rad ≈ -132°，按短杠杆收敛）。</summary>
         public const float FlickLiftPitchDeg = -115f;
         /// <summary>砸地角：whip 段末滚筒吻到身前地面（真实骨架标定：body18° 时滚筒轴心 y=0.095，
@@ -132,11 +134,13 @@ namespace P1.Player
         public const float SlamSquashImpulse = 2.8f;
 
         // ---- 拖地姿态（roll）：武器挂在 Chest 下，胸口俯仰（视角/移动前倾）会把长杠杆放大成数厘米的
-        // 滚筒高度变化，固定角度不可能在所有视角下都贴地。以下为默认视角（body10°）的**造型基准**，
+        // 滚筒高度变化，固定角度不可能在所有视角下都贴地。以下为默认视角（body18°）的**造型基准**，
         // 真正的贴地由 CharacterVisualController 的闭环俯仰修正完成（GroundContact01 + 地面射线）。
-        // 标定：body10° 拖行 p25/d0 → 滚筒轴心 y≈0.114，主鼓底缘约 +0.004 吻地；
-        // body18° 砸地 p5/d0.03 → y=0.095（底缘 -0.015 轻陷保留冲击）。
-        // 见 Tests RollerSolver_RollPoseCalibratedOnRig 与 PlayMode RollerGroundContactPlayTests。
+        // P39 对照 INKWAVE character.js L1876-1886（wRoll：手位前推、SPINE/CHEST/HIPS 累加前倾约 20°）：
+        // 旧基准 25°/body10°/f0.10 要闭环再拧 +25° 才够到地面，滚轴几乎竖直吊在手心，读作"拄拐"；
+        // 新基准 40°/body18°/f0.14/d0.02 让闭环只需 -8° 左右的小修正，滚筒落在身前约 0.65m，
+        // 人明显压向把手——与 INKWAVE 的"推着走"剪影一致。
+        // 标定：body18° 拖行 p40/d0.02 → 闭环后鼓轴心 y≈0.106（底缘吻地），鼓轴在脚前 0.6m+。
         /// <summary>滚筒主鼓外皮半径（米）：DrumMesh 直径 0.24 × 模型缩放 0.92 / 2 = 0.1104。
         /// 贴地与滚轴自转都按主鼓体计算——TreadRib 花纹只比主鼓高 4.6mm，按花纹外缘贴地会让
         /// 大面积的队伍色鼓体悬空近 1cm，正是"看起来浮着"的来源；按主鼓贴地时花纹轻陷墨面，观感才对。</summary>
@@ -144,11 +148,11 @@ namespace P1.Player
         /// <summary>贴地闭环的目标压入量（米）：滚轴外缘略陷进墨面，读作"压住"而不是"擦过"。</summary>
         public const float GroundContactPenetration = 0.004f;
 
-        public const float RollPitchDeg = 25f;
-        public const float RollDropMeters = 0.00f;
-        public const float RollForwardMeters = 0.10f;
-        public const float RollBodyPitchDeg = 10f;
-        public const float RollSink = 0.05f;
+        public const float RollPitchDeg = 40f;
+        public const float RollDropMeters = 0.02f;
+        public const float RollForwardMeters = 0.14f;
+        public const float RollBodyPitchDeg = 18f;
+        public const float RollSink = 0.06f;
 
         // ---- 拖地权重阻尼（INKWAVE wRoll：切入 11 / 退出 6）----
         public const float RollWeightInRate = 11f;

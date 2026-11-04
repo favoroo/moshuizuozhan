@@ -385,12 +385,12 @@ namespace P1.Player
         public float eyeLookSmoothTime = 0.07f;
 
         [Header("滚筒持握 (Roller Wield，参考 Inkwave _poseFlick 四段 / wRoll 拖地 / 滚轴自转)")]
-        [Tooltip("待机持握俯仰（度，正 = 主鼓压低斜提；旧版 -28° 会把滚筒抬到胸口挡视野）")]
-        public float rollerCarryPitchDeg = 16f;
+        [Tooltip("待机持握俯仰（度，正 = 主鼓压低斜提；P39 对齐 INKWAVE carry 的压低剪影）")]
+        public float rollerCarryPitchDeg = 28f;
         [Tooltip("待机持握偏航（度，正 = 滚筒朝右前方斜提，让出正前方与准星视野）")]
-        public float rollerCarryYawDeg = 15f;
+        public float rollerCarryYawDeg = 10f;
         [Tooltip("待机持握滚转（度，负 = 滚轴斜放，两手自然贴身握杆）")]
-        public float rollerCarryRollDeg = -12f;
+        public float rollerCarryRollDeg = -8f;
         [Tooltip("挥击抡起角（度，负 = 举过肩；前摇期从持握角抡到此角）")]
         public float rollerFlickLiftPitchDeg = -115f;
         [Tooltip("砸地角（度，正 = 滚筒压向身前地面；默认视角造型角，落点贴地由运行时闭环修正）")]
@@ -410,16 +410,16 @@ namespace P1.Player
         [Tooltip("砸地瞬间果冻压扁冲量（复用跳跃/落地弹簧，越大砸地感越沉）")]
         public float rollerSlamSquashImpulse = 2.8f;
         [Tooltip("拖地姿态俯角（度，正 = 滚筒压向地面；默认视角造型角，贴地由运行时闭环修正）")]
-        public float rollerRollPitchDeg = 25f;
+        public float rollerRollPitchDeg = 40f;
         [Tooltip("拖地姿态挂点下压量（米）")]
-        public float rollerRollDrop = 0.00f;
+        public float rollerRollDrop = 0.02f;
         [Tooltip("拖地姿态挂点前推量（米）")]
-        public float rollerRollForward = 0.10f;
+        public float rollerRollForward = 0.14f;
         [Tooltip("拖地身体前倾（度）")]
-        public float rollerRollBodyPitchDeg = 10f;
+        public float rollerRollBodyPitchDeg = 18f;
         [Tooltip("拖地重心下沉（竖向缩放比例）")]
         [Range(0f, 0.3f)]
-        public float rollerRollSink = 0.05f;
+        public float rollerRollSink = 0.06f;
         [Tooltip("拖地姿态权重进入速率（阻尼 λ，INKWAVE 11 ≈ 0.25s 到 90%）")]
         public float rollerRollWeightInRate = 11f;
         [Tooltip("拖地姿态权重退出速率（阻尼 λ，INKWAVE 6 ≈ 0.4s 回落）")]
@@ -436,6 +436,15 @@ namespace P1.Player
         public float rollerGroundPenetration = 0.004f;
         [Tooltip("拖地入地瞬间果冻压扁冲量（0 = 关闭），让角色有'把滚筒按下去'的重量感")]
         public float rollerRollPlantSquashImpulse = 0.6f;
+        [Tooltip("滚筒接地阴影开关：鼓体底缘被圆柱侧面挡住，没有贴地暗斑时即使轴心贴地也会读作悬浮")]
+        public bool rollerContactShadowEnabled = true;
+        [Tooltip("滚筒接地阴影宽度（米，沿鼓轴方向）")]
+        public float rollerContactShadowWidth = 0.80f;
+        [Tooltip("滚筒接地阴影深度（米，沿前进方向）")]
+        public float rollerContactShadowDepth = 0.42f;
+        [Tooltip("滚筒接地阴影不透明度（0~1）：与贴地权重相乘，只在鼓体真正压地时出现")]
+        [Range(0f, 1f)]
+        public float rollerContactShadowOpacity = 0.52f;
 
         [Header("武器持握/动作 (Weapon Wield P35)")]
         [Tooltip("双枪翻滚/架枪、加特林扫射等二值状态的姿态权重平滑速率（1/s）")]

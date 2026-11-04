@@ -1109,6 +1109,14 @@ namespace P1.UI.WeaponSelect
             }
             if (HomeInfoOverlay.MenuInputConsumedThisFrame) return;
 
+            // 地图选择浮层打开时，武器抽屉的快捷键同样全部让路（Esc 交给浮层关闭）。
+            if (MapSelectOverlay.IsOpen)
+            {
+                HandleMenuEsc();
+                return;
+            }
+            if (MapSelectOverlay.MenuInputConsumedThisFrame) return;
+
             if (keyboard.digit1Key.wasPressedThisFrame || keyboard.numpad1Key.wasPressedThisFrame) SelectWeapon(0);
             else if (keyboard.digit2Key.wasPressedThisFrame || keyboard.numpad2Key.wasPressedThisFrame) SelectWeapon(1);
             else if (keyboard.digit3Key.wasPressedThisFrame || keyboard.numpad3Key.wasPressedThisFrame) SelectWeapon(2);
@@ -1151,7 +1159,8 @@ namespace P1.UI.WeaponSelect
                 homeInfoOpen: HomeInfoOverlay.IsOpen,
                 layoutEditing: MobileLayoutCustomizer.IsEditingAny,
                 pauseExpanded: PauseMenuOverlay.IsAnyMenuExpanded,
-                drawerExpanded: _isDrawerOpen);
+                drawerExpanded: _isDrawerOpen,
+                mapSelectOpen: MapSelectOverlay.IsOpen);
 
             if (!MenuInputRouter.CanLayerHandle(MenuEscLayer.WeaponDrawer, owner)) return;
             if (!MenuInputRouter.TryConsumeEsc(MenuEscLayer.WeaponDrawer)) return;
@@ -1163,6 +1172,9 @@ namespace P1.UI.WeaponSelect
                     return;
                 case MenuEscAction.CloseLayoutEditor:
                     MobileLayoutCustomizer.ActiveEditor?.Close(false);
+                    return;
+                case MenuEscAction.CloseMapSelect:
+                    MapSelectOverlay.TryCloseFromMenuInput();
                     return;
                 case MenuEscAction.CloseDrawer:
                     SetDrawerOpen(false);

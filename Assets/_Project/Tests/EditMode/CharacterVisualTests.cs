@@ -798,13 +798,15 @@ namespace P1.Tests
         public void RollerSolver_RollPoseCalibratedOnRig()
         {
             // 拖地/砸地姿态为真实骨架上的**默认视角造型**标定值（武器挂 Chest 下，胸口前倾会耦合进滚筒高度）。
-            // 标定：body10° 拖行 p25/d0 → 滚筒轴心 y≈0.114（主鼓半径 0.1104，底缘约 +0.004 吻地）；
-            // body18° 砸地 p5/d0.03 → 底缘约 -0.02 轻陷保留冲击。
+            // P39 对齐 INKWAVE wRoll（手位前推 + 脊柱链前倾 ~20°）：拖地基准角抬到 40°、身体 18°、前推 14cm，
+            // 闭环只剩 -8° 左右的小修正，鼓轴落在脚前 0.6m+，不再是"竖着吊在手心的拐杖"。
             // P31 起运行时按真实地面做俯仰闭环（GroundContact01），视角/坡度不再影响贴地；
             // 改动装配器（WeaponMountOffset / WeaponModelScale / Chest 层级）后仍需重新标定本组造型常量。
             var p = RollerWieldParams.Default;
-            Assert.AreEqual(25f, p.RollPitchDeg, 0.01f, "拖行俯角标定值");
-            Assert.AreEqual(0f, p.RollDropMeters, 0.001f, "拖行下压标定值");
+            Assert.AreEqual(40f, p.RollPitchDeg, 0.01f, "拖行俯角标定值");
+            Assert.AreEqual(0.02f, p.RollDropMeters, 0.001f, "拖行下压标定值");
+            Assert.AreEqual(0.14f, p.RollForwardMeters, 0.001f, "拖行前推标定值");
+            Assert.AreEqual(18f, p.RollBodyPitchDeg, 0.01f, "拖行身体前倾标定值");
             Assert.AreEqual(5f, p.FlickSlamPitchDeg, 0.01f, "砸地俯角标定值");
             Assert.AreEqual(0.03f, p.FlickSlamDropMeters, 0.001f, "砸地下压标定值");
 

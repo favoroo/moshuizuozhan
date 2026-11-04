@@ -11,7 +11,8 @@ namespace P1.UI
         WeaponDrawer = 1,
         PauseMenu = 2,
         LayoutEditor = 3,
-        HomeInfo = 4
+        HomeInfo = 4,
+        MapSelect = 5
     }
 
     /// <summary>归属层对应的唯一动作，两个消费者（暂停菜单 / 武器抽屉）共用同一份映射。</summary>
@@ -21,7 +22,8 @@ namespace P1.UI
         CloseHomeInfo,
         CloseLayoutEditor,
         TogglePause,
-        CloseDrawer
+        CloseDrawer,
+        CloseMapSelect
     }
 
     /// <summary>
@@ -58,8 +60,10 @@ namespace P1.UI
         /// 纯逻辑：按展开状态解析本帧 Esc 的归属层。
         /// 展开态互斥（界面自身保证不会同时展开多个），因此结果唯一且与调用顺序无关。
         /// </summary>
-        public static MenuEscLayer ResolveEscOwner(bool homeInfoOpen, bool layoutEditing, bool pauseExpanded, bool drawerExpanded)
+        public static MenuEscLayer ResolveEscOwner(bool homeInfoOpen, bool layoutEditing, bool pauseExpanded, bool drawerExpanded,
+            bool mapSelectOpen = false)
         {
+            if (mapSelectOpen) return MenuEscLayer.MapSelect;
             if (homeInfoOpen) return MenuEscLayer.HomeInfo;
             if (layoutEditing) return MenuEscLayer.LayoutEditor;
             if (pauseExpanded) return MenuEscLayer.PauseMenu;
@@ -68,9 +72,10 @@ namespace P1.UI
         }
 
         /// <summary>按当前帧号解析归属（运行时代码用这个）。</summary>
-        public static MenuEscLayer ResolveEscOwnerThisFrame(bool homeInfoOpen, bool layoutEditing, bool pauseExpanded, bool drawerExpanded)
+        public static MenuEscLayer ResolveEscOwnerThisFrame(bool homeInfoOpen, bool layoutEditing, bool pauseExpanded, bool drawerExpanded,
+            bool mapSelectOpen = false)
         {
-            return ResolveEscOwner(homeInfoOpen, layoutEditing, pauseExpanded, drawerExpanded);
+            return ResolveEscOwner(homeInfoOpen, layoutEditing, pauseExpanded, drawerExpanded, mapSelectOpen);
         }
 
         /// <summary>
@@ -81,7 +86,7 @@ namespace P1.UI
         /// </summary>
         public static bool CanLayerHandle(MenuEscLayer layer, MenuEscLayer owner)
         {
-            if (owner == MenuEscLayer.HomeInfo || owner == MenuEscLayer.LayoutEditor) return true;
+            if (owner == MenuEscLayer.HomeInfo || owner == MenuEscLayer.LayoutEditor || owner == MenuEscLayer.MapSelect) return true;
             return layer == owner;
         }
 
@@ -92,6 +97,7 @@ namespace P1.UI
             {
                 case MenuEscLayer.HomeInfo: return MenuEscAction.CloseHomeInfo;
                 case MenuEscLayer.LayoutEditor: return MenuEscAction.CloseLayoutEditor;
+                case MenuEscLayer.MapSelect: return MenuEscAction.CloseMapSelect;
                 case MenuEscLayer.WeaponDrawer: return MenuEscAction.CloseDrawer;
                 default: return MenuEscAction.TogglePause;
             }

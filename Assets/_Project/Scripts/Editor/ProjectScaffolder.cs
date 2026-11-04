@@ -25,7 +25,11 @@ namespace P1.Editor
         private const string SoFolder = "Assets/_Project/ScriptableObjects";
         private const string MatFolder = "Assets/_Project/Materials";
         private const string ScenePath = "Assets/_Project/Scenes/PhaseA_Playbox.unity";
+        private const string KelpScenePath = "Assets/_Project/Scenes/KelpTerminal.unity";
         private const string ArenaStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle.asset";
+        private const string KelpStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle_KelpTerminal.asset";
+        private const string KelpMeshPrefix = "kelp";
+        private const string KelpGroundMatPath = "Assets/_Project/Materials/Mat_KT_InkGround.mat";
 
         [MenuItem("P1/构建/1. 生成默认配置与材质 (SO & Materials)", false, 10)]
         public static void GenerateConfigsAndMaterials()
@@ -116,7 +120,28 @@ namespace P1.Editor
         [MenuItem("P1/构建/2. 一键生成并打开第一阶段试玩场景 (Phase A Playbox)", false, 11)]
         public static void BuildPhaseAPlayboxScene()
         {
+            BuildArenaScene(ScenePath, false);
+        }
+
+        /// <summary>
+        /// 新地图「潮汐货站 / Kelp Terminal」独立构建入口。
+        /// 与既有竞技场共用玩法常量（40×56 边界、出生甲板、出生线、涂地网格），
+        /// 但拥有独立的场内布局、地标、画风资产与材质集，不会覆盖 PhaseA 主场景与共享材质。
+        /// </summary>
+        [MenuItem("P1/关卡与地图/生成新地图：潮汐货站 (Kelp Terminal)", false, 31)]
+        public static void BuildKelpTerminalScene()
+        {
+            BuildArenaScene(KelpScenePath, true);
+        }
+
+        private static void BuildArenaScene(string scenePath, bool kelpTerminal)
+        {
             GenerateConfigsAndMaterials();
+            if (kelpTerminal)
+            {
+                EnsureKelpTerminalArt();
+            }
+
             ApplyProjectPlayerSettings();
 
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
@@ -133,8 +158,8 @@ namespace P1.Editor
             var teamAMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamA_Body.mat");
             var teamBMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamB_Body.mat");
             var visorMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_VisorDark.mat");
-            var arenaStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
-            var arenaMats = BuildArenaMaterialSet(arenaStyle);
+            var arenaStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(kelpTerminal ? KelpStylePath : ArenaStylePath);
+            var arenaMats = kelpTerminal ? BuildKelpMaterialSet(arenaStyle) : BuildArenaMaterialSet(arenaStyle);
 
             // 1. 主光源与环境光
             var lightGo = new GameObject("Directional Light");
@@ -157,11 +182,19 @@ namespace P1.Editor
             var navigator = managersRoot.AddComponent<ArenaNavigator>();
             managersRoot.AddComponent<TopDownOcclusionManager>();
 
-            // 3. 搭建 40×56 集装箱码头竞技场（含中立高台、四向斜坡、集装箱掩体群、延长区与出生网关）
+            // 3. 搭建 40×56 竞技场（新旧两图共用边界/出生/涂地口径，仅场内布局不同）
             var inkableRenderers = new List<Renderer>();
             var blockedColliders = new List<Collider>();
-            ArenaGeometryBuilder.BuildArenaGeometry(
-                arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
+            if (kelpTerminal)
+            {
+                KelpTerminalGeometryBuilder.BuildArenaGeometry(
+                    arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
+            }
+            else
+            {
+                ArenaGeometryBuilder.BuildArenaGeometry(
+                    arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
+            }
 
             inkSurface.Configure(inkCfg, inkableRenderers, blockedColliders);
             navigator.Configure(inkCfg != null ? inkCfg.mapSize : ArenaLayoutV2.MapSize, 0.5f, ~0);
@@ -211,7 +244,7 @@ namespace P1.Editor
             camFollow.Configure(playerGo.transform, gameCfg);
 
             // 7.1 P7-B：烘焙地面/横幅贴图、生成装饰与港口远景、应用日光/雾/天空/后处理
-            BakeArenaVisuals(arenaMats, arenaStyle);
+            BakeArenaVisualsVariant(arenaMats, arenaStyle, kelpTerminal);
 
             // 8. 创建战斗 HUD（含顶部覆盖率条、右上角实时涂地小地图、底部墨水/手雷/大招槽与操作说明）
             BuildHudCanvas();
@@ -224,11 +257,209 @@ namespace P1.Editor
             // 10. 移动端触控层（桌面自动隐藏）
             managersRoot.AddComponent<MobileTouchUI>();
 
-            // 10. 保存场景并写入 BuildSettings
-            EditorSceneManager.SaveScene(scene, ScenePath);
-            RegisterSceneInBuildSettings(ScenePath);
+            // 10.1 新地图：场景级画风锚点，让运行时全局反射/天空/涂层参数取自本图风格资产
+            if (kelpTerminal)
+            {
+                var styleAnchor = new GameObject("_ArenaStyleAnchor");
+                styleAnchor.AddComponent<ArenaStyleSceneAnchor>().Configure(arenaStyle);
+            }
 
-            Debug.Log($"[ProjectScaffolder] 4v4 竞技场场景已生成并打开：{ScenePath}");
+            // 11. 保存场景并写入 BuildSettings
+            EditorSceneManager.SaveScene(scene, scenePath);
+            RegisterSceneInBuildSettings(scenePath);
+
+            Debug.Log($"[ProjectScaffolder] 4v4 竞技场场景已生成并打开：{scenePath}");
+        }
+
+        /// <summary>
+        /// 新地图的画风/材质总装：
+        /// 1) 复制一份 ArenaStyle.asset 作为本图独立画风档位（不修改共享风格资产）；
+        /// 2) 在本图专属路径生成一套材质（不覆盖 Mat_* 共享材质）；
+        /// 3) 地面复用已烘焙的公共地面图集（标记层与 40×56 车道网格一致）。
+        /// </summary>
+        private static void EnsureKelpTerminalArt()
+        {
+            var baseStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
+            if (baseStyle == null)
+            {
+                Debug.LogError("[ProjectScaffolder] 找不到 ArenaStyle.asset，无法生成潮汐货站画风。");
+                return;
+            }
+
+            var kelpStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(KelpStylePath);
+            if (kelpStyle == null)
+            {
+                AssetDatabase.CopyAsset(ArenaStylePath, KelpStylePath);
+                AssetDatabase.SaveAssets();
+                kelpStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(KelpStylePath);
+            }
+            if (kelpStyle == null)
+            {
+                Debug.LogError("[ProjectScaffolder] 潮汐货站画风资产创建失败。");
+                return;
+            }
+
+            ApplyKelpPalette(kelpStyle);
+            EditorUtility.SetDirty(kelpStyle);
+            AssetDatabase.SaveAssets();
+
+            // 材质全部写到 KT_ 前缀路径；共享的 Mat_InkWall / 道具素色材质直接复用。
+            CreateOrUpdateGroundMaterial(kelpStyle, KelpGroundMatPath);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_ObstacleWall.mat", kelpStyle.concreteLight, kelpStyle.concreteDark, 0.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Container_Teal.mat", kelpStyle.containerTeal, Color.Lerp(kelpStyle.containerTeal, kelpStyle.steelDark, 0.55f), 1.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Container_Rust.mat", kelpStyle.containerRust, Color.Lerp(kelpStyle.containerRust, kelpStyle.steelDark, 0.55f), 1.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Container_Slate.mat", kelpStyle.containerSlate, Color.Lerp(kelpStyle.containerSlate, kelpStyle.steelDark, 0.55f), 1.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Container_Mustard.mat", kelpStyle.containerMustard, Color.Lerp(kelpStyle.containerMustard, kelpStyle.steelDark, 0.55f), 1.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_BoundaryWall.mat", kelpStyle.boundaryConcrete, kelpStyle.boundaryTrim, 0.0f);
+            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Prop_Wood.mat", kelpStyle.wood, kelpStyle.woodDark, 0.0f);
+
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_KT_SpawnPad_TeamA.mat", kelpStyle, 1f);
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_KT_SpawnPad_TeamB.mat", kelpStyle, -1f);
+            CreateOrUpdateWaterMaterial(kelpStyle, $"{MatFolder}/Mat_KT_Water.mat");
+            CreateOrUpdateSkyboxMaterial(kelpStyle, $"{MatFolder}/Mat_KT_Skybox.mat");
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log($"[ProjectScaffolder] 潮汐货站画风资产已生成：{KelpStylePath}");
+        }
+
+        /// <summary>
+        /// 潮汐货站的画风档位（在复制自 ArenaStyle 的基础上只覆盖配色与日光/天空/水面）。
+        /// 质感参数（清漆/涂层/阴影/SSAO/对比/饱和/曝光/Neutral 色调映射）保持与 P31 完全一致。
+        /// </summary>
+        private static void ApplyKelpPalette(ArenaStyleSO s)
+        {
+            // 地面 / 建材：冷灰水泥 + 海风青
+            s.groundBase = new Color(0.70f, 0.71f, 0.69f, 1f);
+            s.groundSeam = new Color(0.45f, 0.47f, 0.47f, 1f);
+            s.groundCliff = new Color(0.30f, 0.33f, 0.33f, 1f);
+            s.concreteLight = new Color(0.74f, 0.76f, 0.74f, 1f);
+            s.concreteMid = new Color(0.58f, 0.61f, 0.61f, 1f);
+            s.concreteDark = new Color(0.36f, 0.39f, 0.40f, 1f);
+            s.boundaryConcrete = new Color(0.72f, 0.74f, 0.72f, 1f);
+            s.boundaryTrim = new Color(0.47f, 0.51f, 0.50f, 1f);
+
+            // 集装箱：深海青 / 铁锈 / 板岩蓝 / 芥末黄
+            s.containerTeal = new Color(0.14f, 0.45f, 0.46f, 1f);
+            s.containerRust = new Color(0.58f, 0.30f, 0.20f, 1f);
+            s.containerSlate = new Color(0.28f, 0.38f, 0.52f, 1f);
+            s.containerMustard = new Color(0.80f, 0.62f, 0.26f, 1f);
+            s.steel = new Color(0.44f, 0.51f, 0.54f, 1f);
+            s.steelDark = new Color(0.20f, 0.25f, 0.27f, 1f);
+            s.wood = new Color(0.60f, 0.46f, 0.31f, 1f);
+            s.woodDark = new Color(0.35f, 0.26f, 0.18f, 1f);
+
+            // 低角度黄昏侧光：长阴影 + 暖日光，冷天空形成对比
+            s.sunEuler = new Vector3(38f, -52f, 0f);
+            s.sunColor = new Color(1.00f, 0.90f, 0.76f, 1f);
+            s.sunIntensity = 1.55f;
+            s.ambientSky = new Color(0.30f, 0.42f, 0.62f, 1f);
+            s.ambientEquator = new Color(0.52f, 0.50f, 0.48f, 1f);
+            s.ambientGround = new Color(0.24f, 0.20f, 0.18f, 1f);
+            s.ambientIntensity = 0.84f;
+
+            // 远景：冷蓝雾（不是奶白），雾距强制保持 65 / 210
+            s.fogColor = new Color(0.62f, 0.66f, 0.72f, 1f);
+            s.fogStartDistance = 65f;
+            s.fogEndDistance = 210f;
+            s.skyTop = new Color(0.10f, 0.26f, 0.52f, 1f);
+            s.skyHorizon = new Color(0.62f, 0.66f, 0.72f, 1f);
+            s.skyGround = new Color(0.36f, 0.40f, 0.44f, 1f);
+            s.sunDisc = new Color(1.00f, 0.82f, 0.55f, 1f);
+            s.cloudColor = new Color(1.00f, 0.92f, 0.84f, 1f);
+            s.cloudStrength = 0.22f;
+
+            s.waterShallow = new Color(0.14f, 0.38f, 0.44f, 1f);
+            s.waterDeep = new Color(0.03f, 0.13f, 0.22f, 1f);
+            s.waterHorizon = new Color(0.46f, 0.58f, 0.66f, 1f);
+
+            // P31 质感红线（显式重申，避免复制资产后续被别的流程刷掉）
+            s.inkCoatStrength = 1.5f;
+            s.inkCoatRoughness = 0.06f;
+            s.envSpecStrength = 1.35f;
+            s.shadowStrength = 0.94f;
+            s.ssaoIntensity = 1.15f;
+            s.colorContrast = 16f;
+            s.colorSaturation = 14f;
+            s.postExposure = 0.12f;
+        }
+
+        private static ArenaMaterialSet BuildKelpMaterialSet(ArenaStyleSO style)
+        {
+            Material Load(string file) => AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/{file}");
+
+            var set = new ArenaMaterialSet
+            {
+                ground = Load("Mat_KT_InkGround.mat"),
+                wall = Load("Mat_KT_ObstacleWall.mat"),
+                inkWall = Load("Mat_InkWall.mat"),
+                boundary = Load("Mat_KT_BoundaryWall.mat"),
+                spawnPadA = Load("Mat_KT_SpawnPad_TeamA.mat"),
+                spawnPadB = Load("Mat_KT_SpawnPad_TeamB.mat"),
+                containerTeal = Load("Mat_KT_Container_Teal.mat"),
+                containerRust = Load("Mat_KT_Container_Rust.mat"),
+                containerSlate = Load("Mat_KT_Container_Slate.mat"),
+                containerMustard = Load("Mat_KT_Container_Mustard.mat"),
+                propMatte = Load("Mat_Prop_Matte.mat"),
+                propMetal = Load("Mat_Prop_Metal.mat"),
+                propEmissive = Load("Mat_Prop_Emissive.mat"),
+                propCloth = Load("Mat_Prop_Cloth.mat"),
+                bannerAtlas = Load("Mat_BannerAtlas.mat"),
+                water = Load("Mat_KT_Water.mat"),
+                skybox = Load("Mat_KT_Skybox.mat"),
+            };
+
+            set.concrete = Load("Mat_Prop_Concrete.mat") ?? set.wall;
+            set.concreteDark = Load("Mat_Prop_ConcreteDark.mat") ?? set.concrete;
+            set.steel = Load("Mat_Prop_Steel.mat") ?? set.wall;
+            set.steelDark = Load("Mat_Prop_SteelDark.mat") ?? set.steel;
+            set.wood = Load("Mat_KT_Prop_Wood.mat") ?? set.wall;
+            set.woodDark = Load("Mat_Prop_WoodDark.mat") ?? set.wood;
+            set.foliage = Load("Mat_Prop_Foliage.mat");
+            return set;
+        }
+
+        /// <summary>
+        /// 视觉总装（多地图变体）：海图复用公共地面图集，不重烘焙；装饰与远景写到 kelp_ 前缀资产，
+        /// 不覆盖主场景的 arena_decor / arena_backdrop 网格。
+        /// </summary>
+        private static void BakeArenaVisualsVariant(ArenaMaterialSet mats, ArenaStyleSO style, bool kelpTerminal)
+        {
+            if (style == null)
+            {
+                style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(kelpTerminal ? KelpStylePath : ArenaStylePath);
+            }
+
+            if (style == null)
+            {
+                Debug.LogWarning("[ProjectScaffolder] 画风资产未找到，将使用内置默认配色并跳过氛围。");
+            }
+
+            if (!kelpTerminal)
+            {
+                ArenaGroundTextureBaker.BakeAll(style);
+            }
+
+            // 贴图导入后重新取一次材质，避免资产重导入造成「假 null」。
+            var fresh = kelpTerminal ? BuildKelpMaterialSet(style) : BuildArenaMaterialSet(style);
+            AssignGroundTexture(fresh.ground);
+            AssignBannerAtlas(fresh.bannerAtlas);
+
+            DestroyImmediateByName("Arena_Decor");
+            DestroyImmediateByName("_ArenaBackdrop");
+
+            if (kelpTerminal)
+            {
+                ArenaDecorationBuilder.Build(null, style, fresh, null, ArenaLayoutKelp.Props, KelpMeshPrefix, false);
+                ArenaDecorationBuilder.BuildBackdrop(null, style, fresh, KelpMeshPrefix + "_backdrop");
+                ArenaAtmosphereBuilder.Apply(style, fresh);
+            }
+            else
+            {
+                ArenaDecorationBuilder.Build(null, style, fresh, null);
+                ArenaDecorationBuilder.BuildBackdrop(null, style, fresh);
+                ArenaAtmosphereBuilder.Apply(style);
+            }
         }
 
         private static Transform[] CreateSpawnLine(Transform parent, Team team)
@@ -647,6 +878,172 @@ namespace P1.Editor
                     uniqueMats.Add(renderers[i].sharedMaterial);
             }
             Debug.Log($"[P7B] 场景统计：Renderer={renderers.Length}，唯一材质={uniqueMats.Count}。留底图已写入 Logs/p7b_*.png。");
+        }
+
+        /// <summary>
+        /// 新地图「潮汐货站」视觉留底 + 量化统计：俯视全景、出生点、中路、掩体近景、地标远景。
+        /// 同一机位与 <see cref="CaptureP7BVerificationShots"/> 对齐，便于与既有竞技场做性能/观感对比。
+        /// </summary>
+        [MenuItem("P1/关卡与地图/渲染潮汐货站视觉留底图", false, 33)]
+        public static void CaptureKelpVerificationShots()
+        {
+            var active = EditorSceneManager.GetActiveScene();
+            if (!string.Equals(active.path, KelpScenePath, System.StringComparison.Ordinal))
+            {
+                if (active.isDirty)
+                {
+                    EditorSceneManager.SaveScene(active);
+                }
+                EditorSceneManager.OpenScene(KelpScenePath, OpenSceneMode.Single);
+            }
+
+            System.IO.Directory.CreateDirectory("Logs");
+
+            Camera cam = Camera.main;
+            GameObject tempCam = null;
+            if (cam == null)
+            {
+                tempCam = new GameObject("TempKelpRenderCam", typeof(Camera));
+                cam = tempCam.GetComponent<Camera>();
+            }
+
+            Vector3 origPos = cam.transform.position;
+            Quaternion origRot = cam.transform.rotation;
+            float origFov = cam.fieldOfView;
+            bool origOrtho = cam.orthographic;
+
+            var surface = Object.FindAnyObjectByType<InkSurfaceController>();
+            if (surface != null)
+            {
+                surface.InitializeIfNeeded();
+                PaintKelpInk(surface);
+                surface.FlushTexture();
+            }
+
+            cam.orthographic = false;
+
+            cam.fieldOfView = 50f;
+            cam.transform.SetPositionAndRotation(new Vector3(-62f, 46f, 0f), Quaternion.Euler(34f, 90f, 0f));
+            RenderCameraToPng(cam, "Logs/kelp_overview.png", 1920, 1080);
+
+            cam.fieldOfView = 50f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 8.5f, -32.5f), Quaternion.Euler(34f, 0f, 0f));
+            RenderCameraToPng(cam, "Logs/kelp_spawn_teamA.png", 1920, 1080);
+
+            cam.fieldOfView = 46f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 13f, -13f), Quaternion.Euler(46f, 0f, 0f));
+            RenderCameraToPng(cam, "Logs/kelp_midfield.png", 1920, 1080);
+
+            cam.fieldOfView = 50f;
+            cam.transform.SetPositionAndRotation(new Vector3(7.6f, 5.4f, -9.4f), Quaternion.Euler(34f, 28f, 0f));
+            RenderCameraToPng(cam, "Logs/kelp_cover_closeup.png", 1920, 1080);
+
+            cam.fieldOfView = 52f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 11f, -8.0f), Quaternion.Euler(18f, 0f, 0f));
+            RenderCameraToPng(cam, "Logs/kelp_landmark_vista.png", 1920, 1080);
+
+            cam.fieldOfView = origFov;
+            cam.orthographic = origOrtho;
+            cam.transform.SetPositionAndRotation(origPos, origRot);
+            if (tempCam != null) Object.DestroyImmediate(tempCam);
+
+            LogSceneStats("Kelp", KelpScenePath);
+            Debug.Log("[Kelp] 视觉留底已写入 Logs/kelp_*.png（俯视/出生/中路/掩体近景/地标）。");
+        }
+
+        private static void PaintKelpInk(InkSurfaceController surface)
+        {
+            // Team A：南侧出生区 → 低墙两侧 → 中央长条货台顶
+            surface.PaintCircle(new Vector3(0f, 1.2f, -25f), 4.2f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-3.4f, 0f, -17f), 2.8f, Team.TeamA);
+            surface.PaintCircle(new Vector3(3.4f, 0f, -17f), 2.8f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-8.1f, 0.6f, -5.5f), 2.2f, Team.TeamA);
+            surface.PaintCircle(new Vector3(8.1f, 0.9f, -5.5f), 2.2f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-7.4f, 0.7f, 0f), 2.6f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-2.6f, 1.1f, 0f), 2.6f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-13.45f, 1.5f, -1.6f), 2.4f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-16.75f, 0f, -3.2f), 2.0f, Team.TeamA);
+
+            // Team B：北侧对称推进
+            surface.PaintCircle(new Vector3(0f, 1.2f, 25f), 4.2f, Team.TeamB);
+            surface.PaintCircle(new Vector3(-3.4f, 0f, 17f), 2.8f, Team.TeamB);
+            surface.PaintCircle(new Vector3(3.4f, 0f, 17f), 2.8f, Team.TeamB);
+            surface.PaintCircle(new Vector3(8.1f, 0.6f, 5.5f), 2.2f, Team.TeamB);
+            surface.PaintCircle(new Vector3(-8.1f, 0.9f, 5.5f), 2.2f, Team.TeamB);
+            surface.PaintCircle(new Vector3(7.4f, 0.7f, 0f), 2.6f, Team.TeamB);
+            surface.PaintCircle(new Vector3(2.6f, 1.1f, 0f), 2.6f, Team.TeamB);
+            surface.PaintCircle(new Vector3(13.45f, 1.5f, 1.6f), 2.4f, Team.TeamB);
+            surface.PaintCircle(new Vector3(16.75f, 0f, 3.2f), 2.0f, Team.TeamB);
+        }
+
+        /// <summary>在当前打开的场景上按统一俯视机位渲染一帧并输出统计，用于两图同机位性能对比。</summary>
+        [MenuItem("P1/关卡与地图/统计当前场景同机位渲染数据", false, 34)]
+        public static void MeasureActiveSceneAtOverview()
+        {
+            var active = EditorSceneManager.GetActiveScene();
+            Camera cam = Camera.main;
+            if (cam == null)
+            {
+                Debug.LogWarning("[Stats] 当前场景没有 Main Camera，跳过。");
+                return;
+            }
+
+            Vector3 origPos = cam.transform.position;
+            Quaternion origRot = cam.transform.rotation;
+            float origFov = cam.fieldOfView;
+
+            cam.orthographic = false;
+            cam.fieldOfView = 55f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 42f, -62f), Quaternion.Euler(48f, 0f, 0f));
+            cam.Render();
+
+            LogSceneStats(active.name, active.path);
+
+            cam.fieldOfView = origFov;
+            cam.transform.SetPositionAndRotation(origPos, origRot);
+        }
+
+        private static void LogSceneStats(string label, string scenePath)
+        {
+            var renderers = Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude);
+            var uniqueMats = new HashSet<Material>();
+            var uniqueMeshes = new HashSet<Mesh>();
+            int triangleCount = 0;
+            int shadowCasterRenderers = 0;
+
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                var r = renderers[i];
+                if (r == null) continue;
+                if (r.sharedMaterial != null) uniqueMats.Add(r.sharedMaterial);
+                if (r.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off) shadowCasterRenderers++;
+
+                Mesh mesh = null;
+                if (r is SkinnedMeshRenderer smr) mesh = smr.sharedMesh;
+                else if (r.TryGetComponent<MeshFilter>(out var mf)) mesh = mf.sharedMesh;
+                if (mesh != null && uniqueMeshes.Add(mesh))
+                {
+                    triangleCount += mesh.triangles.Length / 3;
+                }
+            }
+
+            var lights = Object.FindObjectsByType<Light>(FindObjectsInactive.Exclude);
+            int realtimeLights = 0;
+            int shadowedLights = 0;
+            for (int i = 0; i < lights.Length; i++)
+            {
+                if (lights[i].lightmapBakeType == LightmapBakeType.Realtime) realtimeLights++;
+                if (lights[i].shadows != LightShadows.None) shadowedLights++;
+            }
+
+            Debug.Log(
+                $"[{label}] 统计 scene={scenePath} Renderer={renderers.Length} 唯一材质={uniqueMats.Count} " +
+                $"唯一网格={uniqueMeshes.Count} 三角面={triangleCount} 投影渲染器={shadowCasterRenderers} " +
+                $"Light={lights.Length} 实时灯={realtimeLights} 带阴影灯={shadowedLights} " +
+                $"UnityStats.drawCalls={UnityStats.drawCalls} staticBatches={UnityStats.staticBatches} " +
+                $"dynamicBatches={UnityStats.dynamicBatches} instancedBatches={UnityStats.instancedBatches} " +
+                $"setPass={UnityStats.setPassCalls} triangles={UnityStats.triangles} shadowCasters={UnityStats.shadowCasters} " +
+                $"fog={RenderSettings.fog} fogRange={RenderSettings.fogStartDistance:F0}/{RenderSettings.fogEndDistance:F0}");
         }
 
         private static void PaintP7BInk(InkSurfaceController surface)
@@ -1564,9 +1961,9 @@ namespace P1.Editor
             return sh;
         }
 
-        private static Material CreateOrUpdateGroundMaterial(ArenaStyleSO style)
+        private static Material CreateOrUpdateGroundMaterial(ArenaStyleSO style, string path = null)
         {
-            string path = $"{MatFolder}/Mat_InkGround.mat";
+            path ??= $"{MatFolder}/Mat_InkGround.mat";
             Shader sh = FindArenaShader("InkGround.shader", "P1/InkGround", "Universal Render Pipeline/Lit");
 
             var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
@@ -1682,9 +2079,9 @@ namespace P1.Editor
             return mat;
         }
 
-        private static Material CreateOrUpdateWaterMaterial(ArenaStyleSO style)
+        private static Material CreateOrUpdateWaterMaterial(ArenaStyleSO style, string path = null)
         {
-            string path = $"{MatFolder}/Mat_Water.mat";
+            path ??= $"{MatFolder}/Mat_Water.mat";
             Shader sh = FindArenaShader("Water.shader", "P1/Water", "Universal Render Pipeline/Unlit");
 
             var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
@@ -1708,9 +2105,9 @@ namespace P1.Editor
             return mat;
         }
 
-        private static Material CreateOrUpdateSkyboxMaterial(ArenaStyleSO style)
+        private static Material CreateOrUpdateSkyboxMaterial(ArenaStyleSO style, string path = null)
         {
-            string path = $"{MatFolder}/Mat_Skybox.mat";
+            path ??= $"{MatFolder}/Mat_Skybox.mat";
             Shader sh = FindArenaShader("SkyGradient.shader", "P1/SkyGradient", "Skybox/Procedural");
 
             var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
@@ -1998,11 +2395,21 @@ namespace P1.Editor
         private static void RegisterSceneInBuildSettings(string scenePath)
         {
             var scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
-            if (!scenes.Exists(s => s.path == scenePath))
+            scenes.RemoveAll(s => s.path == scenePath);
+
+            // 主场景 PhaseA 固定 Build Index 0（默认启动图）；新地图紧排其后（Index 1），
+            // 既不会被顶掉默认启动图，也能在 Build Settings 里直接互相切换。
+            if (scenePath == ScenePath)
             {
                 scenes.Insert(0, new EditorBuildSettingsScene(scenePath, true));
-                EditorBuildSettings.scenes = scenes.ToArray();
             }
+            else
+            {
+                int mainIndex = scenes.FindIndex(s => s.path == ScenePath);
+                scenes.Insert(mainIndex >= 0 ? mainIndex + 1 : 0, new EditorBuildSettingsScene(scenePath, true));
+            }
+
+            EditorBuildSettings.scenes = scenes.ToArray();
         }
     }
 }

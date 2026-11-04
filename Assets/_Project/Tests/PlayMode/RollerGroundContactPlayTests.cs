@@ -166,16 +166,21 @@ namespace P1.Tests
             float gap = MeasureGap(player, motor, drum);
             float weight = ReadPrivate<float>(visual, "_rollerContactWeight");
             float contact01 = ReadPrivate<float>(visual, "_rollerPoseContact01");
+            Vector3 localDrum = player.transform.InverseTransformPoint(drum.position);
             Transform chestT = visual.KidRoot.transform.Find("Chest") ?? visual.KidRoot.transform.Find("Hips/BodySquash/Spine/Chest");
             float chestPitch = chestT != null ? chestT.localEulerAngles.x : 0f;
             if (chestPitch > 180f) chestPitch -= 360f;
 
             Debug.Log($"[ROLLGAP] {label} gap={gap:F4}m contact={weight:F3}/{contact01:F3} " +
-                      $"chestPitch={chestPitch:F2} drumY={drum.position.y:F4} " +
+                      $"chestPitch={chestPitch:F2} drumY={drum.position.y:F4} localDrum=({localDrum.x:F2},{localDrum.y:F2},{localDrum.z:F2}) " +
                       $"modelPitch={roller.localEulerAngles.x:F2}");
 
             Assert.Less(gap, 0.015f, $"{label}：滚筒底缘不应悬空，实测间隙 {gap:F3}m");
             Assert.Greater(gap, -0.03f, $"{label}：滚筒不应明显陷入地面，实测间隙 {gap:F3}m");
+            // P39 INKWAVE 剪影：滚筒要压在身前地面（脚前 0.3m 以上），而不是竖直吊在手心下方或翻到身后。
+            // 旧基准 25° 时闭环要拧 +25° 才够地，第三人称俯视读作"拄拐/横板悬空"。
+            Assert.Greater(localDrum.z, 0.30f, $"{label}：滚筒应压在身前地面，实测脚前距离 {localDrum.z:F2}m");
+            Assert.Less(roller.localEulerAngles.x, 80f, $"{label}：滚筒不应翻到接近垂直/过顶，实测局部俯角 {roller.localEulerAngles.x:F1}°");
         }
 
         private static float MeasureGap(

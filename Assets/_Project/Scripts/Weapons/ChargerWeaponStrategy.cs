@@ -20,6 +20,17 @@ namespace P1.Weapons
 
         public override WeaponKind Kind => WeaponKind.Charger;
 
+        /// <summary>起射门槛：连最低蓄力（chargeMinInkFraction）都不够时不能开火。</summary>
+        public override float InkRequiredToFire
+        {
+            get
+            {
+                float costFull = Config != null ? Mathf.Max(0f, Config.chargeInkCostFull) : 18f;
+                float minFraction = Config != null ? Mathf.Clamp01(Config.chargeMinInkFraction) : 0.2f;
+                return costFull * minFraction;
+            }
+        }
+
         public override bool IsCharging => _charging;
 
         public override float Charge01 => _charge;

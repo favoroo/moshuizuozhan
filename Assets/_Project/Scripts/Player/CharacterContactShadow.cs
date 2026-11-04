@@ -83,24 +83,42 @@ namespace P1.Player
             _propertyBlock = null;
         }
 
+        /// <summary>共享的 1×1 贴地 quad（滚筒接地阴影复用，避免每个角色再建一份网格）。</summary>
+        internal static Mesh SharedQuadMesh
+        {
+            get
+            {
+                if (_quadMesh == null) _quadMesh = BuildQuadMesh();
+                return _quadMesh;
+            }
+        }
+
+        /// <summary>共享的 P1/ContactShadow 材质（逐实例用 MaterialPropertyBlock 写 _Color.a）。</summary>
+        internal static Material SharedShadowMaterial
+        {
+            get
+            {
+                if (_sharedMaterial == null)
+                {
+                    if (_radialTexture == null) _radialTexture = BuildRadialTexture();
+                    _sharedMaterial = BuildMaterial(_radialTexture);
+                }
+                return _sharedMaterial;
+            }
+        }
+
         private void EnsureVisuals()
         {
             // 只要任一运行时资源缺失就重建（域重载/上一次运行残留会让静态引用变 fake-null）
             if (_renderer != null && _propertyBlock != null) return;
-            if (_quadMesh == null) _quadMesh = BuildQuadMesh();
-            if (_sharedMaterial == null)
-            {
-                if (_radialTexture == null) _radialTexture = BuildRadialTexture();
-                _sharedMaterial = BuildMaterial(_radialTexture);
-            }
 
             var mf = GetComponent<MeshFilter>();
             if (mf == null) mf = gameObject.AddComponent<MeshFilter>();
-            mf.sharedMesh = _quadMesh;
+            mf.sharedMesh = SharedQuadMesh;
 
             _renderer = GetComponent<MeshRenderer>();
             if (_renderer == null) _renderer = gameObject.AddComponent<MeshRenderer>();
-            _renderer.sharedMaterial = _sharedMaterial;
+            _renderer.sharedMaterial = SharedShadowMaterial;
             _renderer.shadowCastingMode = ShadowCastingMode.Off;
             _renderer.receiveShadows = false;
             _renderer.lightProbeUsage = LightProbeUsage.Off;

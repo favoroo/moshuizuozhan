@@ -42,6 +42,10 @@ namespace P1.Weapons
         private bool _triggerHeldThisFrame;
         private bool _triggerHeldLastFrame;
 
+        /// <summary>空墨拒射戳记的节流间隔（秒）：连发武器每帧扣扳机，HUD 动效不能跟着刷屏。</summary>
+        private const float EmptyFeedbackMinInterval = 0.18f;
+        private float _lastEmptyFeedbackStampTime = -99f;
+
         /// <summary>本帧主武器扳机被主动抑制（暂停 / 终场 / 死亡 / 副武器投掷仲裁占用）。</summary>
         private bool _triggerSuppressedThisFrame;
 
@@ -173,6 +177,17 @@ namespace P1.Weapons
         public float EffectiveRange => _strategy != null
             ? _strategy.EffectiveRange
             : (config != null ? Mathf.Max(0.1f, config.maxRange) : 0f);
+
+        /// <summary>打出下一发所需的最低墨水：HUD 准星据此显示「没子弹」预警。</summary>
+        public float InkRequiredToFire => _strategy != null
+            ? _strategy.InkRequiredToFire
+            : (config != null ? Mathf.Max(0f, config.inkCostPerShot) : 0f);
+
+        /// <summary>
+        /// 空墨拒射戳记：每次 <see cref="ReportEmptyFeedback"/> 递增，供准星轮询做「空打」动效。
+        /// 用戳记而非事件，避免 HUD 订阅武器生命周期（换枪 / 复活重建）带来的悬挂引用。
+        /// </summary>
+        public int EmptyFeedbackStamp { get; private set; }
 
         public bool IsCharging => _strategy != null && _strategy.IsCharging;
         public bool IsRolling => _strategy != null && _strategy.IsRolling;
@@ -1564,6 +1579,14 @@ namespace P1.Weapons
 
         void IWeaponRuntimeHost.ReportEmptyFeedback()
         {
+            // 空墨拒射戳记：准星轮询它播放「空打」红叉/震颤/toast；节流避免连发武器刷屏。
+            float now = Time.unscaledTime;
+            if (now - _lastEmptyFeedbackStampTime >= EmptyFeedbackMinInterval)
+            {
+                _lastEmptyFeedbackStampTime = now;
+                EmptyFeedbackStamp++;
+            }
+
             if (TeamId == Team.TeamA && AudioManager.Instance != null)
             {
                 AudioManager.Instance.PlayInkEmpty();

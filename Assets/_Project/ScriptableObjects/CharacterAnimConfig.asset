@@ -400,6 +400,8 @@ MonoBehaviour:
   hipsBobShare: 1
   hipsCounterRollShare: 1
   hipsCounterPitchShare: 1
+  hipsBobSmoothTime: 0.07
+  hipsBobSmoothTimeLowFps: 0.28
   contactShadowEnabled: 1
   contactShadowRadius: 0.55
   contactShadowOpacity: 0.48
@@ -420,6 +422,21 @@ MonoBehaviour:
   landHardBlinkSpeed: 8
   landVfxMinFallSpeed: 3.5
   landVfxSize: 0.45
+  slamFlipDegrees: 360
+  slamLaunchThighDeg: 14
+  slamLaunchFootDeg: 26
+  slamLaunchSpineDeg: -10
+  slamTuckThighDeg: 42
+  slamTuckKneeDeg: 78
+  slamTuckSpineDeg: 30
+  slamHangChestDeg: -12
+  slamHangLegSplitDeg: 12
+  slamDiveThighDeg: 8
+  slamImpactHipDropMeters: 0.18
+  slamImpactSpineDeg: 34
+  slamImpactKneeDeg: 62
+  slamImpactHoldSeconds: 0.18
+  slamImpactRecoverSeconds: 0.26
   leanAccelClamp: 24
   leanPitchGain: 0.35
   leanPitchMaxDeg: 9
@@ -443,9 +460,21 @@ MonoBehaviour:
   idleShiftSwayMeters: 0.015
   idleFidgetIntervalMin: 4
   idleFidgetIntervalMax: 9
-  rollerCarryPitchDeg: 16
-  rollerCarryYawDeg: 15
-  rollerCarryRollDeg: -12
+  flinchPitchMaxDeg: 9
+  flinchRollMaxDeg: 7
+  flinchSpringHz: 6.5
+  flinchSpringZeta: 0.32
+  flinchFullDamage: 45
+  flinchJellyKick: -1.4
+  flinchBlinkDamage: 20
+  eyeLookMaxOffset: 0.004
+  eyeSaccadeIntervalMin: 1.2
+  eyeSaccadeIntervalMax: 3
+  eyeLookAimGain: 0.00012
+  eyeLookSmoothTime: 0.07
+  rollerCarryPitchDeg: 28
+  rollerCarryYawDeg: 10
+  rollerCarryRollDeg: -8
   rollerFlickLiftPitchDeg: -115
   rollerFlickSlamPitchDeg: 5
   rollerFlickSlamDrop: 0.03
@@ -455,11 +484,11 @@ MonoBehaviour:
   rollerFlickCoilBodyPitchDeg: -12
   rollerFlickWhipBodyPitchDeg: 18
   rollerSlamSquashImpulse: 2.8
-  rollerRollPitchDeg: 25
-  rollerRollDrop: 0
-  rollerRollForward: 0.1
-  rollerRollBodyPitchDeg: 10
-  rollerRollSink: 0.05
+  rollerRollPitchDeg: 40
+  rollerRollDrop: 0.02
+  rollerRollForward: 0.14
+  rollerRollBodyPitchDeg: 18
+  rollerRollSink: 0.06
   rollerRollWeightInRate: 11
   rollerRollWeightOutRate: 6
   rollerDrumFlickSpin: 34
@@ -468,3 +497,32 @@ MonoBehaviour:
   rollerGroundContactOutRate: 22
   rollerGroundPenetration: 0.004
   rollerRollPlantSquashImpulse: 0.6
+  rollerContactShadowEnabled: 1
+  rollerContactShadowWidth: 0.8
+  rollerContactShadowDepth: 0.42
+  rollerContactShadowOpacity: 0.52
+  weaponWieldSmoothRate: 18
+  weaponIdleSwayDeg: 0.6
+  weaponIdleSwayHz: 0.4
+  weaponChargePullback: 0.05
+  weaponChargeDrop: 0.015
+  weaponChargeBodyPitchDeg: 4
+  weaponChargeTremorDeg: 0.18
+  slosherCoilPitchDeg: 14
+  slosherThrowPitchDeg: 32
+  slosherThrowBodyPitchDeg: 14
+  slosherThrowDuration: 0.24
+  blasterKickPitchDeg: 10
+  blasterKickBackMeters: 0.07
+  dualiesDodgeBodyRollDeg: 16
+  dualiesDodgeSink: 0.05
+  dualiesTurretSink: 0.06
+  dualiesTurretBodyPitchDeg: 5
+  splatlingChargeDropMeters: 0.025
+  splatlingChargeBodyPitchDeg: 3
+  splatlingSpinMinDegPerSec: 280
+  splatlingSpinMaxDegPerSec: 1400
+  splatlingSpinCoastRate: 5
+  splatlingStreamShakeDeg: 0.5
+  shooterFireBodyPitchDeg: 2
+  shooterFirePullbackMeters: 0.01

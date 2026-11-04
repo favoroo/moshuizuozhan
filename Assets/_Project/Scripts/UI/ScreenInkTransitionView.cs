@@ -18,6 +18,10 @@ namespace P1.UI
     /// 
     /// 全部采用 unscaledDeltaTime 推进，不受 Hitstop 与暂停 (timeScale=0) 干扰；
     /// 转场结束与空闲时自动关闭 Graphic，零开销。
+    /// 
+    /// 颜色约定：_InkColor / _HoleRimColor 是 ShaderLab 的 Color 属性，Unity 在 Linear 色彩空间下
+    /// 会自动做 sRGB→Linear，所以这里直接传 <see cref="InkSurfaceController.GetTeamColor"/> 的 sRGB 原值；
+    /// 再手动 `.linear` 会二次转换（队伍橙 #FF700F 被压成暗血红）。
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     [RequireComponent(typeof(CanvasRenderer))]
@@ -263,7 +267,7 @@ namespace P1.UI
             _mode = TransitionMode.FloodIn;
             _modeTimer = 0f;
             _holeValue = 0f;
-            _currentInkColor = ToLinear(enemyColor);
+            _currentInkColor = enemyColor;
 
             _material.SetColor(InkColorProp, _currentInkColor);
             _material.SetFloat(HoleProp, 0f);
@@ -287,9 +291,9 @@ namespace P1.UI
             _floodDripValue = ScreenInkTransitionMath.MatchIntroFloodDrip;
             _holeValue = 0.0001f;
 
-            _currentInkColor = ToLinear(ownColor);
+            _currentInkColor = ownColor;
             Color rim = Color.Lerp(ownColor, Color.white, 0.55f) * 1.6f;
-            _currentRimColor = ToLinear(rim);
+            _currentRimColor = rim;
 
             _material.SetColor(InkColorProp, _currentInkColor);
             _material.SetColor(HoleRimColorProp, _currentRimColor);
@@ -316,9 +320,9 @@ namespace P1.UI
             _revealDelay = 0.10f;
             _revealDuration = 0.72f;
 
-            _currentInkColor = ToLinear(ownColor);
+            _currentInkColor = ownColor;
             Color rim = Color.Lerp(ownColor, Color.white, 0.55f) * 1.6f;
-            _currentRimColor = ToLinear(rim);
+            _currentRimColor = rim;
 
             _material.SetColor(InkColorProp, _currentInkColor);
             _material.SetColor(HoleRimColorProp, _currentRimColor);
@@ -530,13 +534,6 @@ namespace P1.UI
 
             col.a = 1f;
             return col;
-        }
-
-        private static Color ToLinear(Color color)
-        {
-            if (QualitySettings.activeColorSpace == ColorSpace.Linear)
-                color = color.linear;
-            return color;
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD

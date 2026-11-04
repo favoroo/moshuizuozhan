@@ -113,7 +113,7 @@ namespace P1.UI
         public static bool HasStableHomeGeometry => s_homeGeometryStableFrames >= 2;
         private TextMeshProUGUI _homeSettingsInfo;
         private TextMeshProUGUI _homeRecordInfo;
-        private TextMeshProUGUI _homeKeysInfo;
+        private TextMeshProUGUI _homeMapInfo;
 
         // 首页 Hero 卡头部的 Bot 难度四档段选（新手/轻松/普通/硬核），选择结果持久化到 GameSettingsService。
         private readonly UIInkShapeGraphic[] _difficultyShapes =
@@ -900,7 +900,7 @@ namespace P1.UI
             StyleStartButtonGeometric(theme, UITypography.FontSnapped(m.CtaFont), mobile);
         }
 
-        /// <summary>右侧 2×2 次级卡：战绩（信息）/ 系统设置（可点）/ 操作指南或键位（信息）/ 修改按钮位置（可点）。</summary>
+        /// <summary>右侧 2×2 次级卡：战绩（信息）/ 系统设置（可点）/ 地图选择（可点）/ 修改按钮位置（可点）。</summary>
         private void BuildHomeTiles(UIThemeSO theme, HomeMenuMetrics m, bool mobile)
         {
             BuildHomeTile(new HomeTileSpec
@@ -925,16 +925,19 @@ namespace P1.UI
                 ClickAction = OpenHomeSettings,
             }, theme, m, mobile, out _homeSettingsInfo, out _);
 
+            MapDefinition currentMap = MapCatalogService.ActiveOrSelected;
+            MapDefinition otherMap = MapCatalogService.OtherThan(currentMap);
             BuildHomeTile(new HomeTileSpec
             {
                 Index = 2,
-                Tag = mobile ? "GUIDE" : "KEYS",
-                Title = mobile ? "操作指南" : "键位说明",
-                Info = BuildKeysInfo(),
-                Accent = ComicStyle.Blue,
+                Tag = "MAP",
+                Title = currentMap.DisplayName,
+                Info = BuildMapInfo(currentMap, otherMap),
+                Accent = currentMap.Accent,
                 Interactive = true,
-                ClickAction = () => ShowHomeInfo(HomeInfoTab.Controls),
-            }, theme, m, mobile, out _homeKeysInfo, out _);
+                MapPreview = currentMap,
+                ClickAction = OpenMapSelect,
+            }, theme, m, mobile, out _homeMapInfo, out _);
 
             BuildHomeTile(new HomeTileSpec
             {
@@ -947,6 +950,18 @@ namespace P1.UI
                 Interactive = true,
                 ClickAction = OpenLayoutCustomizerFromHome,
             }, theme, m, mobile, out _, out _);
+        }
+
+        private static string BuildMapInfo(MapDefinition current, MapDefinition other)
+        {
+            return other == null ? "当前地图" : $"当前 · 还可选「{other.DisplayName}」";
+        }
+
+        /// <summary>首页地图卡：打开地图选择浮层；选择后真实加载对应场景。</summary>
+        private void OpenMapSelect()
+        {
+            if (readyPanel == null) return;
+            MapSelectOverlay.Show(readyPanel.transform as RectTransform, UIThemeSO.Resolve(uiTheme));
         }
 
         /// <summary>
@@ -972,6 +987,7 @@ namespace P1.UI
             public string Info;
             public Color Accent;
             public bool Interactive;
+            public MapDefinition MapPreview;
             public System.Action ClickAction;
         }
 
@@ -1082,6 +1098,30 @@ namespace P1.UI
                 new Vector2(m.TilePadding.x, infoTop),
                 new Vector2(rowWidth, infoHeight),
                 TextAlignmentOptions.MidlineLeft, 0.5f, FontStyles.Bold);
+
+            // 地图卡的小预览：占用标题与信息行之间的空白，右对齐，不压任何文字。
+            if (spec.MapPreview != null)
+            {
+                float previewTop = titleTop + titleHeight + (mobile ? 6f : 10f);
+                float previewAvailable = infoTop - previewTop - (mobile ? 4f : 8f);
+                if (previewAvailable >= 60f)
+                {
+                    float previewHeight = previewAvailable;
+                    float previewWidth = previewHeight * 40f / 56f;
+                    float maxPreviewWidth = rowWidth * 0.46f;
+                    if (previewWidth > maxPreviewWidth)
+                    {
+                        previewWidth = maxPreviewWidth;
+                        previewHeight = previewWidth * 56f / 40f;
+                    }
+
+                    RectTransform preview = MapPreviewBuilder.BuildPreview(
+                        content, spec.MapPreview, new Vector2(previewWidth, previewHeight), theme, "TileMapPreview");
+                    preview.anchorMin = preview.anchorMax = new Vector2(1f, 1f);
+                    preview.pivot = new Vector2(1f, 1f);
+                    preview.anchoredPosition = new Vector2(-m.TilePadding.x, -previewTop);
+                }
+            }
 
             if (spec.Interactive)
             {
@@ -1506,18 +1546,7 @@ namespace P1.UI
             return "LV.1 · 胜场 0/0 · 涂地 0㎡";
         }
 
-        /// <summary>
-        /// 键位卡信息行。移动端字号 ×1.28（18→23），信息行可用宽度只有 ~384px，
-        /// 长句必须压成「动作 + 按键」四段短词，否则会顶出卡面。
-        /// </summary>
-        private static string BuildKeysInfo()
-        {
-            return UITypography.IsMobileLike
-                ? "摇杆移动 · 射击 · 跳跃 · 大招"
-                : "WASD 移动 · 左键 射击 · 空格 跳跃 · Q 大招";
-        }
-
-        /// <summary>首页读数（战绩 / 设置 / 键位）刷新：回到主菜单或设置项变化时数值会变。</summary>
+        /// <summary>首页读数（战绩 / 设置 / 当前地图）刷新：回到主菜单或设置项变化时数值会变。</summary>
         private void RefreshHomeInfo()
         {
             if (_homeRecordInfo != null)
@@ -1532,10 +1561,11 @@ namespace P1.UI
                 FitTileInfoText(_homeSettingsInfo);
             }
 
-            if (_homeKeysInfo != null)
+            if (_homeMapInfo != null)
             {
-                _homeKeysInfo.text = BuildKeysInfo();
-                FitTileInfoText(_homeKeysInfo);
+                MapDefinition currentMap = MapCatalogService.ActiveOrSelected;
+                _homeMapInfo.text = BuildMapInfo(currentMap, MapCatalogService.OtherThan(currentMap));
+                FitTileInfoText(_homeMapInfo);
             }
         }
 
@@ -2623,6 +2653,7 @@ namespace P1.UI
         private bool CanStartMatch()
         {
             if (HomeInfoOverlay.IsOpen) return false;
+            if (MapSelectOverlay.IsOpen) return false;
             if (MobileLayoutCustomizer.IsEditingAny) return false;
             return true;
         }
@@ -2634,6 +2665,14 @@ namespace P1.UI
             var match = MatchManager.Instance;
             if (match == null) return;
             if (match.CurrentPhase != MatchManager.Phase.Ready && match.CurrentPhase != MatchManager.Phase.Result) return;
+
+            // 存档里的选中图与当前场景不一致（例如外部改过存档）：先真实切图，避免开错场地。
+            if (MapCatalogService.IsMapScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().path) &&
+                !MapCatalogService.IsSelectedSceneActive())
+            {
+                MapCatalogService.LoadMap(MapCatalogService.Selected);
+                return;
+            }
 
             match.StartMatch();
         }

@@ -209,5 +209,85 @@ namespace P1.Tests
             Object.Destroy(playerGo);
             Object.Destroy(canvasGo);
         }
+
+        /// <summary>
+        /// P36 空墨反馈：墨水跌到「下一发门槛」以下时准星进入 IsOutOfInk（染红 + 中央禁止叉）；
+        /// 此时扣扳机被拒 → 弹出短 toast「弹药耗尽」，约 0.9s 后自动收起；补满墨后警告立即消失。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator WeaponReticleUI_OutOfInk_ShowsWarningAndEmptyToast()
+        {
+            var canvasGo = new GameObject("TestCanvas", typeof(Canvas));
+            var canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+
+            var reticleGo = new GameObject("TestReticleUI", typeof(RectTransform));
+            reticleGo.transform.SetParent(canvasGo.transform, false);
+            var reticleUI = reticleGo.AddComponent<WeaponReticleUI>();
+            reticleUI.EnsureInitialized();
+
+            var playerGo = new GameObject("TestLocalPlayer",
+                typeof(CharacterController),
+                typeof(CombatantHealth),
+                typeof(InkCharacterMotor),
+                typeof(WeaponController),
+                typeof(PlayerController));
+            var player = playerGo.GetComponent<PlayerController>();
+            player.Health.Configure(Team.TeamA, null);
+            var weapon = playerGo.GetComponent<WeaponController>();
+            var motor = playerGo.GetComponent<InkCharacterMotor>();
+
+            var cfg = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            cfg.weaponKind = WeaponKind.Shooter;
+            cfg.inkCostPerShot = 1f;
+            weapon.EquipWeapon(cfg);
+
+            yield return null;
+
+            Assert.IsNotNull(reticleGo.transform.Find("EmptyInkX"), "空墨红叉层必须随准星一起装配");
+            Assert.IsNotNull(reticleGo.transform.Find("EmptyInkToast"), "「弹药耗尽」toast 必须随准星一起装配");
+
+            // 1. 墨量充足：不预警
+            motor.RefillInkFull();
+            yield return null;
+            yield return null;
+            Assert.IsFalse(reticleUI.IsOutOfInk, "满墨时准星不该染红");
+            Assert.AreEqual("弹药耗尽", reticleUI.EmptyToastText);
+
+            // 2. 墨量掉到门槛以下：进入空墨状态
+            motor.TryConsumeInk(motor.CurrentInk - 0.2f);
+            yield return null;
+            yield return null;
+            Assert.IsTrue(reticleUI.IsOutOfInk, "墨水低于下一发门槛时准星必须进入空墨状态");
+
+            // 3. 空墨扣扳机：戳记递增 → 红叉弹跳 + toast 弹出
+            int stampBefore = weapon.EmptyFeedbackStamp;
+            weapon.TryFireMainWeapon(Vector3.forward);
+            Assert.Greater(weapon.EmptyFeedbackStamp, stampBefore,
+                "空墨开火必须递增 EmptyFeedbackStamp（准星据此播放空打动效）");
+
+            yield return null;
+            Assert.IsTrue(reticleUI.IsEmptyToastVisible, "空墨拒射后 toast 必须立刻可见");
+            Assert.Greater(reticleUI.EmptyPunch01, 0f, "空墨拒射后红叉/刻度冲击必须开始播放");
+
+            // 4. toast 很短：1.2s 后自动收起
+            float waited = 0f;
+            while (waited < 1.2f)
+            {
+                waited += Time.deltaTime;
+                yield return null;
+            }
+            Assert.IsFalse(reticleUI.IsEmptyToastVisible, "toast 必须短促自动收起，不能常驻挡视野");
+
+            // 5. 补满墨：警告与红叉一起退出
+            motor.RefillInkFull();
+            yield return null;
+            yield return null;
+            Assert.IsFalse(reticleUI.IsOutOfInk, "补满墨后准星必须立刻恢复正常配色");
+
+            Object.Destroy(cfg);
+            Object.Destroy(playerGo);
+            Object.Destroy(canvasGo);
+        }
     }
 }

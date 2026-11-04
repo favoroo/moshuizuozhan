@@ -131,6 +131,7 @@ MonoBehaviour:
   specialOuterDamage: 55
   specialOuterFalloffWeight: 0.3
   specialImpactTrauma: 1
+  specialImpactHitstopSeconds: 0.045
   stormDuration: 6.5
   stormRadius: 3.4
   stormDps: 34

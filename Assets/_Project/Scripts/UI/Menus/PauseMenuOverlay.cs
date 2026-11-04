@@ -985,7 +985,7 @@ namespace P1.UI.Menus
             UpdateInvertYLabel();
         }
 
-        // ── 板块 2：画面与操作（4 行） ────────────────────────────────
+        // ── 板块 2：画面与操作（5 行） ────────────────────────────────
         private void BuildDisplaySettingsPanel(Transform panel)
         {
             float cursor = SettingsPanelContentTop;
@@ -1021,6 +1021,29 @@ namespace P1.UI.Menus
 
             // 操作设置入口（移动端打开触控布局自定义，桌面端打开按键自定义）
             BuildControlSettingsRow(panel, ref cursor);
+            // 操作指南入口：首页地图卡取代了原「操作指南」卡，这里保证指南仍可达（含首页移动端）。
+            BuildOperationGuideRow(panel, ref cursor);
+        }
+
+        /// <summary>打开与首页同源的「操作说明」指南；叠在暂停画布（100）之上。</summary>
+        private void BuildOperationGuideRow(Transform parent, ref float cursor)
+        {
+            var row = CreateSettingRow(parent, ref cursor, showSeparator: false);
+            CreateSettingLabel(row.transform, "操作说明", "移动 / 战斗 / 规则速记");
+
+            var button = CreateStyledButton("OperationGuideBtn", row.transform, "查看指南",
+                ComicStyle.Paper, ComicStyle.Ink,
+                new Vector2(PauseSettingControlWidth, PauseSettingControlHeight),
+                _theme, UITypography.FontSnapped(PauseSettingControlFont),
+                ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            PlaceSettingControl(button.transform);
+            button.onClick.AddListener(OpenOperationGuide);
+        }
+
+        private void OpenOperationGuide()
+        {
+            RectTransform host = _safeAreaRect != null ? _safeAreaRect : (RectTransform)transform;
+            HomeInfoOverlay.Show(host, _theme, HomeInfoTab.Controls, sortingOrder: 110);
         }
 
         /// <summary>分组眉题：左侧黄色色标 + 中文组名 + 右侧英文角标 + 2px 分隔线。</summary>
@@ -1944,7 +1967,8 @@ namespace P1.UI.Menus
                     homeInfoOpen: HomeInfoOverlay.IsOpen,
                     layoutEditing: MobileLayoutCustomizer.IsEditingAny,
                     pauseExpanded: IsMenuExpanded,
-                    drawerExpanded: WeaponSelectView.Instance != null && WeaponSelectView.Instance.IsDrawerOpen);
+                    drawerExpanded: WeaponSelectView.Instance != null && WeaponSelectView.Instance.IsDrawerOpen,
+                    mapSelectOpen: MapSelectOverlay.IsOpen);
 
                 if (!MenuInputRouter.CanLayerHandle(MenuEscLayer.PauseMenu, owner))
                 {
@@ -1963,6 +1987,9 @@ namespace P1.UI.Menus
                         return;
                     case MenuEscAction.CloseLayoutEditor:
                         MobileLayoutCustomizer.ActiveEditor?.Close(false);
+                        return;
+                    case MenuEscAction.CloseMapSelect:
+                        MapSelectOverlay.TryCloseFromMenuInput();
                         return;
                     case MenuEscAction.CloseDrawer:
                         // 归属为抽屉时由这里执行收起（与 WeaponSelectView 共用同一动作映射，

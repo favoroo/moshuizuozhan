@@ -219,7 +219,12 @@ namespace P1.UI.WeaponSelect
 
         private void SubscribeMatch(MatchManager match)
         {
-            if (match == null || _subscribedMatch) return;
+            if (match == null) return;
+            // 切换地图会销毁旧 MatchManager 并重建场景；视图是 DDOL 常驻，
+            // 因此必须允许「换绑」而不是见到 _subscribedMatch 就退出，否则新局选枪界面不再跟随阶段。
+            if (_subscribedMatch && _currentMatch == match) return;
+            if (_subscribedMatch) UnsubscribeMatch();
+
             _currentMatch = match;
             _currentMatch.PhaseChanged += HandlePhaseChanged;
             _subscribedMatch = true;
@@ -231,8 +236,8 @@ namespace P1.UI.WeaponSelect
             if (_currentMatch != null)
             {
                 _currentMatch.PhaseChanged -= HandlePhaseChanged;
-                _currentMatch = null;
             }
+            _currentMatch = null;
             _subscribedMatch = false;
         }
 

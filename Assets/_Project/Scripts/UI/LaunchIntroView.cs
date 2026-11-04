@@ -14,6 +14,8 @@ namespace P1.UI
     /// 2. 橙色墨点从中心炸开 → App 图标贴纸（纸白 + 墨框 + 硬影）弹入；
     /// 3. 「墨水大作战」逐字显示 + `INK TURF` 副标 + 载入块逐格填满；
     /// 4. 整块舞台向上硬擦除（底缘一道黄/蓝双色线），露出已就绪的首页。
+    ///    擦除会等 <see cref="MatchFlowUI.HasStableHomeGeometry"/>（安全区/画布 settle）才放行，
+    ///    真机冷启动首帧脏几何排出的错版首页永远不会被露出来；上限 <see cref="RevealHoldCap"/> 兜底。
     ///
     /// 设计约束：
     /// - 不碰场景 YAML：运行时自建独立 Overlay Canvas（sortingOrder 10000），
@@ -31,6 +33,9 @@ namespace P1.UI
         private const float ReferenceWidth = 1920f;
         private const float ReferenceHeight = 1080f;
         private const int BarBlockCount = 7;
+
+        /// <summary>擦除前最多为首页几何 settle 多等多久（unscaled 秒）；超时兜底放行，绝不卡死开场。</summary>
+        private const float RevealHoldCap = 2.5f;
 
         private static readonly Color StageInk = ComicStyle.FromHex(0x0B0B0B);
         private static readonly Color BarTrack = ComicStyle.FromHex(0x2A2A2A);
@@ -52,6 +57,9 @@ namespace P1.UI
         private bool _finished;
         private bool _playedMark;
         private bool _playedWipe;
+        private bool _revealGateOpen;
+        private bool _revealGateProbed;
+        private bool _revealGateHostPresent;
 
         private RectTransform _stageRoot;
         private RectTransform _markRoot;
@@ -148,6 +156,31 @@ namespace P1.UI
                 if (LaunchIntroMath.CanSkip(_time) && AnySkipPressed())
                 {
                     _time = LaunchIntroMath.WipeStart;
+                }
+
+                // 擦除前等首页几何稳定：Android 冷启动首帧 safeArea/画布常是脏的，首页按错版几何
+                // 排出、settle 后才重建；若擦除先于 settle，玩家会看到「放大的错版首页 → 闪一下 → 正常」。
+                // Hold 在擦除起点（载入块已满格，观感是「加载完成，正要开窗」），settle 或超时后才放行。
+                // 场景里没有 MatchFlowUI（测试 / 预览）无门可等；已到总时长则必须收尾。
+                if (!_revealGateOpen && _time >= LaunchIntroMath.WipeStart &&
+                    _time < LaunchIntroMath.TotalDuration)
+                {
+                    if (!_revealGateProbed)
+                    {
+                        _revealGateProbed = true;
+                        _revealGateHostPresent =
+                            UnityEngine.Object.FindAnyObjectByType<MatchFlowUI>() != null;
+                    }
+
+                    bool settled = !_revealGateHostPresent || MatchFlowUI.HasStableHomeGeometry;
+                    if (settled || _time >= LaunchIntroMath.WipeStart + RevealHoldCap)
+                    {
+                        _revealGateOpen = true;
+                    }
+                    else
+                    {
+                        _time = LaunchIntroMath.WipeStart;
+                    }
                 }
 
                 Apply(LaunchIntroMath.Evaluate(_time, _title != null ? _title.text.Length : 0));

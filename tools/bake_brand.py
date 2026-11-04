@@ -160,21 +160,29 @@ def compose_icon(size: int = MASTER) -> Image.Image:
 
 
 def compose_adaptive_foreground(size: int = 432) -> Image.Image:
-    """自适应前景：透明底，所有图形落在中心 66.7% 安全圆内（Android 规范）。"""
+    """自适应前景：透明底，所有图形收进中心 ~0.29R 的安全圆（严于官方 66/108≈0.306R）。
+
+    2026-11-04：旧版把乌贼取满 2/3 安全区、墨点贴安全区右上角，但国产启动器
+    （鸿蒙/小米等）会先把图标按 2/3 区域 1.5x 放大再套圆/方遮罩，墨点角与圆边被切。
+    墨点整体取 0.16 边长、中心距 (0.648,0.352)，最远墨滴 0.30R < 0.306R；
+    乌贼取 0.40 边长，与背景橙圆（0.52）保持主图标同比例（≈78% 圆径）。
+    """
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    # 安全区直径 = size * 2/3；乌贼取安全区的 88%，墨点贴安全区右上。
-    safe = size * 2 / 3
-    place(canvas, render_svg(splat_svg(TEAM_B, INK), size), int(safe * 0.30 * SPLAT_PAD),
-          (0.5 + safe / size * 0.30, 0.5 - safe / size * 0.30), 16)
-    place(canvas, render_svg(squash_svg(PAPER, TEAM_A, INK, INK), size), int(safe * 0.90),
-          (0.5, 0.5))
+    place(canvas, render_svg(splat_svg(TEAM_B, INK), size), int(size * 0.16 * SPLAT_PAD),
+          (0.648, 0.352), 16)
+    place(canvas, render_svg(squash_svg(PAPER, TEAM_A, INK, INK), size), int(size * 0.40),
+          (0.5, 0.49))
     return canvas
 
 
 def compose_adaptive_background(size: int = 432) -> Image.Image:
-    """自适应背景：墨黑底 + 橙圆（直径略大于安全区，遮罩后仍是一整块橙）。"""
+    """自适应背景：墨黑底 + 缩小版橙圆（0.52 边长，旧版 0.78 会被遮罩切边）。
+
+    圆整体落进 66/108 可见圆（0.61）与 1.5x 放大后的方形可见区（0.667）之内，
+    任何遮罩/缩放都保留一圈墨黑呼吸边，呈现「完整圆形」而不是被切的橙块。
+    """
     canvas = Image.new("RGBA", (size, size), STAGE)
-    draw_circle(canvas, TEAM_A, int(size * 0.78), (0.5, 0.5))
+    draw_circle(canvas, TEAM_A, int(size * 0.52), (0.5, 0.495))
     return canvas
 
 

@@ -16,7 +16,8 @@ namespace P1.UI
 /// 4. 坐标拖拽采用 (startPos + delta) 增量运算，并按父级 SafeArea 尺寸做 Clamp（留出半宽半高边距）；
     /// 5. 选中项展示 3px 纯黄描边 + 四角方块几何标记与实时读数角标；
     /// 6. 面板采用直角黑底白字纯色大色块（无阴影无网点）；t-1 控件下限：
-    ///    设置类按钮高 ≥64、字号 ≥20，顶栏 88、属性舱 1120x88、辅助卡 1120x152（两行 64 高按钮）；
+    ///    设置类按钮高 ≥64、字号 ≥20，顶栏/属性舱/辅助卡统一 960 宽居中（高 88/88/152），
+    ///    滑轨 110x44；顶栏不再横贯全屏，给顶部两角的按键留出拖拽空间；
     ///    所有按钮走 UIJellyButton/UISpringMotion 的 0ms scale 0.97 + 0.1s Cubic-Out 回弹；
     /// 7. 额外提供 2/3/4 指方案、左开火键、开火转视角、固定摇杆与辅助瞄准档位，手动编辑会把方案标记为自定义。
     /// </summary>
@@ -27,8 +28,10 @@ namespace P1.UI
         private const float TopBarHeight = 88f;
         private const float ControlHeight = 64f;
         private const float ControlFontBase = 20f;
-        private const float PanelWidth = 1120f;
+        private const float PanelWidth = 960f;
         private const float InspectorHeight = 88f;
+        private const float SliderTrackWidth = 110f;
+        private const float SliderTrackHeight = 44f;
 
         /// <summary>辅助卡：两行 64 高按钮 + 内边距。规范给的 112 高塞不下两行 64，故取 152。</summary>
         private const float AuxCardHeight = 152f;
@@ -173,50 +176,50 @@ namespace P1.UI
             bgImg.color = new Color(0.04f, 0.04f, 0.06f, 0.65f);
             bgImg.raycastTarget = false; // 【关键修复 1】：背板不拦截射线
 
-            // 2. 顶部主控制栏（直角纯黑底 + 3px 实线边框，高 88 ≥ 64 触控下限）
+            // 2. 顶部主控制栏（直角纯黑底 + 3px 实线边框，960 宽居中，不再横贯全屏挡住顶部按键）
             var topBar = CreateComicPanel(transform, "TopBar",
-                new Vector2(0f, 1f), new Vector2(1f, 1f),
-                new Vector2(0f, -TopBarHeight * 0.5f), new Vector2(0f, TopBarHeight),
+                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(0f, -TopBarHeight * 0.5f), new Vector2(PanelWidth, TopBarHeight),
                 ComicStyle.Ink, ComicStyle.BorderThin, false);
 
             // 左侧黄色装饰标块（8x44 直角纯黄方块）
             CreateCornerMarker(topBar.transform, "DecoYellow", new Vector2(0f, 0.5f), new Vector2(24f, 0f), new Vector2(8f, 44f), ComicStyle.Yellow);
 
-            var titleText = CreateTextMesh("Title", topBar.transform, "操作与按键设置", UITypography.FontSnapped(24f), ComicStyle.Paper,
-                theme.ResolveFont(true, "操作与按键设置"), TextAlignmentOptions.Left);
+            var titleText = CreateTextMesh("Title", topBar.transform, "按键布局", UITypography.FontSnapped(24f), ComicStyle.Paper,
+                theme.ResolveFont(true, "按键布局"), TextAlignmentOptions.Left);
             var titleRt = titleText.rectTransform;
             titleRt.anchorMin = new Vector2(0f, 0.5f);
             titleRt.anchorMax = new Vector2(0f, 0.5f);
             titleRt.pivot = new Vector2(0f, 0.5f);
             titleRt.anchoredPosition = new Vector2(44f, 0f);
-            titleRt.sizeDelta = new Vector2(220f, 48f);
+            titleRt.sizeDelta = new Vector2(140f, 48f);
 
             // 竖直分割线
-            CreateSeparator(topBar.transform, new Vector2(272f, 0f), new Vector2(2f, 44f));
+            CreateSeparator(topBar.transform, new Vector2(196f, 0f), new Vector2(2f, 44f));
 
-            var subText = CreateTextMesh("Subtitle", topBar.transform, "点选按键拖动/缩放 · 改完点保存", UITypography.FontSnapped(18f), ComicStyle.FromHex(0xA8A8A8),
-                theme.ResolveFont(false, "点选按键拖动缩放改完点保存"), TextAlignmentOptions.Left);
+            var subText = CreateTextMesh("Subtitle", topBar.transform, "拖动按键 · 改完保存", UITypography.FontSnapped(18f), ComicStyle.FromHex(0xA8A8A8),
+                theme.ResolveFont(false, "拖动按键改完保存"), TextAlignmentOptions.Left);
             var subRt = subText.rectTransform;
             subRt.anchorMin = new Vector2(0f, 0.5f);
             subRt.anchorMax = new Vector2(0f, 0.5f);
             subRt.pivot = new Vector2(0f, 0.5f);
-            subRt.anchoredPosition = new Vector2(286f, 0f);
-            subRt.sizeDelta = new Vector2(560f, 48f);
+            subRt.anchoredPosition = new Vector2(208f, 0f);
+            subRt.sizeDelta = new Vector2(240f, 48f);
 
-            // 控制栏右侧三键：恢复默认 (200x64)、保存完成 (200x64)、关闭 (64x64)
-            CreateComicButton(topBar.transform, "ResetBtn", "恢复默认",
-                new Vector2(-416f, 0f), new Vector2(200f, ControlHeight),
+            // 控制栏右侧三键：重置 (110x64)、保存 (110x64)、关闭 (64x64)
+            CreateComicButton(topBar.transform, "ResetBtn", "重置",
+                new Vector2(-280f, 0f), new Vector2(110f, ControlHeight),
                 ComicStyle.FromHex(0x282828), ComicStyle.Paper, controlFont, () => ResetToDefault());
 
-            CreateComicButton(topBar.transform, "SaveBtn", "保存完成",
-                new Vector2(-200f, 0f), new Vector2(200f, ControlHeight),
+            CreateComicButton(topBar.transform, "SaveBtn", "保存",
+                new Vector2(-155f, 0f), new Vector2(110f, ControlHeight),
                 ComicStyle.Yellow, ComicStyle.Ink, controlFont, () => Close(save: true));
 
             CreateComicButton(topBar.transform, "CloseBtn", "X",
                 new Vector2(-52f, 0f), new Vector2(64f, 64f),
                 ComicStyle.Red, ComicStyle.Paper, UITypography.FontSnapped(26f), () => Close(save: false));
 
-            // 3. 属性调节舱（直角纯黑底 + 3px 边框，1120x88，紧贴顶栏下方 12px）
+            // 3. 属性调节舱（直角纯黑底 + 3px 边框，960x88，紧贴顶栏下方 12px）
             _inspectorCard = CreateComicPanel(transform, "InspectorCard",
                 new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
                 new Vector2(0f, -(TopBarHeight + PanelGap)), new Vector2(PanelWidth, InspectorHeight),
@@ -226,16 +229,16 @@ namespace P1.UI
             // 黄色小标块
             CreateCornerMarker(_inspectorCard.transform, "InspDeco", new Vector2(0f, 0.5f), new Vector2(16f, 0f), new Vector2(4f, 32f), ComicStyle.Yellow);
 
-            _inspectorTitle = CreateTextMesh("InspectorTitle", _inspectorCard, "点选按键开始调整", controlFont, ComicStyle.Paper,
-                theme.ResolveFont(true, "点选按键开始调整正在"), TextAlignmentOptions.Left);
+            _inspectorTitle = CreateTextMesh("InspectorTitle", _inspectorCard, "点选按键调整", controlFont, ComicStyle.Paper,
+                theme.ResolveFont(true, "点选按键调整正在"), TextAlignmentOptions.Left);
             var inspTitleRt = _inspectorTitle.rectTransform;
             inspTitleRt.anchorMin = new Vector2(0f, 0.5f);
             inspTitleRt.anchorMax = new Vector2(0f, 0.5f);
             inspTitleRt.pivot = new Vector2(0f, 0.5f);
             inspTitleRt.anchoredPosition = new Vector2(28f, 0f);
-            inspTitleRt.sizeDelta = new Vector2(280f, 48f);
+            inspTitleRt.sizeDelta = new Vector2(200f, 48f);
 
-            // 读数走 18/24（正文底线），避免 26 号字把 1120 宽的舱体挤爆
+            // 读数走 18/24（正文底线），避免 26 号字把 960 宽的舱体挤爆
             float readoutFont = UITypography.FontSnapped(18f);
             _inspectorCoord = CreateTextMesh("InspectorCoord", _inspectorCard, "", readoutFont, ComicStyle.Yellow,
                 theme.ResolveFont(false, "坐标"), TextAlignmentOptions.Left);
@@ -243,21 +246,21 @@ namespace P1.UI
             coordRt.anchorMin = new Vector2(0f, 0.5f);
             coordRt.anchorMax = new Vector2(0f, 0.5f);
             coordRt.pivot = new Vector2(0f, 0.5f);
-            coordRt.anchoredPosition = new Vector2(314f, 0f);
-            coordRt.sizeDelta = new Vector2(150f, 48f);
+            coordRt.anchoredPosition = new Vector2(236f, 0f);
+            coordRt.sizeDelta = new Vector2(120f, 48f);
 
             // 竖分割线
-            CreateSeparator(_inspectorCard.transform, new Vector2(476f, 0f), new Vector2(2f, 40f));
+            CreateSeparator(_inspectorCard.transform, new Vector2(372f, 0f), new Vector2(2f, 40f));
 
-            // 大小调节 Slider 组
+            // 大小调节 Slider 组（滑轨收窄到 110x44，把手 20x44）
             var scaleLabel = CreateTextMesh("ScaleLabel", _inspectorCard, "大小", controlFont, ComicStyle.Paper,
                 theme.ResolveFont(false, "大小"), TextAlignmentOptions.Left);
             var scaleLabelRt = scaleLabel.rectTransform;
             scaleLabelRt.anchorMin = new Vector2(0f, 0.5f);
             scaleLabelRt.anchorMax = new Vector2(0f, 0.5f);
             scaleLabelRt.pivot = new Vector2(0f, 0.5f);
-            scaleLabelRt.anchoredPosition = new Vector2(490f, 0f);
-            scaleLabelRt.sizeDelta = new Vector2(64f, 48f);
+            scaleLabelRt.anchoredPosition = new Vector2(386f, 0f);
+            scaleLabelRt.sizeDelta = new Vector2(60f, 48f);
 
             var scaleSliderGo = new GameObject("ScaleSlider", typeof(RectTransform));
             scaleSliderGo.transform.SetParent(_inspectorCard, false);
@@ -265,11 +268,11 @@ namespace P1.UI
             scaleRt.anchorMin = new Vector2(0f, 0.5f);
             scaleRt.anchorMax = new Vector2(0f, 0.5f);
             scaleRt.pivot = new Vector2(0f, 0.5f);
-            scaleRt.anchoredPosition = new Vector2(558f, 0f);
-            scaleRt.sizeDelta = new Vector2(150f, ControlHeight);
+            scaleRt.anchoredPosition = new Vector2(454f, 0f);
+            scaleRt.sizeDelta = new Vector2(SliderTrackWidth, SliderTrackHeight);
 
             _scaleSlider = TouchSlider.Create(scaleSliderGo, MobileLayoutConfig.MinScale, MobileLayoutConfig.MaxScale, 1.0f,
-                new Vector2(24f, ControlHeight));
+                new Vector2(20f, SliderTrackHeight));
             _scaleSlider.OnValueChanged += OnScaleSliderChanged;
 
             _scaleValueText = CreateTextMesh("ScaleValue", _inspectorCard, "100%", readoutFont, ComicStyle.Yellow,
@@ -278,21 +281,21 @@ namespace P1.UI
             scaleValRt.anchorMin = new Vector2(0f, 0.5f);
             scaleValRt.anchorMax = new Vector2(0f, 0.5f);
             scaleValRt.pivot = new Vector2(0f, 0.5f);
-            scaleValRt.anchoredPosition = new Vector2(712f, 0f);
-            scaleValRt.sizeDelta = new Vector2(62f, 48f);
+            scaleValRt.anchoredPosition = new Vector2(570f, 0f);
+            scaleValRt.sizeDelta = new Vector2(64f, 48f);
 
             // 竖分割线
-            CreateSeparator(_inspectorCard.transform, new Vector2(786f, 0f), new Vector2(2f, 40f));
+            CreateSeparator(_inspectorCard.transform, new Vector2(648f, 0f), new Vector2(2f, 40f));
 
             // 透明度调节 Slider 组（容器宽度宽裕给足，严禁任何换行）
-            var alphaLabel = CreateTextMesh("AlphaLabel", _inspectorCard, "透明度", controlFont, ComicStyle.Paper,
-                theme.ResolveFont(false, "透明度"), TextAlignmentOptions.Left);
+            var alphaLabel = CreateTextMesh("AlphaLabel", _inspectorCard, "透明", controlFont, ComicStyle.Paper,
+                theme.ResolveFont(false, "透明"), TextAlignmentOptions.Left);
             var alphaLabelRt = alphaLabel.rectTransform;
             alphaLabelRt.anchorMin = new Vector2(0f, 0.5f);
             alphaLabelRt.anchorMax = new Vector2(0f, 0.5f);
             alphaLabelRt.pivot = new Vector2(0f, 0.5f);
-            alphaLabelRt.anchoredPosition = new Vector2(800f, 0f);
-            alphaLabelRt.sizeDelta = new Vector2(90f, 48f);
+            alphaLabelRt.anchoredPosition = new Vector2(662f, 0f);
+            alphaLabelRt.sizeDelta = new Vector2(60f, 48f);
 
             var alphaSliderGo = new GameObject("AlphaSlider", typeof(RectTransform));
             alphaSliderGo.transform.SetParent(_inspectorCard, false);
@@ -300,11 +303,11 @@ namespace P1.UI
             alphaRt.anchorMin = new Vector2(0f, 0.5f);
             alphaRt.anchorMax = new Vector2(0f, 0.5f);
             alphaRt.pivot = new Vector2(0f, 0.5f);
-            alphaRt.anchoredPosition = new Vector2(894f, 0f);
-            alphaRt.sizeDelta = new Vector2(150f, ControlHeight);
+            alphaRt.anchoredPosition = new Vector2(730f, 0f);
+            alphaRt.sizeDelta = new Vector2(SliderTrackWidth, SliderTrackHeight);
 
             _alphaSlider = TouchSlider.Create(alphaSliderGo, MobileLayoutConfig.MinAlpha, MobileLayoutConfig.MaxAlpha, 1.0f,
-                new Vector2(24f, ControlHeight));
+                new Vector2(20f, SliderTrackHeight));
             _alphaSlider.OnValueChanged += OnAlphaSliderChanged;
 
             _alphaValueText = CreateTextMesh("AlphaValue", _inspectorCard, "90%", readoutFont, ComicStyle.Yellow,
@@ -313,8 +316,8 @@ namespace P1.UI
             alphaValRt.anchorMin = new Vector2(0f, 0.5f);
             alphaValRt.anchorMax = new Vector2(0f, 0.5f);
             alphaValRt.pivot = new Vector2(0f, 0.5f);
-            alphaValRt.anchoredPosition = new Vector2(1048f, 0f);
-            alphaValRt.sizeDelta = new Vector2(68f, 48f);
+            alphaValRt.anchoredPosition = new Vector2(846f, 0f);
+            alphaValRt.sizeDelta = new Vector2(64f, 48f);
 
             // 4. 方案与辅助设置卡片（置顶收敛，两行 64 高按钮，绝不遮挡中央操作区）
             BuildAuxCard(theme);
@@ -335,7 +338,7 @@ namespace P1.UI
                 ComicStyle.Ink, ComicStyle.BorderThin, false);
             card.pivot = new Vector2(0.5f, 1f);
 
-            var font = theme.ResolveFont(false, "方案与辅助瞄准关弱中强固定摇杆开火转视角左");
+            var font = theme.ResolveFont(false, "方案辅助瞄准关弱中强固定摇杆转视角左开火拖动调整位置大小");
             float controlFont = UITypography.FontSnapped(ControlFontBase);
             float rowY = 36f;
 
@@ -346,39 +349,39 @@ namespace P1.UI
             presetLabelRt.anchorMax = new Vector2(0f, 0.5f);
             presetLabelRt.pivot = new Vector2(0f, 0.5f);
             presetLabelRt.anchoredPosition = new Vector2(16f, rowY);
-            presetLabelRt.sizeDelta = new Vector2(84f, ControlHeight);
+            presetLabelRt.sizeDelta = new Vector2(80f, ControlHeight);
 
             var presetValues = new[] { MobileLayoutPreset.TwoFinger, MobileLayoutPreset.ThreeFinger, MobileLayoutPreset.FourFinger };
             for (int i = 0; i < presetValues.Length; i++)
             {
                 int index = i;
                 var preset = presetValues[i];
-                // 2/3/4 指方案按钮：96x64（旧 56x32 太小，点不准也看不清）
+                // 2/3/4 指方案按钮：80x64（标签只有 2 字，80 宽仍有充足点按余量）
                 var btn = CreateAuxButton(card, $"Preset_{preset}", MobileLayoutPresets.GetLabel(preset),
-                    new Vector2(108f + i * 104f, rowY), new Vector2(96f, ControlHeight), controlFont, font,
+                    new Vector2(104f + i * 88f, rowY), new Vector2(80f, ControlHeight), controlFont, font,
                     () => ApplyPreset(presetValues[index]));
                 _presetShapes[i] = btn.GetComponentInChildren<UIInkShapeGraphic>();
                 _presetTexts[i] = btn.GetComponentInChildren<TextMeshProUGUI>();
             }
 
-            CreateSeparator(card.transform, new Vector2(426f, rowY), new Vector2(2f, 40f));
+            CreateSeparator(card.transform, new Vector2(372f, rowY), new Vector2(2f, 40f));
 
-            _leftFireToggle = CreateAuxButton(card, "LeftFireToggle", "左开火键：关",
-                new Vector2(440f, rowY), new Vector2(190f, ControlHeight), controlFont, font, ToggleLeftFire);
+            _leftFireToggle = CreateAuxButton(card, "LeftFireToggle", "左开火：关",
+                new Vector2(384f, rowY), new Vector2(150f, ControlHeight), controlFont, font, ToggleLeftFire);
             _leftFireShape = _leftFireToggle.GetComponentInChildren<UIInkShapeGraphic>();
             _leftFireText = _leftFireToggle.GetComponentInChildren<TextMeshProUGUI>();
 
-            CreateSeparator(card.transform, new Vector2(638f, rowY), new Vector2(2f, 40f));
+            CreateSeparator(card.transform, new Vector2(546f, rowY), new Vector2(2f, 40f));
 
-            _fireRotateToggle = CreateAuxButton(card, "FireRotateToggle", "开火转视角：开",
-                new Vector2(652f, rowY), new Vector2(210f, ControlHeight), controlFont, font, ToggleFireRotate);
+            _fireRotateToggle = CreateAuxButton(card, "FireRotateToggle", "转视角：开",
+                new Vector2(558f, rowY), new Vector2(150f, ControlHeight), controlFont, font, ToggleFireRotate);
             _fireRotateShape = _fireRotateToggle.GetComponentInChildren<UIInkShapeGraphic>();
             _fireRotateText = _fireRotateToggle.GetComponentInChildren<TextMeshProUGUI>();
 
-            CreateSeparator(card.transform, new Vector2(870f, rowY), new Vector2(2f, 40f));
+            CreateSeparator(card.transform, new Vector2(720f, rowY), new Vector2(2f, 40f));
 
             _fixedJoystickToggle = CreateAuxButton(card, "FixedJoystickToggle", "固定摇杆：关",
-                new Vector2(884f, rowY), new Vector2(200f, ControlHeight), controlFont, font, ToggleFixedJoystick);
+                new Vector2(732f, rowY), new Vector2(170f, ControlHeight), controlFont, font, ToggleFixedJoystick);
             _fixedJoystickShape = _fixedJoystickToggle.GetComponentInChildren<UIInkShapeGraphic>();
             _fixedJoystickText = _fixedJoystickToggle.GetComponentInChildren<TextMeshProUGUI>();
 
@@ -390,29 +393,29 @@ namespace P1.UI
             aimLabelRt.anchorMax = new Vector2(0f, 0.5f);
             aimLabelRt.pivot = new Vector2(0f, 0.5f);
             aimLabelRt.anchoredPosition = new Vector2(16f, rowY2);
-            aimLabelRt.sizeDelta = new Vector2(150f, ControlHeight);
+            aimLabelRt.sizeDelta = new Vector2(140f, ControlHeight);
 
             for (int level = 0; level <= 3; level++)
             {
                 int captured = level;
                 var btn = CreateAuxButton(card, $"AimLevel_{level}", GameSettingsMath.GetAimAssistLevelLabel(level),
-                    new Vector2(174f + level * 96f, rowY2), new Vector2(88f, ControlHeight), controlFont, font,
+                    new Vector2(164f + level * 72f, rowY2), new Vector2(64f, ControlHeight), controlFont, font,
                     () => SetAimAssistLevel(captured));
                 _aimLevelButtons[level] = btn;
                 _aimLevelShapes[level] = btn.GetComponentInChildren<UIInkShapeGraphic>();
                 _aimLevelTexts[level] = btn.GetComponentInChildren<TextMeshProUGUI>();
             }
 
-            CreateSeparator(card.transform, new Vector2(558f, rowY2), new Vector2(2f, 40f));
+            CreateSeparator(card.transform, new Vector2(456f, rowY2), new Vector2(2f, 40f));
 
-            var hintText = CreateTextMesh("AuxHint", card, "点选按键拖动/缩放 · 控制舱置顶", UITypography.FontSnapped(18f),
+            var hintText = CreateTextMesh("AuxHint", card, "拖动按键调整位置与大小", UITypography.FontSnapped(18f),
                 ComicStyle.FromHex(0x9A9A9A), font, TextAlignmentOptions.Left);
             var hintRt = hintText.rectTransform;
             hintRt.anchorMin = new Vector2(0f, 0.5f);
             hintRt.anchorMax = new Vector2(0f, 0.5f);
             hintRt.pivot = new Vector2(0f, 0.5f);
-            hintRt.anchoredPosition = new Vector2(572f, rowY2);
-            hintRt.sizeDelta = new Vector2(520f, ControlHeight);
+            hintRt.anchoredPosition = new Vector2(470f, rowY2);
+            hintRt.sizeDelta = new Vector2(380f, ControlHeight);
 
             RefreshAuxButtons();
         }
@@ -645,7 +648,7 @@ namespace P1.UI
             bool leftFire = _workingConfig != null
                 ? _workingConfig.leftFireVisible
                 : (_touchUI != null && _touchUI.IsLeftFireVisible);
-            if (_leftFireText != null) _leftFireText.text = leftFire ? "左开火键：开" : "左开火键：关";
+            if (_leftFireText != null) _leftFireText.text = leftFire ? "左开火：开" : "左开火：关";
             if (_leftFireShape != null)
             {
                 _leftFireShape.color = leftFire ? ComicStyle.Yellow : ComicStyle.FromHex(0x222222);
@@ -654,7 +657,7 @@ namespace P1.UI
             if (_leftFireText != null) _leftFireText.color = leftFire ? ComicStyle.Ink : ComicStyle.Paper;
 
             bool rotate = GameSettingsService.FireButtonRotatesCamera;
-            if (_fireRotateText != null) _fireRotateText.text = rotate ? "开火转视角：开" : "开火转视角：关";
+            if (_fireRotateText != null) _fireRotateText.text = rotate ? "转视角：开" : "转视角：关";
             if (_fireRotateShape != null)
             {
                 _fireRotateShape.color = rotate ? ComicStyle.Yellow : ComicStyle.FromHex(0x222222);
@@ -872,7 +875,7 @@ namespace P1.UI
             _selectedItem = item;
             if (item == null)
             {
-                if (_inspectorTitle != null) _inspectorTitle.text = "点选按键开始调整";
+                if (_inspectorTitle != null) _inspectorTitle.text = "点选按键调整";
                 if (_inspectorCoord != null) _inspectorCoord.text = "";
                 if (_selectionHighlight != null) _selectionHighlight.gameObject.SetActive(false);
                 return;
@@ -880,7 +883,7 @@ namespace P1.UI
 
             if (_inspectorTitle != null)
             {
-                // 26 号字下 1120 宽舱体只容得下 8 个汉字：去掉冗余前缀，保留「调整【名称】」
+                // 26 号字下 960 宽舱体只容得下 8 个汉字：去掉冗余前缀，保留「调整【名称】」
                 _inspectorTitle.text = $"调整【{item.displayName}】";
             }
 

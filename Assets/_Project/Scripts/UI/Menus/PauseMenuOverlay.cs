@@ -70,8 +70,13 @@ namespace P1.UI.Menus
         /// <summary>暂停主面板宽度：左列 460 按钮 + 40 间距 + 右列 500 操作说明卡 + 左右各 50。</summary>
         private const float PausePanelWidth = 1100f;
 
-        /// <summary>暂停主面板高度（保持不变，设置视图的 8 行表格依赖它）。</summary>
+        /// <summary>暂停主面板高度。主视图与按键视图的 820 固定布局依赖它；
+        /// 设置视图打开时临时扩到 <see cref="SettingsPanelHeight"/>，退出时恢复。</summary>
         private const float PausePanelHeight = 820f;
+
+        /// <summary>设置视图面板高度：820 + 4 行新设置（音乐/音效/FPS/小地图，4×76=304）。
+        /// 内容整体下移半扩量（152）保持上下边距对称。</summary>
+        private const float SettingsPanelHeight = PausePanelHeight + 304f;
 
         // ── 操作说明卡几何 ──────────────────────────────────────────────
         private const float ControlsCardWidth = 500f;
@@ -148,6 +153,10 @@ namespace P1.UI.Menus
         // 设置项控件
         private Slider _volumeSlider;
         private TextMeshProUGUI _volumeValueText;
+        private Slider _musicSlider;
+        private TextMeshProUGUI _musicValueText;
+        private Slider _sfxSlider;
+        private TextMeshProUGUI _sfxValueText;
         private Slider _shakeSlider;
         private TextMeshProUGUI _shakeValueText;
         private Slider _mouseSensSlider;
@@ -157,6 +166,12 @@ namespace P1.UI.Menus
         private Button _invertYButton;
         private UIInkShapeGraphic _invertYShape;
         private TextMeshProUGUI _invertYText;
+        private Button _showFpsButton;
+        private UIInkShapeGraphic _showFpsShape;
+        private TextMeshProUGUI _showFpsText;
+        private Button _showMinimapButton;
+        private UIInkShapeGraphic _showMinimapShape;
+        private TextMeshProUGUI _showMinimapText;
         private Button[] _fpsButtons;
         private UIInkShapeGraphic[] _fpsShapes;
         private TextMeshProUGUI[] _fpsTexts;
@@ -744,7 +759,8 @@ namespace P1.UI.Menus
             var headerRt = headerGo.GetComponent<RectTransform>();
             headerRt.anchorMin = new Vector2(0.5f, 0.5f);
             headerRt.anchorMax = new Vector2(0.5f, 0.5f);
-            headerRt.anchoredPosition = new Vector2(0f, 350f);
+            // 面板扩高（820→1124）后整体下移半扩量 152，保持上 28 / 下 22 边距对称。
+            headerRt.anchoredPosition = new Vector2(0f, 502f);
             headerRt.sizeDelta = new Vector2(SettingsContentWidth, 64f);
 
             BuildAccentBar(headerGo.transform, new Vector2(0f, 0f), new Vector2(8f, 44f));
@@ -767,10 +783,10 @@ namespace P1.UI.Menus
             headerHintRt.anchoredPosition = new Vector2(-SettingsRowPadding, 0f);
             headerHintRt.sizeDelta = new Vector2(300f, 34f);
 
-            // 从上往下排：标题底边 318 → 组 1 顶边 302，底部页脚落在 -388，四周留白一致。
-            float cursor = 302f;
+            // 从上往下排：标题底边 470 → 组 1 顶边 454，底部页脚落在 -540，四周留白与旧版一致。
+            float cursor = 454f;
 
-            // 组 1：声音与视角（5 行）
+            // 组 1：声音与视角（7 行）
             cursor = BuildSettingsGroupHeader(parent, cursor, "声音与视角", "AUDIO & CAMERA");
 
             // Row 0: 主音量
@@ -781,7 +797,23 @@ namespace P1.UI.Menus
             _volumeSlider.onValueChanged.AddListener(OnVolumeSliderChanged);
             UpdateVolumeLabel(GameSettingsService.MasterVolume);
 
-            // Row 1: 屏幕震动（长说明拆成小号注解，避免整行标签折行）
+            // Row 1: 音乐音量（BGM 分轨，主音量之下的相对乘数）
+            var rowMusic = CreateSettingRow(parent, ref cursor, showSeparator: true);
+            CreateSettingLabel(rowMusic.transform, "音乐音量", "BGM");
+            _musicSlider = CreateStyledSlider("MusicSlider", rowMusic.transform, 0f, 1f, GameSettingsService.MusicVolume, _theme, out _musicValueText);
+            PlaceSettingControl(_musicSlider.transform.parent);
+            _musicSlider.onValueChanged.AddListener(OnMusicSliderChanged);
+            UpdateMusicVolumeLabel(GameSettingsService.MusicVolume);
+
+            // Row 2: 音效音量（分轨，覆盖枪声/UI 音/播报/循环音）
+            var rowSfx = CreateSettingRow(parent, ref cursor, showSeparator: true);
+            CreateSettingLabel(rowSfx.transform, "音效音量", "含界面音");
+            _sfxSlider = CreateStyledSlider("SfxSlider", rowSfx.transform, 0f, 1f, GameSettingsService.SfxVolume, _theme, out _sfxValueText);
+            PlaceSettingControl(_sfxSlider.transform.parent);
+            _sfxSlider.onValueChanged.AddListener(OnSfxSliderChanged);
+            UpdateSfxVolumeLabel(GameSettingsService.SfxVolume);
+
+            // Row 3: 屏幕震动（长说明拆成小号注解，避免整行标签折行）
             var row1 = CreateSettingRow(parent, ref cursor, showSeparator: true);
             CreateSettingLabel(row1.transform, "屏幕震动", "无障碍减弱");
             _shakeSlider = CreateStyledSlider("ShakeSlider", row1.transform, 0f, 1f, GameSettingsService.ShakeScale, _theme, out _shakeValueText);
@@ -789,7 +821,7 @@ namespace P1.UI.Menus
             _shakeSlider.onValueChanged.AddListener(OnShakeSliderChanged);
             UpdateShakeLabel(GameSettingsService.ShakeScale);
 
-            // Row 2: 鼠标视角灵敏度
+            // Row 4: 鼠标视角灵敏度
             var row2 = CreateSettingRow(parent, ref cursor, showSeparator: true);
             CreateSettingLabel(row2.transform, "鼠标视角灵敏度");
             _mouseSensSlider = CreateStyledSlider(
@@ -800,7 +832,7 @@ namespace P1.UI.Menus
             _mouseSensSlider.onValueChanged.AddListener(OnMouseSensChanged);
             UpdateLookSensitivityLabel(_mouseSensValueText, GameSettingsService.MouseLookSensitivity);
 
-            // Row 3: 触控视角灵敏度
+            // Row 5: 触控视角灵敏度
             var row3 = CreateSettingRow(parent, ref cursor, showSeparator: true);
             CreateSettingLabel(row3.transform, "触控视角灵敏度");
             _touchSensSlider = CreateStyledSlider(
@@ -811,7 +843,7 @@ namespace P1.UI.Menus
             _touchSensSlider.onValueChanged.AddListener(OnTouchSensChanged);
             UpdateLookSensitivityLabel(_touchSensValueText, GameSettingsService.TouchLookSensitivity);
 
-            // Row 4: 视角垂直方向（完整语义留在标签，按钮只显示开/关）
+            // Row 6: 视角垂直方向（完整语义留在标签，按钮只显示开/关）
             var row4 = CreateSettingRow(parent, ref cursor, showSeparator: false);
             CreateSettingLabel(row4.transform, "视角垂直方向", "反转 Y 轴");
             _invertYButton = CreateStyledButton(
@@ -824,16 +856,42 @@ namespace P1.UI.Menus
             _invertYButton.onClick.AddListener(OnInvertYToggled);
             UpdateInvertYLabel();
 
-            // 组 2：画面与操作（2 行）
+            // 组 2：画面与操作（4 行）
             cursor -= SettingsGroupGap;
             cursor = BuildSettingsGroupHeader(parent, cursor, "画面与操作", "DISPLAY & CONTROLS");
 
-            // Row 5: 帧率上限
+            // Row 7: 帧率上限
             var row5 = CreateSettingRow(parent, ref cursor, showSeparator: true);
             CreateSettingLabel(row5.transform, "帧率上限", "FPS");
             BuildFrameRateButtons(row5.transform);
 
-            // Row 6: 操作设置入口（移动端打开触控布局自定义，桌面端打开按键自定义）
+            // Row 8: 显示 FPS 角标
+            var rowFps = CreateSettingRow(parent, ref cursor, showSeparator: true);
+            CreateSettingLabel(rowFps.transform, "显示帧率", "HUD 左上角");
+            _showFpsButton = CreateStyledButton(
+                "ShowFpsBtn", rowFps.transform, "关闭",
+                ComicStyle.Paper, ComicStyle.Ink, new Vector2(PauseSettingControlWidth, PauseSettingControlHeight),
+                _theme, UITypography.FontSnapped(PauseSettingControlFont), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            PlaceSettingControl(_showFpsButton.transform);
+            _showFpsShape = _showFpsButton.GetComponent<UIInkShapeGraphic>();
+            _showFpsText = _showFpsButton.GetComponentInChildren<TextMeshProUGUI>();
+            _showFpsButton.onClick.AddListener(OnShowFpsToggled);
+            UpdateShowFpsLabel();
+
+            // Row 9: 小地图开关
+            var rowMinimap = CreateSettingRow(parent, ref cursor, showSeparator: true);
+            CreateSettingLabel(rowMinimap.transform, "小地图", "右上角");
+            _showMinimapButton = CreateStyledButton(
+                "ShowMinimapBtn", rowMinimap.transform, "开启",
+                ComicStyle.Paper, ComicStyle.Ink, new Vector2(PauseSettingControlWidth, PauseSettingControlHeight),
+                _theme, UITypography.FontSnapped(PauseSettingControlFont), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            PlaceSettingControl(_showMinimapButton.transform);
+            _showMinimapShape = _showMinimapButton.GetComponent<UIInkShapeGraphic>();
+            _showMinimapText = _showMinimapButton.GetComponentInChildren<TextMeshProUGUI>();
+            _showMinimapButton.onClick.AddListener(OnShowMinimapToggled);
+            UpdateShowMinimapLabel();
+
+            // Row 10: 操作设置入口（移动端打开触控布局自定义，桌面端打开按键自定义）
             BuildControlSettingsRow(parent, ref cursor);
 
             // 页脚：恢复默认 / 自动保存提示 / 返回
@@ -1089,6 +1147,7 @@ namespace P1.UI.Menus
             _isKeyBindingsOpen = true;
             _settingsViewContainer.SetActive(false);
             _keyBindingsViewContainer.SetActive(true);
+            RestoreDefaultPanelHeight(); // 按键视图是 820 固定布局，从设置页进入时先收回来
             RefreshKeyBindingsUI();
 
             if (_panelMotion != null)
@@ -1107,6 +1166,7 @@ namespace P1.UI.Menus
             _isKeyBindingsOpen = false;
             if (_keyBindingsViewContainer != null) _keyBindingsViewContainer.SetActive(false);
             if (_settingsViewContainer != null) _settingsViewContainer.SetActive(true);
+            ApplySettingsPanelHeight(); // 回到设置视图，重新扩高
 
             if (_panelMotion != null)
             {
@@ -1544,6 +1604,34 @@ namespace P1.UI.Menus
             }
         }
 
+        private void OnMusicSliderChanged(float val)
+        {
+            GameSettingsService.MusicVolume = val;
+            UpdateMusicVolumeLabel(val);
+        }
+
+        private void UpdateMusicVolumeLabel(float val)
+        {
+            if (_musicValueText != null)
+            {
+                _musicValueText.text = $"{Mathf.RoundToInt(val * 100f)}%";
+            }
+        }
+
+        private void OnSfxSliderChanged(float val)
+        {
+            GameSettingsService.SfxVolume = val;
+            UpdateSfxVolumeLabel(val);
+        }
+
+        private void UpdateSfxVolumeLabel(float val)
+        {
+            if (_sfxValueText != null)
+            {
+                _sfxValueText.text = $"{Mathf.RoundToInt(val * 100f)}%";
+            }
+        }
+
         private void OnShakeSliderChanged(float val)
         {
             GameSettingsService.ShakeScale = val;
@@ -1599,18 +1687,63 @@ namespace P1.UI.Menus
             }
         }
 
+        private void OnShowFpsToggled()
+        {
+            GameSettingsService.ShowFps = !GameSettingsService.ShowFps;
+            UpdateShowFpsLabel();
+        }
+
+        private void UpdateShowFpsLabel()
+        {
+            if (_showFpsText != null)
+            {
+                // 语义由左侧「显示帧率 · HUD 左上角」承担，按钮只保留 开启 / 关闭 状态。
+                _showFpsText.text = GameSettingsService.ShowFps ? "开启" : "关闭";
+                _showFpsText.color = ComicStyle.Ink;
+            }
+            if (_showFpsShape != null)
+            {
+                _showFpsShape.color = GameSettingsService.ShowFps ? ComicStyle.Yellow : ComicStyle.Paper;
+            }
+        }
+
+        private void OnShowMinimapToggled()
+        {
+            GameSettingsService.ShowMinimap = !GameSettingsService.ShowMinimap;
+            UpdateShowMinimapLabel();
+        }
+
+        private void UpdateShowMinimapLabel()
+        {
+            if (_showMinimapText != null)
+            {
+                _showMinimapText.text = GameSettingsService.ShowMinimap ? "开启" : "关闭";
+                _showMinimapText.color = ComicStyle.Ink;
+            }
+            if (_showMinimapShape != null)
+            {
+                _showMinimapShape.color = GameSettingsService.ShowMinimap ? ComicStyle.Yellow : ComicStyle.Paper;
+            }
+        }
+
         private void OnResetDefaultsClicked()
         {
             GameSettingsService.ResetToDefaults();
             if (_volumeSlider != null) _volumeSlider.value = GameSettingsService.MasterVolume;
+            if (_musicSlider != null) _musicSlider.value = GameSettingsService.MusicVolume;
+            if (_sfxSlider != null) _sfxSlider.value = GameSettingsService.SfxVolume;
             if (_shakeSlider != null) _shakeSlider.value = GameSettingsService.ShakeScale;
             if (_mouseSensSlider != null) _mouseSensSlider.value = GameSettingsService.MouseLookSensitivity;
             if (_touchSensSlider != null) _touchSensSlider.value = GameSettingsService.TouchLookSensitivity;
             UpdateVolumeLabel(GameSettingsService.MasterVolume);
+            UpdateMusicVolumeLabel(GameSettingsService.MusicVolume);
+            UpdateSfxVolumeLabel(GameSettingsService.SfxVolume);
             UpdateShakeLabel(GameSettingsService.ShakeScale);
             UpdateLookSensitivityLabel(_mouseSensValueText, GameSettingsService.MouseLookSensitivity);
             UpdateLookSensitivityLabel(_touchSensValueText, GameSettingsService.TouchLookSensitivity);
             UpdateInvertYLabel();
+            UpdateShowFpsLabel();
+            UpdateShowMinimapLabel();
             UpdateFrameRateButtons();
         }
 
@@ -1769,6 +1902,7 @@ namespace P1.UI.Menus
             _isKeyBindingsOpen = false;
             if (_isListeningForKey) CancelKeyListening();
             if (_keyBindingsViewContainer != null) _keyBindingsViewContainer.SetActive(false);
+            RestoreDefaultPanelHeight();
 
             UpdateMobileButtonVisibility();
             PauseStateChanged?.Invoke(false);
@@ -1800,11 +1934,25 @@ namespace P1.UI.Menus
             _isSettingsOpen = true;
             _mainViewContainer.SetActive(false);
             _settingsViewContainer.SetActive(true);
+            ApplySettingsPanelHeight();
 
+            // 每次打开都从 GameSettingsService 全量回读：设置可能被别处（重置/其他面板）改过，
+            // 旧版只回读了音量/震屏/帧率，灵敏度和反转 Y 会显示陈旧值。
             if (_volumeSlider != null) _volumeSlider.value = GameSettingsService.MasterVolume;
+            if (_musicSlider != null) _musicSlider.value = GameSettingsService.MusicVolume;
+            if (_sfxSlider != null) _sfxSlider.value = GameSettingsService.SfxVolume;
             if (_shakeSlider != null) _shakeSlider.value = GameSettingsService.ShakeScale;
+            if (_mouseSensSlider != null) _mouseSensSlider.value = GameSettingsService.MouseLookSensitivity;
+            if (_touchSensSlider != null) _touchSensSlider.value = GameSettingsService.TouchLookSensitivity;
             UpdateVolumeLabel(GameSettingsService.MasterVolume);
+            UpdateMusicVolumeLabel(GameSettingsService.MusicVolume);
+            UpdateSfxVolumeLabel(GameSettingsService.SfxVolume);
             UpdateShakeLabel(GameSettingsService.ShakeScale);
+            UpdateLookSensitivityLabel(_mouseSensValueText, GameSettingsService.MouseLookSensitivity);
+            UpdateLookSensitivityLabel(_touchSensValueText, GameSettingsService.TouchLookSensitivity);
+            UpdateInvertYLabel();
+            UpdateShowFpsLabel();
+            UpdateShowMinimapLabel();
             UpdateFrameRateButtons();
 
             if (_panelMotion != null)
@@ -1825,6 +1973,7 @@ namespace P1.UI.Menus
             _isSettingsOpen = false;
             _settingsViewContainer.SetActive(false);
             _mainViewContainer.SetActive(true);
+            RestoreDefaultPanelHeight();
             UpdateReturnMenuButtonVisibility();
 
             if (_panelMotion != null)
@@ -1869,6 +2018,7 @@ namespace P1.UI.Menus
             // OnDisable/OnDestroy 拆除期调用时容器可能已销毁，做判空
             if (_settingsViewContainer != null) _settingsViewContainer.SetActive(false);
             if (_modalRoot != null) _modalRoot.SetActive(false);
+            RestoreDefaultPanelHeight();
         }
 
         private void ShowMainView()
@@ -1876,6 +2026,7 @@ namespace P1.UI.Menus
             _isSettingsOpen = false;
             _settingsViewContainer.SetActive(false);
             _mainViewContainer.SetActive(true);
+            RestoreDefaultPanelHeight(); // 主视图是 820 固定布局
             UpdateReturnMenuButtonVisibility();
         }
 
@@ -1967,7 +2118,8 @@ namespace P1.UI.Menus
             float canvasHeight = 1080f;
             float safeRatio = Screen.height > 0 ? Screen.safeArea.height / Screen.height : 1f;
             float availableHeight = canvasHeight * safeRatio;
-            const float targetHeight = 860f;
+            // 目标高度跟随当前面板：设置页扩到 1124 后，860 常量会让移动端溢出屏幕。
+            float targetHeight = Mathf.Max(860f, _panelRect.sizeDelta.y + 40f);
 
             if (availableHeight < targetHeight && availableHeight > 100f)
             {
@@ -1978,6 +2130,22 @@ namespace P1.UI.Menus
             {
                 _panelRect.localScale = Vector3.one;
             }
+        }
+
+        /// <summary>设置视图是 11 行表格（比主视图高 304），打开时把共享面板临时扩高并重算响应式缩放。</summary>
+        private void ApplySettingsPanelHeight()
+        {
+            if (_panelRect != null)
+                _panelRect.sizeDelta = new Vector2(PausePanelWidth, SettingsPanelHeight);
+            ApplyResponsivePanelScale();
+        }
+
+        /// <summary>退出设置视图时恢复主视图/按键视图依赖的 820 固定面板高度。</summary>
+        private void RestoreDefaultPanelHeight()
+        {
+            if (_panelRect != null)
+                _panelRect.sizeDelta = new Vector2(PausePanelWidth, PausePanelHeight);
+            ApplyResponsivePanelScale();
         }
 
         private TextMeshProUGUI CreateTextMesh(

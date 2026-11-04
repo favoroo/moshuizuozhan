@@ -119,12 +119,23 @@ namespace P1.UI
 
         /// <summary>
         /// 是否支持应用内下载并调起系统安装器。
-        /// TapTap 隐私合规要求移除与游戏功能无关的高危安装权限（REQUEST_INSTALL_PACKAGES），
-        /// 因此默认关闭：检查更新只负责发现新版本，下载/安装交给 TapTap 商店或浏览器。
-        /// 若将来恢复应用内安装，需要同时把 AndroidManifest 的权限与 FileProvider 加回来
-        /// （但 TapTap 渠道会再次把它判为高危权限，上架包不要开）。
+        /// TapTap 上架变体（<c>P1_OFFLINE</c>）没有联网能力、检查更新入口整体隐藏，
+        /// 且 TapTap 审核会把 REQUEST_INSTALL_PACKAGES 判为与游戏功能无关的高危权限（v0.1.14 曾被拒），
+        /// 所以离线包保持关闭；GitHub / Gitee 自托管渠道的全量包恢复应用内「立即更新」，
+        /// 权限与 FileProvider 由 <c>Assets/Plugins/Android/AndroidManifest.xml</c> 声明，
+        /// 离线变体构建时由 <c>AndroidPrivacyManifestPostprocessor</c> 剥离。
         /// </summary>
-        public static bool InAppInstallSupported => false;
+        public static bool InAppInstallSupported
+        {
+            get
+            {
+#if P1_OFFLINE
+                return false;
+#else
+                return true;
+#endif
+            }
+        }
 
         /// <summary>
         /// 本包是否完全不带联网能力（TapTap 上架专用变体）。

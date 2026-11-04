@@ -183,6 +183,7 @@ namespace P1.Core
         private void Awake()
         {
             Instance = this;
+            GameSettingsService.SfxVolumeChanged += OnSfxVolumeChanged;
             EnsureRuntimeClips();
 #if UNITY_EDITOR
             EnsureEditorClips();
@@ -199,6 +200,8 @@ namespace P1.Core
 
         private void OnDestroy()
         {
+            GameSettingsService.SfxVolumeChanged -= OnSfxVolumeChanged;
+
             if (_match != null)
             {
                 _match.PhaseChanged -= OnMatchPhaseChanged;
@@ -486,7 +489,9 @@ namespace P1.Core
 
         private void ApplyMusicVolume()
         {
-            float volume = Mix.bgmVolume * _duckFactor;
+            // 用户「音乐音量」分轨（主音量仍由 AudioListener.volume 总控）；
+            // 本方法每帧由 Update() 调用，拖动滑条即时生效。
+            float volume = Mix.bgmVolume * _duckFactor * GameSettingsService.MusicVolume;
             if (_musicMainSource != null)
                 _musicMainSource.volume = volume * _musicMainGain;
             if (_musicFinalSource != null)
@@ -499,6 +504,31 @@ namespace P1.Core
             {
                 StopCoroutine(_musicRoutine);
                 _musicRoutine = null;
+            }
+        }
+
+        /// <summary>
+        /// 「音效音量」变化时重算在播循环音的目标音量：循环音是长驻音源，只在 PlayLoop 时
+        /// 定价的话拖滑条不会生效。有淡入淡出协程的通道取消协程直接跳变（循环音为氛围音，跳变不可闻）。
+        /// </summary>
+        private void OnSfxVolumeChanged(float volume)
+        {
+            foreach (var kvp in _loopChannels)
+            {
+                LoopChannel channel = kvp.Value;
+                if (channel == null || channel.Source == null || !channel.Source.isPlaying)
+                    continue;
+
+                if (channel.FadeRoutine != null)
+                {
+                    StopCoroutine(channel.FadeRoutine);
+                    channel.FadeRoutine = null;
+                }
+
+                channel.IsFadingIn = false;
+                float newTarget = GetLoopBaseVolume(channel.Kind) * Mix.loopMasterVolume * volume;
+                channel.TargetVolume = newTarget;
+                channel.Source.volume = newTarget;
             }
         }
 
@@ -540,7 +570,7 @@ namespace P1.Core
             if (clip == null || _voiceSource == null)
                 return;
 
-            _voiceSource.volume = Mix.voiceVolume;
+            _voiceSource.volume = Mix.voiceVolume * GameSettingsService.SfxVolume;
             _voiceSource.clip = clip;
             _voiceSource.Play();
             Duck(duckAmount, clip.length);
@@ -997,7 +1027,7 @@ namespace P1.Core
                 return;
 
             float baseVol = GetLoopBaseVolume(kind);
-            float targetVol = baseVol * Mix.loopMasterVolume;
+            float targetVol = baseVol * Mix.loopMasterVolume * GameSettingsService.SfxVolume;
 
             if (channel.FadeRoutine != null)
             {
@@ -1177,7 +1207,8 @@ namespace P1.Core
             _poolCursor = (_poolCursor + 1) % _pool.Length;
 
             src.pitch = Random.Range(minPitch, maxPitch);
-            src.volume = volume;
+            // 全项目一次性音效（含 UI 音）的唯一收口：在此乘「音效音量」分轨。
+            src.volume = volume * GameSettingsService.SfxVolume;
             src.clip = clip;
             src.Play();
         }

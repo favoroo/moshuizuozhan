@@ -103,6 +103,14 @@ namespace P1.UI
         private Vector4 _homeGeometryKey;
         private Vector4 _homeGeometryKeyPrev;
         private bool _homeGeometryKeyValid;
+
+        // 首页几何连续稳定的帧数；启动动画（LaunchIntroView）据此决定何时擦除露出首页，
+        // 避免把「首帧脏几何排出的错版首页」直接暴露给玩家。项目开了 DisableDomainReload，
+        // 静态字段跨 Play 残留，Awake 里显式归零。
+        private static int s_homeGeometryStableFrames;
+
+        /// <summary>首页几何是否已连续 ≥2 帧不变；为 false 时启动动画应按住擦除不露出首页。</summary>
+        public static bool HasStableHomeGeometry => s_homeGeometryStableFrames >= 2;
         private TextMeshProUGUI _homeSettingsInfo;
         private TextMeshProUGUI _homeRecordInfo;
         private TextMeshProUGUI _homeKeysInfo;
@@ -208,6 +216,7 @@ namespace P1.UI
 
         private void Awake()
         {
+            s_homeGeometryStableFrames = 0;
             EnsureTheme();
             EnsureFullscreenPaperUnderlay();
             EnsureSafeAreaRoot();
@@ -317,7 +326,11 @@ namespace P1.UI
         /// 5. 内容全部放进 SafeArea，入场按 0.05s/张错峰 pop-in（0.22s Back-Out）。
         /// 所有盒子来自 <see cref="MenuLayoutMath.Home"/>，纯数据、EditMode 可断言。
         /// </summary>
-        private void EnsureReadyVisuals()
+        /// <param name="animateEntrance">
+        /// 首次构建（Awake）传 true 播错峰入场；几何重建传 false——重建发生在安全区 settle /
+        /// 旋转瞬间，重播入场会先整树透明一帧再逐张弹回，真机上读作「首页闪一下」。
+        /// </param>
+        private void EnsureReadyVisuals(bool animateEntrance = true)
         {
             if (readyPanel == null) return;
             EnsureTheme();
@@ -372,7 +385,8 @@ namespace P1.UI
             Transform legacyHint = FindMenuNode("StartHint");
             if (legacyHint != null) legacyHint.gameObject.SetActive(false);
 
-            PlayHomeEntrance();
+            if (animateEntrance) PlayHomeEntrance();
+            else SnapHomeEntrance();
             P1.UI.WeaponSelect.WeaponSelectView.Instance?.SyncHomeLayout();
 
             // 记录本次构建使用的几何指纹：安全区/画布此后一旦变化（启动 settle、旋转、分屏），
@@ -483,7 +497,7 @@ namespace P1.UI
 
             _homeEntrance.Clear();
             _homeGeometryKeyValid = false;
-            EnsureReadyVisuals();
+            EnsureReadyVisuals(false);
         }
 
         /// <summary>
@@ -1517,6 +1531,22 @@ namespace P1.UI
         private void PlayHomeEntrance()
         {
             PlayStaggered(_homeEntrance);
+        }
+
+        /// <summary>
+        /// 几何重建后的无缝落位：所有卡片直接吸附到常态（不透明、原尺寸），不重播错峰入场。
+        /// 入场动画在延迟期间是「缩小 + 全透明」，重建时重播它会先整树消失一帧再逐张弹回
+        /// ——真机安全区 settle 恰落在启动动画擦除之后时，玩家看到的就是「首页闪一下」。
+        /// 吸附换装只留下一次干净的版式切换。
+        /// </summary>
+        private void SnapHomeEntrance()
+        {
+            for (int i = 0; i < _homeEntrance.Count; i++)
+            {
+                UISpringMotion motion = _homeEntrance[i];
+                if (motion == null) continue;
+                motion.SnapHome();
+            }
         }
 
         /// <summary>结算入场：两块读数板先到，判定牌 / 台账卡在掷点揭晓时各自 pop-in。</summary>
@@ -2635,10 +2665,15 @@ namespace P1.UI
                 bool changed = MaxDimensionDelta(key, _homeGeometryKey) > 0.5f;
                 bool settled = MaxDimensionDelta(key, _homeGeometryKeyPrev) <= 0.5f;
                 _homeGeometryKeyPrev = key;
+                s_homeGeometryStableFrames = settled ? s_homeGeometryStableFrames + 1 : 0;
                 if (changed && settled)
                 {
                     RebuildHomeVisuals();
                 }
+            }
+            else
+            {
+                s_homeGeometryStableFrames = 0;
             }
 
             var match = MatchManager.Instance;

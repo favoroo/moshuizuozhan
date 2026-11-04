@@ -104,6 +104,9 @@ namespace P1.UI
 
         public MatchCalloutView MatchCallout => matchCallout;
 
+        [Header("实时帧率角标（系统设置：显示帧率）")]
+        [SerializeField] private bool autoBuildFpsBadge = true;
+
 #if UNITY_EDITOR
         private const string EditorThemePath = "Assets/_Project/ScriptableObjects/UITheme.asset";
         private const string EditorGaugeStylePath = "Assets/_Project/ScriptableObjects/HudGaugeStyle.asset";
@@ -177,6 +180,14 @@ namespace P1.UI
             EnsureLensInk();
             EnsureInkEdgeWarning();
             EnsureMatchCallout();
+
+            // 系统设置消费端：读持久化开关并订阅后续变更
+            GameSettingsService.ShowFpsChanged += HandleShowFpsChanged;
+            GameSettingsService.ShowMinimapChanged += HandleShowMinimapChanged;
+            if (autoBuildFpsBadge)
+                EnsureFpsBadge();
+            ApplyFpsBadgeVisibility();
+            ApplyMinimapVisibility();
         }
 
         /// <summary>运行时 HUD 内容根：SafeArea 容器，桌面/编辑器下等价于全屏。</summary>
@@ -468,6 +479,13 @@ namespace P1.UI
         private MatchManager _phaseMatch;
         private bool _phaseSubscribed;
 
+        // 系统设置消费端：FPS 角标 + 小地图开关（改动经 GameSettingsService 事件推送）
+        private TextMeshProUGUI _fpsBadgeText;
+        private bool _showFpsBadge;
+        private bool _showMinimapEnabled = true;
+        private float _fpsAccumTime;
+        private int _fpsAccumFrames;
+
         /// <summary>
         /// 战斗 HUD 只在 Countdown/Playing/Finished 显示：Ready（主菜单）与 Result（结算页）
         /// 整张画布关掉，首页不再露出小地图/阵容条/墨罐，也不会挡住菜单按钮的点击。
@@ -493,6 +511,9 @@ namespace P1.UI
                 _phaseMatch.PhaseChanged -= HandlePhaseVisibilityChanged;
                 _phaseSubscribed = false;
             }
+
+            GameSettingsService.ShowFpsChanged -= HandleShowFpsChanged;
+            GameSettingsService.ShowMinimapChanged -= HandleShowMinimapChanged;
         }
 
         private void HandlePhaseVisibilityChanged(MatchManager.Phase phase)
@@ -506,6 +527,105 @@ namespace P1.UI
                 if (centerTimer != null) centerTimer.ResetForMatch();
                 if (inkTankView != null) inkTankView.ResetAlertState();
             }
+        }
+
+        // ---------------------------------------------------------------- 系统设置消费端（FPS 角标 / 小地图）
+
+        private void HandleShowFpsChanged(bool show) => ApplyFpsBadgeVisibility();
+
+        private void HandleShowMinimapChanged(bool show) => ApplyMinimapVisibility();
+
+        private void ApplyFpsBadgeVisibility()
+        {
+            _showFpsBadge = GameSettingsService.ShowFps;
+            if (_fpsBadgeText != null)
+                _fpsBadgeText.gameObject.SetActive(_showFpsBadge);
+        }
+
+        /// <summary>小地图开关：整组隐藏（新 MinimapView 与旧 RawImage 兜底路径都盖到）。</summary>
+        private void ApplyMinimapVisibility()
+        {
+            _showMinimapEnabled = GameSettingsService.ShowMinimap;
+            if (minimapView != null)
+                minimapView.gameObject.SetActive(_showMinimapEnabled);
+            if (minimapRawImage != null)
+                minimapRawImage.gameObject.SetActive(_showMinimapEnabled);
+            if (playerMarkerDot != null)
+                playerMarkerDot.gameObject.SetActive(_showMinimapEnabled);
+        }
+
+        /// <summary>
+        /// 左上角实时帧率角标：墨色直角小底板 + 纸白数字（几何风）。
+        /// 装饰性构建，失败只 LogWarning 不阻断整局。
+        /// </summary>
+        private void EnsureFpsBadge()
+        {
+            if (_fpsBadgeText != null) return;
+
+            try
+            {
+                var badgeGo = new GameObject("FpsBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                badgeGo.transform.SetParent(ContentRoot, false);
+                var badgeRt = badgeGo.GetComponent<RectTransform>();
+                badgeRt.anchorMin = new Vector2(0f, 1f);
+                badgeRt.anchorMax = new Vector2(0f, 1f);
+                badgeRt.pivot = new Vector2(0f, 1f);
+                badgeRt.anchoredPosition = new Vector2(20f, -16f);
+                badgeRt.sizeDelta = new Vector2(110f, 36f);
+
+                var shape = badgeGo.GetComponent<UIInkShapeGraphic>();
+                shape.Shape = UIInkShape.SharpRect;
+                shape.CornerRadius = ComicStyle.CornerSharp;
+                shape.BorderWidth = 0f;
+                shape.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.78f);
+                shape.raycastTarget = false;
+
+                var textGo = new GameObject("Value", typeof(RectTransform), typeof(TextMeshProUGUI));
+                textGo.transform.SetParent(badgeGo.transform, false);
+                var textRt = textGo.GetComponent<RectTransform>();
+                textRt.anchorMin = Vector2.zero;
+                textRt.anchorMax = Vector2.one;
+                textRt.offsetMin = new Vector2(10f, 0f);
+                textRt.offsetMax = new Vector2(-10f, 0f);
+
+                var tmp = textGo.GetComponent<TextMeshProUGUI>();
+                tmp.fontSize = UITypography.FontSnapped(18f);
+                tmp.color = ComicStyle.Paper;
+                tmp.fontStyle = FontStyles.Bold;
+                tmp.alignment = TextAlignmentOptions.Left;
+                tmp.raycastTarget = false;
+                tmp.textWrappingMode = TextWrappingModes.NoWrap;
+                tmp.overflowMode = TextOverflowModes.Overflow;
+
+                UIThemeSO resolvedTheme = UIThemeSO.Resolve(uiTheme);
+                TMP_FontAsset font = resolvedTheme != null ? resolvedTheme.ResolveFont(false, "FPS 60") : null;
+                if (font != null)
+                    tmp.font = font;
+
+                _fpsBadgeText = tmp;
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[HudController] FPS 角标构建失败（不影响游戏）：{ex.Message}");
+                _fpsBadgeText = null;
+            }
+        }
+
+        /// <summary>每 0.5s 汇总一次 unscaled 帧数，暂停（timeScale=0）时读数依然真实。</summary>
+        private void UpdateFpsBadge()
+        {
+            if (_fpsBadgeText == null || !_showFpsBadge)
+                return;
+
+            _fpsAccumFrames++;
+            _fpsAccumTime += Time.unscaledDeltaTime;
+            if (_fpsAccumTime < 0.5f)
+                return;
+
+            float fps = _fpsAccumFrames / Mathf.Max(0.0001f, _fpsAccumTime);
+            _fpsAccumFrames = 0;
+            _fpsAccumTime = 0f;
+            _fpsBadgeText.text = $"{Mathf.RoundToInt(fps)} FPS";
         }
 
         private void ApplyHudPhaseVisibility()
@@ -1348,6 +1468,7 @@ namespace P1.UI
             UpdateCoverageHeader();
             UpdatePlayerStatusBars();
             UpdateMinimap();
+            UpdateFpsBadge();
         }
 
         private void UpdateCoverageHeader()
@@ -1619,6 +1740,8 @@ namespace P1.UI
 
         private void UpdateMinimap()
         {
+            if (!_showMinimapEnabled) return;
+
             if (minimapView != null)
             {
                 minimapView.UpdateMinimap();

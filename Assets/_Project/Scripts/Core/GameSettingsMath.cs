@@ -18,8 +18,16 @@ namespace P1.Core
         public const string KeyAimAssistLevel = "P1_Settings_AimAssistLevel";
         public const string KeyBotDifficulty = "P1_Settings_BotDifficulty";
         public const string KeyBotDifficultyVersion = "P1_Settings_BotDifficultyVersion";
+        public const string KeyMusicVolume = "P1_Settings_MusicVolume";
+        public const string KeySfxVolume = "P1_Settings_SfxVolume";
+        public const string KeyShowFps = "P1_Settings_ShowFps";
+        public const string KeyShowMinimap = "P1_Settings_ShowMinimap";
 
         public const float DefaultMasterVolume = 1.0f;
+        /// <summary>音乐分轨默认音量（主音量之下的相对乘数）。</summary>
+        public const float DefaultMusicVolume = 1.0f;
+        /// <summary>音效分轨默认音量（主音量之下的相对乘数，含 UI 音与播报语音）。</summary>
+        public const float DefaultSfxVolume = 1.0f;
         public const float DefaultShakeScale = 1.0f;
         public const int DefaultTargetFrameRate = 60;
         public const float DefaultLookSensitivity = 1.0f;
@@ -28,6 +36,10 @@ namespace P1.Core
 
         public const bool DefaultFixedJoystick = false;
         public const bool DefaultFireButtonRotatesCamera = true;
+        /// <summary>HUD 实时帧率角标默认关闭。</summary>
+        public const bool DefaultShowFps = false;
+        /// <summary>HUD 小地图默认显示。</summary>
+        public const bool DefaultShowMinimap = true;
         public const int DefaultAimAssistLevel = 2;
         public const int MinAimAssistLevel = 0;
         public const int MaxAimAssistLevel = 3;

@@ -94,7 +94,11 @@ namespace P1.Tests
                 GameSettingsMath.KeyFireButtonRotatesCamera,
                 GameSettingsMath.KeyAimAssistLevel,
                 GameSettingsMath.KeyBotDifficulty,
-                GameSettingsMath.KeyBotDifficultyVersion
+                GameSettingsMath.KeyBotDifficultyVersion,
+                GameSettingsMath.KeyMusicVolume,
+                GameSettingsMath.KeySfxVolume,
+                GameSettingsMath.KeyShowFps,
+                GameSettingsMath.KeyShowMinimap
             };
 
             for (int i = 0; i < keys.Length; i++)
@@ -114,6 +118,10 @@ namespace P1.Tests
             Assert.AreEqual("P1_Settings_AimAssistLevel", GameSettingsMath.KeyAimAssistLevel);
             Assert.AreEqual("P1_Settings_BotDifficulty", GameSettingsMath.KeyBotDifficulty);
             Assert.AreEqual("P1_Settings_BotDifficultyVersion", GameSettingsMath.KeyBotDifficultyVersion);
+            Assert.AreEqual("P1_Settings_MusicVolume", GameSettingsMath.KeyMusicVolume);
+            Assert.AreEqual("P1_Settings_SfxVolume", GameSettingsMath.KeySfxVolume);
+            Assert.AreEqual("P1_Settings_ShowFps", GameSettingsMath.KeyShowFps);
+            Assert.AreEqual("P1_Settings_ShowMinimap", GameSettingsMath.KeyShowMinimap);
         }
 
         [Test]
@@ -171,6 +179,8 @@ namespace P1.Tests
         {
             GameSettingsService.EnsureInitialized();
             GameSettingsService.MasterVolume = 0.2f;
+            GameSettingsService.MusicVolume = 0.3f;
+            GameSettingsService.SfxVolume = 0.1f;
             GameSettingsService.ShakeScale = 0.4f;
             GameSettingsService.TargetFrameRate = 30;
             GameSettingsService.MouseLookSensitivity = 2.0f;
@@ -178,12 +188,16 @@ namespace P1.Tests
             GameSettingsService.InvertLookY = true;
             GameSettingsService.FixedJoystick = true;
             GameSettingsService.FireButtonRotatesCamera = false;
+            GameSettingsService.ShowFps = true;
+            GameSettingsService.ShowMinimap = false;
             GameSettingsService.AimAssistLevel = 0;
             GameSettingsService.BotDifficulty = GameSettingsMath.MaxBotDifficulty;
 
             GameSettingsService.ResetToDefaults();
 
             Assert.AreEqual(GameSettingsMath.DefaultMasterVolume, GameSettingsService.MasterVolume, 1e-4f);
+            Assert.AreEqual(GameSettingsMath.DefaultMusicVolume, GameSettingsService.MusicVolume, 1e-4f);
+            Assert.AreEqual(GameSettingsMath.DefaultSfxVolume, GameSettingsService.SfxVolume, 1e-4f);
             Assert.AreEqual(GameSettingsMath.DefaultShakeScale, GameSettingsService.ShakeScale, 1e-4f);
             Assert.AreEqual(GameSettingsMath.DefaultTargetFrameRate, GameSettingsService.TargetFrameRate);
             Assert.AreEqual(GameSettingsMath.DefaultLookSensitivity, GameSettingsService.MouseLookSensitivity, 1e-4f);
@@ -191,6 +205,8 @@ namespace P1.Tests
             Assert.IsFalse(GameSettingsService.InvertLookY);
             Assert.AreEqual(GameSettingsMath.DefaultFixedJoystick, GameSettingsService.FixedJoystick);
             Assert.AreEqual(GameSettingsMath.DefaultFireButtonRotatesCamera, GameSettingsService.FireButtonRotatesCamera);
+            Assert.AreEqual(GameSettingsMath.DefaultShowFps, GameSettingsService.ShowFps);
+            Assert.AreEqual(GameSettingsMath.DefaultShowMinimap, GameSettingsService.ShowMinimap);
             Assert.AreEqual(GameSettingsMath.DefaultAimAssistLevel, GameSettingsService.AimAssistLevel);
             Assert.AreEqual(GameSettingsMath.DefaultBotDifficulty, GameSettingsService.BotDifficulty);
         }

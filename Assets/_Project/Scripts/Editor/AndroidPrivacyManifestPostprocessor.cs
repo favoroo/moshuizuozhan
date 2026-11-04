@@ -24,6 +24,7 @@ namespace P1.Editor
         const string AndroidNs = "http://schemas.android.com/apk/res/android";
         const string ToolsNs = "http://schemas.android.com/tools";
         const string UnityActivity = "com.unity3d.player.UnityPlayerActivity";
+        const string FileProviderClass = "androidx.core.content.FileProvider";
         const string Tag = "[隐私合规]";
 
         // 放在 Unity 自己写完清单之后执行。
@@ -67,7 +68,9 @@ namespace P1.Editor
             }
 
             // TapTap 上架变体：Unity 会按「使用了网络 API」自动注入 INTERNET 权限，
-            // 自定义主清单里的声明同样会带进来。这里统一摘掉，保证包体零联网能力。
+            // 自定义主清单里的声明同样会带进来。这里连同应用内安装的
+            // REQUEST_INSTALL_PACKAGES 与 FileProvider 一起摘掉：
+            // 上架包零联网能力（检查更新入口已隐藏），且 TapTap 会把安装权限判为高危（v0.1.14 被拒）。
             //
             // 注意：不能写 `#if P1_OFFLINE`。宏只写进 Android 平台的 defines，
             // 而本类是 P1.Editor 程序集（按 Editor 平台编译），条件编译永远为假，
@@ -75,10 +78,12 @@ namespace P1.Editor
             if (IsOfflineVariant())
             {
                 int removed = RemovePermission(doc, ns, "android.permission.INTERNET");
+                removed += RemovePermission(doc, ns, "android.permission.REQUEST_INSTALL_PACKAGES");
+                removed += RemoveFileProvider(doc, ns);
                 if (removed > 0)
                 {
                     changed = true;
-                    Debug.Log($"{Tag} TapTap 上架变体：已移除 {removed} 条 INTERNET 权限声明（{manifestPath}）");
+                    Debug.Log($"{Tag} TapTap 上架变体：已移除 {removed} 条联网/安装清单声明（{manifestPath}）");
                 }
             }
 
@@ -107,6 +112,25 @@ namespace P1.Editor
         {
             var nodes = doc.SelectNodes(
                 $"/manifest/uses-permission[@android:name='{permissionName}']", ns);
+            if (nodes == null) return 0;
+
+            int count = 0;
+            foreach (XmlNode node in nodes)
+            {
+                node.ParentNode?.RemoveChild(node);
+                count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// 删掉应用内安装用的 FileProvider 声明（含其 meta-data），返回删除条数。
+        /// authority 带 ${applicationId} 占位符，按节点类型与类名匹配，不匹配具体值。
+        /// </summary>
+        static int RemoveFileProvider(XmlDocument doc, XmlNamespaceManager ns)
+        {
+            var nodes = doc.SelectNodes(
+                $"/manifest/application/provider[@android:name='{FileProviderClass}']", ns);
             if (nodes == null) return 0;
 
             int count = 0;

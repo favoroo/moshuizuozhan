@@ -110,7 +110,7 @@ namespace P1.UI
             bool isLocalKiller = killer != null && killer == localHealth;
             string killerName = killer != null
                 ? FormatCombatantName(killer, isLocalKiller)
-                : (killerTeam == Team.TeamA ? "ORANGE TEAM" : "BLUE TEAM");
+                : (killerTeam == Team.TeamA ? "橙队" : "蓝队");
 
             WeaponKind kind = WeaponKind.Shooter;
             string weaponName = "Spritzer";
@@ -167,13 +167,13 @@ namespace P1.UI
 
         private static string FormatCombatantName(CombatantHealth ch, bool isLocal)
         {
-            if (isLocal) return "YOU";
-            if (ch == null) return "UNKNOWN";
+            if (isLocal) return "你";
+            if (ch == null) return "未知";
 
             string raw = ch.gameObject.name;
-            if (raw.StartsWith("BotA_")) return "ALLY " + raw.Substring(5);
-            if (raw.StartsWith("BotB_")) return "ENEMY " + raw.Substring(5);
-            return raw.ToUpperInvariant();
+            if (raw.StartsWith("BotA_")) return "我方 " + raw.Substring(5);
+            if (raw.StartsWith("BotB_")) return "敌方 " + raw.Substring(5);
+            return raw;
         }
 
         private static CombatantHealth FindRepresentativeEnemy(CombatantHealth victim, Team enemyTeam)
@@ -206,9 +206,9 @@ namespace P1.UI
         {
             var ev = new KillFeedEvent
             {
-                KillerName = killer ?? (killerTeam == Team.TeamA ? "YOU" : "OCTO BOT"),
+                KillerName = killer ?? (killerTeam == Team.TeamA ? "你" : "机器人"),
                 KillerTeam = killerTeam,
-                VictimName = victim ?? (victimTeam == Team.TeamA ? "INKLING" : "TARGET BOT"),
+                VictimName = victim ?? "机器人",
                 VictimTeam = victimTeam,
                 WeaponKind = weapon,
                 WeaponDisplayName = weapon.ToString(),

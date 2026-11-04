@@ -22,10 +22,11 @@ namespace P1.Core
         public const string KeySfxVolume = "P1_Settings_SfxVolume";
         public const string KeyShowFps = "P1_Settings_ShowFps";
         public const string KeyShowMinimap = "P1_Settings_ShowMinimap";
+        public const string KeyMatchDurationMinutes = "P1_Settings_MatchDurationMinutes";
 
         public const float DefaultMasterVolume = 1.0f;
-        /// <summary>音乐分轨默认音量（主音量之下的相对乘数）。</summary>
-        public const float DefaultMusicVolume = 1.0f;
+        /// <summary>音乐分轨默认音量（主音量之下的相对乘数）。BGM 常压过音效，默认降到 20%。</summary>
+        public const float DefaultMusicVolume = 0.2f;
         /// <summary>音效分轨默认音量（主音量之下的相对乘数，含 UI 音与播报语音）。</summary>
         public const float DefaultSfxVolume = 1.0f;
         public const float DefaultShakeScale = 1.0f;
@@ -43,6 +44,17 @@ namespace P1.Core
         public const int DefaultAimAssistLevel = 2;
         public const int MinAimAssistLevel = 0;
         public const int MaxAimAssistLevel = 3;
+
+        /// <summary>
+        /// 首页可选比赛时长（分钟）：2 / 3 / 5。默认 2 分钟，与旧版 GameConfig 的 120s 一致。
+        /// 玩家选择持久化到 <see cref="KeyMatchDurationMinutes"/>，MatchManager 开局时读取。
+        /// </summary>
+        public const int DefaultMatchDurationMinutes = 2;
+        public const int MatchDurationQuickMinutes = 2;
+        public const int MatchDurationStandardMinutes = 3;
+        public const int MatchDurationLongMinutes = 5;
+        public static readonly int[] AvailableMatchDurationMinutes =
+            { MatchDurationQuickMinutes, MatchDurationStandardMinutes, MatchDurationLongMinutes };
 
         /// <summary>
         /// Bot 难度档位：0 新手 / 1 轻松 / 2 普通 / 3 硬核（与 P1.AI.BotDifficultyMath 一一对应）。
@@ -201,6 +213,39 @@ namespace P1.Core
                 default:
                     return "普通";
             }
+        }
+
+        /// <summary>
+        /// 规范化比赛时长：只允许 2 / 3 / 5 分钟，其他值取最接近的合法档；
+        /// 正好落在两档中间（如 4 分钟）时取更长的档，避免意外缩短玩家预期。
+        /// </summary>
+        public static int NormalizeMatchDurationMinutes(int minutes)
+        {
+            int best = AvailableMatchDurationMinutes[0];
+            int bestDistance = int.MaxValue;
+            for (int i = 0; i < AvailableMatchDurationMinutes.Length; i++)
+            {
+                int option = AvailableMatchDurationMinutes[i];
+                int distance = Mathf.Abs(minutes - option);
+                if (distance <= bestDistance)
+                {
+                    best = option;
+                    bestDistance = distance;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>比赛时长的中文展示文案（例：2分 / 3分 / 5分）。</summary>
+        public static string GetMatchDurationLabel(int minutes)
+        {
+            return NormalizeMatchDurationMinutes(minutes).ToString() + "分";
+        }
+
+        /// <summary>比赛时长（分钟）换算成秒；MatchManager 开局计时统一走这里。</summary>
+        public static float GetMatchDurationSeconds(int minutes)
+        {
+            return NormalizeMatchDurationMinutes(minutes) * 60f;
         }
 
         /// <summary>

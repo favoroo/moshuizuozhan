@@ -7,10 +7,16 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 局内 HUD 中央偏上大字播报视图（Geometric Bold 几何大胆风）：
-    /// 对齐 INKWAVE 的 Callout 播报链，在对局中展示 WIPEOUT! / DOUBLE SPLAT! / FIRST SPLAT! 等。
-    /// 纯色直角色块底板 + 超大粗体字，出现 0.10s linear 硬切，停留 1.1~1.4s，快速淡出。
-    /// 高优先级打断低优先级，同优先级 0.3s 内去抖。
+    /// 局内 HUD 中央偏上成就播报视图（Geometric Bold 几何大胆风）：
+    /// 把原来的「一整条英文」改成「图标圆章 + 中文大字 + ×N 徽章 + 连杀方块」。
+    ///
+    /// 参考主流射击游戏的连杀播报：玩家一眼只需要读三件事——
+    /// 1. 发生了什么（双杀 / 三杀 / 全队击倒 / 反杀 / 终结连杀）；
+    /// 2. 这次是几连（右侧 ×N 方块 + 底部连杀方块逐颗点亮）；
+    /// 3. 情绪强度（大播报用黄底/黄边、图标翻转、Back-Out 入场）。
+    ///
+    /// 动效仍守几何风规范：入场 0.20s Back-Out（轻微过冲）+ alpha，停留后 0.12s 淡出；
+    /// 不做弹簧、循环脉冲或无限呼吸。
     /// </summary>
     [AddComponentMenu("P1/UI/Match Callout View")]
     [RequireComponent(typeof(RectTransform))]
@@ -23,6 +29,14 @@ namespace P1.UI
             Holding,
             Fading
         }
+
+        private const int MaxStreakPips = 8;
+        private const float HomeY = 180f;
+        private const float IconLeft = 52f;
+        private const float TextLeftWithIcon = 104f;
+        private const float TextLeftNoIcon = 22f;
+        private const float CountRight = 20f;
+        private const float CountWidth = 78f;
 
         [Header("主题与字体")]
         [SerializeField] private UIThemeSO theme;
@@ -37,16 +51,30 @@ namespace P1.UI
         [SerializeField] private TextMeshProUGUI mainText;
         [SerializeField] private TextMeshProUGUI subText;
 
-        [Header("动效参数（规范：≤100ms linear 入场，无弹簧）")]
-        [SerializeField] private float entranceDuration = 0.10f;
+        [Header("成就装饰（运行时自动补齐）")]
+        [SerializeField] private UIInkShapeGraphic accentGraphic;
+        [SerializeField] private UIInkShapeGraphic iconBadgeGraphic;
+        [SerializeField] private Image iconImage;
+        [SerializeField] private UIInkShapeGraphic countBadgeGraphic;
+        [SerializeField] private TextMeshProUGUI countText;
+        [SerializeField] private UIInkShapeGraphic[] streakPips = new UIInkShapeGraphic[MaxStreakPips];
+
+        [Header("动效参数（规范：入场 0.20s Back-Out，其余硬切）")]
+        [SerializeField] private float entranceDuration = 0.20f;
         [SerializeField] private float holdDurationNormal = 1.20f;
-        [SerializeField] private float holdDurationBig = 1.40f;
-        [SerializeField] private float fadeDuration = 0.15f;
+        [SerializeField] private float holdDurationBig = 1.45f;
+        [SerializeField] private float fadeDuration = 0.12f;
         [SerializeField] private float samePriorityDebounceSeconds = 0.30f;
+        [SerializeField] private float countPopDelay = 0.06f;
+        [SerializeField] private float pipStagger = 0.03f;
 
         private RectTransform _rootRect;
         private RectTransform _mainRect;
         private RectTransform _subRect;
+        private RectTransform _iconRect;
+        private RectTransform _countRect;
+        private RectTransform _pipsRect;
+        private Vector2 _homePosition;
 
         private MatchCalloutMath _math = new MatchCalloutMath();
         private CalloutResult _currentCallout = CalloutResult.None;
@@ -55,6 +83,7 @@ namespace P1.UI
         private float _lastCalloutStartTime = -999f;
         private bool _subscribedPhase;
         private bool _isBuilt;
+        private bool _iconAvailable;
 
         public MatchCalloutMath Math => _math;
         public CalloutResult CurrentCallout => _currentCallout;
@@ -111,13 +140,28 @@ namespace P1.UI
                 case DisplayState.Entering:
                 {
                     float t = entranceDuration > 0.001f ? Mathf.Clamp01(_stateTimer / entranceDuration) : 1f;
-                    transform.localScale = Vector3.LerpUnclamped(Vector3.one * 0.90f, Vector3.one, t);
-                    if (canvasGroup != null) canvasGroup.alpha = Mathf.Lerp(0f, 1f, t);
+                    float eased = UICubicBezier.BackOut.Evaluate(t);
+
+                    // 主块：从 78% 弹到 100%，同时从上方 24px 砸回原位。
+                    transform.localScale = Vector3.one * Mathf.LerpUnclamped(0.78f, 1f, eased);
+                    if (_rootRect != null)
+                    {
+                        _rootRect.anchoredPosition = _homePosition + new Vector2(0f, 24f * (1f - eased));
+                    }
+                    if (canvasGroup != null) canvasGroup.alpha = Mathf.Clamp01(t / 0.55f);
+
+                    AnimateBadge(_iconRect, _stateTimer, 0f);
+                    AnimateBadge(_countRect, _stateTimer, countPopDelay);
+                    AnimatePips(_stateTimer);
 
                     if (t >= 1f)
                     {
                         transform.localScale = Vector3.one;
+                        if (_rootRect != null) _rootRect.anchoredPosition = _homePosition;
                         if (canvasGroup != null) canvasGroup.alpha = 1f;
+                        SnapBadge(_iconRect);
+                        SnapBadge(_countRect);
+                        SnapPips();
                         _state = DisplayState.Holding;
                         _stateTimer = 0f;
                     }
@@ -127,6 +171,7 @@ namespace P1.UI
                 case DisplayState.Holding:
                 {
                     transform.localScale = Vector3.one;
+                    if (_rootRect != null) _rootRect.anchoredPosition = _homePosition;
                     if (canvasGroup != null) canvasGroup.alpha = 1f;
                     float hold = _currentCallout.IsBig ? holdDurationBig : holdDurationNormal;
                     if (_stateTimer >= hold)
@@ -141,13 +186,14 @@ namespace P1.UI
                 {
                     float t = fadeDuration > 0.001f ? Mathf.Clamp01(_stateTimer / fadeDuration) : 1f;
                     if (canvasGroup != null) canvasGroup.alpha = Mathf.Lerp(1f, 0f, t);
+                    transform.localScale = Vector3.one * Mathf.Lerp(1f, 1.05f, t);
 
                     if (t >= 1f)
                     {
                         _state = DisplayState.Inactive;
                         _stateTimer = 0f;
                         _currentCallout = CalloutResult.None;
-                        if (canvasGroup != null) canvasGroup.alpha = 0f;
+                        ResetVisualState();
                     }
                     break;
                 }
@@ -191,11 +237,22 @@ namespace P1.UI
             // 3. 伴随音效（大播报播放大招就绪确认音，常规播报播放 UI 确认音）
             PlaySoundFeedback(result);
 
-            // 4. 重置动效计时
+            // 4. 重置动效计时（图标 / 计数 / 连杀方块在入场段内错峰弹出）
             _state = DisplayState.Entering;
             _stateTimer = 0f;
-            transform.localScale = Vector3.one * 0.90f;
+            transform.localScale = Vector3.one * 0.78f;
+            if (_rootRect != null) _rootRect.anchoredPosition = _homePosition + new Vector2(0f, 24f);
             if (canvasGroup != null) canvasGroup.alpha = 0f;
+
+            if (_iconRect != null && _iconRect.gameObject.activeSelf)
+            {
+                _iconRect.localScale = Vector3.one * 0.45f;
+            }
+            if (_countRect != null && _countRect.gameObject.activeSelf)
+            {
+                _countRect.localScale = Vector3.one * 0.35f;
+            }
+            ResetPipScales(0.2f);
         }
 
         /// <summary>
@@ -206,28 +263,123 @@ namespace P1.UI
             _state = DisplayState.Inactive;
             _stateTimer = 0f;
             _currentCallout = CalloutResult.None;
-            if (canvasGroup != null)
+            ResetVisualState();
+        }
+
+        private void ResetVisualState()
+        {
+            transform.localScale = Vector3.one;
+            if (_rootRect != null) _rootRect.anchoredPosition = _homePosition;
+            if (canvasGroup != null) canvasGroup.alpha = 0f;
+            SnapBadge(_iconRect);
+            SnapBadge(_countRect);
+            SnapPips();
+        }
+
+        private static void AnimateBadge(RectTransform rect, float timer, float delay)
+        {
+            if (rect == null || !rect.gameObject.activeSelf) return;
+
+            float t = Mathf.Clamp01((timer - delay) / 0.16f);
+            float eased = UICubicBezier.BackOut.Evaluate(t);
+            rect.localScale = Vector3.one * Mathf.LerpUnclamped(0.35f, 1f, eased);
+        }
+
+        private static void SnapBadge(RectTransform rect)
+        {
+            if (rect != null) rect.localScale = Vector3.one;
+        }
+
+        private void AnimatePips(float timer)
+        {
+            if (_pipsRect == null || !_pipsRect.gameObject.activeSelf) return;
+
+            for (int i = 0; i < streakPips.Length; i++)
             {
-                canvasGroup.alpha = 0f;
+                var pip = streakPips[i];
+                if (pip == null || !pip.gameObject.activeSelf) continue;
+
+                float t = Mathf.Clamp01((timer - countPopDelay - i * pipStagger) / 0.12f);
+                float eased = UICubicBezier.BackOut.Evaluate(t);
+                pip.rectTransform.localScale = Vector3.one * Mathf.LerpUnclamped(0.2f, 1f, eased);
+            }
+        }
+
+        private void ResetPipScales(float scale)
+        {
+            for (int i = 0; i < streakPips.Length; i++)
+            {
+                if (streakPips[i] != null) streakPips[i].rectTransform.localScale = Vector3.one * scale;
+            }
+        }
+
+        private void SnapPips()
+        {
+            for (int i = 0; i < streakPips.Length; i++)
+            {
+                if (streakPips[i] != null) streakPips[i].rectTransform.localScale = Vector3.one;
             }
         }
 
         private void ApplyVisuals(in CalloutResult result)
         {
+            UIThemeSO resolved = UIThemeSO.Resolve(theme);
             bool hasSub = !string.IsNullOrEmpty(result.SubText);
+            bool isStreak = result.Kind == CalloutKind.Streak;
+            bool hasCount = result.Count > 1 && (result.Kind == CalloutKind.MultiSplat || isStreak);
 
+            // 1. 图标：取不到就整块隐藏，绝不留下白方块。
+            string iconKey = result.IconKey;
+            Sprite icon = string.IsNullOrEmpty(iconKey) ? null : UIIconLibrary.Get(iconKey);
+            _iconAvailable = icon != null;
+            if (iconImage != null)
+            {
+                iconImage.sprite = icon;
+                iconImage.enabled = _iconAvailable;
+            }
+            if (iconBadgeGraphic != null)
+            {
+                iconBadgeGraphic.gameObject.SetActive(_iconAvailable);
+            }
+
+            // 2. 计数徽章：双杀 ×2 / 三杀 ×3 / 连杀 ×N
+            if (countBadgeGraphic != null)
+            {
+                countBadgeGraphic.gameObject.SetActive(hasCount);
+            }
+            if (countText != null)
+            {
+                countText.text = hasCount ? "×" + result.Count : string.Empty;
+                countText.gameObject.SetActive(hasCount);
+            }
+
+            // 3. 连杀方块：只在 STREAK 时逐颗点亮（最多 8 颗，超出部分由 ×N 承担）
+            if (_pipsRect != null)
+            {
+                _pipsRect.gameObject.SetActive(isStreak && !hasSub);
+            }
+            int litPips = isStreak ? Mathf.Clamp(result.Count, 0, MaxStreakPips) : 0;
+            for (int i = 0; i < streakPips.Length; i++)
+            {
+                if (streakPips[i] != null)
+                {
+                    streakPips[i].gameObject.SetActive(i < litPips);
+                }
+            }
+
+            // 4. 文字与字体（中文必须按 CJK 分支取字体，否则标题字重会缺字形）
+            string main = result.MainText ?? string.Empty;
             if (mainText != null)
             {
-                // 移动端 52×1.28≈66 号时，"WIPEOUT!" 这类大字在 76px 高的主行里会纵向溢出；
-                // TMP 自动缩字在「不超过设计字号」的前提下自适配到当前行高/行宽。
-                float mainFontSize = UITypography.FontSnapped(result.IsBig ? 52f : 38f);
+                float mainFontSize = UITypography.FontSnapped(result.IsBig ? 52f : 40f);
                 mainText.enableAutoSizing = true;
-                mainText.fontSizeMin = UITypography.FontSnapped(22f);
+                mainText.fontSizeMin = UITypography.FontSnapped(24f);
                 mainText.fontSizeMax = mainFontSize;
                 mainText.fontSize = mainFontSize;
                 mainText.textWrappingMode = TextWrappingModes.NoWrap;
                 mainText.overflowMode = TextOverflowModes.Overflow;
-                mainText.text = result.MainText;
+                mainText.font = resolved.ResolveFont(true, main);
+                mainText.text = main;
             }
 
             if (subText != null)
@@ -239,47 +391,26 @@ namespace P1.UI
                 subText.fontSize = subFontSize;
                 subText.textWrappingMode = TextWrappingModes.NoWrap;
                 subText.overflowMode = TextOverflowModes.Overflow;
+                subText.font = resolved.ResolveFont(false, result.SubText ?? string.Empty);
                 subText.text = result.SubText;
                 subText.gameObject.SetActive(hasSub);
             }
 
-            // 版面自适应：有副标题时面板加高
-            if (_rootRect != null)
-            {
-                _rootRect.sizeDelta = hasSub ? new Vector2(620f, 112f) : new Vector2(540f, 82f);
-            }
+            ApplyLayout(result.IsBig, hasSub, hasCount, isStreak);
 
-            if (_mainRect != null)
-            {
-                if (hasSub)
-                {
-                    _mainRect.anchorMin = new Vector2(0f, 0.32f);
-                    _mainRect.anchorMax = new Vector2(1f, 1f);
-                }
-                else
-                {
-                    _mainRect.anchorMin = Vector2.zero;
-                    _mainRect.anchorMax = Vector2.one;
-                }
-                // 左右 24px 内边距：大字永不贴住 6px 墨边（旧版直接拉到边缘，截图里像“字撑破了板”）。
-                _mainRect.offsetMin = new Vector2(24f, 4f);
-                _mainRect.offsetMax = new Vector2(-24f, -4f);
-            }
-
-            if (_subRect != null)
-            {
-                _subRect.anchorMin = new Vector2(0f, 0f);
-                _subRect.anchorMax = new Vector2(1f, hasSub ? 0.36f : 0f);
-                _subRect.offsetMin = new Vector2(24f, 4f);
-                _subRect.offsetMax = new Vector2(-24f, 0f);
-            }
-
-            // 配色方案（几何大胆风 token）
+            // 5. 配色方案（几何大胆风 token）
             Color fillColor = ComicStyle.Ink;
-            Color borderColor = ComicStyle.Border > 0f ? ComicStyle.Paper : ComicStyle.Ink;
+            Color borderColor = ComicStyle.Paper;
             float borderWidth = ComicStyle.Border;
             Color textColor = ComicStyle.Paper;
             Color subColor = ComicStyle.PaperAlt;
+            Color accentColor = ComicStyle.Yellow;
+            Color iconBadgeFill = ComicStyle.Yellow;
+            Color iconBadgeBorder = ComicStyle.Ink;
+            Color iconColor = ComicStyle.Ink;
+            Color countFill = ComicStyle.Yellow;
+            Color countBorder = ComicStyle.Ink;
+            Color countColor = ComicStyle.Ink;
 
             switch (result.Kind)
             {
@@ -289,13 +420,22 @@ namespace P1.UI
                     borderWidth = ComicStyle.BorderHeavy;
                     textColor = ComicStyle.Ink;
                     subColor = ComicStyle.Ink;
+                    accentColor = ComicStyle.Ink;
+                    iconBadgeFill = ComicStyle.Ink;
+                    iconBadgeBorder = ComicStyle.Yellow;
+                    iconColor = ComicStyle.Paper;
                     break;
 
                 case CalloutKind.MultiSplat:
                     fillColor = ComicStyle.Ink;
-                    borderColor = result.IsBig ? ComicStyle.Yellow : ComicStyle.Paper;
+                    borderColor = ComicStyle.Yellow;
                     borderWidth = result.IsBig ? ComicStyle.BorderHeavy : ComicStyle.Border;
-                    textColor = result.IsBig ? ComicStyle.Yellow : ComicStyle.Paper;
+                    textColor = ComicStyle.Paper;
+                    subColor = ComicStyle.PaperAlt;
+                    accentColor = ComicStyle.Yellow;
+                    iconBadgeFill = ComicStyle.Yellow;
+                    iconBadgeBorder = ComicStyle.Ink;
+                    iconColor = ComicStyle.Ink;
                     break;
 
                 case CalloutKind.FirstSplat:
@@ -303,6 +443,11 @@ namespace P1.UI
                     borderColor = ComicStyle.Paper;
                     borderWidth = ComicStyle.Border;
                     textColor = ComicStyle.Paper;
+                    subColor = ComicStyle.PaperAlt;
+                    accentColor = ComicStyle.Paper;
+                    iconBadgeFill = ComicStyle.Paper;
+                    iconBadgeBorder = ComicStyle.Ink;
+                    iconColor = ComicStyle.Ink;
                     break;
 
                 case CalloutKind.Revenge:
@@ -310,6 +455,13 @@ namespace P1.UI
                     borderColor = ComicStyle.Red;
                     borderWidth = ComicStyle.Border;
                     textColor = ComicStyle.Red;
+                    subColor = ComicStyle.PaperAlt;
+                    accentColor = ComicStyle.Red;
+                    iconBadgeFill = ComicStyle.Red;
+                    iconBadgeBorder = ComicStyle.Ink;
+                    iconColor = ComicStyle.Paper;
+                    countFill = ComicStyle.Red;
+                    countColor = ComicStyle.Paper;
                     break;
 
                 case CalloutKind.Shutdown:
@@ -318,6 +470,10 @@ namespace P1.UI
                     borderWidth = ComicStyle.Border;
                     textColor = ComicStyle.Yellow;
                     subColor = ComicStyle.PaperAlt;
+                    accentColor = ComicStyle.Yellow;
+                    iconBadgeFill = ComicStyle.Yellow;
+                    iconBadgeBorder = ComicStyle.Ink;
+                    iconColor = ComicStyle.Ink;
                     break;
 
                 case CalloutKind.Streak:
@@ -325,6 +481,14 @@ namespace P1.UI
                     borderColor = ComicStyle.Paper;
                     borderWidth = ComicStyle.Border;
                     textColor = ComicStyle.Paper;
+                    subColor = ComicStyle.PaperAlt;
+                    accentColor = ComicStyle.Yellow;
+                    iconBadgeFill = ComicStyle.Yellow;
+                    iconBadgeBorder = ComicStyle.Ink;
+                    iconColor = ComicStyle.Ink;
+                    countFill = ComicStyle.Yellow;
+                    countBorder = ComicStyle.Ink;
+                    countColor = ComicStyle.Ink;
                     break;
             }
 
@@ -332,6 +496,38 @@ namespace P1.UI
             {
                 bgGraphic.ApplyComic(fillColor, border: borderWidth);
                 bgGraphic.BorderColor = borderColor;
+                // 浮起的成就条：面板档硬影 (4,-5)
+                resolved.ApplyHardShadow(bgGraphic, UIHardShadowLevel.Panel);
+            }
+
+            if (accentGraphic != null)
+            {
+                accentGraphic.color = accentColor;
+            }
+
+            if (iconBadgeGraphic != null)
+            {
+                iconBadgeGraphic.color = iconBadgeFill;
+                iconBadgeGraphic.BorderColor = iconBadgeBorder;
+                resolved.ApplyHardShadow(iconBadgeGraphic, UIHardShadowLevel.Tag);
+            }
+
+            if (iconImage != null)
+            {
+                iconImage.color = iconColor;
+            }
+
+            if (countBadgeGraphic != null)
+            {
+                countBadgeGraphic.color = countFill;
+                countBadgeGraphic.BorderColor = countBorder;
+                resolved.ApplyHardShadow(countBadgeGraphic, UIHardShadowLevel.Tag);
+            }
+
+            if (countText != null)
+            {
+                countText.color = countColor;
+                countText.font = resolved.ResolveFont(true, countText.text);
             }
 
             if (mainText != null)
@@ -342,6 +538,68 @@ namespace P1.UI
             if (subText != null)
             {
                 subText.color = subColor;
+            }
+
+            for (int i = 0; i < streakPips.Length; i++)
+            {
+                if (streakPips[i] != null) streakPips[i].color = ComicStyle.Yellow;
+            }
+        }
+
+        /// <summary>
+        /// 版面自适应：图标让出左侧 104，计数徽章占右侧 98；有副标题/连杀方块时主行上收。
+        /// </summary>
+        private void ApplyLayout(bool isBig, bool hasSub, bool hasCount, bool isStreak)
+        {
+            if (_rootRect != null)
+            {
+                _rootRect.sizeDelta = hasSub
+                    ? new Vector2(700f, 126f)
+                    : new Vector2(620f, 92f);
+            }
+
+            float iconSize = isBig ? 72f : 62f;
+            float iconY = hasSub ? 0.67f : 0.5f;
+            if (_iconRect != null)
+            {
+                _iconRect.anchorMin = _iconRect.anchorMax = new Vector2(0f, iconY);
+                _iconRect.pivot = new Vector2(0.5f, 0.5f);
+                _iconRect.anchoredPosition = new Vector2(IconLeft, 0f);
+                _iconRect.sizeDelta = new Vector2(iconSize, iconSize);
+            }
+
+            if (_countRect != null)
+            {
+                _countRect.anchorMin = _countRect.anchorMax = new Vector2(1f, iconY);
+                _countRect.pivot = new Vector2(0.5f, 0.5f);
+                _countRect.anchoredPosition = new Vector2(-CountRight - CountWidth * 0.5f, 0f);
+                _countRect.sizeDelta = new Vector2(CountWidth, isBig ? 86f : CountWidth);
+            }
+
+            float textLeft = _iconAvailable ? TextLeftWithIcon : TextLeftNoIcon;
+            float textRight = hasCount ? -(CountRight + CountWidth + 14f) : -22f;
+
+            if (_mainRect != null)
+            {
+                float bottom = hasSub ? 0.34f : (isStreak ? 0.28f : 0f);
+                _mainRect.anchorMin = new Vector2(0f, bottom);
+                _mainRect.anchorMax = Vector2.one;
+                _mainRect.offsetMin = new Vector2(textLeft, 4f);
+                _mainRect.offsetMax = new Vector2(textRight, -4f);
+            }
+
+            if (_subRect != null)
+            {
+                _subRect.anchorMin = Vector2.zero;
+                _subRect.anchorMax = new Vector2(1f, hasSub ? 0.36f : 0f);
+                _subRect.offsetMin = new Vector2(textLeft, 4f);
+                _subRect.offsetMax = new Vector2(-22f, -2f);
+            }
+
+            if (_pipsRect != null)
+            {
+                float pipX = _iconAvailable ? TextLeftWithIcon + 2f : TextLeftNoIcon + 2f;
+                _pipsRect.anchoredPosition = new Vector2(pipX, 12f);
             }
         }
 
@@ -444,8 +702,9 @@ namespace P1.UI
             _rootRect.anchorMin = new Vector2(0.5f, 0.5f);
             _rootRect.anchorMax = new Vector2(0.5f, 0.5f);
             _rootRect.pivot = new Vector2(0.5f, 0.5f);
-            _rootRect.anchoredPosition = new Vector2(0f, 180f);
-            _rootRect.sizeDelta = new Vector2(540f, 82f);
+            _rootRect.anchoredPosition = new Vector2(0f, HomeY);
+            _rootRect.sizeDelta = new Vector2(620f, 92f);
+            _homePosition = _rootRect.anchoredPosition;
 
             if (canvasGroup == null)
             {
@@ -456,9 +715,9 @@ namespace P1.UI
             canvasGroup.blocksRaycasts = false;
             canvasGroup.interactable = false;
 
-            TMP_FontAsset resolvedCalloutFont = UIThemeSO.Resolve(theme).GetFont(true);
+            UIThemeSO resolved = UIThemeSO.Resolve(theme);
 
-            // 1. 直角纯色墨溅底板（UIInkShapeGraphic 纯网格直角色块）
+            // 1. 直角纯色墨底 + 左侧行动黄竖条（与 HUD 卡色带 / 决战横幅同一语言）
             if (bgGraphic == null)
             {
                 Transform bgTr = transform.Find("CalloutBg");
@@ -486,9 +745,76 @@ namespace P1.UI
             {
                 bgGraphic.raycastTarget = false;
                 bgGraphic.ApplyComic(ComicStyle.Ink, border: ComicStyle.Border);
+                resolved.ApplyHardShadow(bgGraphic, UIHardShadowLevel.Panel);
             }
 
-            // 2. 主标题文字（MainText）
+            if (accentGraphic == null)
+            {
+                var accentGo = new GameObject("CalloutAccent",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                accentGo.transform.SetParent(transform, false);
+                accentGraphic = accentGo.GetComponent<UIInkShapeGraphic>();
+                var accentRect = (RectTransform)accentGo.transform;
+                accentRect.anchorMin = new Vector2(0f, 0f);
+                accentRect.anchorMax = new Vector2(0f, 1f);
+                accentRect.pivot = new Vector2(0f, 0.5f);
+                accentRect.anchoredPosition = new Vector2(6f, 0f);
+                accentRect.sizeDelta = new Vector2(10f, -16f);
+
+                accentGraphic.Shape = UIInkShape.SharpRect;
+                accentGraphic.CornerRadius = ComicStyle.CornerSharp;
+                accentGraphic.BorderWidth = 0f;
+                accentGraphic.HardShadow = false;
+                accentGraphic.Halftone = false;
+                accentGraphic.GlossAlpha = 0f;
+                accentGraphic.DrawGloss = false;
+                accentGraphic.InnerRimAlpha = 0f;
+                accentGraphic.color = ComicStyle.Yellow;
+                accentGraphic.raycastTarget = false;
+            }
+
+            // 2. 图标圆章（成就符号：墨溅 / 交叉剑 / 闪电 / 皇冠 / 星）
+            if (iconBadgeGraphic == null)
+            {
+                var badgeGo = new GameObject("IconBadge",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                badgeGo.transform.SetParent(transform, false);
+                iconBadgeGraphic = badgeGo.GetComponent<UIInkShapeGraphic>();
+                _iconRect = (RectTransform)badgeGo.transform;
+                _iconRect.anchorMin = _iconRect.anchorMax = new Vector2(0f, 0.5f);
+                _iconRect.pivot = new Vector2(0.5f, 0.5f);
+                _iconRect.anchoredPosition = new Vector2(IconLeft, 0f);
+                _iconRect.sizeDelta = new Vector2(62f, 62f);
+
+                iconBadgeGraphic.Shape = UIInkShape.Blob;
+                iconBadgeGraphic.CornerRadius = ComicStyle.CornerBubble;
+                iconBadgeGraphic.BorderWidth = ComicStyle.BorderThin;
+                iconBadgeGraphic.BorderColor = ComicStyle.Ink;
+                iconBadgeGraphic.Halftone = false;
+                iconBadgeGraphic.GlossAlpha = 0f;
+                iconBadgeGraphic.DrawGloss = false;
+                iconBadgeGraphic.InnerRimAlpha = 0f;
+                iconBadgeGraphic.color = ComicStyle.Yellow;
+                iconBadgeGraphic.raycastTarget = false;
+                resolved.ApplyHardShadow(iconBadgeGraphic, UIHardShadowLevel.Tag);
+
+                var iconGo = new GameObject("Icon",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                iconGo.transform.SetParent(badgeGo.transform, false);
+                var iconRect = (RectTransform)iconGo.transform;
+                iconRect.anchorMin = Vector2.zero;
+                iconRect.anchorMax = Vector2.one;
+                iconRect.offsetMin = new Vector2(12f, 12f);
+                iconRect.offsetMax = new Vector2(-12f, -12f);
+
+                iconImage = iconGo.GetComponent<Image>();
+                iconImage.preserveAspect = true;
+                iconImage.color = ComicStyle.Ink;
+                iconImage.raycastTarget = false;
+                iconImage.enabled = false;
+            }
+
+            // 3. 主标题文字（中文大字）
             if (mainText == null)
             {
                 Transform mTr = transform.Find("MainText");
@@ -517,12 +843,12 @@ namespace P1.UI
                 mainText.raycastTarget = false;
                 mainText.alignment = TextAlignmentOptions.Center;
                 mainText.fontStyle = FontStyles.Bold;
-                mainText.fontSize = UITypography.FontSnapped(38f);
+                mainText.fontSize = UITypography.FontSnapped(40f);
                 mainText.color = ComicStyle.Paper;
-                if (resolvedCalloutFont != null) mainText.font = resolvedCalloutFont;
+                mainText.font = resolved.ResolveFont(true, "双杀");
             }
 
-            // 3. 副标题文字（SubText）
+            // 4. 副标题文字（说明性短句）
             if (subText == null)
             {
                 Transform sTr = transform.Find("SubText");
@@ -553,9 +879,101 @@ namespace P1.UI
                 subText.fontStyle = FontStyles.Bold;
                 subText.fontSize = UITypography.FontSnapped(18f);
                 subText.color = ComicStyle.PaperAlt;
-                if (resolvedCalloutFont != null) subText.font = resolvedCalloutFont;
+                subText.font = resolved.ResolveFont(false, "敌方全员倒地");
                 subText.gameObject.SetActive(false);
             }
+
+            // 5. ×N 计数徽章（双杀/三杀/连杀）
+            if (countBadgeGraphic == null)
+            {
+                var countGo = new GameObject("CountBadge",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                countGo.transform.SetParent(transform, false);
+                countBadgeGraphic = countGo.GetComponent<UIInkShapeGraphic>();
+                _countRect = (RectTransform)countGo.transform;
+                _countRect.anchorMin = _countRect.anchorMax = new Vector2(1f, 0.5f);
+                _countRect.pivot = new Vector2(0.5f, 0.5f);
+                _countRect.anchoredPosition = new Vector2(-CountRight - CountWidth * 0.5f, 0f);
+                _countRect.sizeDelta = new Vector2(CountWidth, CountWidth);
+
+                countBadgeGraphic.Shape = UIInkShape.SharpRect;
+                countBadgeGraphic.CornerRadius = ComicStyle.CornerSharp;
+                countBadgeGraphic.BorderWidth = ComicStyle.Border;
+                countBadgeGraphic.BorderColor = ComicStyle.Ink;
+                countBadgeGraphic.Halftone = false;
+                countBadgeGraphic.GlossAlpha = 0f;
+                countBadgeGraphic.DrawGloss = false;
+                countBadgeGraphic.InnerRimAlpha = 0f;
+                countBadgeGraphic.color = ComicStyle.Yellow;
+                countBadgeGraphic.raycastTarget = false;
+                resolved.ApplyHardShadow(countBadgeGraphic, UIHardShadowLevel.Tag);
+
+                var countTxtGo = new GameObject("CountText",
+                    typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+                countTxtGo.transform.SetParent(countGo.transform, false);
+                var countTxtRect = (RectTransform)countTxtGo.transform;
+                countTxtRect.anchorMin = Vector2.zero;
+                countTxtRect.anchorMax = Vector2.one;
+                countTxtRect.offsetMin = new Vector2(2f, 2f);
+                countTxtRect.offsetMax = new Vector2(-2f, -2f);
+
+                countText = countTxtGo.GetComponent<TextMeshProUGUI>();
+                countText.raycastTarget = false;
+                countText.alignment = TextAlignmentOptions.Center;
+                countText.fontStyle = FontStyles.Bold;
+                countText.enableAutoSizing = true;
+                countText.fontSizeMin = UITypography.FontSnapped(24f);
+                countText.fontSizeMax = UITypography.FontSnapped(46f);
+                countText.fontSize = UITypography.FontSnapped(46f);
+                countText.color = ComicStyle.Ink;
+                countText.font = resolved.ResolveFont(true, "×3");
+                countText.textWrappingMode = TextWrappingModes.NoWrap;
+                countText.overflowMode = TextOverflowModes.Overflow;
+            }
+
+            // 6. 连杀方块行（8 颗，逐颗点亮）
+            if (_pipsRect == null)
+            {
+                var pipsGo = new GameObject("StreakPips", typeof(RectTransform));
+                pipsGo.transform.SetParent(transform, false);
+                _pipsRect = (RectTransform)pipsGo.transform;
+                _pipsRect.anchorMin = _pipsRect.anchorMax = new Vector2(0f, 0f);
+                _pipsRect.pivot = new Vector2(0f, 0f);
+                _pipsRect.anchoredPosition = new Vector2(TextLeftWithIcon + 2f, 12f);
+                _pipsRect.sizeDelta = new Vector2(220f, 14f);
+
+                for (int i = 0; i < streakPips.Length; i++)
+                {
+                    var pipGo = new GameObject("Pip" + i,
+                        typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                    pipGo.transform.SetParent(pipsGo.transform, false);
+                    var pipRect = (RectTransform)pipGo.transform;
+                    pipRect.anchorMin = pipRect.anchorMax = new Vector2(0f, 0.5f);
+                    pipRect.pivot = new Vector2(0f, 0.5f);
+                    pipRect.anchoredPosition = new Vector2(i * 20f, 0f);
+                    pipRect.sizeDelta = new Vector2(14f, 14f);
+
+                    var pip = pipGo.GetComponent<UIInkShapeGraphic>();
+                    pip.Shape = UIInkShape.SharpRect;
+                    pip.CornerRadius = ComicStyle.CornerSharp;
+                    pip.BorderWidth = 0f;
+                    pip.HardShadow = false;
+                    pip.Halftone = false;
+                    pip.GlossAlpha = 0f;
+                    pip.DrawGloss = false;
+                    pip.InnerRimAlpha = 0f;
+                    pip.color = ComicStyle.Yellow;
+                    pip.raycastTarget = false;
+                    pip.gameObject.SetActive(false);
+
+                    streakPips[i] = pip;
+                }
+            }
+
+            if (countBadgeGraphic != null) countBadgeGraphic.gameObject.SetActive(false);
+            if (_pipsRect != null) _pipsRect.gameObject.SetActive(false);
+            if (iconBadgeGraphic != null) iconBadgeGraphic.gameObject.SetActive(false);
+            ApplyLayout(false, false, false, false);
         }
     }
 }

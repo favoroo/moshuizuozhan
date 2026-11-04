@@ -119,7 +119,41 @@ namespace P1.Tests
         }
 
         [Test]
-        public void Home_HeroDifficulty_FitsHeaderAndDoesNotOverlapHeroTag()
+        public void ResolveHeroFlow_StacksHeaderWeaponSettingsCtaTopToBottom()
+        {
+            foreach (bool mobile in new[] { false, true })
+            {
+                string tag = mobile ? "[移动端]" : "[桌面端]";
+                HomeMenuMetrics home = MenuLayoutMath.Home(mobile);
+                float height = home.BoardHeight;
+                HeroFlowLayout flow = MenuLayoutMath.ResolveHeroFlow(home, height, mobile);
+                float cardH = MenuLayoutMath.LoadoutCard(mobile).Size.y;
+
+                Assert.AreEqual(home.HeroPadding.y, flow.HeaderTop, 0.01f, tag + " Header 必须贴 Hero 内边距顶部");
+                Assert.AreEqual(home.TagSize.y, flow.HeaderHeight, 0.01f, tag + " Header 高度 = PLAY 角签高度");
+                Assert.AreEqual(cardH, flow.WeaponHeight, 0.01f, tag + " 武器卡高度来自 LoadoutCard");
+
+                // 方案1 的硬约束：Header → 武器卡 → 难度行 → 时长行 → CTA 严格自上而下，不重叠。
+                Assert.GreaterOrEqual(flow.WeaponTop, flow.HeaderTop + flow.HeaderHeight + MenuLayoutMath.HeroWeaponSlotGap - 0.01f,
+                    tag + " 武器卡必须在 Header 下方并留出呼吸位");
+                Assert.GreaterOrEqual(flow.DifficultyTop, flow.WeaponTop + flow.WeaponHeight + MenuLayoutMath.HeroWeaponSlotGap - 0.01f,
+                    tag + " 难度行必须在武器卡下方");
+                Assert.GreaterOrEqual(flow.DurationTop, flow.DifficultyTop + flow.DifficultyHeight + home.DurationRowGap - 0.01f,
+                    tag + " 时长行必须在难度行下方");
+                Assert.LessOrEqual(flow.DurationTop + flow.DurationHeight, flow.CtaTop + 0.01f,
+                    tag + " 时长行不得压住开始游戏按钮");
+                Assert.AreEqual(height - home.HeroPadding.y - home.CtaSize.y, flow.CtaTop, 0.01f,
+                    tag + " CTA 必须贴 Hero 底部内边距上方");
+
+                // 极矮卡片区：仍保持「不压 CTA」的最低优先序。
+                HeroFlowLayout tight = MenuLayoutMath.ResolveHeroFlow(home, 420f, mobile);
+                Assert.GreaterOrEqual(tight.WeaponTop, tight.HeaderTop + tight.HeaderHeight + 12f - 0.01f,
+                    tag + " 极矮卡片区时武器卡仍不得压住 Header");
+            }
+        }
+
+        [Test]
+        public void Home_HeroSettingsRows_SitBelowWeaponSlot_AndAlignWithEachOther()
         {
             foreach (bool mobile in new[] { false, true })
             {
@@ -127,37 +161,66 @@ namespace P1.Tests
                 HomeMenuMetrics home = MenuLayoutMath.Home(mobile);
                 Vector2 canvas = new Vector2(MenuLayoutMath.RefWidth, MenuLayoutMath.RefHeight);
                 HomeBox difficulty = home.HeroDifficulty;
-                HomeBox heroTag = home.HeroTag;
-                HomeBox hero = home.HeroCard;
+                HomeBox duration = home.HeroDuration;
                 HomeBox weaponSlot = home.HeroWeaponSlot;
+                HomeBox hero = home.HeroCard;
                 HomeBox cta = home.HeroCta;
 
                 Assert.IsTrue(difficulty.FitsIn(canvas), tag + " 难度段选不应超出参考画布");
-                Assert.IsTrue(hero.Contains(difficulty.Center.x, difficulty.Center.y),
-                    tag + " 难度段选必须落在 Hero 卡内");
-                Assert.IsFalse(difficulty.Overlaps(heroTag), tag + " 难度段选与 PLAY 角签不得重叠");
-                Assert.Greater(difficulty.X, heroTag.Right, tag + " 难度段选必须在 PLAY 角签右侧");
-                Assert.LessOrEqual(difficulty.Bottom, weaponSlot.Y, tag + " 难度段选不得压住武器整备卡");
-                Assert.LessOrEqual(difficulty.Bottom, cta.Y, tag + " 难度段选不得压住开始游戏按钮");
-                Assert.GreaterOrEqual(difficulty.X, hero.X + home.HeroPadding.x,
-                    tag + " 难度段选不应越过 Hero 内边距");
+                Assert.IsTrue(duration.FitsIn(canvas), tag + " 时长段选不应超出参考画布");
+                Assert.IsTrue(hero.Contains(difficulty.Center.x, difficulty.Center.y), tag + " 难度段选必须落在 Hero 卡内");
+                Assert.IsTrue(hero.Contains(duration.Center.x, duration.Center.y), tag + " 时长段选必须落在 Hero 卡内");
 
-                // 四档总宽 = 4 段 + 3 间隙；段宽必须够放两字中文。
-                float expectedWidth = home.DifficultySegmentSize.x * MenuLayoutMath.DifficultyTierCount
-                                      + home.DifficultyGap * (MenuLayoutMath.DifficultyTierCount - 1);
-                Assert.AreEqual(expectedWidth, difficulty.Width, 0.5f, tag + " 难度段选总宽应为 4 段 + 3 间隙");
+                // 方案1：两行设置都在武器卡下方，且顺序为 难度 → 时长。
+                Assert.GreaterOrEqual(difficulty.Y, weaponSlot.Bottom, tag + " 难度行必须在武器整备卡下方");
+                Assert.GreaterOrEqual(duration.Y, difficulty.Bottom, tag + " 时长行必须在难度行下方");
+                Assert.LessOrEqual(duration.Bottom, cta.Y, tag + " 时长行不得压住开始游戏按钮");
+                Assert.IsFalse(difficulty.Overlaps(duration), tag + " 难度行与时长行不得重叠");
+
+                // 两行同宽、同左缘、同右缘（都铺满 Hero 内宽）：读作一组对局设置。
+                Assert.AreEqual(difficulty.Width, duration.Width, 0.5f, tag + " 难度行与时长行必须同宽");
+                Assert.AreEqual(difficulty.X, duration.X, 0.5f, tag + " 难度行与时长行必须同左缘");
+                Assert.AreEqual(difficulty.Right, duration.Right, 0.5f, tag + " 难度行与时长行必须同右缘");
+                Assert.AreEqual(home.HeroCard.X + home.HeroPadding.x, difficulty.X, 0.5f,
+                    tag + " 设置行应贴 Hero 内边距左缘");
                 Assert.AreEqual(4, MenuLayoutMath.DifficultyTierCount, tag + " 难度必须是四档（新手/轻松/普通/硬核）");
-                Assert.GreaterOrEqual(home.DifficultySegmentSize.x, 64f, tag + " 单段难度按钮应至少 64 宽");
-                Assert.GreaterOrEqual(home.DifficultySegmentSize.y, 44f, tag + " 单段难度按钮高度不得低于桌面可点下限");
+                Assert.AreEqual(3, MenuLayoutMath.MatchDurationOptionCount, tag + " 时长必须是三档（2/3/5 分）");
+                Assert.GreaterOrEqual(home.DifficultyTagSize.x, 72f, tag + " 「难度」角签要放得下两字");
+                Assert.GreaterOrEqual(home.DurationTagSize.x, 72f, tag + " 「时长」角签要放得下两字");
+                Assert.GreaterOrEqual(home.DifficultySegmentSize.y, 44f, tag + " 难度按钮高度不得低于可点下限");
+                Assert.GreaterOrEqual(home.DurationSegmentSize.y, 44f, tag + " 时长按钮高度不得低于可点下限");
 
                 if (mobile)
                 {
-                    Assert.GreaterOrEqual(home.DifficultySegmentSize.y, 64f, "移动端难度按钮高度必须 ≥64（触控下限）");
-                    Assert.GreaterOrEqual(home.DifficultySegmentSize.x, 100f, "移动端单段难度按钮应 ≥100 宽");
-                    Assert.Greater(home.DifficultySegmentSize.x, MenuLayoutMath.Home(false).DifficultySegmentSize.x,
-                        "移动端难度按钮应明显宽于桌面");
+                    // 由竖向胶囊改为横向长条后，触控高度仍必须守住设置控件 64px 下限。
+                    Assert.GreaterOrEqual(home.DifficultySegmentSize.y, 64f, "移动端难度行高度必须 ≥64（触控下限）");
+                    Assert.GreaterOrEqual(home.DurationSegmentSize.y, 64f, "移动端时长行高度必须 ≥64（触控下限）");
+                    Assert.GreaterOrEqual(home.DifficultyTagSize.x, 96f, "移动端「难度」角签应 ≥96 宽");
                 }
             }
+        }
+
+        [Test]
+        public void ResolveHeroDuration_ShrinksSegmentsWithoutOverflowingAvailableWidth()
+        {
+            HomeMenuMetrics desktop = MenuLayoutMath.Home(false);
+
+            // 648 = 桌面 Hero 内宽：角签 + 3 段 + 间隙正好铺满，保持设计段宽。
+            MatchDurationBarLayout design = MenuLayoutMath.ResolveHeroDuration(desktop, 648f);
+            Assert.AreEqual(desktop.DurationSegmentSize.x, design.SegmentWidth, 0.5f,
+                "宽度充足时应保持设计段宽");
+            Assert.AreEqual(desktop.DurationTagSize.x, design.TagWidth, 0.5f,
+                "角签宽度固定，不随可用宽度收窄");
+            Assert.AreEqual(648f, design.TotalWidth, 0.5f, "设计宽度下应正好铺满 Hero 内宽");
+
+            // 极窄：Hero 卡被压到最小宽度（728 × 0.62 → 内宽 371）时的可用区
+            const float narrowAvailable = 371f;
+            MatchDurationBarLayout narrow = MenuLayoutMath.ResolveHeroDuration(desktop, narrowAvailable);
+            Assert.Less(narrow.SegmentWidth, desktop.DurationSegmentSize.x, "窄宽必须收窄段宽");
+            Assert.GreaterOrEqual(narrow.SegmentWidth, desktop.DurationMinSegmentWidth,
+                "段宽不得缩到低于版面表下限");
+            Assert.LessOrEqual(narrow.TotalWidth, narrowAvailable + 0.01f,
+                "收窄后的总宽必须落在可用宽度内");
         }
 
         [Test]
@@ -165,20 +228,21 @@ namespace P1.Tests
         {
             HomeMenuMetrics desktop = MenuLayoutMath.Home(false);
 
-            // 设计宽度：保持版面表尺寸
-            DifficultyBarLayout design = MenuLayoutMath.ResolveHeroDifficulty(desktop, 480f);
+            // 648 = 桌面 Hero 内宽：角签 + 4 段 + 间隙正好铺满，保持设计段宽。
+            DifficultyBarLayout design = MenuLayoutMath.ResolveHeroDifficulty(desktop, 648f);
             Assert.AreEqual(desktop.DifficultySegmentSize.x, design.SegmentWidth, 0.5f,
                 "宽度充足时应保持设计段宽");
             Assert.AreEqual(desktop.DifficultyGap, design.Gap, 0.5f);
+            Assert.AreEqual(648f, design.TotalWidth, 0.5f, "设计宽度下应正好铺满 Hero 内宽");
 
             // 极窄：Hero 卡被压到最小宽度（桌面 0.62 × 728）时的可用区
-            const float narrowAvailable = 207f;
+            const float narrowAvailable = 371f;
             DifficultyBarLayout narrow = MenuLayoutMath.ResolveHeroDifficulty(desktop, narrowAvailable);
             Assert.Less(narrow.SegmentWidth, desktop.DifficultySegmentSize.x, "窄宽必须收窄段宽");
             Assert.GreaterOrEqual(narrow.SegmentWidth, desktop.DifficultyMinSegmentWidth,
                 "段宽不得缩到低于版面表下限");
             Assert.LessOrEqual(narrow.TotalWidth, narrowAvailable + 0.01f,
-                "收窄后的总宽必须落在可用宽度内，不能压住 PLAY 角签");
+                "收窄后的总宽必须落在可用宽度内，不能压住 Hero 内边");
         }
 
         [Test]

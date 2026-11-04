@@ -200,5 +200,150 @@ namespace P1.Tests
             }
             Assert.IsTrue(buffered, "落地前缓冲的跳跃必须在触地帧触发（jump buffer）");
         }
+
+        /// <summary>
+        /// 加特林扫射阶段（扳机已松开、弹幕仍在持续倾泻）身体必须继续面向准星：
+        /// 对齐 INKWAVE weapons.js firingPose() + actor.js _face（蓄力/扫射期间 yaw 目标 = aimYaw，
+        /// 且扫射每帧刷新 fireFacing）。旧实现只在按住扳机的帧刷新保持计时，
+        /// 松手 0.4s 后身体转回移动方向，出现「枪口朝后、子弹朝前」的错位。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator SplatlingStream_KeepsBodyFacingAim_WhileMovingBackward()
+        {
+            yield return LoadPlaybox();
+            var player = PlayerController.LocalPlayer;
+            var motor = player.Motor;
+            var weapon = player.Weapon;
+            Assert.IsNotNull(weapon, "本地玩家应有 WeaponController");
+
+            WeaponConfigSO originalConfig = weapon.Config;
+            var splatlingConfig = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            WeaponConfigSO.ApplySplatlingSpec(splatlingConfig);
+            weapon.EquipWeapon(splatlingConfig);
+            yield return null;
+            Assert.AreEqual(WeaponKind.Splatling, weapon.CurrentWeaponKind, "测试前置：应已装备加特林");
+
+            yield return SettleOnGround(player, new Vector3(10f, 0.4f, 10f));
+            Assert.IsTrue(motor.IsGrounded, "测试起点必须站在地面上");
+
+            Vector3 aim = Vector3.forward;
+            Vector3 moveBack = Vector3.back;
+
+            // 1. 按住扳机蓄力 0.95s（> 0.85s 满蓄力），期间身体朝准星
+            float start = Time.time;
+            while (Time.time - start < 0.95f)
+            {
+                weapon.TryFireMainWeapon(aim);
+                motor.SetFrameIntent(Vector3.zero, aim, false, false, true);
+                yield return null;
+            }
+            Assert.IsTrue(weapon.IsCharging, "按住扳机 0.95s 应处于蓄力中");
+            Assert.IsTrue(weapon.WantsAimFacing, "蓄力中武器应要求身体朝准星");
+
+            // 2. 松开扳机进入扫射，同时持续朝准星反方向后退：身体必须保持朝准星
+            start = Time.time;
+            while (Time.time - start < 0.8f)
+            {
+                motor.SetFrameIntent(moveBack, aim, false, false, false);
+                yield return null;
+            }
+
+            Assert.IsTrue(weapon.IsStreaming, "满蓄力扫射持续 1.7s，0.8s 时应仍在倾泻弹幕");
+            Assert.IsTrue(weapon.WantsAimFacing, "扫射中（扳机已松开）仍应要求身体朝准星");
+            float angle = Vector3.Angle(player.transform.forward, aim);
+            Assert.Less(angle, 25f, $"扫射中后退移动时身体仍应面向准星（实际偏离 {angle:F1}°）");
+
+            // 收尾：先把武器换回原配置再销毁临时配置，避免场景里的 WeaponController 继续引用已销毁的 SO
+            weapon.EquipWeapon(originalConfig);
+            Object.Destroy(splatlingConfig);
+        }
+
+        /// <summary>
+        /// 双枪「翻滚 → 架枪站桩」阶段（<c>lockT</c>，移速锁 0）身体必须继续面向准星：
+        /// 对齐 INKWAVE weapons.js <c>_dualies</c>（<c>lockT &gt; 0</c> 每帧 <c>a.fireFacing = 0.5</c>）。
+        /// 旧实现只在按住扳机的帧朝准星，架枪期间移动输入会让身体原地转圈，
+        /// 而枪已经钉在原地、弹道仍沿准星飞出。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator DualiesTurretLock_KeepsBodyFacingAim_WhileMovingBackward()
+        {
+            yield return LoadPlaybox();
+            var player = PlayerController.LocalPlayer;
+            var motor = player.Motor;
+            var weapon = player.Weapon;
+            Assert.IsNotNull(weapon, "本地玩家应有 WeaponController");
+
+            WeaponConfigSO originalConfig = weapon.Config;
+            var dualiesConfig = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            WeaponConfigSO.ApplyDualiesSpec(dualiesConfig);
+            weapon.EquipWeapon(dualiesConfig);
+            yield return null;
+            Assert.AreEqual(WeaponKind.Dualies, weapon.CurrentWeaponKind, "测试前置：应已装备双枪");
+
+            yield return SettleOnGround(player, new Vector3(10f, 0.4f, 10f));
+            Vector3 aim = Vector3.forward;
+
+            // 先朝准星站定，建立基准朝向（翻滚前的普通朝向）
+            for (int i = 0; i < 10; i++)
+            {
+                motor.SetFrameIntent(Vector3.zero, aim, false, false, false);
+                yield return null;
+            }
+
+            Assert.IsTrue(weapon.TryDodgeRoll(Vector3.forward), "应能触发双枪战术翻滚");
+
+            // 翻滚（0.3s）+ 架枪站桩（0.5s）期间持续朝准星反方向输入移动
+            float start = Time.time;
+            bool sawTurret = false;
+            float turretAngle = 180f;
+            while (Time.time - start < 0.9f)
+            {
+                motor.SetFrameIntent(Vector3.back, aim, false, false, false);
+                yield return null;
+                if (weapon.IsTurretLocked)
+                {
+                    sawTurret = true;
+                    Assert.IsTrue(weapon.WantsAimFacing, "架枪站桩属于开火姿态，武器应要求身体朝准星");
+                    turretAngle = Vector3.Angle(player.transform.forward, aim);
+                }
+            }
+
+            Assert.IsTrue(sawTurret, "翻滚结束应进入架枪站桩状态");
+            Assert.Less(turretAngle, 25f, $"架枪站桩时移动输入不应把身体转离准星（实际偏离 {turretAngle:F1}°）");
+            weapon.EquipWeapon(originalConfig);
+            Object.Destroy(dualiesConfig);
+        }
+
+        /// <summary>
+        /// 外部瞄准姿态请求（副武器手雷按住瞄准：预览弹道与落点按准星解算）：
+        /// 对齐 INKWAVE weapons.js <c>aimingSub → a.fireFacing = 0.3</c>，瞄准期间身体朝准星，
+        /// 即使同时有反向移动输入也不该把身体转走。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator AimFacingRequest_KeepsBodyFacingAim_WhileMovingBackward()
+        {
+            yield return LoadPlaybox();
+            var player = PlayerController.LocalPlayer;
+            var motor = player.Motor;
+
+            yield return SettleOnGround(player, new Vector3(10f, 0.4f, 10f));
+            Vector3 aim = Vector3.forward;
+
+            for (int i = 0; i < 10; i++)
+            {
+                motor.SetFrameIntent(Vector3.zero, aim, false, false, false);
+                yield return null;
+            }
+
+            for (int i = 0; i < 25; i++)
+            {
+                motor.SetFrameIntent(Vector3.back, aim, false, false, false, false, true);
+                yield return null;
+            }
+
+            Assert.IsTrue(motor.IsAimFacingRequested, "外部瞄准请求应被记录（供调试/测试读取）");
+            float angle = Vector3.Angle(player.transform.forward, aim);
+            Assert.Less(angle, 25f, $"手雷瞄准中后退移动时身体仍应面向准星（实际偏离 {angle:F1}°）");
+        }
     }
 }

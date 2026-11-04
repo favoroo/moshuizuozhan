@@ -6,7 +6,7 @@ using UnityEngine;
 namespace P1.Core
 {
     /// <summary>
-    /// 比赛流程状态机：Ready → Countdown(开赛墨幕动画) → Playing(120s) → FinishFreeze → Result → Restart。
+    /// 比赛流程状态机：Ready → Countdown(开赛墨幕动画) → Playing(2/3/5 分钟，首页可选) → FinishFreeze → Result → Restart。
     /// 负责计时、结算取数、清场重开，并向 UI 广播阶段变化。
     /// Countdown 已不再做 3-2-1 数字倒数，而是只播一次入场演出（墨幕涌满 → 虹膜撕开露出战场），
     /// 演完立刻进入 Playing；阶段名保留是为了 WeaponSelect / HUD 复位 / 移动端触控等既有订阅方不必改动。
@@ -78,14 +78,26 @@ namespace P1.Core
             Instance = this;
             // 物理层过滤：场景碰撞体只在启动时分类一次，之后弹丸/角色/Bot 的查询只扫 World|Combatant
             PhysicsLayerBootstrap.EnsureSceneLayers();
-            _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
+            _remaining = ResolveMatchDurationSeconds();
             EnsureRuntimeGuards();
+        }
+
+        /// <summary>
+        /// 本局时长：优先使用首页「时长」段选（GameSettingsService，2/3/5 分钟，默认 2 分钟）；
+        /// 设置服务不可用时回退 GameConfigSO 的设计值，保证纯逻辑测试/编辑器工具仍能开局。
+        /// </summary>
+        private float ResolveMatchDurationSeconds()
+        {
+            float selected = GameSettingsService.MatchDurationSeconds;
+            if (selected > 0f)
+                return selected;
+            return gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
         }
 
         public void Configure(GameConfigSO config)
         {
             gameConfig = config;
-            _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
+            _remaining = ResolveMatchDurationSeconds();
             EnsureRuntimeGuards();
             if (_boundsGuard != null) _boundsGuard.Configure(gameConfig);
             if (_spawnZoneA != null) _spawnZoneA.Configure(Team.TeamA, gameConfig);
@@ -177,7 +189,7 @@ namespace P1.Core
         public void RestartMatch()
         {
             ResetWorld();
-            _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
+            _remaining = ResolveMatchDurationSeconds();
             // 开赛演出：默认走新的墨幕入场（0.86s，与动画同长）；负值才回退旧的 3-2-1 倒计时。
             _countdown = introSeconds >= 0f ? introSeconds : countdownSeconds;
             _finalA = 0f;
@@ -199,7 +211,7 @@ namespace P1.Core
             if (CurrentPhase == Phase.Ready) return;
 
             ResetWorld();
-            _remaining = gameConfig != null ? gameConfig.matchDurationSeconds : 120f;
+            _remaining = ResolveMatchDurationSeconds();
             _countdown = 0f;
             _freeze = 0f;
             _finalA = 0f;

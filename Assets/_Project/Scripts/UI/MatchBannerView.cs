@@ -17,10 +17,10 @@ namespace P1.UI
     /// <summary>
     /// 全屏比赛流程横幅视图（Match Banner View，P4-D）：
     /// 借鉴 Inkwave .iw-bn 街头潮流横幅：
-    /// 1. GO 墨滴炸开巨幅横幅（开赛墨幕撕开后打出）；
-    /// 2. 1:00 决战横幅（ONE MINUTE LEFT!）；
-    /// 3. FINISH 终局定格炸墨横幅。
-    /// 旧 3-2-1 数字倒数已退役：<see cref="ShowCountdown"/> 保留仅为旧场景 / 单测兼容，正式流程不再调用。
+    /// 1. 开赛「开战!」巨幅横幅（开赛墨幕撕开后打出）；
+    /// 2. 最后 1 分钟决战横幅；
+    /// 3. 「结束!」终局定格炸墨横幅。
+    /// 文案统一中文短词，避免玩家读不懂长英文。
     /// </summary>
     [AddComponentMenu("P1/UI/Match Banner View")]
     [RequireComponent(typeof(RectTransform))]
@@ -205,7 +205,7 @@ namespace P1.UI
                     bannerSplatBg.color = ComicStyle.Paper;
                 }
 
-                ApplyBannerText(number.ToString(), 140f, "READY...", 24f, ComicStyle.Ink, ComicStyle.Ink);
+                ApplyBannerText(number.ToString(), 140f, "准备", 24f, ComicStyle.Ink, ComicStyle.Ink);
 
                 if (actionLinesGraphic != null)
                 {
@@ -242,7 +242,7 @@ namespace P1.UI
                 bannerSplatBg.color = ComicStyle.Yellow;
             }
 
-            ApplyBannerText("GO!", 140f, "TURF RIOT START!", 24f, ComicStyle.Ink, ComicStyle.Ink);
+            ApplyBannerText("开战!", 140f, "涂满全场!", 24f, ComicStyle.Ink, ComicStyle.Ink);
 
             if (actionLinesGraphic != null)
             {
@@ -279,7 +279,7 @@ namespace P1.UI
                 bannerSplatBg.color = ComicStyle.Red;
             }
 
-            ApplyBannerText("1:00 LEFT!", 52f, "FINAL MINUTE · TURF NOW!", 22f,
+            ApplyBannerText("最后 1 分钟", 52f, "全力涂地!", 22f,
                 ComicStyle.Paper, ComicStyle.Paper);
 
             if (actionLinesGraphic != null)
@@ -312,7 +312,7 @@ namespace P1.UI
                 bannerSplatBg.color = ComicStyle.Ink;
             }
 
-            ApplyBannerText("FINISH!", 140f, "TIME'S UP!", 24f, ComicStyle.Paper, ComicStyle.Yellow);
+            ApplyBannerText("结束!", 140f, "时间到!", 24f, ComicStyle.Paper, ComicStyle.Yellow);
 
             if (actionLinesGraphic != null)
             {
@@ -335,6 +335,8 @@ namespace P1.UI
         private void ApplyBannerText(string main, float mainSize, string sub, float subSize,
             Color mainColor, Color subColor)
         {
+            UIThemeSO resolved = UIThemeSO.Resolve(theme);
+
             if (bannerMainText != null)
             {
                 float maxFont = UITypography.FontSnapped(mainSize);
@@ -344,6 +346,7 @@ namespace P1.UI
                 bannerMainText.fontSize = maxFont;
                 bannerMainText.textWrappingMode = TextWrappingModes.NoWrap;
                 bannerMainText.overflowMode = TextOverflowModes.Overflow;
+                bannerMainText.font = resolved.ResolveFont(true, main);
                 bannerMainText.text = main;
                 bannerMainText.color = mainColor;
             }
@@ -357,6 +360,8 @@ namespace P1.UI
                 bannerSubText.fontSize = maxFont;
                 bannerSubText.textWrappingMode = TextWrappingModes.NoWrap;
                 bannerSubText.overflowMode = TextOverflowModes.Overflow;
+                // 副标题用正文字重：标题字重只预烘了 ASCII，中文副标题会走运行时动态栅格化。
+                bannerSubText.font = resolved.ResolveFont(false, sub);
                 bannerSubText.text = sub;
                 bannerSubText.color = subColor;
             }

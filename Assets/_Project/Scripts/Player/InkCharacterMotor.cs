@@ -34,6 +34,7 @@ namespace P1.Player
         private bool _wantsToSwim;
         private bool _wantsJump;
         private bool _isFiringOrThrowing;
+        private bool _aimFacingRequested;
         private bool _isLockedBySpecial;
 
         // P35 朝向解耦（对齐 INKWAVE actor.js _face）：人形在开火/投弹及之后一小段时间内面向瞄准方向，
@@ -127,6 +128,13 @@ namespace P1.Player
         /// </summary>
         public float EffectiveMoveSpeed { get; private set; }
         public Vector3 AimDirection => _aimDirectionWorld;
+
+        /// <summary>
+        /// 当前帧是否要求面向准星（主武器开火姿态 / 外部瞄准请求，如副武器按住瞄准）。
+        /// 实际朝向还受潜墨形态与爬墙优先级影响，仅供调试与测试读取。
+        /// </summary>
+        public bool IsAimFacingRequested =>
+            _isFiringOrThrowing || _aimFacingRequested || (_weapon != null && _weapon.WantsAimFacing);
 
         /// <summary>
         /// 潜墨隐匿状态：在己方墨水中潜行且几乎静止时成立。
@@ -234,6 +242,7 @@ namespace P1.Player
             _planarVelocity = Vector3.zero;
             ActualPlanarSpeed = 0f;
             _isFiringOrThrowing = false;
+            _aimFacingRequested = false;
             _aimFacingTimer = 0f;
             _isLockedBySpecial = false;
 
@@ -268,13 +277,19 @@ namespace P1.Player
         /// <summary>
         /// 完整移动输入（包含跳跃控制与大招状态锁定）
         /// </summary>
+        /// <param name="aimFacingRequested">
+        /// 外部瞄准姿态请求（副武器手雷按住瞄准等「不属于主武器策略状态」的准星锁定）：
+        /// 为 true 时本帧身体朝准星，并对齐 INKWAVE weapons.js 的 <c>aimingSub → fireFacing = 0.3</c>
+        /// 刷新松手保持计时。默认 false，旧调用方语义不变。
+        /// </param>
         public void SetFrameIntent(
             Vector3 worldMoveDir,
             Vector3 worldAimDir,
             bool wantsSwim,
             bool wantsJump,
             bool isFiring,
-            bool lockedBySpecial = false)
+            bool lockedBySpecial = false,
+            bool aimFacingRequested = false)
         {
             _moveInputWorld = Vector3.ClampMagnitude(worldMoveDir, 1f);
             _moveInputWorld.y = 0f;
@@ -288,9 +303,10 @@ namespace P1.Player
             _wantsToSwim = wantsSwim;
             _wantsJump = wantsJump;
             _isFiringOrThrowing = isFiring;
-            if (isFiring)
+            _aimFacingRequested = aimFacingRequested;
+            if (isFiring || aimFacingRequested)
             {
-                // 开火瞬间重置保持计时：松手后仍面向准星 aimFacingHoldSeconds 秒
+                // 开火瞬间 / 瞄准中重置保持计时：松手后仍面向准星 aimFacingHoldSeconds 秒
                 _aimFacingTimer = config != null ? Mathf.Max(0f, config.aimFacingHoldSeconds) : 0.4f;
             }
             _isLockedBySpecial = lockedBySpecial;
@@ -717,7 +733,20 @@ namespace P1.Player
             if (_aimFacingTimer > 0f)
                 _aimFacingTimer = Mathf.Max(0f, _aimFacingTimer - dt);
 
-            bool aimFacing = !IsInSquidForm && (_isFiringOrThrowing || _aimFacingTimer > 0f);
+            // 武器处于开火姿态（INKWAVE weapons.js firingPose：蓄力/加特林扫射/滚筒推地与挥击前摇/
+            // 泼桶前摇/双枪翻滚与架枪站桩）：枪口即弹道方向，扳机松开也要保持朝准星。
+            // 旧实现只在「按住扳机」的帧刷新保持计时，加特林松手扫射 0.4s 后身体转回移动方向
+            // → 枪口朝后、子弹朝前；双枪架枪更是移速为 0 却跟着移动输入原地打转。
+            bool weaponAimFacing = !IsInSquidForm && _weapon != null && _weapon.WantsAimFacing;
+
+            // 外部瞄准姿态请求（副武器手雷按住瞄准：预览弹道按准星解算）。
+            bool requestedAimFacing = !IsInSquidForm && _aimFacingRequested;
+
+            if (weaponAimFacing || requestedAimFacing)
+                _aimFacingTimer = config != null ? Mathf.Max(0f, config.aimFacingHoldSeconds) : 0.4f;
+
+            bool aimFacing = !IsInSquidForm &&
+                (_isFiringOrThrowing || _aimFacingTimer > 0f || weaponAimFacing || requestedAimFacing);
 
             Vector3 desiredForward;
             if (IsWallClimbing && _wallNormal.sqrMagnitude > 0.001f)

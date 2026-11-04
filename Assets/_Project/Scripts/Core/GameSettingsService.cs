@@ -6,8 +6,9 @@ namespace P1.Core
     /// <summary>
     /// 全局游戏设置管理服务（单例静态类 + PlayerPrefs 持久化）：
     /// 包含主音量 (0~1)、音乐/音效分轨音量 (0~1)、无障碍屏幕震动比例 (0~1)、帧率上限 (30/60/120/无限制)、
-    /// 第三人称鼠标/触控视角灵敏度 (0.25~2.5)、Y 轴反转、HUD 显示开关（FPS 角标、小地图），
-    /// 以及移动端辅助操作：固定摇杆、开火键拖动转视角、辅助瞄准档位（关/弱/中/强）。
+/// 第三人称鼠标/触控视角灵敏度 (0.25~2.5)、Y 轴反转、HUD 显示开关（FPS 角标、小地图）、
+/// 比赛时长（2/3/5 分钟）、Bot 难度（新手/轻松/普通/硬核），
+/// 以及移动端辅助操作：固定摇杆、开火键拖动转视角、辅助瞄准档位（关/弱/中/强）。
     /// 启动时通过 RuntimeInitializeOnLoadMethod 自动读取并应用；
     /// 支持动态修改、重置为默认值及事件广播。
     /// </summary>
@@ -28,6 +29,7 @@ namespace P1.Core
         private static bool _showMinimap = GameSettingsMath.DefaultShowMinimap;
         private static int _aimAssistLevel = GameSettingsMath.DefaultAimAssistLevel;
         private static int _botDifficulty = GameSettingsMath.DefaultBotDifficulty;
+        private static int _matchDurationMinutes = GameSettingsMath.DefaultMatchDurationMinutes;
 
         public static event Action<float> MasterVolumeChanged;
         public static event Action<float> MusicVolumeChanged;
@@ -43,6 +45,7 @@ namespace P1.Core
         public static event Action<bool> ShowMinimapChanged;
         public static event Action<int> AimAssistLevelChanged;
         public static event Action<int> BotDifficultyChanged;
+        public static event Action<int> MatchDurationChanged;
         public static event Action SettingsChanged;
 
         /// <summary>
@@ -367,6 +370,35 @@ namespace P1.Core
             }
         }
 
+        /// <summary>
+        /// 比赛时长（分钟）：2 / 3 / 5，默认 2 分钟。
+        /// 首页 Hero 卡段选写入；MatchManager 在开局 / 重开 / 返回菜单时读取换算成秒。
+        /// </summary>
+        public static int MatchDurationMinutes
+        {
+            get
+            {
+                EnsureInitialized();
+                return _matchDurationMinutes;
+            }
+            set
+            {
+                EnsureInitialized();
+                int normalized = GameSettingsMath.NormalizeMatchDurationMinutes(value);
+                if (_matchDurationMinutes == normalized)
+                    return;
+
+                _matchDurationMinutes = normalized;
+                SaveMatchDuration();
+                MatchDurationChanged?.Invoke(_matchDurationMinutes);
+                SettingsChanged?.Invoke();
+            }
+        }
+
+        /// <summary>当前选择的比赛时长（秒），供 MatchManager 计时直接使用。</summary>
+        public static float MatchDurationSeconds =>
+            GameSettingsMath.GetMatchDurationSeconds(MatchDurationMinutes);
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void AutoInitialize()
         {
@@ -407,6 +439,7 @@ namespace P1.Core
             _showMinimap = GameSettingsMath.DefaultShowMinimap;
             _aimAssistLevel = GameSettingsMath.DefaultAimAssistLevel;
             _botDifficulty = GameSettingsMath.DefaultBotDifficulty;
+            _matchDurationMinutes = GameSettingsMath.DefaultMatchDurationMinutes;
 
             SaveAll();
             ApplyAll();
@@ -425,6 +458,7 @@ namespace P1.Core
             ShowMinimapChanged?.Invoke(_showMinimap);
             AimAssistLevelChanged?.Invoke(_aimAssistLevel);
             BotDifficultyChanged?.Invoke(_botDifficulty);
+            MatchDurationChanged?.Invoke(_matchDurationMinutes);
             SettingsChanged?.Invoke();
         }
 
@@ -456,6 +490,9 @@ namespace P1.Core
             _aimAssistLevel = GameSettingsMath.NormalizeAimAssistLevel(
                 PlayerPrefs.GetInt(GameSettingsMath.KeyAimAssistLevel, GameSettingsMath.DefaultAimAssistLevel));
             _botDifficulty = LoadBotDifficultyWithMigration();
+            _matchDurationMinutes = GameSettingsMath.NormalizeMatchDurationMinutes(
+                PlayerPrefs.GetInt(GameSettingsMath.KeyMatchDurationMinutes,
+                    GameSettingsMath.DefaultMatchDurationMinutes));
         }
 
         /// <summary>
@@ -565,6 +602,12 @@ namespace P1.Core
             PlayerPrefs.Save();
         }
 
+        private static void SaveMatchDuration()
+        {
+            PlayerPrefs.SetInt(GameSettingsMath.KeyMatchDurationMinutes, _matchDurationMinutes);
+            PlayerPrefs.Save();
+        }
+
         private static void SaveAll()
         {
             PlayerPrefs.SetFloat(GameSettingsMath.KeyMasterVolume, _masterVolume);
@@ -582,6 +625,7 @@ namespace P1.Core
             PlayerPrefs.SetInt(GameSettingsMath.KeyAimAssistLevel, _aimAssistLevel);
             PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficulty, _botDifficulty);
             PlayerPrefs.SetInt(GameSettingsMath.KeyBotDifficultyVersion, GameSettingsMath.BotDifficultyVersion);
+            PlayerPrefs.SetInt(GameSettingsMath.KeyMatchDurationMinutes, _matchDurationMinutes);
             PlayerPrefs.Save();
         }
 

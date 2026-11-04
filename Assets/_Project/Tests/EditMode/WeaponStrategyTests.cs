@@ -642,6 +642,31 @@ namespace P1.Tests
         }
 
         [Test]
+        public void Slosher_WaveFollowsAimAtRelease_NotAtPress()
+        {
+            var config = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            _createdConfigs.Add(config);
+            WeaponConfigSO.ApplySlosherSpec(config);
+
+            var host = new FakeHost { Config = config, CurrentInk = 100f };
+            var strategy = new SlosherWeaponStrategy(config);
+
+            // 按下时朝正前方
+            WeaponAim pressAim = ForwardAim(9.5f);
+            Assert.IsTrue(strategy.OnTriggerHeld(pressAim, 1f / 60f, host));
+            Assert.IsTrue(strategy.IsWindingUp);
+
+            // 前摇期间甩枪到正右方：墨浪必须跟着「甩出瞬间」的准星（INKWAVE fireSlosh 读出手时的 aimPoint）
+            WeaponAim releaseAim = WeaponAim.FromDirection(Vector3.right, new Vector3(9f, 0f, 0f));
+            strategy.Tick(0.14f, true, releaseAim, host);
+
+            Assert.AreEqual(8, host.Shots.Count, "前摇走完泼出 8 滴");
+            Vector3 head = host.Shots[0].Direction;
+            Assert.Greater(head.x, 0.5f, $"头滴应飞向甩出瞬间的准星（+X），实际方向 {head}");
+            Assert.Less(Mathf.Abs(head.z), 0.2f, $"不应残留按下瞬间的正前方方向，实际方向 {head}");
+        }
+
+        [Test]
         public void Slosher_VolleyAggregatesDamage_PreventingMultiHitBurst()
         {
             // 创建一个 100 HP 的假敌人

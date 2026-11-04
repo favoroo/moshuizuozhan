@@ -38,18 +38,52 @@ namespace P1.Tests
         }
 
         [Test]
-        public void MobileLayoutCustomizer_Backdrop_DoesNotBlockRaycasts()
+        public void MobileLayoutCustomizer_RootImage_DoesNotBlockRaycasts()
         {
-            // 验证修复 Bug 1：编辑模式背板 Image 的 raycastTarget 必须为 false，杜绝吞掉 PointerDown
+            // 编辑器根节点上的 Image 只保留历史语义（真正铺底的是 LayoutEditBackdrop，在按键之下）；
+            // 它必须 raycastTarget=false，否则会盖在按键上吞掉 PointerDown。
             var go = new GameObject("TestCustomizerHost", typeof(RectTransform));
             var safeArea = go.GetComponent<RectTransform>();
             var customizer = MobileLayoutCustomizer.Create(null, safeArea, null);
 
             var bgImg = customizer.GetComponent<Image>();
             Assert.IsNotNull(bgImg, "Customizer 根物体必须包含背景 Image");
-            Assert.IsFalse(bgImg.raycastTarget, "全屏背板 raycastTarget 必须为 false，避免吞掉按键与代理的 PointerDown");
+            Assert.IsFalse(bgImg.raycastTarget, "根节点 Image raycastTarget 必须为 false，避免吞掉按键与代理的 PointerDown");
 
             Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void MobileLayoutCustomizer_Backdrop_IsOpaqueAndRenderedUnderItems()
+        {
+            // 首页打开布局编辑器时，实心背板必须压在首页 UI 之上、触屏按键之下，
+            // 否则首页卡片会从半透明遮罩里透出来（旧实现 0.65 透明 + 盖在按键上）。
+            var host = new GameObject("TestCanvasRoot", typeof(RectTransform));
+            var safeGo = new GameObject("SafeArea", typeof(RectTransform));
+            safeGo.transform.SetParent(host.transform, false);
+            var safeArea = safeGo.GetComponent<RectTransform>();
+
+            var itemGo = new GameObject("TestItem", typeof(RectTransform));
+            itemGo.transform.SetParent(safeArea, false);
+
+            var customizer = MobileLayoutCustomizer.Create(null, safeArea, null);
+            customizer.RegisterItem("Fire", "射击", itemGo.GetComponent<RectTransform>(), null, Vector2.zero, 1f, 1f);
+
+            var backdrop = host.transform.Find("LayoutEditBackdrop");
+            Assert.IsNotNull(backdrop, "编辑器必须创建独立的 LayoutEditBackdrop 节点");
+            var img = backdrop.GetComponent<Image>();
+            Assert.IsNotNull(img, "背板必须带 Image 才能铺底");
+            Assert.IsTrue(img.raycastTarget, "背板必须吃掉空白处的点击，避免穿透到已遮住的首页卡片");
+            Assert.AreEqual(1f, img.color.a, 1e-4f, "背板必须不透明，首页卡片不允许透出");
+            Assert.AreEqual(0, backdrop.GetSiblingIndex(), "背板必须排在 SafeArea 之前（渲染在触屏按键之下）");
+            Assert.IsFalse(backdrop.gameObject.activeSelf, "未进入编辑模式时背板必须隐藏");
+
+            customizer.Open();
+            Assert.IsTrue(backdrop.gameObject.activeSelf, "进入编辑模式后背板必须显示");
+            customizer.Close(save: false);
+            Assert.IsFalse(backdrop.gameObject.activeSelf, "退出编辑模式后背板必须隐藏");
+
+            Object.DestroyImmediate(host);
         }
 
         [Test]

@@ -35,6 +35,12 @@ namespace P1.UI
         public bool IsBig;
         public Team SplattedTeam;
 
+        /// <summary>徽章计数（多杀 / 连杀为 2、3、4…；其它播报为 0 = 不显示）。</summary>
+        public int Count;
+
+        /// <summary>成就图标键名（UIIconLibrary；空 = 不显示图标）。</summary>
+        public string IconKey;
+
         public bool HasCallout => Kind != CalloutKind.None;
 
         public static readonly CalloutResult None = new CalloutResult
@@ -44,7 +50,9 @@ namespace P1.UI
             SubText = string.Empty,
             Priority = 0,
             IsBig = false,
-            SplattedTeam = Team.Neutral
+            SplattedTeam = Team.Neutral,
+            Count = 0,
+            IconKey = string.Empty
         };
     }
 
@@ -53,20 +61,24 @@ namespace P1.UI
     /// 对齐 INKWAVE 的 Callout 播报链（hud.js _onSplatted）：
     /// 维护本地连杀窗口（4.2s）、复仇目标（Revenge）、各战斗员连杀数（Shutdown 阈值 ≥3）、
     /// 首杀标记（FirstSplat 每局一次）以及团灭判定（Wipeout 带复活去抖与冷却）。
+    ///
+    /// 文案一律用中文短词（「双杀 / 三杀 / 全队击倒」），数字与成就图标由视图层补足；
+    /// 不再把 "WIPEOUT!" / "SPLAT STREAK ×3" 这类长英文甩给玩家。
     /// </summary>
     public class MatchCalloutMath
     {
-        public const string TextWipeout = "WIPEOUT!";
-        public const string SubWipeout = "THE WHOLE TEAM IS SPLATTED";
+        public const string TextWipeout = "全队击倒";
+        public const string SubWipeout = "敌方全员倒地";
 
-        public const string TextDoubleSplat = "DOUBLE SPLAT!";
-        public const string TextTripleSplat = "TRIPLE SPLAT!";
-        public const string TextQuadSplat = "QUAD SPLAT!";
+        public const string TextDoubleSplat = "双杀";
+        public const string TextTripleSplat = "三杀";
+        public const string TextQuadSplat = "四杀";
 
-        public const string TextFirstSplat = "FIRST SPLAT!";
-        public const string TextRevenge = "REVENGE!";
-        public const string TextShutdown = "SHUTDOWN!";
-        public const string SubShutdown = "ENDED ENEMY'S STREAK";
+        public const string TextFirstSplat = "首杀";
+        public const string TextRevenge = "反杀";
+        public const string TextShutdown = "终结连杀";
+        public const string SubShutdown = "打断敌方的连杀";
+        public const string TextStreak = "连杀";
 
         private static readonly string[] StreakTexts = InitStreakTexts();
 
@@ -75,7 +87,7 @@ namespace P1.UI
             var arr = new string[32];
             for (int i = 0; i < arr.Length; i++)
             {
-                arr[i] = "SPLAT STREAK ×" + i;
+                arr[i] = TextStreak + " ×" + i;
             }
             return arr;
         }
@@ -206,7 +218,9 @@ namespace P1.UI
                     SubText = SubWipeout,
                     Priority = (int)CalloutKind.Wipeout,
                     IsBig = true,
-                    SplattedTeam = ev.VictimTeam
+                    SplattedTeam = ev.VictimTeam,
+                    Count = 0,
+                    IconKey = "glyph_crown"
                 };
             }
 
@@ -250,7 +264,9 @@ namespace P1.UI
                     SubText = string.Empty,
                     Priority = (int)CalloutKind.MultiSplat,
                     IsBig = isBig,
-                    SplattedTeam = ev.VictimTeam
+                    SplattedTeam = ev.VictimTeam,
+                    Count = multiCount,
+                    IconKey = "mark_splat"
                 };
             }
 
@@ -270,7 +286,9 @@ namespace P1.UI
                     SubText = string.Empty,
                     Priority = (int)CalloutKind.FirstSplat,
                     IsBig = false,
-                    SplattedTeam = ev.VictimTeam
+                    SplattedTeam = ev.VictimTeam,
+                    Count = 0,
+                    IconKey = "mark_splat"
                 };
             }
 
@@ -285,7 +303,9 @@ namespace P1.UI
                     SubText = string.Empty,
                     Priority = (int)CalloutKind.Revenge,
                     IsBig = false,
-                    SplattedTeam = ev.VictimTeam
+                    SplattedTeam = ev.VictimTeam,
+                    Count = 0,
+                    IconKey = "glyph_swords"
                 };
             }
 
@@ -299,7 +319,9 @@ namespace P1.UI
                     SubText = SubShutdown,
                     Priority = (int)CalloutKind.Shutdown,
                     IsBig = false,
-                    SplattedTeam = ev.VictimTeam
+                    SplattedTeam = ev.VictimTeam,
+                    Count = 0,
+                    IconKey = "glyph_bolt"
                 };
             }
 
@@ -309,11 +331,13 @@ namespace P1.UI
                 return new CalloutResult
                 {
                     Kind = CalloutKind.Streak,
-                    MainText = GetStreakText(_localStreak),
+                    MainText = TextStreak,
                     SubText = string.Empty,
                     Priority = (int)CalloutKind.Streak,
                     IsBig = false,
-                    SplattedTeam = ev.VictimTeam
+                    SplattedTeam = ev.VictimTeam,
+                    Count = _localStreak,
+                    IconKey = "glyph_star"
                 };
             }
 

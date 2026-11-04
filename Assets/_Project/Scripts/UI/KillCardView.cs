@@ -11,7 +11,7 @@ namespace P1.UI
     /// 遵循 Inkwave .iw-kcard 设计：
     /// - 圆角长条胶囊底（UIInkShapeGraphic RoundedRect），带 Chunky 纯黑描边与果冻晃动；
     /// - 左侧队伍色圆形底，内嵌纯白矢量武器图标（7类主武器 / 手雷 / 大招）；
-    /// - 击杀者粗体名、SPLAT 标签、受害者名字；
+    /// - 击杀者粗体名、中文「击倒」标签（本地击杀带 ×N 连杀数）、受害者名字；
     /// - UISpringMotion 物理弹簧弹性滑入与淡出。
     /// </summary>
     [AddComponentMenu("P1/UI/Kill Card View")]
@@ -145,7 +145,7 @@ namespace P1.UI
                 actionTagText.fontStyle = FontStyles.Bold;
                 actionTagText.alignment = TextAlignmentOptions.MidlineLeft;
                 actionTagText.color = ComicStyle.Yellow;
-                actionTagText.text = "SPLAT";
+                actionTagText.text = "击倒";
                 actionTagText.raycastTarget = false;
                 actionTagText.textWrappingMode = TextWrappingModes.NoWrap;
                 actionTagText.overflowMode = TextOverflowModes.Overflow;
@@ -234,15 +234,15 @@ namespace P1.UI
 
             // 3. 文字（击杀卡档 24，移动端走 UITypography ×1.28）
             float fontSize = UITypography.FontSnapped(24f);
-            // 第二行（标签 + 受害者）在移动端若跟 24×1.28=30 号，"CRUSHED!" 实测宽 181px，
-            // 会从 78px 的起点一路压到受害者名（196px 起）上。这里把该行收到 24 号：
-            // 桌面不变（仍是 24），移动端仍高于 20px 下限，且给受害者名留出 157px。
+            // 第二行（标签 + 受害者）在移动端若跟 24×1.28=30 号，「击倒 ×2!」会比
+            // 桌面宽约 1.28 倍，从 78px 起点压到受害者名上。这里把该行收到 24 号：
+            // 桌面不变（仍是 24），移动端仍高于 20px 下限，且给受害者名留出足够宽度。
             float rowFontSize = UITypography.IsMobileLike ? UITypography.FontSnapped(19f) : fontSize;
 
             if (killerText != null)
             {
                 // 名字用正文字重（MiSans-Semibold）：拉丁 + CJK + 省略号字形齐全；
-                // 标题字重（MiSans-Heavy）只留给 SPLAT! 这类大写标签。
+                // 标题字重（MiSans-Heavy）只留给「击倒」这类强调标签。
                 killerText.font = resolved.ResolveFont(false, ev.KillerName);
                 killerText.text = ev.KillerName;
                 killerText.fontSize = fontSize;
@@ -252,11 +252,16 @@ namespace P1.UI
 
             if (actionTagText != null)
             {
-                string tag = ev.IsLocalPlayerKiller ? "CRUSHED!" : "SPLAT!";
+                // 中文短标签：本地玩家用「击倒 ×N!」把连杀数带进信息流，
+                // 非本地击杀只写「击倒」，避免整条播报被英文 SPLAT/CRUSHED 占满。
+                int streak = ev.IsLocalPlayerKiller ? KillFeedbackState.CurrentStreak : 0;
+                string tag = ev.IsLocalPlayerKiller
+                    ? (streak >= 2 ? $"击倒 ×{streak}!" : "击倒!")
+                    : "击倒";
                 actionTagText.font = resolved.ResolveFont(true, tag);
                 actionTagText.text = tag;
                 actionTagText.fontSize = rowFontSize;
-                actionTagText.color = ev.IsLocalPlayerVictim ? ComicStyle.Yellow : ComicStyle.Yellow;
+                actionTagText.color = ev.IsLocalPlayerKiller ? ComicStyle.Yellow : ComicStyle.Paper;
             }
 
             if (victimText != null)

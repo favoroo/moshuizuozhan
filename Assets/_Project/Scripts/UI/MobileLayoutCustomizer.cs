@@ -11,7 +11,9 @@ namespace P1.UI
     /// <summary>
     /// 移动端按键自定义布局编辑器（几何大胆风 Geometric Bold P14）：
     /// 1. 进入编辑模式后游戏自动暂停，退出时严格还原进入前的 Time.timeScale；
-    /// 2. 根节点全屏背板 raycastTarget=false，杜绝吞掉按键 PointerDown；
+    /// 2. 全屏实心深墨背板（独立节点）压在首页/战场之上、所有触屏按键之下：
+    ///    首页卡片与白色底板不再从半透明遮罩里透出来；背板同时吃掉落在空白处的点击，
+    ///    避免隔着不透明背板误触首页卡片（按键在背板之上，不受影响）；
     /// 3. 为每个可配置按键挂载透明命中代理层，并在编辑态解开摇杆 blocksRaycasts 阻断；
 /// 4. 坐标拖拽采用 (startPos + delta) 增量运算，并按父级 SafeArea 尺寸做 Clamp（留出半宽半高边距）；
     /// 5. 选中项展示 3px 纯黄描边 + 四角方块几何标记与实时读数角标；
@@ -41,6 +43,7 @@ namespace P1.UI
         private MobileTouchUI _touchUI;
         private RectTransform _safeArea;
         private GameObject _overlayRoot;
+        private GameObject _backdrop;
         private RectTransform _inspectorCard;
         private TextMeshProUGUI _inspectorTitle;
         private TextMeshProUGUI _inspectorCoord;
@@ -109,9 +112,42 @@ namespace P1.UI
             customizer._touchUI = touchUI;
             customizer._safeArea = safeArea;
             customizer.BuildUI(circleRingSprite);
+            customizer.BuildBackdrop();
             go.SetActive(false);
 
             return customizer;
+        }
+
+        /// <summary>
+        /// 全屏实心编辑背板：与首页舞台同色的不透明深墨底（#12100E）。
+        /// 挂在触屏画布根（SafeArea 的父级）并置为首个兄弟节点：
+        /// - 排在 SafeArea 之前 → 压在首页卡片/战斗 HUD 之上、所有触屏按键与编辑面板之下；
+        /// - 不受 SafeArea 缩进影响 → 刘海/圆角区域也不会漏出首页的白底。
+        /// 旧实现是挂在编辑器根节点上的 65% 半透明遮罩，既挡不住首页 UI，又把按键一起压暗一层。
+        /// </summary>
+        private void BuildBackdrop()
+        {
+            Transform host = _safeArea != null && _safeArea.parent != null ? _safeArea.parent : (Transform)_safeArea;
+            if (host == null) host = transform;
+
+            var go = new GameObject("LayoutEditBackdrop", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(host, false);
+
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+
+            var img = go.GetComponent<Image>();
+            img.color = MatchFlowUI.StageInk;
+            // 背板在按键之下，命中顺序天然是「按键 → 背板」：按键与拖拽代理照常收到 PointerDown，
+            // 只有落在空白处的点击会被背板吃掉，不会穿透到已被遮住的首页卡片/武器抽屉。
+            img.raycastTarget = true;
+
+            go.transform.SetAsFirstSibling();
+            go.SetActive(false);
+            _backdrop = go;
         }
 
         public void RegisterItem(string id, string displayName, RectTransform target, CanvasGroup group, Vector2 defaultPos, float defaultScale, float defaultAlpha)
@@ -171,9 +207,10 @@ namespace P1.UI
             var theme = UIThemeSO.Resolve(null);
             float controlFont = UITypography.FontSnapped(ControlFontBase);
 
-            // 1. 全屏半透明暗色背景遮罩（必须 raycastTarget = false，绝不能吞底层射线）
+            // 1. 根节点背板：只保留「不吞射线」的图形语义（旧版本这里是 65% 半透明黑，
+            //    既挡不住首页 UI，又会把已渲染的按键再压暗一层）。真正的实心背板见 BuildBackdrop()。
             var bgImg = gameObject.AddComponent<Image>();
-            bgImg.color = new Color(0.04f, 0.04f, 0.06f, 0.65f);
+            bgImg.color = Color.clear;
             bgImg.raycastTarget = false; // 【关键修复 1】：背板不拦截射线
 
             // 2. 顶部主控制栏（直角纯黑底 + 3px 实线边框，960 宽居中，不再横贯全屏挡住顶部按键）
@@ -623,6 +660,7 @@ namespace P1.UI
                 }
 
                 if (_selectionHighlight != null) _selectionHighlight.gameObject.SetActive(false);
+                if (_backdrop != null) _backdrop.SetActive(false);
                 _touchUI?.SetLayoutEditing(false);
                 gameObject.SetActive(false);
             }
@@ -799,6 +837,7 @@ namespace P1.UI
                 ApplyConfig(saved);
             }
 
+            if (_backdrop != null) _backdrop.SetActive(true);
             gameObject.SetActive(true);
             RefreshAuxButtons();
 
@@ -866,6 +905,7 @@ namespace P1.UI
 
             Time.timeScale = _previousTimeScale; // 【关键修复 3】：还原进入前的值，绝不硬编码 1
             if (_selectionHighlight != null) _selectionHighlight.gameObject.SetActive(false);
+            if (_backdrop != null) _backdrop.SetActive(false);
             gameObject.SetActive(false);
             OnClosed?.Invoke();
         }

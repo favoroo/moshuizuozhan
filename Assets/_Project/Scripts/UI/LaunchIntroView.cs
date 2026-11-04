@@ -7,24 +7,30 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 游戏内启动动画（P1 品牌层）：Unity 启动画面之后、首页可交互之前播放一次。
+    /// 游戏内启动层：Unity 启动画面之后、首页可交互之前出现一次。两种模式：
     ///
-    /// 演出顺序（时序见 <see cref="LaunchIntroMath"/>）：
+    /// **正式启动 = 纯黑遮罩（coverOnly，见 <see cref="Create"/>）**
+    /// 系统启动 logo 之后只铺一块纯黑全屏（挡住误触），等首页几何稳定
+    /// （<see cref="MatchFlowUI.HasStableHomeGeometry"/>）且黑够 <see cref="CoverMinSeconds"/> 后
+    /// 硬切消失——观感就是「启动 logo → 黑屏 → 直接首页」，不再有第二段品牌动画。
+    /// 上限 <see cref="RevealHoldCap"/> 兜底放行，绝不卡死开场。
+    ///
+    /// **品牌动画（默认 Create，仅供编辑器预览 / 测试 / 将来复用）**
     /// 1. 墨黑舞台 + 低透明几何装饰（不参与循环动画，只负责构图）；
     /// 2. 橙色墨点从中心炸开 → App 图标贴纸（纸白 + 墨框 + 硬影）弹入；
     /// 3. 「墨水大作战」逐字显示 + `INK TURF` 副标 + 载入块逐格填满；
     /// 4. 整块舞台向上硬擦除（底缘一道黄/蓝双色线），露出已就绪的首页。
-    ///    擦除会等 <see cref="MatchFlowUI.HasStableHomeGeometry"/>（安全区/画布 settle）才放行，
-    ///    真机冷启动首帧脏几何排出的错版首页永远不会被露出来；上限 <see cref="RevealHoldCap"/> 兜底。
+    ///    擦除同样等 <see cref="MatchFlowUI.HasStableHomeGeometry"/> 才放行，
+    ///    真机冷启动首帧脏几何排出的错版首页永远不会被露出来。
     ///
     /// 设计约束：
     /// - 不碰场景 YAML：运行时自建独立 Overlay Canvas（sortingOrder 10000），
     ///   与 MenuBootstrap / WeaponSelectBootstrap 的「零入侵装配」一致；
-    /// - 全屏底板 raycastTarget = true，保证动画期间不会点穿到首页按钮；
+    /// - 全屏底板 raycastTarget = true，保证遮罩期间不会点穿到首页按钮；
     /// - 只在主场景（存在 MatchManager）的首次启动出现一次；PlayMode 测试的
     ///   InitTestScene 没有 MatchManager，因此自动化不会看到它，无需测试特判；
-    /// - 任意键/点击/触屏可跳过；跳过只快进到擦除段，不做瞬时消失（硬切更符合风格）；
-    /// - 所有装饰性构建 / 播放都包 try-catch：启动演出失败绝不能拖垮整局游戏。
+    /// - 品牌动画模式任意键/点击/触屏可跳过；跳过只快进到擦除段，不做瞬时消失（硬切更符合风格）；
+    /// - 所有构建 / 播放都包 try-catch：启动层失败绝不能拖垮整局游戏。
     /// </summary>
     [DefaultExecutionOrder(-100)]
     public class LaunchIntroView : MonoBehaviour
@@ -36,6 +42,9 @@ namespace P1.UI
 
         /// <summary>擦除前最多为首页几何 settle 多等多久（unscaled 秒）；超时兜底放行，绝不卡死开场。</summary>
         private const float RevealHoldCap = 2.5f;
+
+        /// <summary>黑屏遮罩最短显示时长：避免只闪 1~2 帧被读成渲染故障；黑屏本身就是「加载中」的语言。</summary>
+        private const float CoverMinSeconds = 0.12f;
 
         private static readonly Color StageInk = ComicStyle.FromHex(0x0B0B0B);
         private static readonly Color BarTrack = ComicStyle.FromHex(0x2A2A2A);
@@ -60,6 +69,7 @@ namespace P1.UI
         private bool _revealGateOpen;
         private bool _revealGateProbed;
         private bool _revealGateHostPresent;
+        private bool _coverOnly;
 
         private RectTransform _stageRoot;
         private RectTransform _markRoot;
@@ -98,23 +108,32 @@ namespace P1.UI
             // 测试框架的 InitTestScene / UIDemo / 样式画廊都不该被启动动画遮挡。
             if (UnityEngine.Object.FindAnyObjectByType<MatchManager>() == null) return;
 
-            Create();
+            // 正式启动只走纯黑遮罩：系统启动 logo 之后黑屏直接进首页，不再播第二段品牌动画。
+            Create(coverOnly: true);
         }
 
         /// <summary>
-        /// 创建启动动画。默认遵守「每局会话只播一次」；
+        /// 创建启动层。默认遵守「每局会话只出现一次」；
         /// <paramref name="force"/> 仅供编辑器预览 / 测试重复取景，正式流程不要传 true。
+        /// <paramref name="coverOnly"/> = 纯黑遮罩模式：不建品牌装饰/贴纸/标题/载入条，
+        /// 等首页几何稳定后硬切消失，实现「启动 logo → 黑屏 → 直接首页」。
         /// </summary>
-        public static LaunchIntroView Create(bool force = false)
+        public static LaunchIntroView Create(bool force = false, bool coverOnly = false)
         {
             if (!Application.isPlaying || Disabled) return null;
             if (s_instance != null) return s_instance;
             if (s_shown && !force) return null;
 
+            // 先进失活态再挂组件：AddComponent 会立即触发 Awake，Awake 里的 Build 必须
+            // 已经知道是黑屏模式（否则会先建出一整套品牌元素）。
             var go = new GameObject("[LaunchIntro]", typeof(RectTransform));
-            UnityEngine.Object.DontDestroyOnLoad(go);
-
+            go.SetActive(false);
             LaunchIntroView view = go.AddComponent<LaunchIntroView>();
+            view._coverOnly = coverOnly;
+
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            go.SetActive(true);
+
             s_instance = view;
             s_shown = true;
             return view;
@@ -133,9 +152,13 @@ namespace P1.UI
         {
             try
             {
-                _theme = UIThemeSO.Resolve(RuntimeAssetLibrary.Load() != null
-                    ? RuntimeAssetLibrary.Load().uiTheme
-                    : null);
+                // 黑屏模式不碰字体/主题：少一次资源库加载，启动路径更短。
+                if (!_coverOnly)
+                {
+                    _theme = UIThemeSO.Resolve(RuntimeAssetLibrary.Load() != null
+                        ? RuntimeAssetLibrary.Load().uiTheme
+                        : null);
+                }
                 Build();
             }
             catch (Exception e)
@@ -152,6 +175,13 @@ namespace P1.UI
             try
             {
                 _time += Time.unscaledDeltaTime;
+
+                // 纯黑遮罩模式（正式启动路径）：没有演出，几何稳定 + 黑够最短时长后硬切消失。
+                if (_coverOnly)
+                {
+                    if (CoverRevealReady()) Finish();
+                    return;
+                }
 
                 if (LaunchIntroMath.CanSkip(_time) && AnySkipPressed())
                 {
@@ -195,6 +225,26 @@ namespace P1.UI
                 Debug.LogWarning("[P1][LaunchIntro] 启动动画播放异常，已跳过：" + e.Message);
                 Finish();
             }
+        }
+
+        /// <summary>
+        /// 黑屏遮罩的放行条件：已黑够最短时长（避免 1~2 帧闪黑读成故障），
+        /// 且首页几何稳定（无 MatchFlowUI 视为无门可等），上限 <see cref="RevealHoldCap"/> 兜底。
+        /// </summary>
+        private bool CoverRevealReady()
+        {
+            if (_time < CoverMinSeconds) return false;
+
+            if (!_revealGateProbed)
+            {
+                _revealGateProbed = true;
+                _revealGateHostPresent =
+                    UnityEngine.Object.FindAnyObjectByType<MatchFlowUI>() != null;
+            }
+
+            return !_revealGateHostPresent ||
+                   MatchFlowUI.HasStableHomeGeometry ||
+                   _time >= RevealHoldCap;
         }
 
         private void Finish()
@@ -328,6 +378,9 @@ namespace P1.UI
             var stageBg = CreateImage("StageInk", _stageRoot, StageInk);
             Stretch(stageBg.rectTransform);
             stageBg.raycastTarget = true;
+
+            // 纯黑遮罩模式到此为止：没有装饰、贴纸、标题、载入条与擦除边。
+            if (_coverOnly) return;
 
             BuildDecorations();
             BuildMark();

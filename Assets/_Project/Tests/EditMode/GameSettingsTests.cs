@@ -98,7 +98,8 @@ namespace P1.Tests
                 GameSettingsMath.KeyMusicVolume,
                 GameSettingsMath.KeySfxVolume,
                 GameSettingsMath.KeyShowFps,
-                GameSettingsMath.KeyShowMinimap
+                GameSettingsMath.KeyShowMinimap,
+                GameSettingsMath.KeyMatchDurationMinutes
             };
 
             for (int i = 0; i < keys.Length; i++)
@@ -122,6 +123,7 @@ namespace P1.Tests
             Assert.AreEqual("P1_Settings_SfxVolume", GameSettingsMath.KeySfxVolume);
             Assert.AreEqual("P1_Settings_ShowFps", GameSettingsMath.KeyShowFps);
             Assert.AreEqual("P1_Settings_ShowMinimap", GameSettingsMath.KeyShowMinimap);
+            Assert.AreEqual("P1_Settings_MatchDurationMinutes", GameSettingsMath.KeyMatchDurationMinutes);
         }
 
         [Test]
@@ -175,6 +177,24 @@ namespace P1.Tests
         }
 
         [Test]
+        public void MatchDuration_NormalizesToThreeOptionsAndLabels()
+        {
+            Assert.AreEqual(2, GameSettingsMath.NormalizeMatchDurationMinutes(1));
+            Assert.AreEqual(2, GameSettingsMath.NormalizeMatchDurationMinutes(2));
+            Assert.AreEqual(3, GameSettingsMath.NormalizeMatchDurationMinutes(3));
+            Assert.AreEqual(5, GameSettingsMath.NormalizeMatchDurationMinutes(4));
+            Assert.AreEqual(5, GameSettingsMath.NormalizeMatchDurationMinutes(9));
+
+            Assert.AreEqual("2分", GameSettingsMath.GetMatchDurationLabel(2));
+            Assert.AreEqual("3分", GameSettingsMath.GetMatchDurationLabel(3));
+            Assert.AreEqual("5分", GameSettingsMath.GetMatchDurationLabel(5));
+            Assert.AreEqual(3f * 60f, GameSettingsMath.GetMatchDurationSeconds(3), 1e-4f);
+
+            Assert.AreEqual(3, GameSettingsMath.AvailableMatchDurationMinutes.Length);
+            Assert.AreEqual(2, GameSettingsMath.DefaultMatchDurationMinutes);
+        }
+
+        [Test]
         public void GameSettingsService_ResetToDefaults_RestoresExpectedValues()
         {
             GameSettingsService.EnsureInitialized();
@@ -192,6 +212,7 @@ namespace P1.Tests
             GameSettingsService.ShowMinimap = false;
             GameSettingsService.AimAssistLevel = 0;
             GameSettingsService.BotDifficulty = GameSettingsMath.MaxBotDifficulty;
+            GameSettingsService.MatchDurationMinutes = GameSettingsMath.MatchDurationLongMinutes;
 
             GameSettingsService.ResetToDefaults();
 
@@ -209,6 +230,7 @@ namespace P1.Tests
             Assert.AreEqual(GameSettingsMath.DefaultShowMinimap, GameSettingsService.ShowMinimap);
             Assert.AreEqual(GameSettingsMath.DefaultAimAssistLevel, GameSettingsService.AimAssistLevel);
             Assert.AreEqual(GameSettingsMath.DefaultBotDifficulty, GameSettingsService.BotDifficulty);
+            Assert.AreEqual(GameSettingsMath.DefaultMatchDurationMinutes, GameSettingsService.MatchDurationMinutes);
         }
     }
 }

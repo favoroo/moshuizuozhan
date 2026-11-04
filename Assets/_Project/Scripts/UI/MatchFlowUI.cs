@@ -121,6 +121,12 @@ namespace P1.UI
         private readonly TextMeshProUGUI[] _difficultyTexts =
             new TextMeshProUGUI[MenuLayoutMath.DifficultyTierCount];
 
+        // 首页 Hero 卡第二行的比赛时长段选（2分/3分/5分），选择结果持久化到 GameSettingsService。
+        private readonly UIInkShapeGraphic[] _durationShapes =
+            new UIInkShapeGraphic[MenuLayoutMath.MatchDurationOptionCount];
+        private readonly TextMeshProUGUI[] _durationTexts =
+            new TextMeshProUGUI[MenuLayoutMath.MatchDurationOptionCount];
+
         private readonly List<UISpringMotion> _homeEntrance = new List<UISpringMotion>();
         private bool _homeEntrancePending;
         private bool _resultEntrancePending;
@@ -223,7 +229,9 @@ namespace P1.UI
             EnsureBannerView();
             EnsureResultVisuals();
             EnsureUpdateUI();
-            EnsureReadyVisuals();
+            // 首次构建不播错峰入场：启动层（LaunchIntroView 纯黑遮罩）会盖住前几帧，
+            // 揭开时必须是完整首页，否则会看到卡片还在逐张淡入/弹入。
+            EnsureReadyVisuals(false);
 
             if (startButton != null) startButton.onClick.AddListener(OnStartClicked);
             if (restartButton != null) restartButton.onClick.AddListener(OnStartClicked);
@@ -231,6 +239,7 @@ namespace P1.UI
             // 设置页改音量/震屏时同步首页设置卡读数（事件由 GameSettingsService 静态广播）
             GameSettingsService.SettingsChanged += RefreshHomeInfo;
             GameSettingsService.BotDifficultyChanged += HandleBotDifficultyChanged;
+            GameSettingsService.MatchDurationChanged += HandleMatchDurationChanged;
 
             // 右下角检查更新标签跟随检查结果换文案（更新弹窗仍由 UpdateManager 自己弹）
             UpdateManager updater = UpdateManager.Instance;
@@ -603,110 +612,77 @@ namespace P1.UI
 
             float innerWidth = heroWidth - m.HeroPadding.x * 2f;
 
-            // 1. 顶部 Header：左上「PLAY」硬角签 + 右侧 Bot 难度四档段选 + 模式微标
+            // 1. 顶部 Header：左上「PLAY」硬角签 + 模式微标（不再挤塞难度/时长，清爽通透）
             CreateStageTag(card, "HeroTag", "PLAY", m.TagSize, m.TagFont, theme,
                 ComicStyle.Ink, ComicStyle.Paper, m.HeroPadding, TextAlignmentOptions.Center);
 
-            float difficultyWidth = BuildHeroDifficulty(card, theme, m, innerWidth);
-
             float badgeFont = UITypography.FontSnapped(mobile ? 22f : 20f);
             float badgeX = m.HeroPadding.x + m.TagSize.x + 16f;
-            float badgeWidth = innerWidth - m.TagSize.x - 16f
-                               - (difficultyWidth > 0.01f ? difficultyWidth + 16f : 0f);
+            float badgeWidth = innerWidth - m.TagSize.x - 16f;
             if (badgeWidth >= 96f)
             {
-                // 移动端只保留「4V4 · TURF」，给难度段选让出头部宽度；桌面保留完整英文微标。
-                CreateBoardText(card, "HeroModeBadge", mobile ? "4V4 · TURF" : "4V4 · TURF WAR", badgeFont, true,
+                CreateBoardText(card, "HeroModeBadge", mobile ? "4V4 · 涂地模式" : "4V4 · 涂地对战 (TURF WAR)", badgeFont, true,
                     ComicStyle.WithAlpha(ComicStyle.Ink, 0.72f),
                     new Vector2(badgeX, m.HeroPadding.y + (m.TagSize.y - badgeFont * 1.4f) * 0.5f),
                     new Vector2(badgeWidth, badgeFont * 1.4f),
                     TextAlignmentOptions.MidlineLeft, 2f, FontStyles.Bold);
             }
 
-            // 1.5 标题群：游戏名 Hero 大标题 + 拉丁副标。
-            // 版面表一直保留 TitleFont/LatinFont 两档但构建时未落地，
-            // 导致 Hero 卡中部整片空场、首页失去品牌锚点。标题群落在武器整备卡与 CTA 之间的
-            // 空档，全部左对齐；底部必须让开桌面端 CTA 上方的按键提示区。
-            // 规则速记不放在这里：顶部微标、左下角类型签与 KEYS 浮层已覆盖，再放是冗余。
-            {
-                float slotTopLocal = m.HeroPadding.y + m.TagSize.y + (m.ShowTopButton ? 48f : 68f);
-                float slotBottomLocal = slotTopLocal + MenuLayoutMath.LoadoutCard(m.ShowTopButton).Size.y;
-                float ctaTopLocal = _homeBoard.Height - m.HeroPadding.y - m.CtaSize.y;
-                float hintFont = UITypography.FontSnapped(18f);
-                float bottomLimit = mobile
-                    ? ctaTopLocal - 12f
-                    : ctaTopLocal - hintFont * 1.6f - 8f - 6f;
-                float freeTop = slotBottomLocal + 12f;
-                float freeH = Mathf.Max(0f, bottomLimit - freeTop);
+            // 2. 流式排版：从上到下 Header → 武器整备卡 → 难度行 → 时长行 → CTA
+            // 武器整备卡由 WeaponSelectView 对齐 HeroWeaponSlot 渲染，高度与位置由 ResolveHeroFlow 统一收口。
+            HeroFlowLayout flow = MenuLayoutMath.ResolveHeroFlow(m, _homeBoard.Height, mobile);
+            BuildHeroDifficulty(card, theme, m, innerWidth, flow.DifficultyTop);
+            BuildHeroDuration(card, theme, m, innerWidth, flow.DurationTop);
 
-                // 移动端空档浅，×1.28 后的 154 号会同时撞武器卡与 CTA；
-                // 移动端取版面表原值 120（与桌面相等，不违反「移动端不小于桌面」）。
-                float titleFont = mobile ? m.TitleFont : UITypography.FontSnapped(m.TitleFont);
-                float titleBoxH = Mathf.Min(titleFont * 1.3f, freeH);
-                float latinFont = UITypography.FontSnapped(m.LatinFont);
-                float latinH = latinFont * 1.5f;
-                bool withLatin = !mobile && titleBoxH + 8f + latinH <= freeH;
-                float groupH = withLatin ? titleBoxH + 8f + latinH : titleBoxH;
-                float titleY = freeTop + Mathf.Max(0f, (freeH - groupH) * 0.35f);
-                CreateBoardText(card, "HeroTitle", GameVersion.APP_NAME, titleFont, true, ComicStyle.Ink,
-                    new Vector2(m.HeroPadding.x, titleY), new Vector2(innerWidth, titleBoxH),
-                    TextAlignmentOptions.MidlineLeft, 2f, FontStyles.Bold);
-
-                if (withLatin)
-                {
-                    CreateBoardText(card, "HeroLatin", "INK TURF · SPLAT THE DOCK", latinFont, true,
-                        ComicStyle.WithAlpha(ComicStyle.Ink, 0.72f),
-                        new Vector2(m.HeroPadding.x + 4f, titleY + titleBoxH + 8f),
-                        new Vector2(innerWidth - 4f, latinH),
-                        TextAlignmentOptions.MidlineLeft, 6f, FontStyles.Bold | FontStyles.UpperCase);
-                }
-            }
-
-            // 2. 中间区域：专为「武器整备卡」预留黄金展示位（由 WeaponSelectView 对齐 HeroWeaponSlot 渲染，白底黑边+硬阴影）
-            // 桌面端在 CTA 上方添加极淡极简的操作提示微字，贴心且不喧宾夺主
+            // 3. 桌面端操作提示微字：在时长行底与 CTA 之间居中偏下，舒适呼应
             if (!mobile)
             {
                 float hintFont = UITypography.FontSnapped(18f);
-                float ctaTop = _homeBoard.Top + _homeBoard.Height - m.HeroPadding.y - m.CtaSize.y;
-                float hintY = (ctaTop - _homeBoard.Top) - hintFont * 1.6f - 8f;
-                CreateBoardText(card, "HeroKeyHint", "SPACE / ENTER TO BATTLE", hintFont, true,
-                    ComicStyle.WithAlpha(ComicStyle.Ink, 0.40f),
-                    new Vector2(m.HeroPadding.x, hintY),
-                    new Vector2(innerWidth, hintFont * 1.6f),
-                    TextAlignmentOptions.Center, 2f, FontStyles.Bold);
+                float durBottom = flow.DurationTop + flow.DurationHeight;
+                float hintFree = flow.CtaTop - durBottom;
+                if (hintFree >= hintFont * 1.6f + 8f)
+                {
+                    float hintY = durBottom + (hintFree - hintFont * 1.6f) * 0.65f;
+                    CreateBoardText(card, "HeroKeyHint", "SPACE / ENTER TO BATTLE", hintFont, true,
+                        ComicStyle.WithAlpha(ComicStyle.Ink, 0.40f),
+                        new Vector2(m.HeroPadding.x, hintY),
+                        new Vector2(innerWidth, hintFont * 1.6f),
+                        TextAlignmentOptions.Center, 2f, FontStyles.Bold);
+                }
             }
 
-            // 3. 主 CTA：复用场景里的 StartButton（保持 MenuSafeArea 直接子级）
+            // 4. 主 CTA：复用场景里的 StartButton（保持 MenuSafeArea 直接子级）
             if (startButton != null) PlaceHomeCta(theme, m, mobile);
         }
 
         /// <summary>
-        /// Hero 卡头部右侧的 Bot 难度四档段选（新手 / 轻松 / 普通 / 硬核）。
-        /// 位置：与 PLAY 角签同一行、右对齐贴 Hero 内边；窄窗先收窄段宽，绝不压住 PLAY。
+        /// Hero 卡中部对局控制区的 Bot 难度四档段选（新手 / 轻松 / 普通 / 硬核）。
+        /// 位置：位于武器整备卡正下方，与时长行同宽同右缘对齐铺满 innerWidth。
         /// 点击只改 <see cref="GameSettingsService.BotDifficulty"/>，Bot 通过事件即时重建缩放配置。
-        /// 返回整组占用的宽度（供模式微标让位）。
         /// </summary>
-        private float BuildHeroDifficulty(RectTransform card, UIThemeSO theme, HomeMenuMetrics m,
-            float innerWidth)
+        private void BuildHeroDifficulty(RectTransform card, UIThemeSO theme, HomeMenuMetrics m,
+            float innerWidth, float rowY)
         {
-            // 给 PLAY 角签 + 右侧模式微标留最小呼吸位，剩余宽度才是段选可用区。
-            float available = Mathf.Max(0f, innerWidth - m.TagSize.x - 16f - 16f);
-            DifficultyBarLayout layout = MenuLayoutMath.ResolveHeroDifficulty(m, available);
-
+            DifficultyBarLayout layout = MenuLayoutMath.ResolveHeroDifficulty(m, innerWidth);
             float segHeight = m.DifficultySegmentSize.y;
-            float rowY = m.HeroPadding.y + (m.TagSize.y - segHeight) * 0.5f;
 
             var rowGo = new GameObject("HeroDifficultyRow", typeof(RectTransform));
             rowGo.transform.SetParent(card, false);
             var row = (RectTransform)rowGo.transform;
-            row.anchorMin = new Vector2(1f, 1f);
-            row.anchorMax = new Vector2(1f, 1f);
-            row.pivot = new Vector2(1f, 1f);
-            row.anchoredPosition = new Vector2(-m.HeroPadding.x, -rowY);
+            row.anchorMin = new Vector2(0f, 1f);
+            row.anchorMax = new Vector2(0f, 1f);
+            row.pivot = new Vector2(0f, 1f);
+            row.anchoredPosition = new Vector2(m.HeroPadding.x, -rowY);
             row.sizeDelta = new Vector2(layout.TotalWidth, segHeight);
 
+            // 左侧「难度」黑角签：与 PLAY 同语言的黑底白字硬角签，语义清晰
+            CreateStageTag(row, "HeroDifficultyTag", "难度",
+                new Vector2(layout.TagWidth, segHeight), m.DifficultyTagFont, theme,
+                ComicStyle.Ink, ComicStyle.Paper, Vector2.zero, TextAlignmentOptions.Center,
+                layout.TagWidth);
+
             float fontSize = UITypography.FontSnapped(m.DifficultyFont);
-            float x = 0f;
+            float x = layout.TagWidth + layout.TagGap;
             for (int level = GameSettingsMath.MinBotDifficulty; level <= GameSettingsMath.MaxBotDifficulty; level++)
             {
                 int capturedLevel = level;
@@ -731,7 +707,6 @@ namespace P1.UI
             }
 
             RefreshDifficultyButtons();
-            return layout.TotalWidth;
         }
 
         /// <summary>单段难度药丸：纸白实底 + 墨框 + 居中粗体字；选中态由 RefreshDifficultyButtons 改色。</summary>
@@ -810,6 +785,92 @@ namespace P1.UI
                 shape.Refresh();
 
                 TextMeshProUGUI text = _difficultyTexts[i];
+                if (text != null)
+                    text.color = selected ? ComicStyle.Yellow : ComicStyle.Ink;
+            }
+        }
+
+        /// <summary>
+        /// Hero 卡中部对局控制区的比赛时长段选（2分 / 3分 / 5分）：
+        /// 黑色「时长」角签 + 3 段纸白药丸，与难度行严格对齐铺满 innerWidth。
+        /// 点击只改 <see cref="GameSettingsService.MatchDurationMinutes"/>，下一局开局时生效。
+        /// </summary>
+        private void BuildHeroDuration(RectTransform card, UIThemeSO theme, HomeMenuMetrics m,
+            float innerWidth, float rowY)
+        {
+            MatchDurationBarLayout layout = MenuLayoutMath.ResolveHeroDuration(m, innerWidth);
+            float segHeight = m.DurationSegmentSize.y;
+
+            var rowGo = new GameObject("HeroDurationRow", typeof(RectTransform));
+            rowGo.transform.SetParent(card, false);
+            var row = (RectTransform)rowGo.transform;
+            row.anchorMin = new Vector2(0f, 1f);
+            row.anchorMax = new Vector2(0f, 1f);
+            row.pivot = new Vector2(0f, 1f);
+            row.anchoredPosition = new Vector2(m.HeroPadding.x, -rowY);
+            row.sizeDelta = new Vector2(layout.TotalWidth, segHeight);
+
+            // 「时长」角签：与 PLAY 同语言的黑底白字硬角签，给第二行一个明确语义锚点。
+            CreateStageTag(row, "HeroDurationTag", "时长",
+                new Vector2(layout.TagWidth, segHeight), m.DurationTagFont, theme,
+                ComicStyle.Ink, ComicStyle.Paper, Vector2.zero, TextAlignmentOptions.Center,
+                layout.TagWidth);
+
+            float fontSize = UITypography.FontSnapped(m.DurationFont);
+            float x = layout.TagWidth + layout.TagGap;
+            int[] options = GameSettingsMath.AvailableMatchDurationMinutes;
+            for (int i = 0; i < options.Length && i < _durationShapes.Length; i++)
+            {
+                int capturedMinutes = options[i];
+                string label = GameSettingsMath.GetMatchDurationLabel(capturedMinutes);
+
+                Button button = CreateDifficultySegment(row, "Duration_" + capturedMinutes, label,
+                    layout.SegmentWidth, segHeight, theme, fontSize);
+                if (button == null) continue;
+
+                var rect = (RectTransform)button.transform;
+                rect.anchorMin = new Vector2(0f, 0.5f);
+                rect.anchorMax = new Vector2(0f, 0.5f);
+                rect.pivot = new Vector2(0f, 0.5f);
+                rect.anchoredPosition = new Vector2(x, 0f);
+
+                _durationShapes[i] = button.GetComponent<UIInkShapeGraphic>();
+                _durationTexts[i] = button.GetComponentInChildren<TextMeshProUGUI>();
+
+                button.onClick.AddListener(() => OnMatchDurationSelected(capturedMinutes));
+                x += layout.SegmentWidth + layout.Gap;
+            }
+
+            RefreshMatchDurationButtons();
+        }
+
+        private void OnMatchDurationSelected(int minutes)
+        {
+            GameSettingsService.MatchDurationMinutes = minutes;
+            RefreshMatchDurationButtons();
+        }
+
+        private void HandleMatchDurationChanged(int minutes)
+        {
+            RefreshMatchDurationButtons();
+        }
+
+        /// <summary>时长选中态与难度段选一致：墨黑实底 + 金黄字；未选中纸白 + 墨字。</summary>
+        private void RefreshMatchDurationButtons()
+        {
+            int current = GameSettingsService.MatchDurationMinutes;
+            int[] options = GameSettingsMath.AvailableMatchDurationMinutes;
+            for (int i = 0; i < _durationShapes.Length; i++)
+            {
+                UIInkShapeGraphic shape = _durationShapes[i];
+                if (shape == null) continue;
+
+                bool selected = i < options.Length && options[i] == current;
+                shape.color = selected ? ComicStyle.Ink : ComicStyle.Paper;
+                shape.BorderColor = ComicStyle.Ink;
+                shape.Refresh();
+
+                TextMeshProUGUI text = _durationTexts[i];
                 if (text != null)
                     text.color = selected ? ComicStyle.Yellow : ComicStyle.Ink;
             }
@@ -1816,6 +1877,7 @@ namespace P1.UI
             if (checkUpdateButton != null) checkUpdateButton.onClick.RemoveListener(OnCheckUpdateClicked);
             GameSettingsService.SettingsChanged -= RefreshHomeInfo;
             GameSettingsService.BotDifficultyChanged -= HandleBotDifficultyChanged;
+            GameSettingsService.MatchDurationChanged -= HandleMatchDurationChanged;
 
             if (_updateTagResetRoutine != null)
             {

@@ -39,6 +39,7 @@ namespace P1.UI
         [SerializeField] private RectTransform finalMinuteBannerRoot;
         [SerializeField] private UIInkShapeGraphic bannerBgGraphic;
         [SerializeField] private TMP_Text bannerText;
+        [SerializeField] private Image bannerIcon;
         [SerializeField] private UISpringMotion bannerMotion;
 
         // 比分条填充条的四边内缩（四周露出等宽墨黑边框）：左右 1.5% / 上下 12%，在 520×56 底座上约 8px / 7px。
@@ -46,6 +47,16 @@ namespace P1.UI
         // A 队顶边、B 队底边直接贴到面板边缘，四边框忽有忽无。
         internal const float FillInsetX = 0.015f;
         internal const float FillInsetY = 0.12f;
+
+        // 顶部倒计时几何（2026-11-04 整体缩小一档）：旧值 260×112 / 字号 76 在 1080p 下块头过大，
+        // 现在桌面 210×92 / 64，移动端球体 240×104、字号由 FontSnapped ×1.28 放大到 82。
+        private const float TimerFontBaseSize = 64f;
+        private const float TimerReadyFontBaseSize = 44f;
+        private static readonly Vector2 TimerBlobDesktopSize = new Vector2(210f, 92f);
+        private static readonly Vector2 TimerBlobMobileSize = new Vector2(240f, 104f);
+
+        private Vector2 ResolveBlobSize()
+            => _isMobileLayout ? TimerBlobMobileSize : TimerBlobDesktopSize;
 
         // 弹簧插值
         private UISpringFloat _springPercentA;
@@ -84,9 +95,9 @@ namespace P1.UI
 
         private void ApplyLayoutMetrics()
         {
-            // 计时器档 72~76（桌面 76，移动端 ×1.28）；黑块 260×112，移动端再放大一档
-            float timerFontSize = UITypography.FontSnapped(76f);
-            Vector2 blobSize = _isMobileLayout ? new Vector2(290f, 124f) : new Vector2(260f, 112f);
+            // 计时器档 64（移动端 ×1.28 → 82）；黑块桌面 210×92，移动端再放大一档
+            float timerFontSize = UITypography.FontSnapped(TimerFontBaseSize);
+            Vector2 blobSize = ResolveBlobSize();
 
             if (timerBlobRoot != null)
             {
@@ -94,7 +105,7 @@ namespace P1.UI
             }
             if (timerText != null)
             {
-                timerText.fontSize = _lastRemainingSeconds > 0f ? timerFontSize : UITypography.FontSnapped(56f);
+                timerText.fontSize = _lastRemainingSeconds > 0f ? timerFontSize : UITypography.FontSnapped(TimerReadyFontBaseSize);
             }
             if (percentTextA != null)
             {
@@ -120,8 +131,17 @@ namespace P1.UI
             {
                 finalMinuteBannerRoot.anchoredPosition = new Vector2(0f, -(70f + blobSize.y + 16f));
                 finalMinuteBannerRoot.sizeDelta = _isMobileLayout
-                    ? new Vector2(540f, 100f)
-                    : new Vector2(460f, 84f);
+                    ? new Vector2(560f, 104f)
+                    : new Vector2(500f, 88f);
+            }
+
+            if (bannerIcon != null)
+            {
+                var iconRect = (RectTransform)bannerIcon.transform;
+                iconRect.anchorMin = iconRect.anchorMax = new Vector2(0f, 0.5f);
+                iconRect.pivot = new Vector2(0.5f, 0.5f);
+                iconRect.anchoredPosition = new Vector2(28f, 0f);
+                iconRect.sizeDelta = new Vector2(30f, 30f);
             }
 
             if (bannerText != null)
@@ -133,15 +153,16 @@ namespace P1.UI
                 bannerText.fontSize = maxFont;
                 bannerText.textWrappingMode = TextWrappingModes.NoWrap;
                 bannerText.overflowMode = TextOverflowModes.Overflow;
-                // 左侧 10px 黄条 + 12px 呼吸位；右侧留 18px，文字永不贴边。
-                bannerText.rectTransform.offsetMin = new Vector2(26f, 6f);
+                // 左侧 10px 黄条 + 时钟图标；无图标时退回 26px 内边距。
+                float leftInset = bannerIcon != null && bannerIcon.enabled ? 54f : 26f;
+                bannerText.rectTransform.offsetMin = new Vector2(leftInset, 6f);
                 bannerText.rectTransform.offsetMax = new Vector2(-18f, -6f);
             }
 
             var self = transform as RectTransform;
             if (self != null)
             {
-                self.sizeDelta = new Vector2(580f, _isMobileLayout ? 340f : 310f);
+                self.sizeDelta = new Vector2(620f, _isMobileLayout ? 350f : 320f);
             }
         }
 
@@ -200,7 +221,7 @@ namespace P1.UI
         /// </summary>
         public void SetTime(float remainingSeconds, bool isPlayingOrFinished = true)
         {
-            float timerFontSize = UITypography.FontSnapped(76f);
+            float timerFontSize = UITypography.FontSnapped(TimerFontBaseSize);
 
             if (!isPlayingOrFinished)
             {
@@ -209,8 +230,9 @@ namespace P1.UI
                     _lastTimerTextReady = true;
                     _lastMinutes = -1;
                     _lastSeconds = -1;
-                    timerText.text = "READY";
-                    timerText.fontSize = UITypography.FontSnapped(56f);
+                    timerText.text = "准备";
+                    timerText.font = UIThemeSO.Resolve(theme).ResolveFont(true, "准备");
+                    timerText.fontSize = UITypography.FontSnapped(TimerReadyFontBaseSize);
                 }
                 ResetBlobColorToNormal();
                 return;
@@ -393,8 +415,8 @@ namespace P1.UI
             RectTransform rootRect = GetComponent<RectTransform>();
             if (rootRect == null) rootRect = gameObject.AddComponent<RectTransform>();
 
-            float timerFontSize = UITypography.FontSnapped(76f);
-            Vector2 blobSize = _isMobileLayout ? new Vector2(290f, 124f) : new Vector2(260f, 112f);
+            float timerFontSize = UITypography.FontSnapped(TimerFontBaseSize);
+            Vector2 blobSize = ResolveBlobSize();
 
             rootRect.anchorMin = new Vector2(0.5f, 1f);
             rootRect.anchorMax = new Vector2(0.5f, 1f);
@@ -561,7 +583,7 @@ namespace P1.UI
                 finalMinuteBannerRoot.pivot = new Vector2(0.5f, 1f);
                 // 初值只作占位：BuildHierarchy 末尾会按真实球高重算（桌面 198 / 移动 210）。
                 finalMinuteBannerRoot.anchoredPosition = new Vector2(0f, -198f);
-                finalMinuteBannerRoot.sizeDelta = new Vector2(460f, 84f);
+                finalMinuteBannerRoot.sizeDelta = new Vector2(500f, 88f);
 
                 // 左侧行动黄竖条：让横幅从「一条红条」变成有层级的通知卡（与 HUD 卡色带同语言）。
                 var accentGo = new GameObject("BannerAccent", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
@@ -583,6 +605,16 @@ namespace P1.UI
                 accentGraphic.InnerRimAlpha = 0f;
                 accentGraphic.color = ComicStyle.Yellow;
                 accentGraphic.raycastTarget = false;
+
+                // 时钟图标：把「只剩 1 分钟」从一行文字变成一个一眼能读的符号；取不到图标就隐藏。
+                var iconGo = new GameObject("BannerIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                iconGo.transform.SetParent(finalMinuteBannerRoot, false);
+                bannerIcon = iconGo.GetComponent<Image>();
+                bannerIcon.sprite = UIIconLibrary.Get("glyph_clock");
+                bannerIcon.preserveAspect = true;
+                bannerIcon.color = ComicStyle.Paper;
+                bannerIcon.raycastTarget = false;
+                bannerIcon.enabled = bannerIcon.sprite != null;
 
                 bannerMotion = bannerGo.GetComponent<UISpringMotion>();
                 bannerMotion.SetTheme(resolvedTheme);
@@ -610,12 +642,12 @@ namespace P1.UI
                 bannerTxtRect.offsetMax = new Vector2(-18f, -6f);
 
                 bannerText = bannerTxtGo.GetComponent<TextMeshProUGUI>();
-                bannerText.font = resolvedTheme.ResolveFont(true, "1:00 · FINAL MINUTE!");
+                bannerText.font = resolvedTheme.ResolveFont(true, "最后 1 分钟");
                 bannerText.fontSize = UITypography.FontSnapped(26f);
                 bannerText.fontStyle = FontStyles.Bold;
                 bannerText.alignment = TextAlignmentOptions.Center;
                 bannerText.color = ComicStyle.Paper;
-                bannerText.text = "1:00 · FINAL MINUTE!";
+                bannerText.text = "最后 1 分钟 · 全力涂地!";
 
                 finalMinuteBannerRoot.gameObject.SetActive(false);
             }

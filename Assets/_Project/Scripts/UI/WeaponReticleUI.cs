@@ -61,6 +61,7 @@ namespace P1.UI
         private UIInkShapeGraphic _subAimBg;
         private Image _subAimFill;
         private RectTransform _subAimBarBg;
+        private Image _subAimIcon;
         private TMP_Text _subAimLabelText;
         private TMP_Text _subAimTimeText;
         private TMP_Text _subAimReadyText;
@@ -625,11 +626,10 @@ namespace P1.UI
 
         /// <summary>
         /// 手雷冷却徽标（旧名 SubAimBadge）：准星下方一条几何风读数——
-        /// 冷却中「手雷 █████░░ 5.4s」，就绪时整条翻黄显示「手雷就绪」，1.8s 后收起。
+        /// 冷却中「[手雷图标] █████░░ 5.4s」，就绪时整条翻黄显示「手雷就绪」，1.8s 后收起。
         ///
-        /// 旧版固定 220×36 + 三块等分文字框：桌面 18 号的 "BOMB" 已比 60px 框宽 2.5px，
-        /// 移动端放大到 24 号后 "BOMB" 会直接压进进度条、"READY" 也会顶出胶囊。
-        /// 现在按平台算出胶囊宽度、进度条吃掉两侧读数之外的剩余宽度，并给就绪态单独的整条黄底文案。
+        /// 左侧优先用手雷图标（UIIconLibrary.sub_bomb），取不到时退回中文「手雷」；
+        /// 不再使用 "BOMB" / "BOMB READY · E" 这类英文长标签。
         /// </summary>
         private void BuildSubAimBadge()
         {
@@ -638,7 +638,11 @@ namespace P1.UI
             float badgeWidth = _subAimMobile ? 340f : 292f;
             float badgeHeight = _subAimMobile ? 48f : 40f;
             float pad = 14f;
-            float labelWidth = _subAimMobile ? 88f : 70f;
+            Sprite bombSprite = UIIconLibrary.Get("sub_bomb");
+            bool hasBombIcon = bombSprite != null;
+            float labelWidth = hasBombIcon
+                ? (_subAimMobile ? 42f : 36f)
+                : (_subAimMobile ? 88f : 70f);
             float timeWidth = _subAimMobile ? 78f : 66f;
             float gap = 10f;
 
@@ -670,10 +674,29 @@ namespace P1.UI
             bg.DrawGloss = false;
             bg.InnerRimAlpha = 0f;
 
-            // 左侧标签：桌面 "BOMB"（拉丁全大写），移动端 "手雷"（避免真机中文界面里孤零零一串英文）。
-            _subAimLabelText = CreateBadgeText("Text", new Vector2(pad, 0f),
-                new Vector2(labelWidth, badgeHeight), TextAnchor.MiddleLeft,
-                _subAimMobile ? "手雷" : "BOMB", ComicStyle.Paper);
+            // 左侧：优先画手雷图标（纯白剪影），取不到图标才退回中文标签。
+            if (hasBombIcon)
+            {
+                var iconGo = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                iconGo.transform.SetParent(_subAimBadge, false);
+                var iconRect = (RectTransform)iconGo.transform;
+                iconRect.anchorMin = iconRect.anchorMax = new Vector2(0f, 0.5f);
+                iconRect.pivot = new Vector2(0f, 0.5f);
+                iconRect.anchoredPosition = new Vector2(pad, 0f);
+                iconRect.sizeDelta = new Vector2(26f, 26f);
+
+                _subAimIcon = iconGo.GetComponent<Image>();
+                _subAimIcon.sprite = bombSprite;
+                _subAimIcon.preserveAspect = true;
+                _subAimIcon.color = ComicStyle.Paper;
+                _subAimIcon.raycastTarget = false;
+            }
+            else
+            {
+                _subAimLabelText = CreateBadgeText("Text", new Vector2(pad, 0f),
+                    new Vector2(labelWidth, badgeHeight), TextAnchor.MiddleLeft,
+                    "手雷", ComicStyle.Paper);
+            }
 
             // 中部冷却进度条：宽度吃掉「左标签 + 右读数」之外的剩余空间，任何平台都不会挤字。
             float barX = pad + labelWidth + gap;
@@ -718,12 +741,12 @@ namespace P1.UI
             readyRect.offsetMin = new Vector2(10f, 2f);
             readyRect.offsetMax = new Vector2(-10f, -2f);
             _subAimReadyText = readyGo.GetComponent<TextMeshProUGUI>();
-            _subAimReadyText.font = UIThemeSO.ResolveGlobalFont(true, _subAimMobile);
+            _subAimReadyText.font = UIThemeSO.ResolveGlobalFont(true, true);
             _subAimReadyText.fontSize = UITypography.FontSnapped(20f);
             _subAimReadyText.fontStyle = FontStyles.Bold;
             _subAimReadyText.alignment = TextAlignmentOptions.Center;
             _subAimReadyText.color = ComicStyle.Ink;
-            _subAimReadyText.text = _subAimMobile ? "手雷就绪" : "BOMB READY · E";
+            _subAimReadyText.text = _subAimMobile ? "手雷就绪" : "手雷就绪 · E";
             _subAimReadyText.raycastTarget = false;
             _subAimReadyText.textWrappingMode = TextWrappingModes.NoWrap;
             _subAimReadyText.overflowMode = TextOverflowModes.Overflow;
@@ -1618,6 +1641,12 @@ namespace P1.UI
             {
                 _subAimBg.color = ready ? ComicStyle.Yellow : ComicStyle.Ink;
                 _subAimBg.BorderColor = ready ? ComicStyle.Ink : ComicStyle.Paper;
+            }
+
+            if (_subAimIcon != null)
+            {
+                // 冷却中墨底 → 纸白图标；就绪时黄底 → 墨色图标，保证对比度。
+                _subAimIcon.color = ready ? ComicStyle.Ink : ComicStyle.Paper;
             }
 
             if (_subAimLabelText != null && _subAimLabelText.gameObject.activeSelf == ready)

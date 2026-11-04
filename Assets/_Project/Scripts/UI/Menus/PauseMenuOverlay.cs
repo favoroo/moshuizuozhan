@@ -57,9 +57,6 @@ namespace P1.UI.Menus
         /// <summary>分组标题行高（小号眉题 + 英文角标 + 2px 分隔线）。</summary>
         private const float SettingsGroupHeaderHeight = 30f;
 
-        /// <summary>两组之间的间距。</summary>
-        private const float SettingsGroupGap = 12f;
-
         /// <summary>页脚操作条：恢复默认 / 返回 / 自动保存提示。</summary>
         private const float SettingsFooterButtonWidth = 220f;
 
@@ -67,16 +64,18 @@ namespace P1.UI.Menus
         private const float SettingsSliderTrackHeight = 26f;
         private const float SettingsSliderHandleSize = 26f;
 
+        /// <summary>设置页板块数（声音 / 视角 / 画面与操作）：分页避免 20:9 手机横向被挤出屏幕。</summary>
+        private const int SettingsTabCount = 3;
+
+        /// <summary>板块内容顶边：标题底边 318 → Tab 行 302~226 → 板块组头从此开始。</summary>
+        private const float SettingsPanelContentTop = 226f;
+
         /// <summary>暂停主面板宽度：左列 460 按钮 + 40 间距 + 右列 500 操作说明卡 + 左右各 50。</summary>
         private const float PausePanelWidth = 1100f;
 
-        /// <summary>暂停主面板高度。主视图与按键视图的 820 固定布局依赖它；
-        /// 设置视图打开时临时扩到 <see cref="SettingsPanelHeight"/>，退出时恢复。</summary>
+        /// <summary>暂停主面板高度。设置页改为板块分页后与主视图/按键视图共用同一固定高度，
+        /// 不再随设置项数量增高（避免 20:9 手机横屏下面板溢出屏幕、底部按钮点不到）。</summary>
         private const float PausePanelHeight = 820f;
-
-        /// <summary>设置视图面板高度：820 + 4 行新设置（音乐/音效/FPS/小地图，4×76=304）。
-        /// 内容整体下移半扩量（152）保持上下边距对称。</summary>
-        private const float SettingsPanelHeight = PausePanelHeight + 304f;
 
         // ── 操作说明卡几何 ──────────────────────────────────────────────
         private const float ControlsCardWidth = 500f;
@@ -175,6 +174,12 @@ namespace P1.UI.Menus
         private Button[] _fpsButtons;
         private UIInkShapeGraphic[] _fpsShapes;
         private TextMeshProUGUI[] _fpsTexts;
+
+        // 设置页板块 Tab（声音 / 视角 / 画面与操作）
+        private UIInkShapeGraphic[] _settingsTabShapes;
+        private TextMeshProUGUI[] _settingsTabTexts;
+        private GameObject[] _settingsPanels;
+        private int _activeSettingsTab;
 
         // 主题与字体缓存
         private UIThemeSO _theme;
@@ -462,6 +467,12 @@ namespace P1.UI.Menus
             var backdropImg = backdropGo.GetComponent<Image>();
             backdropImg.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.70f);
             backdropImg.raycastTarget = true;
+
+            // 点面板外空白返回：按键页 → 设置页；设置页 → 暂停主视图（首页模式则关闭弹窗）。
+            // 面板内空白被 PausePanel 的 Graphic 接住，不会误触。
+            var backdropBtn = backdropGo.AddComponent<Button>();
+            backdropBtn.transition = Selectable.Transition.None;
+            backdropBtn.onClick.AddListener(OnBackdropClicked);
 
             // 2. 居中直角主面板 (1100x820)：t-1 纸白底 + 3px 墨框 + 弹窗硬影 (8,-9)
             var panelGo = new GameObject("PausePanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(UISpringMotion));
@@ -759,8 +770,7 @@ namespace P1.UI.Menus
             var headerRt = headerGo.GetComponent<RectTransform>();
             headerRt.anchorMin = new Vector2(0.5f, 0.5f);
             headerRt.anchorMax = new Vector2(0.5f, 0.5f);
-            // 面板扩高（820→1124）后整体下移半扩量 152，保持上 28 / 下 22 边距对称。
-            headerRt.anchoredPosition = new Vector2(0f, 502f);
+            headerRt.anchoredPosition = new Vector2(0f, 350f);
             headerRt.sizeDelta = new Vector2(SettingsContentWidth, 64f);
 
             BuildAccentBar(headerGo.transform, new Vector2(0f, 0f), new Vector2(8f, 44f));
@@ -783,71 +793,168 @@ namespace P1.UI.Menus
             headerHintRt.anchoredPosition = new Vector2(-SettingsRowPadding, 0f);
             headerHintRt.sizeDelta = new Vector2(300f, 34f);
 
-            // 从上往下排：标题底边 470 → 组 1 顶边 454，底部页脚落在 -540，四周留白与旧版一致。
-            float cursor = 454f;
+            // 从上往下排：标题底边 318 → Tab 行顶边 302 → 板块内容顶边 226 → 固定页脚（divider -316）。
+            // 设置项按板块分页，单页最多 4 行，固定 820 面板在任何比例屏幕上都放得下。
+            float cursor = 302f;
 
-            // 组 1：声音与视角（7 行）
-            cursor = BuildSettingsGroupHeader(parent, cursor, "声音与视角", "AUDIO & CAMERA");
+            // 板块 Tab 段选（声音 / 视角 / 画面与操作）
+            BuildSettingsTabRow(parent, ref cursor);
 
-            // Row 0: 主音量
-            var row0 = CreateSettingRow(parent, ref cursor, showSeparator: true);
+            // 三个板块容器：共用同一固定区域，切换显示
+            _settingsPanels = new GameObject[SettingsTabCount];
+            _settingsPanels[0] = CreateSettingsPanelContainer(parent, "SettingsPanel_Audio");
+            BuildAudioSettingsPanel(_settingsPanels[0].transform);
+            _settingsPanels[1] = CreateSettingsPanelContainer(parent, "SettingsPanel_Camera");
+            BuildCameraSettingsPanel(_settingsPanels[1].transform);
+            _settingsPanels[2] = CreateSettingsPanelContainer(parent, "SettingsPanel_Display");
+            BuildDisplaySettingsPanel(_settingsPanels[2].transform);
+
+            // 页脚固定：恢复默认 / 自动保存提示 / 返回（dividerY = -302 - 14 = -316，与旧版 5 行构图一致）
+            BuildSettingsFooter(parent, -302f);
+
+            SetSettingsTab(_activeSettingsTab);
+        }
+
+        /// <summary>板块 Tab 段选行：3 段等宽按钮，选中态黄底粗体（与帧率段选同一视觉语言）。</summary>
+        private void BuildSettingsTabRow(Transform parent, ref float cursor)
+        {
+            var rowGo = new GameObject("SettingsTabs", typeof(RectTransform));
+            rowGo.transform.SetParent(parent, false);
+            var rowRt = rowGo.GetComponent<RectTransform>();
+            rowRt.anchorMin = new Vector2(0.5f, 0.5f);
+            rowRt.anchorMax = new Vector2(0.5f, 0.5f);
+            rowRt.pivot = new Vector2(0.5f, 0.5f);
+            rowRt.anchoredPosition = new Vector2(0f, cursor - PauseSettingRowHeight * 0.5f);
+            rowRt.sizeDelta = new Vector2(SettingsContentWidth, PauseSettingRowHeight);
+            cursor -= PauseSettingRowHeight;
+
+            string[] labels = { "声音", "视角", "画面与操作" };
+            float spacing = 8f;
+            float btnWidth = (SettingsContentWidth - SettingsRowPadding * 2f - spacing * (SettingsTabCount - 1))
+                             / SettingsTabCount;
+            float startX = -SettingsContentWidth * 0.5f + SettingsRowPadding + btnWidth * 0.5f;
+
+            _settingsTabShapes = new UIInkShapeGraphic[SettingsTabCount];
+            _settingsTabTexts = new TextMeshProUGUI[SettingsTabCount];
+
+            for (int i = 0; i < SettingsTabCount; i++)
+            {
+                int captured = i;
+                var btn = CreateStyledButton(
+                    $"SettingsTab_{i}", rowGo.transform, labels[i],
+                    ComicStyle.Paper, ComicStyle.Ink, new Vector2(btnWidth, PauseSettingControlHeight),
+                    _theme, UITypography.FontSnapped(PauseSettingControlFont), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+                var btnRt = btn.GetComponent<RectTransform>();
+                btnRt.anchoredPosition = new Vector2(startX + i * (btnWidth + spacing), 0f);
+
+                _settingsTabShapes[i] = btn.GetComponent<UIInkShapeGraphic>();
+                _settingsTabTexts[i] = btn.GetComponentInChildren<TextMeshProUGUI>();
+                btn.onClick.AddListener(() => SetSettingsTab(captured));
+            }
+        }
+
+        /// <summary>切换设置板块（0 声音 / 1 视角 / 2 画面与操作），并同步 Tab 选中态。</summary>
+        private void SetSettingsTab(int index)
+        {
+            _activeSettingsTab = Mathf.Clamp(index, 0, SettingsTabCount - 1);
+
+            for (int i = 0; i < SettingsTabCount; i++)
+            {
+                bool active = i == _activeSettingsTab;
+                if (_settingsPanels != null && i < _settingsPanels.Length && _settingsPanels[i] != null)
+                {
+                    _settingsPanels[i].SetActive(active);
+                }
+                if (_settingsTabShapes != null && _settingsTabShapes[i] != null)
+                {
+                    _settingsTabShapes[i].color = active ? ComicStyle.Yellow : ComicStyle.Paper;
+                }
+                if (_settingsTabTexts != null && _settingsTabTexts[i] != null)
+                {
+                    _settingsTabTexts[i].color = ComicStyle.Ink;
+                    _settingsTabTexts[i].fontStyle = active ? FontStyles.Bold : FontStyles.Normal;
+                }
+            }
+        }
+
+        /// <summary>板块容器：铺满设置视图，内部行坐标与主设置栅格同基准。</summary>
+        private GameObject CreateSettingsPanelContainer(Transform parent, string name)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+            return go;
+        }
+
+        // ── 板块 0：声音（4 行） ──────────────────────────────────────
+        private void BuildAudioSettingsPanel(Transform panel)
+        {
+            float cursor = SettingsPanelContentTop;
+            cursor = BuildSettingsGroupHeader(panel, cursor, "声音", "AUDIO");
+
+            var row0 = CreateSettingRow(panel, ref cursor, showSeparator: true);
             CreateSettingLabel(row0.transform, "主音量");
             _volumeSlider = CreateStyledSlider("VolumeSlider", row0.transform, 0f, 1f, GameSettingsService.MasterVolume, _theme, out _volumeValueText);
             PlaceSettingControl(_volumeSlider.transform.parent);
             _volumeSlider.onValueChanged.AddListener(OnVolumeSliderChanged);
             UpdateVolumeLabel(GameSettingsService.MasterVolume);
 
-            // Row 1: 音乐音量（BGM 分轨，主音量之下的相对乘数）
-            var rowMusic = CreateSettingRow(parent, ref cursor, showSeparator: true);
+            var rowMusic = CreateSettingRow(panel, ref cursor, showSeparator: true);
             CreateSettingLabel(rowMusic.transform, "音乐音量", "BGM");
             _musicSlider = CreateStyledSlider("MusicSlider", rowMusic.transform, 0f, 1f, GameSettingsService.MusicVolume, _theme, out _musicValueText);
             PlaceSettingControl(_musicSlider.transform.parent);
             _musicSlider.onValueChanged.AddListener(OnMusicSliderChanged);
             UpdateMusicVolumeLabel(GameSettingsService.MusicVolume);
 
-            // Row 2: 音效音量（分轨，覆盖枪声/UI 音/播报/循环音）
-            var rowSfx = CreateSettingRow(parent, ref cursor, showSeparator: true);
+            var rowSfx = CreateSettingRow(panel, ref cursor, showSeparator: true);
             CreateSettingLabel(rowSfx.transform, "音效音量", "含界面音");
             _sfxSlider = CreateStyledSlider("SfxSlider", rowSfx.transform, 0f, 1f, GameSettingsService.SfxVolume, _theme, out _sfxValueText);
             PlaceSettingControl(_sfxSlider.transform.parent);
             _sfxSlider.onValueChanged.AddListener(OnSfxSliderChanged);
             UpdateSfxVolumeLabel(GameSettingsService.SfxVolume);
 
-            // Row 3: 屏幕震动（长说明拆成小号注解，避免整行标签折行）
-            var row1 = CreateSettingRow(parent, ref cursor, showSeparator: true);
-            CreateSettingLabel(row1.transform, "屏幕震动", "无障碍减弱");
-            _shakeSlider = CreateStyledSlider("ShakeSlider", row1.transform, 0f, 1f, GameSettingsService.ShakeScale, _theme, out _shakeValueText);
+            var rowShake = CreateSettingRow(panel, ref cursor, showSeparator: false);
+            CreateSettingLabel(rowShake.transform, "屏幕震动", "无障碍减弱");
+            _shakeSlider = CreateStyledSlider("ShakeSlider", rowShake.transform, 0f, 1f, GameSettingsService.ShakeScale, _theme, out _shakeValueText);
             PlaceSettingControl(_shakeSlider.transform.parent);
             _shakeSlider.onValueChanged.AddListener(OnShakeSliderChanged);
             UpdateShakeLabel(GameSettingsService.ShakeScale);
+        }
 
-            // Row 4: 鼠标视角灵敏度
-            var row2 = CreateSettingRow(parent, ref cursor, showSeparator: true);
-            CreateSettingLabel(row2.transform, "鼠标视角灵敏度");
+        // ── 板块 1：视角（3 行） ──────────────────────────────────────
+        private void BuildCameraSettingsPanel(Transform panel)
+        {
+            float cursor = SettingsPanelContentTop;
+            cursor = BuildSettingsGroupHeader(panel, cursor, "视角", "CAMERA");
+
+            var rowMouse = CreateSettingRow(panel, ref cursor, showSeparator: true);
+            CreateSettingLabel(rowMouse.transform, "鼠标视角灵敏度");
             _mouseSensSlider = CreateStyledSlider(
-                "MouseSensSlider", row2.transform,
+                "MouseSensSlider", rowMouse.transform,
                 GameSettingsMath.MinLookSensitivity, GameSettingsMath.MaxLookSensitivity,
                 GameSettingsService.MouseLookSensitivity, _theme, out _mouseSensValueText);
             PlaceSettingControl(_mouseSensSlider.transform.parent);
             _mouseSensSlider.onValueChanged.AddListener(OnMouseSensChanged);
             UpdateLookSensitivityLabel(_mouseSensValueText, GameSettingsService.MouseLookSensitivity);
 
-            // Row 5: 触控视角灵敏度
-            var row3 = CreateSettingRow(parent, ref cursor, showSeparator: true);
-            CreateSettingLabel(row3.transform, "触控视角灵敏度");
+            var rowTouch = CreateSettingRow(panel, ref cursor, showSeparator: true);
+            CreateSettingLabel(rowTouch.transform, "触控视角灵敏度");
             _touchSensSlider = CreateStyledSlider(
-                "TouchSensSlider", row3.transform,
+                "TouchSensSlider", rowTouch.transform,
                 GameSettingsMath.MinLookSensitivity, GameSettingsMath.MaxLookSensitivity,
                 GameSettingsService.TouchLookSensitivity, _theme, out _touchSensValueText);
             PlaceSettingControl(_touchSensSlider.transform.parent);
             _touchSensSlider.onValueChanged.AddListener(OnTouchSensChanged);
             UpdateLookSensitivityLabel(_touchSensValueText, GameSettingsService.TouchLookSensitivity);
 
-            // Row 6: 视角垂直方向（完整语义留在标签，按钮只显示开/关）
-            var row4 = CreateSettingRow(parent, ref cursor, showSeparator: false);
-            CreateSettingLabel(row4.transform, "视角垂直方向", "反转 Y 轴");
+            var rowInvert = CreateSettingRow(panel, ref cursor, showSeparator: false);
+            CreateSettingLabel(rowInvert.transform, "视角垂直方向", "反转 Y 轴");
             _invertYButton = CreateStyledButton(
-                "InvertYBtn", row4.transform, "关闭",
+                "InvertYBtn", rowInvert.transform, "关闭",
                 ComicStyle.Paper, ComicStyle.Ink, new Vector2(PauseSettingControlWidth, PauseSettingControlHeight),
                 _theme, UITypography.FontSnapped(PauseSettingControlFont), ComicStyle.CornerSharp, ComicStyle.BorderThin);
             PlaceSettingControl(_invertYButton.transform);
@@ -855,21 +962,22 @@ namespace P1.UI.Menus
             _invertYText = _invertYButton.GetComponentInChildren<TextMeshProUGUI>();
             _invertYButton.onClick.AddListener(OnInvertYToggled);
             UpdateInvertYLabel();
+        }
 
-            // 组 2：画面与操作（4 行）
-            cursor -= SettingsGroupGap;
-            cursor = BuildSettingsGroupHeader(parent, cursor, "画面与操作", "DISPLAY & CONTROLS");
+        // ── 板块 2：画面与操作（4 行） ────────────────────────────────
+        private void BuildDisplaySettingsPanel(Transform panel)
+        {
+            float cursor = SettingsPanelContentTop;
+            cursor = BuildSettingsGroupHeader(panel, cursor, "画面与操作", "DISPLAY & CONTROLS");
 
-            // Row 7: 帧率上限
-            var row5 = CreateSettingRow(parent, ref cursor, showSeparator: true);
-            CreateSettingLabel(row5.transform, "帧率上限", "FPS");
-            BuildFrameRateButtons(row5.transform);
+            var rowFps = CreateSettingRow(panel, ref cursor, showSeparator: true);
+            CreateSettingLabel(rowFps.transform, "帧率上限", "FPS");
+            BuildFrameRateButtons(rowFps.transform);
 
-            // Row 8: 显示 FPS 角标
-            var rowFps = CreateSettingRow(parent, ref cursor, showSeparator: true);
-            CreateSettingLabel(rowFps.transform, "显示帧率", "HUD 左上角");
+            var rowShowFps = CreateSettingRow(panel, ref cursor, showSeparator: true);
+            CreateSettingLabel(rowShowFps.transform, "显示帧率", "HUD 左上角");
             _showFpsButton = CreateStyledButton(
-                "ShowFpsBtn", rowFps.transform, "关闭",
+                "ShowFpsBtn", rowShowFps.transform, "关闭",
                 ComicStyle.Paper, ComicStyle.Ink, new Vector2(PauseSettingControlWidth, PauseSettingControlHeight),
                 _theme, UITypography.FontSnapped(PauseSettingControlFont), ComicStyle.CornerSharp, ComicStyle.BorderThin);
             PlaceSettingControl(_showFpsButton.transform);
@@ -878,8 +986,7 @@ namespace P1.UI.Menus
             _showFpsButton.onClick.AddListener(OnShowFpsToggled);
             UpdateShowFpsLabel();
 
-            // Row 9: 小地图开关
-            var rowMinimap = CreateSettingRow(parent, ref cursor, showSeparator: true);
+            var rowMinimap = CreateSettingRow(panel, ref cursor, showSeparator: true);
             CreateSettingLabel(rowMinimap.transform, "小地图", "右上角");
             _showMinimapButton = CreateStyledButton(
                 "ShowMinimapBtn", rowMinimap.transform, "开启",
@@ -891,11 +998,8 @@ namespace P1.UI.Menus
             _showMinimapButton.onClick.AddListener(OnShowMinimapToggled);
             UpdateShowMinimapLabel();
 
-            // Row 10: 操作设置入口（移动端打开触控布局自定义，桌面端打开按键自定义）
-            BuildControlSettingsRow(parent, ref cursor);
-
-            // 页脚：恢复默认 / 自动保存提示 / 返回
-            BuildSettingsFooter(parent, cursor);
+            // 操作设置入口（移动端打开触控布局自定义，桌面端打开按键自定义）
+            BuildControlSettingsRow(panel, ref cursor);
         }
 
         /// <summary>分组眉题：左侧黄色色标 + 中文组名 + 右侧英文角标 + 2px 分隔线。</summary>
@@ -1147,7 +1251,6 @@ namespace P1.UI.Menus
             _isKeyBindingsOpen = true;
             _settingsViewContainer.SetActive(false);
             _keyBindingsViewContainer.SetActive(true);
-            RestoreDefaultPanelHeight(); // 按键视图是 820 固定布局，从设置页进入时先收回来
             RefreshKeyBindingsUI();
 
             if (_panelMotion != null)
@@ -1166,7 +1269,6 @@ namespace P1.UI.Menus
             _isKeyBindingsOpen = false;
             if (_keyBindingsViewContainer != null) _keyBindingsViewContainer.SetActive(false);
             if (_settingsViewContainer != null) _settingsViewContainer.SetActive(true);
-            ApplySettingsPanelHeight(); // 回到设置视图，重新扩高
 
             if (_panelMotion != null)
             {
@@ -1747,6 +1849,31 @@ namespace P1.UI.Menus
             UpdateFrameRateButtons();
         }
 
+        /// <summary>
+        /// 点面板外空白返回（触屏上比找「返回」按钮更顺手）：
+        /// 按键监听中 → 取消监听；按键页 → 回设置页；设置页 → 回暂停主视图（首页模式关闭弹窗）；
+        /// 主视图不响应，避免误触关掉暂停菜单。
+        /// </summary>
+        private void OnBackdropClicked()
+        {
+            if (_isListeningForKey)
+            {
+                CancelKeyListening();
+                return;
+            }
+
+            if (_isKeyBindingsOpen)
+            {
+                CloseKeyBindings();
+                return;
+            }
+
+            if (_isSettingsOpen)
+            {
+                CloseSettings(); // 内部已处理首页设置模式（走 CloseSettingsFromHome）
+            }
+        }
+
         private void HandleInput()
         {
             bool toggleRequested = false;
@@ -1902,7 +2029,6 @@ namespace P1.UI.Menus
             _isKeyBindingsOpen = false;
             if (_isListeningForKey) CancelKeyListening();
             if (_keyBindingsViewContainer != null) _keyBindingsViewContainer.SetActive(false);
-            RestoreDefaultPanelHeight();
 
             UpdateMobileButtonVisibility();
             PauseStateChanged?.Invoke(false);
@@ -1934,7 +2060,6 @@ namespace P1.UI.Menus
             _isSettingsOpen = true;
             _mainViewContainer.SetActive(false);
             _settingsViewContainer.SetActive(true);
-            ApplySettingsPanelHeight();
 
             // 每次打开都从 GameSettingsService 全量回读：设置可能被别处（重置/其他面板）改过，
             // 旧版只回读了音量/震屏/帧率，灵敏度和反转 Y 会显示陈旧值。
@@ -1954,6 +2079,7 @@ namespace P1.UI.Menus
             UpdateShowFpsLabel();
             UpdateShowMinimapLabel();
             UpdateFrameRateButtons();
+            SetSettingsTab(_activeSettingsTab); // 恢复上次浏览的板块，并确保容器显隐与 Tab 选中态一致
 
             if (_panelMotion != null)
             {
@@ -1973,7 +2099,6 @@ namespace P1.UI.Menus
             _isSettingsOpen = false;
             _settingsViewContainer.SetActive(false);
             _mainViewContainer.SetActive(true);
-            RestoreDefaultPanelHeight();
             UpdateReturnMenuButtonVisibility();
 
             if (_panelMotion != null)
@@ -2018,7 +2143,6 @@ namespace P1.UI.Menus
             // OnDisable/OnDestroy 拆除期调用时容器可能已销毁，做判空
             if (_settingsViewContainer != null) _settingsViewContainer.SetActive(false);
             if (_modalRoot != null) _modalRoot.SetActive(false);
-            RestoreDefaultPanelHeight();
         }
 
         private void ShowMainView()
@@ -2026,7 +2150,6 @@ namespace P1.UI.Menus
             _isSettingsOpen = false;
             _settingsViewContainer.SetActive(false);
             _mainViewContainer.SetActive(true);
-            RestoreDefaultPanelHeight(); // 主视图是 820 固定布局
             UpdateReturnMenuButtonVisibility();
         }
 
@@ -2115,11 +2238,18 @@ namespace P1.UI.Menus
         {
             if (_panelRect == null) return;
 
+            // 画布高度必须取 CanvasScaler 生效后的实际值：20:9 手机横屏下参考 1080 会被压到 ~966，
+            // 硬编码 1080 会算出偏大的可用高度，面板底部按钮被挤出屏幕（"点不到返回"的根因）。
+            Canvas.ForceUpdateCanvases();
             float canvasHeight = 1080f;
+            if (transform is RectTransform rootRt && rootRt.rect.height > 100f)
+            {
+                canvasHeight = rootRt.rect.height;
+            }
+
             float safeRatio = Screen.height > 0 ? Screen.safeArea.height / Screen.height : 1f;
             float availableHeight = canvasHeight * safeRatio;
-            // 目标高度跟随当前面板：设置页扩到 1124 后，860 常量会让移动端溢出屏幕。
-            float targetHeight = Mathf.Max(860f, _panelRect.sizeDelta.y + 40f);
+            const float targetHeight = 860f;
 
             if (availableHeight < targetHeight && availableHeight > 100f)
             {
@@ -2132,21 +2262,7 @@ namespace P1.UI.Menus
             }
         }
 
-        /// <summary>设置视图是 11 行表格（比主视图高 304），打开时把共享面板临时扩高并重算响应式缩放。</summary>
-        private void ApplySettingsPanelHeight()
-        {
-            if (_panelRect != null)
-                _panelRect.sizeDelta = new Vector2(PausePanelWidth, SettingsPanelHeight);
-            ApplyResponsivePanelScale();
-        }
 
-        /// <summary>退出设置视图时恢复主视图/按键视图依赖的 820 固定面板高度。</summary>
-        private void RestoreDefaultPanelHeight()
-        {
-            if (_panelRect != null)
-                _panelRect.sizeDelta = new Vector2(PausePanelWidth, PausePanelHeight);
-            ApplyResponsivePanelScale();
-        }
 
         private TextMeshProUGUI CreateTextMesh(
             string name,

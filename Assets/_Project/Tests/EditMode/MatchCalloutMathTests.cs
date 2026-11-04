@@ -90,12 +90,15 @@ namespace P1.Tests
             var r2 = _math.Evaluate(ev2, 11.0f, 4, 2);
             Assert.AreEqual(CalloutKind.MultiSplat, r2.Kind);
             Assert.AreEqual(MatchCalloutMath.TextDoubleSplat, r2.MainText);
+            Assert.AreEqual(2, r2.Count, "双杀徽章应显示 ×2");
+            Assert.AreEqual("mark_splat", r2.IconKey);
             Assert.IsFalse(r2.IsBig, "Double Splat 为常规字号");
 
             var ev3 = CreateLocalKill("BotB_3");
             var r3 = _math.Evaluate(ev3, 12.0f, 4, 1);
             Assert.AreEqual(CalloutKind.MultiSplat, r3.Kind);
             Assert.AreEqual(MatchCalloutMath.TextTripleSplat, r3.MainText);
+            Assert.AreEqual(3, r3.Count, "三杀徽章应显示 ×3");
             Assert.IsTrue(r3.IsBig, "Triple Splat 判定为大播报");
 
             var ev4 = CreateLocalKill("BotB_4");
@@ -228,11 +231,13 @@ namespace P1.Tests
 
             var r3 = _math.Evaluate(CreateLocalKill("BotB_3"), 20.0f, 4, 1); // Kill 3
             Assert.AreEqual(CalloutKind.Streak, r3.Kind);
-            Assert.AreEqual("SPLAT STREAK ×3", r3.MainText);
+            Assert.AreEqual(MatchCalloutMath.TextStreak, r3.MainText);
+            Assert.AreEqual(3, r3.Count, "连杀徽章应显示 ×3");
 
             var r4 = _math.Evaluate(CreateLocalKill("BotB_4"), 30.0f, 4, 1); // Kill 4
             Assert.AreEqual(CalloutKind.Streak, r4.Kind);
-            Assert.AreEqual("SPLAT STREAK ×4", r4.MainText);
+            Assert.AreEqual(MatchCalloutMath.TextStreak, r4.MainText);
+            Assert.AreEqual(4, r4.Count, "连杀徽章应显示 ×4");
         }
 
         [Test]

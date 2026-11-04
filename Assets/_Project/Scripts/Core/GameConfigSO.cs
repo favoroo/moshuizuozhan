@@ -14,6 +14,8 @@ namespace P1.Core
         public WeaponConfigSO weaponConfig;
 
         [Header("比赛时长与规则")]
+        [Tooltip("设计默认时长（秒）。正式对局由首页「时长」段选覆盖（GameSettingsService，2/3/5 分钟）；" +
+                 "仅当设置服务不可用时作为 MatchManager 的回退值。")]
         public float matchDurationSeconds = 120f;
         public float finalWarningSeconds = 30f;
 

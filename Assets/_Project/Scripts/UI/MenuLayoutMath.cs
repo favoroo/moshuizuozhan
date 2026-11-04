@@ -150,14 +150,30 @@ namespace P1.UI
         public float TileArrowFont;
 
         /// <summary>
-        /// Hero 卡头部右侧的 Bot 难度段选：单段尺寸、段间距、单段最小宽度与字号。
-        /// 共 <see cref="MenuLayoutMath.DifficultyTierCount"/> 档（新手/轻松/普通/硬核）；
-        /// 总宽 = SegmentSize.x × 档数 + Gap × (档数 - 1)，运行时按可用宽度收窄。
+        /// Hero 卡中部对局控制区的 Bot 难度段选：黑色「难度」角签 + 4 档药丸（新手/轻松/普通/硬核）。
+        /// 位于武器整备卡正下方，与时长行同宽同右缘对齐铺满 innerWidth。
         /// </summary>
         public Vector2 DifficultySegmentSize;
         public float DifficultyGap;
         public float DifficultyMinSegmentWidth;
         public float DifficultyFont;
+        public Vector2 DifficultyTagSize;
+        public float DifficultyTagFont;
+        public float DifficultyTagGap;
+
+        /// <summary>
+        /// Hero 卡中部对局控制区的比赛时长段选：黑色「时长」角签 + 3 档药丸（2分/3分/5分）。
+        /// 位于难度行正下方，与难度行严格对齐铺满 innerWidth。
+        /// </summary>
+        public Vector2 DurationSegmentSize;
+        public float DurationGap;
+        public float DurationMinSegmentWidth;
+        public float DurationFont;
+        public Vector2 DurationTagSize;
+        public float DurationTagFont;
+        /// <summary>「时长」角签与 3 档药丸之间的横向间距。</summary>
+        public float DurationTagGap;
+        public float DurationRowGap;
 
         /// <summary>左下 / 右下黑底角签（宽或高为 0 表示该平台不显示）。</summary>
         public Vector2 FooterTagSize;
@@ -201,25 +217,9 @@ namespace P1.UI
             new HomeBox(Margin + HeroPadding.x, CardTop + HeroPadding.y, TagSize.x, TagSize.y);
 
         /// <summary>
-        /// Hero 卡头部右侧的 Bot 难度段选（设计盒）：与 PLAY 角签同一行、右对齐贴 Hero 内边。
-        /// Y 基准与 HeroWeaponSlot / ResolveHomeBoard 同源（CenteredBoardTop），运行时不会脱离 Hero 卡。
+        /// Hero 卡内嵌的武器整备卡绝对盒子（以 MenuSafeArea 左上角为原点）。
+        /// 位于 Header 正下方，居于顶部模式与中部设置之间。
         /// </summary>
-        public HomeBox HeroDifficulty
-        {
-            get
-            {
-                float innerWidth = HeroBox.x - HeroPadding.x * 2f;
-                float total = DifficultySegmentSize.x * MenuLayoutMath.DifficultyTierCount
-                              + DifficultyGap * (MenuLayoutMath.DifficultyTierCount - 1);
-                return new HomeBox(
-                    Margin + HeroPadding.x + innerWidth - total,
-                    CenteredBoardTop + HeroPadding.y + (TagSize.y - DifficultySegmentSize.y) * 0.5f,
-                    total,
-                    DifficultySegmentSize.y);
-            }
-        }
-
-        /// <summary>Hero 卡内嵌的武器整备卡绝对盒子（以 MenuSafeArea 左上角为原点）。</summary>
         public HomeBox HeroWeaponSlot
         {
             get
@@ -229,11 +229,46 @@ namespace P1.UI
                 float width = Mathf.Min(innerWidth, cardSize.x);
                 float height = cardSize.y;
                 float x = Margin + HeroPadding.x;
+                float y = CenteredBoardTop + MenuLayoutMath.ResolveHeroFlow(this, BoardHeight, ShowTopButton).WeaponTop;
+                return new HomeBox(x, y, width, height);
+            }
+        }
 
-                // 垂直排版：位于顶部 Tag 之下，与 CTA 左右严格对齐，留出充裕呼吸空间（桌面 68px，移动 48px，绝不与 PLAY 标签重叠）
-                // Y 基准用 CenteredBoardTop（与 ResolveHomeBoard 同源）：版面垂直居中后 Hero 卡顶不再等于 CardTop。
-                float topSpace = CenteredBoardTop + HeroPadding.y + TagSize.y + (ShowTopButton ? 48f : 68f);
-                return new HomeBox(x, topSpace, width, height);
+        /// <summary>
+        /// Hero 卡中部对局控制区的 Bot 难度段选（设计盒）：黑色「难度」角签 + 4 档药丸。
+        /// 位于武器整备卡正下方，与时长行同宽同右缘对齐。
+        /// </summary>
+        public HomeBox HeroDifficulty
+        {
+            get
+            {
+                float innerWidth = HeroBox.x - HeroPadding.x * 2f;
+                HeroFlowLayout flow = MenuLayoutMath.ResolveHeroFlow(this, BoardHeight, ShowTopButton);
+                DifficultyBarLayout layout = MenuLayoutMath.ResolveHeroDifficulty(this, innerWidth);
+                return new HomeBox(
+                    Margin + HeroPadding.x + innerWidth - layout.TotalWidth,
+                    CenteredBoardTop + flow.DifficultyTop,
+                    layout.TotalWidth,
+                    flow.DifficultyHeight);
+            }
+        }
+
+        /// <summary>
+        /// Hero 卡中部对局控制区的比赛时长段选（设计盒）：黑色「时长」角签 + 3 档药丸。
+        /// 位于难度行正下方，与难度行严格对齐铺满 innerWidth。
+        /// </summary>
+        public HomeBox HeroDuration
+        {
+            get
+            {
+                float innerWidth = HeroBox.x - HeroPadding.x * 2f;
+                HeroFlowLayout flow = MenuLayoutMath.ResolveHeroFlow(this, BoardHeight, ShowTopButton);
+                MatchDurationBarLayout layout = MenuLayoutMath.ResolveHeroDuration(this, innerWidth);
+                return new HomeBox(
+                    Margin + HeroPadding.x + innerWidth - layout.TotalWidth,
+                    CenteredBoardTop + flow.DurationTop,
+                    layout.TotalWidth,
+                    flow.DurationHeight);
             }
         }
 
@@ -334,12 +369,42 @@ namespace P1.UI
         public float TileHeight;
     }
 
-    /// <summary>Hero 卡头部 Bot 难度段选在运行时实际采用的几何（按可用宽度自适应收窄）。</summary>
+    /// <summary>Hero 卡中部 Bot 难度段选（含黑色「难度」角签）在运行时实际采用的几何。</summary>
     public struct DifficultyBarLayout
     {
+        public float TagWidth;
+        public float TagGap;
         public float SegmentWidth;
         public float Gap;
         public float TotalWidth;
+    }
+
+    /// <summary>Hero 卡中部比赛时长段选（含黑色「时长」角签）在运行时实际采用的几何。</summary>
+    public struct MatchDurationBarLayout
+    {
+        public float TagWidth;
+        public float SegmentWidth;
+        public float Gap;
+        public float TagGap;
+        public float TotalWidth;
+    }
+
+    /// <summary>
+    /// Hero 卡纵向流式排版（方案1：从上到下 Header → 武器整备卡 → 难度行 → 时长行 → CTA）。
+    /// 所有 Y 坐标均为 Hero 卡本地坐标（以 Hero 卡左上角为原点，向下为正）。
+    /// </summary>
+    public struct HeroFlowLayout
+    {
+        public float HeaderTop;
+        public float HeaderHeight;
+        public float WeaponTop;
+        public float WeaponHeight;
+        public float DifficultyTop;
+        public float DifficultyHeight;
+        public float DurationTop;
+        public float DurationHeight;
+        public float CtaTop;
+        public float CtaHeight;
     }
 
     /// <summary>
@@ -361,6 +426,9 @@ namespace P1.UI
         /// <summary>Bot 难度档数（新手 / 轻松 / 普通 / 硬核），与 GameSettingsMath 的档位区间一致。</summary>
         public const int DifficultyTierCount = 4;
 
+        /// <summary>比赛时长档数（2 / 3 / 5 分钟），与 GameSettingsMath.AvailableMatchDurationMinutes 一致。</summary>
+        public const int MatchDurationOptionCount = 3;
+
         /// <summary>移动端抽屉宽度占参考画布宽度的比例（桌面 620/1920≈32%）。</summary>
         public const float MobileDrawerWidthRatio = 0.82f;
 
@@ -378,7 +446,7 @@ namespace P1.UI
                     TitleFont = 120f,
                     LatinFont = 32f,
                     SpecFont = 20f,
-                    CtaSize = new Vector2(640f, 148f),
+                    CtaSize = new Vector2(648f, 140f),
                     CtaFont = 46f,
                     SecondarySize = new Vector2(196f, 56f),
                     SecondaryFont = 20f,
@@ -401,10 +469,21 @@ namespace P1.UI
                     TileTitleFont = 44f,
                     TileInfoFont = 18f,
                     TileArrowFont = 40f,
-                    DifficultySegmentSize = new Vector2(68f, 44f),
+                    DifficultyTagSize = new Vector2(80f, 44f),
+                    DifficultyTagFont = 18f,
+                    DifficultyTagGap = 12f,
+                    DifficultySegmentSize = new Vector2(133f, 44f),
                     DifficultyGap = 8f,
-                    DifficultyMinSegmentWidth = 44f,
+                    DifficultyMinSegmentWidth = 56f,
                     DifficultyFont = 20f,
+                    DurationTagSize = new Vector2(80f, 44f),
+                    DurationTagFont = 18f,
+                    DurationTagGap = 12f,
+                    DurationSegmentSize = new Vector2(178f, 44f),
+                    DurationGap = 11f,
+                    DurationMinSegmentWidth = 60f,
+                    DurationFont = 20f,
+                    DurationRowGap = 14f,
                     FooterTagSize = new Vector2(320f, 36f),
                     FooterTagFont = 18f,
                     VersionTagSize = new Vector2(300f, 36f),
@@ -414,17 +493,17 @@ namespace P1.UI
             }
 
             // 移动端：顶部留出「自定义按键」小按钮；卡片区 1856×704，横向占屏 97%。
-            // CTA 860×200、Hero 940 宽：手机逻辑画布不宽，靠"更大更高的盒子"而不是继续放大字号。
+            // CTA 860×160、Hero 940 宽：手机逻辑画布不宽，靠"更大更高的盒子"而不是继续放大字号。
             return new HomeMenuMetrics
             {
                 Margin = 32f,
-                TagSize = new Vector2(168f, 56f),
+                TagSize = new Vector2(168f, 52f),
                 TagFont = 20f,
                 HeroBox = new Vector2(940f, 704f),
                 TitleFont = 120f,
                 LatinFont = 34f,
                 SpecFont = 22f,
-                CtaSize = new Vector2(860f, 200f),
+                CtaSize = new Vector2(860f, 190f),
                 CtaFont = 48f,
                 SecondarySize = new Vector2(300f, 96f),
                 SecondaryFont = 22f,
@@ -433,7 +512,9 @@ namespace P1.UI
                 DecoSquare = 130f,
 
                 CardTop = 148f,
-                CardBottom = 228f,
+                // 188（原 208）：方案1 把难度/时长搬到武器卡下方后，Hero 卡需要多 20px 才装得下
+                // 「Header + 整备卡 + 两行设置 + 190 高 CTA」并保留呼吸位；底部版本角签仍有余量。
+                CardBottom = 188f,
                 ColumnGap = 20f,
                 GridWidth = 896f,
                 TileGap = 20f,
@@ -447,10 +528,21 @@ namespace P1.UI
                 TileTitleFont = 44f,
                 TileInfoFont = 18f,
                 TileArrowFont = 44f,
-                DifficultySegmentSize = new Vector2(112f, 64f),
+                DifficultyTagSize = new Vector2(100f, 64f),
+                DifficultyTagFont = 18f,
+                DifficultyTagGap = 12f,
+                DifficultySegmentSize = new Vector2(181f, 64f),
                 DifficultyGap = 8f,
-                DifficultyMinSegmentWidth = 72f,
+                DifficultyMinSegmentWidth = 64f,
                 DifficultyFont = 20f,
+                DurationTagSize = new Vector2(100f, 64f),
+                DurationTagFont = 18f,
+                DurationTagGap = 12f,
+                DurationSegmentSize = new Vector2(242f, 64f),
+                DurationGap = 11f,
+                DurationMinSegmentWidth = 72f,
+                DurationFont = 20f,
+                DurationRowGap = 10f,
                 // 移动端左下是「武器整备」整备卡的地盘，社区角签不显示（返回空盒）。
                 FooterTagSize = Vector2.zero,
                 FooterTagFont = 18f,
@@ -466,7 +558,7 @@ namespace P1.UI
             {
                 return new LoadoutCardMetrics
                 {
-                    Size = new Vector2(640f, 200f),
+                    Size = new Vector2(648f, 190f),
                     IconDiameter = 110f,
                     TitleFont = 18f,
                     NameFont = 38f,
@@ -477,12 +569,14 @@ namespace P1.UI
 
             return new LoadoutCardMetrics
             {
-                Size = new Vector2(860f, 220f),
-                IconDiameter = 136f,
+                // 170（原 220→200）：方案1 把难度/时长搬到武器卡下方后，整备卡收薄给两行设置腾位；
+                // 图标 112 居中后上下留白 19，仍然可点可读。
+                Size = new Vector2(860f, 150f),
+                IconDiameter = 120f,
                 TitleFont = 22f,
                 NameFont = 42f,
-                ChevronSize = 88f,
-                ChevronFont = 36f,
+                ChevronSize = 76f,
+                ChevronFont = 32f,
             };
         }
 
@@ -592,30 +686,133 @@ namespace P1.UI
             };
         }
 
+        /// <summary>整备卡与「头部设置行 / CTA」的最小呼吸位（Hero 卡本地 px）。</summary>
+        public const float HeroWeaponSlotGap = 12f;
+
         /// <summary>
-        /// Hero 头部难度段选的实际几何：按设计段宽排；可用宽度不够时先收窄、
-        /// 收到最小段宽仍不够则继续等比压缩（兜底 48），绝不让难度按钮压到 PLAY 角签上。
+        /// Hero 卡纵向流式排版（方案1：从上到下 Header → 武器整备卡 → 难度行 → 时长行 → CTA）。
+        /// 武器卡与两行设置视为一个「出战配置簇」（内部只留 12/16px），整簇在 Header 与 CTA 之间垂直居中；
+        /// CTA 固定贴底，桌面给快捷键提示预留一条底带。窄屏时整簇贴住 Header 并保持顺序，绝不压 CTA。
+        /// </summary>
+        public static HeroFlowLayout ResolveHeroFlow(HomeMenuMetrics m, float heroHeight, bool mobile)
+        {
+            float headerTop = m.HeroPadding.y;
+            float headerH = m.TagSize.y;
+            float headerBottom = headerTop + headerH;
+
+            float ctaH = m.CtaSize.y;
+            float ctaTop = heroHeight - m.HeroPadding.y - ctaH;
+            // 桌面 CTA 上方要放「SPACE / ENTER」提示，留一条底带；移动端只留呼吸位。
+            float limitBottom = mobile ? ctaTop - 12f : ctaTop - 38f;
+
+            float cardH = LoadoutCard(m.ShowTopButton).Size.y;
+            float diffH = m.DifficultySegmentSize.y;
+            float durH = m.DurationSegmentSize.y;
+            float rowGap = m.DurationRowGap;
+            float cardToSettingsGap = mobile ? 12f : 16f;
+
+            float clusterH = cardH + cardToSettingsGap + diffH + rowGap + durH;
+            float bandTop = headerBottom + HeroWeaponSlotGap;
+            float freeH = Mathf.Max(0f, limitBottom - bandTop - clusterH);
+            float topGap = freeH * 0.5f;
+
+            float weaponTop = bandTop + topGap;
+            float diffTop = weaponTop + cardH + cardToSettingsGap;
+            float durTop = diffTop + diffH + rowGap;
+
+            return new HeroFlowLayout
+            {
+                HeaderTop = headerTop,
+                HeaderHeight = headerH,
+                WeaponTop = weaponTop,
+                WeaponHeight = cardH,
+                DifficultyTop = diffTop,
+                DifficultyHeight = diffH,
+                DurationTop = durTop,
+                DurationHeight = durH,
+                CtaTop = ctaTop,
+                CtaHeight = ctaH,
+            };
+        }
+
+        /// <summary>向后兼容：读取流式排版中武器整备卡的顶端 Y 坐标。</summary>
+        public static float ResolveHeroWeaponSlotTop(HomeMenuMetrics m, float heroHeight)
+        {
+            return ResolveHeroFlow(m, heroHeight, m.ShowTopButton).WeaponTop;
+        }
+
+        /// <summary>
+        /// Hero 中部对局控制区难度段选的实际几何：黑色「难度」角签 + 4 档药丸，铺满 innerWidth。
+        /// 窄宽时先收窄段宽（兜底 DifficultyMinSegmentWidth），绝不溢出。
         /// </summary>
         public static DifficultyBarLayout ResolveHeroDifficulty(HomeMenuMetrics m, float availableWidth)
         {
+            float tagWidth = m.DifficultyTagSize.x;
+            float tagGap = m.DifficultyTagGap;
             float gap = m.DifficultyGap;
             float segment = m.DifficultySegmentSize.x;
             float width = Mathf.Max(0f, availableWidth);
             int count = DifficultyTierCount;
             float gapTotal = gap * (count - 1);
 
-            float total = segment * count + gapTotal;
+            float total = tagWidth + tagGap + segment * count + gapTotal;
             if (total > width)
             {
-                float fitted = (width - gapTotal) / count;
+                float fitted = (width - tagWidth - tagGap - gapTotal) / count;
                 segment = Mathf.Clamp(fitted, m.DifficultyMinSegmentWidth, segment);
-                total = segment * count + gapTotal;
+                total = tagWidth + tagGap + segment * count + gapTotal;
+                if (total > width)
+                {
+                    // 极端窄（Hero 卡被压到设计下限以下）：允许跌破最小段宽兜底，优先保证不溢出。
+                    segment = Mathf.Max(24f, fitted);
+                    total = tagWidth + tagGap + segment * count + gapTotal;
+                }
             }
 
             return new DifficultyBarLayout
             {
+                TagWidth = tagWidth,
+                TagGap = tagGap,
                 SegmentWidth = segment,
                 Gap = gap,
+                TotalWidth = total,
+            };
+        }
+
+        /// <summary>
+        /// Hero 中部对局控制区时长段选的实际几何：黑色「时长」角签 + 3 档药丸，与难度行右缘严格对齐。
+        /// 窄宽时先收窄段宽（兜底 DurationMinSegmentWidth），绝不溢出。
+        /// </summary>
+        public static MatchDurationBarLayout ResolveHeroDuration(HomeMenuMetrics m, float availableWidth)
+        {
+            float tagWidth = m.DurationTagSize.x;
+            float tagGap = m.DurationTagGap;
+            float gap = m.DurationGap;
+            float segment = m.DurationSegmentSize.x;
+            int count = MatchDurationOptionCount;
+            float gapTotal = gap * (count - 1);
+            float width = Mathf.Max(0f, availableWidth);
+
+            float total = tagWidth + tagGap + segment * count + gapTotal;
+            if (total > width)
+            {
+                float fitted = (width - tagWidth - tagGap - gapTotal) / count;
+                segment = Mathf.Clamp(fitted, m.DurationMinSegmentWidth, segment);
+                total = tagWidth + tagGap + segment * count + gapTotal;
+                if (total > width)
+                {
+                    // 极端窄：允许跌破最小段宽兜底，优先保证不溢出。
+                    segment = Mathf.Max(24f, fitted);
+                    total = tagWidth + tagGap + segment * count + gapTotal;
+                }
+            }
+
+            return new MatchDurationBarLayout
+            {
+                TagWidth = tagWidth,
+                SegmentWidth = segment,
+                Gap = gap,
+                TagGap = tagGap,
                 TotalWidth = total,
             };
         }

@@ -99,7 +99,11 @@ namespace P1.Weapons
                 if (_windupTimer <= 0f)
                 {
                     _windupTimer = -1f;
-                    FireSlosherWave(_pendingAim.FlatDirection.sqrMagnitude > 0.001f ? _pendingAim : aim, host);
+                    // 甩出瞬间取「当前准星」（对齐 INKWAVE fireSlosh：出手时才读 a.aimPoint）：
+                    // 前摇仅 0.13s，但按「按下瞬间」锁方向会让甩枪出现「枪口朝新目标、墨浪飞旧方向」。
+                    // 当前准星退化（零向量）时才回落到按下瞬间记录的瞄准。
+                    WeaponAim fireAim = aim.FlatDirection.sqrMagnitude > 0.001f ? aim : _pendingAim;
+                    FireSlosherWave(fireAim, host);
 
                     float totalInterval = FireInterval;
                     float windup = Config != null ? Mathf.Max(0f, Config.slosherWindup) : 0.13f;

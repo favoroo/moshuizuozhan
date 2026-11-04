@@ -411,7 +411,10 @@ namespace P1.Player
                 wantsSwim,
                 wantsJump,
                 isFiringOrActing || wantsFire,
-                _weapon.IsPerformingSpecial);
+                _weapon.IsPerformingSpecial,
+                // 副武器按住瞄准：预览弹道/落点圈按准星解算，身体也必须朝准星
+                // （INKWAVE weapons.js aimingSub → fireFacing = 0.3）
+                bombIntent.IsAiming);
 
             // 8. 兼容旧相机 API（TPS 下不做瞄准 Look-ahead，仅记录）
             if (TopDownCameraFollow.Instance != null)

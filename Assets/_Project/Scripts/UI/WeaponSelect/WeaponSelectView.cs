@@ -817,7 +817,9 @@ namespace P1.UI.WeaponSelect
 
         /// <summary>
         /// 首页 Hero 卡内的整备卡槽（运行时）：主页面的 Hero 卡在宽安全区会整体居中，
-        /// X 必须跟随 Hero 卡实际左缘，不能再用设计表里固定的 Margin。
+        /// X 必须跟随 Hero 卡实际左缘，不能再用设计表里固定的 Margin；
+        /// Y 在「头部设置行下沿」与「CTA 上沿」之间居中，Hero 卡高度随安全区变化，
+        /// 必须用真实卡高重算（设计盒只按 1080 基准估算，短屏会把整备卡算到 CTA 上）。
         /// </summary>
         private HomeBox ResolveHeroWeaponSlot()
         {
@@ -830,6 +832,13 @@ namespace P1.UI.WeaponSelect
                 float innerWidth = Mathf.Max(0f, heroCard.sizeDelta.x - home.HeroPadding.x * 2f);
                 slot.X = heroCard.anchoredPosition.x + home.HeroPadding.x;
                 slot.Width = Mathf.Min(slot.Width, innerWidth);
+            }
+
+            if (heroCard != null && heroCard.sizeDelta.y > 10f)
+            {
+                // Hero 卡锚在 MenuSafeArea 左上角，anchoredPosition.y 为负 → 取反即卡片顶的绝对 Y。
+                float heroTop = -heroCard.anchoredPosition.y;
+                slot.Y = heroTop + MenuLayoutMath.ResolveHeroWeaponSlotTop(home, heroCard.sizeDelta.y);
             }
 
             return slot;

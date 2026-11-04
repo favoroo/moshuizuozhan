@@ -188,6 +188,8 @@ namespace P1.Tests
         /// <summary>
         /// 回归：手雷冷却徽标的三块文字都必须放进自己的框里。
         /// 旧版 220×36 胶囊 + 60px 标签框，"BOMB" 在 18 号已溢出 2.5px，移动端 24 号会压进进度条。
+        /// 左侧后来改成手雷图标（取不到图标才退回中文「手雷」），所以标签可能是 Icon 也可能是 Text，
+        /// 两种形态都要保证不压到进度条。
         /// </summary>
         [Test]
         public void SubAimBadge_TextFitsItsBoxes()
@@ -203,15 +205,23 @@ namespace P1.Tests
             var badge = reticleGo.transform.Find("SubAimBadge") as RectTransform;
             Assert.IsNotNull(badge, "SubAimBadge container should exist");
 
-            var label = badge.Find("Text").GetComponent<TMPro.TMP_Text>();
             var time = badge.Find("TimeText").GetComponent<TMPro.TMP_Text>();
             var ready = badge.Find("ReadyText").GetComponent<TMPro.TMP_Text>();
-            Assert.IsNotNull(label);
             Assert.IsNotNull(time);
             Assert.IsNotNull(ready);
 
-            Assert.LessOrEqual(label.preferredWidth, label.rectTransform.rect.width + 0.5f,
-                "左侧标签必须放在自己的框内");
+            // 左侧标签二选一：手雷图标（Icon）或中文文字（Text）。
+            var icon = badge.Find("Icon") as RectTransform;
+            var label = badge.Find("Text") as RectTransform;
+            Assert.IsTrue(icon != null || label != null, "徽标左侧必须有图标或文字标签");
+            if (label != null)
+            {
+                var labelText = label.GetComponent<TMPro.TMP_Text>();
+                Assert.IsNotNull(labelText);
+                Assert.LessOrEqual(labelText.preferredWidth, label.rect.width + 0.5f,
+                    "左侧标签必须放在自己的框内");
+            }
+
             Assert.LessOrEqual(time.preferredWidth, time.rectTransform.rect.width + 0.5f,
                 "右侧倒计时必须放在自己的框内");
 

@@ -7,6 +7,9 @@
 > **不记**：逐项 `Added` / `Changed` / `Verified` 流水账、测试项数与 exit 状态明细、selftest 细节、用户原话、设计推导、临时出图路径。
 > 2026-11-01 之前的条目按 GitHub Release 说明回填（仅版本里程碑）；逐条根因记录自 v0.1.8 起。
 
+## 2026-11-04 #26
+【发布墨水作战 v0.1.22】本版一并发出 2026-11-04 #22–#25：① 顶部倒计时压到原始尺寸约六成（桌面 136×60 / 38，移动端 152×68 / 48）；② 出生台队色降饱和（`SpawnPad.shader` 新增 `_TeamTintBlend`，队色先向混凝土基台色 lerp 再用）；③ 出生台中心黑盘提亮（两个材质生成入口的钢灰色统一为 0.50）。版本 `GameVersion.APP_VERSION` 0.1.22、`PlayerSettings.bundleVersion` 0.1.22、`AndroidBundleVersionCode` 122 三方一致，APK `build/moshuizuozhan-v0.1.22-arm64-v8a.apk`（64.4 MB，SHA-256 `a8a9452479694e292815d372db1940c438ccd41bc416e7efbbf12d8b46ef238d`），双端 tag 与 Release 均已就绪（GitHub + Gitee 附件同名同体积）。**坑：本次提交前 `Mat_TankGlass_D9EBFF73.mat` 的 `_SrcBlend` 又被编辑器写回 5（与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha），已按 v0.1.18 的老坑改回 1——该字段只要窗口里碰过玻璃材质就可能被归一化，提交前必须 diff 材质文件。**
+
 ## 2026-11-04 #25
 【出生台中心黑盘提亮】出生台内圈近黑（屏上 ≈ (16,16,24)），看着像台面挖了个洞。根因是两个材质生成入口写了不同的 `_BaseColor`：`ProjectScaffolder.CreateOrUpdateSpawnPadMaterial` 写 0.50 钢灰，`ArenaAtmosphereBuilder.ConfigureSpawnPadMaterial` 写 0.22 深钢色，哪条流程后跑就刷成哪一种，场景里长期停在 0.22 那版。现两处统一为 0.50（屏上 ≈ (110,103,102) 磨砂钢板灰，与混凝土基台 0.68 协调），并在两处注释里写明"必须同值"。**坑：`ArenaAtmosphereBuilder` 早于 `ProjectScaffolder` 执行时会被后者覆盖，改这两个函数任何一处的调色都必须同步另一处，否则只在部分重建路径下生效。** 涉及 `Scripts/Editor/ArenaAtmosphereBuilder.cs`、`Scripts/Editor/ProjectScaffolder.cs`、`Materials/Mat_SpawnPad_TeamA.mat`、`Materials/Mat_SpawnPad_TeamB.mat`。
 

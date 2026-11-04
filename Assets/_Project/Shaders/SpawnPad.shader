@@ -7,6 +7,10 @@ Shader "P1/SpawnPad"
         _RingColor ("Ring Color", Color) = (0.92, 0.94, 0.98, 1.0)
         _ChevronColor ("Chevron Color", Color) = (0.86, 0.68, 0.20, 1.0)
         _TeamColor ("Team Color", Color) = (1.0, 0.48, 0.08, 1.0)
+        // 队色降饱和：0 = 原始队色（鲜红/蓝，压在地面上突兀），1 = 完全并入混凝土基台色。
+        // 0.80 实测（后处理 colorSaturation +14 会二次放大饱和）：色带饱和度 ~0.46、
+        // 地面 ~0.25，观感是"褪色陶土/灰蓝涂料"，仍保留 A 暖 B 冷的队别倾向。
+        _TeamTintBlend ("Team Tint Blend To Concrete", Range(0.0, 1.0)) = 0.80
         _GlowStrength ("Glow Strength", Range(0.0, 2.0)) = 0.25
         _PulseSpeed ("Pulse Speed", Float) = 1.6
         _ShadowTint ("Shadow Tint", Color) = (0.40, 0.45, 0.62, 1.0)
@@ -74,6 +78,7 @@ Shader "P1/SpawnPad"
                 float _ShadowFloor;
                 float _ShadeSoftness;
                 float _ForwardSign;
+                float _TeamTintBlend;
             CBUFFER_END
 
             Varyings vert(Attributes input)
@@ -135,7 +140,7 @@ Shader "P1/SpawnPad"
                 // 1. 钢灰嵌板范围（r < 3.0m），外缘 0.1m 过渡到混凝土基台
                 float inlayMask = smoothstep(3.06, 2.96, r) * upness;
 
-                // 2. 队伍色渐变边缘（r 从 1.8m 到 2.95m 呈放射状渐变出队伍鲜艳色彩）
+                // 2. 队色渐变边缘（r 从 1.8m 到 2.95m 呈放射状渐变出降饱和队色）
                 float teamEdgeMask = smoothstep(1.7, 2.85, r) * (1.0 - smoothstep(2.94, 3.02, r)) * upness;
 
                 // 3. 同心环 2 道（外环 r=2.62m，内环 r=1.65m，线宽经 fwidth 抗锯齿）
@@ -172,14 +177,17 @@ Shader "P1/SpawnPad"
                 }
                 chevronMask *= upness;
 
-                // 5. 颜色合成：基台混凝土 -> 钢板 -> 队伍渐变边缘
+                // 5. 颜色合成：基台混凝土 -> 钢板 -> 降饱和队色渐变边缘
+                //    队色先向混凝土基台色混合（_TeamTintBlend），避免鲜红/纯蓝大面积压在地面上过于刺眼；
+                //    只保留淡陶土/灰蓝的色调倾向，远看像"磨损的喷涂标记"。
+                half3 teamAccent = lerp(_TeamColor.rgb, _PlatformColor.rgb, saturate(_TeamTintBlend));
                 half3 inlayCol = _BaseColor.rgb * lerp(1.10, 0.86, smoothstep(0.0, 2.9, r));
-                inlayCol = lerp(inlayCol, _TeamColor.rgb * 0.75, teamEdgeMask * 0.60);
+                inlayCol = lerp(inlayCol, teamAccent * 0.78, teamEdgeMask * 0.55);
                 half3 col = lerp(_PlatformColor.rgb, inlayCol, inlayMask);
 
-                // 队伍色墨滴指针（中心带亮白高光核）
+                // 队色墨滴指针（中心带亮白高光核；同样用降饱和队色，高光核保证识别度）
                 float dropInner = (1.0 - smoothstep(0.0, 0.22, dDrop + 0.22)) * dropletMask;
-                half3 dropCol = lerp(_TeamColor.rgb * 1.25, half3(1.0, 1.0, 1.0), dropInner * 0.65);
+                half3 dropCol = lerp(teamAccent * 1.12, half3(1.0, 1.0, 1.0), dropInner * 0.68);
                 col = lerp(col, dropCol, dropletMask);
 
                 // 导向警戒折线
@@ -194,10 +202,10 @@ Shader "P1/SpawnPad"
                 float rimMask = (1.0 - smoothstep(0.014 + fwRim, 0.032 + fwRim, rimDist)) * upness;
                 col = lerp(col, _PlatformColor.rgb * 0.50, rimMask * 0.65);
 
-                // 缓慢呼吸自发光（双环 + 墨滴 + 能量涟漪）
+                // 缓慢呼吸自发光（双环 + 墨滴 + 能量涟漪；队色部分同样走降饱和 accent）
                 half3 glowCol = _RingColor.rgb * (ringsMask * _GlowStrength * breathGlow);
-                glowCol += _TeamColor.rgb * (dropletMask * _GlowStrength * 1.35 * breathGlow);
-                glowCol += _TeamColor.rgb * (rippleMask * _GlowStrength * 0.85);
+                glowCol += teamAccent * (dropletMask * _GlowStrength * 1.15 * breathGlow);
+                glowCol += teamAccent * (rippleMask * _GlowStrength * 0.70);
 
                 // 6. 光照：主光 + 二分阴影 + 冷色环境补光
                 float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
@@ -260,6 +268,7 @@ Shader "P1/SpawnPad"
                 float _ShadowFloor;
                 float _ShadeSoftness;
                 float _ForwardSign;
+                float _TeamTintBlend;
             CBUFFER_END
 
             float3 _LightDirection;

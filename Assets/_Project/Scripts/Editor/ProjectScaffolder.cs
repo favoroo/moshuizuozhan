@@ -1662,6 +1662,8 @@ namespace P1.Editor
                 mat.shader = sh;
             }
 
+            // 嵌板钢灰：与 ArenaAtmosphereBuilder.ConfigureSpawnPadMaterial 的 steelBase 必须同值，
+            // 否则哪条流程后跑就刷成哪一种（历史上 0.22 那版把出生台中心渲染成近黑）。
             var steelCol = new Color(0.50f, 0.52f, 0.55f, 1f);
             mat.SetColor("_BaseColor", Linear(steelCol));
             mat.SetColor("_PlatformColor", Linear(style != null ? style.concreteMid : new Color(0.65f, 0.63f, 0.58f, 1f)));
@@ -1671,6 +1673,9 @@ namespace P1.Editor
             mat.SetFloat("_ShadowFloor", style != null ? style.shadowFloor : 0.42f);
             mat.SetFloat("_ShadeSoftness", style != null ? style.shadeSoftness : 0.03f);
             mat.SetFloat("_GlowStrength", 0.18f);
+            // 队色降饱和：原始队色大面积压在浅灰地面上太刺眼，向混凝土基台色混合 80%，
+            // 观感变成褪色陶土/灰蓝涂料（与地面协调），细节值见 SpawnPad.shader。
+            mat.SetFloat("_TeamTintBlend", 0.80f);
             mat.SetFloat("_ForwardSign", forwardSign);
             mat.color = Linear(steelCol);
             EditorUtility.SetDirty(mat);

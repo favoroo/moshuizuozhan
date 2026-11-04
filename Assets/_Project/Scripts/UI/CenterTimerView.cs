@@ -48,12 +48,12 @@ namespace P1.UI
         internal const float FillInsetX = 0.015f;
         internal const float FillInsetY = 0.12f;
 
-        // 顶部倒计时几何（2026-11-04 整体缩小一档）：旧值 260×112 / 字号 76 在 1080p 下块头过大，
-        // 现在桌面 210×92 / 64，移动端球体 240×104、字号由 FontSnapped ×1.28 放大到 82。
-        private const float TimerFontBaseSize = 64f;
-        private const float TimerReadyFontBaseSize = 44f;
-        private static readonly Vector2 TimerBlobDesktopSize = new Vector2(210f, 92f);
-        private static readonly Vector2 TimerBlobMobileSize = new Vector2(240f, 104f);
+        // 顶部倒计时几何（2026-11-04 第三轮整体缩小）：原始 260×112 / 76 → 210×92 / 64 → 170×74 / 50
+        // 都还嫌大，现在压到原始尺寸的约六成：桌面 136×60 / 38，移动端 152×68、字号 ×1.28 得 48。
+        private const float TimerFontBaseSize = 38f;
+        private const float TimerReadyFontBaseSize = 26f;
+        private static readonly Vector2 TimerBlobDesktopSize = new Vector2(136f, 60f);
+        private static readonly Vector2 TimerBlobMobileSize = new Vector2(152f, 68f);
 
         private Vector2 ResolveBlobSize()
             => _isMobileLayout ? TimerBlobMobileSize : TimerBlobDesktopSize;
@@ -95,7 +95,7 @@ namespace P1.UI
 
         private void ApplyLayoutMetrics()
         {
-            // 计时器档 64（移动端 ×1.28 → 82）；黑块桌面 210×92，移动端再放大一档
+            // 计时器档 38（移动端 ×1.28 → 48）；黑块桌面 136×60，移动端再放大一档
             float timerFontSize = UITypography.FontSnapped(TimerFontBaseSize);
             Vector2 blobSize = ResolveBlobSize();
 

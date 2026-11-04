@@ -237,6 +237,68 @@ namespace P1.Tests
             Object.DestroyImmediate(canvasGo);
         }
 
+        /// <summary>
+        /// 回归：顶部倒计时的块体尺寸与字号必须锁在「小两档」的几何上。
+        /// 演进：260×112 / 76 → 210×92 / 64 → 170×74 / 50 → 现 136×60 / 38，
+        /// 移动端 152×68（字号 38×1.28=48），约为原始尺寸的六成。
+        /// 数字再大就会重新盖住比分条与天空区域；这里锁死常量防止悄悄改回去。
+        ///
+        /// 陷阱：字号走 `UITypography.FontSnapped`，而它按 `UITypography.IsMobileLike`
+        /// （依赖静态的 `MobileTouchUI.IsTouchSimulationActive`）×1.28——同域里别的用例
+        /// 开过触屏 UI 就会变成 48。所以基础字号用反射锁常量，运行时字号按
+        /// `FontSnapped` 换算断言，不能硬写 38。
+        /// </summary>
+        [Test]
+        public void CenterTimer_BlobSize_AndFontSize_StayAtSmallTier()
+        {
+            var canvasGo = new GameObject("Canvas", typeof(Canvas), typeof(RectTransform));
+            canvasGo.transform.SetParent(_rootGo.transform, false);
+
+            var timerGo = new GameObject("Timer", typeof(RectTransform));
+            timerGo.transform.SetParent(canvasGo.transform, false);
+            var timer = timerGo.AddComponent<CenterTimerView>();
+
+            // 桌面档
+            timer.EnsureTimerBuilt(false);
+            var blob = timerGo.transform.Find("TimerBlob") as RectTransform;
+            Assert.IsNotNull(blob, "计时球应已构建");
+            Assert.AreEqual(136f, blob.sizeDelta.x, 0.01f, "桌面计时球宽应为 136");
+            Assert.AreEqual(60f, blob.sizeDelta.y, 0.01f, "桌面计时球高应为 60");
+
+            var text = blob.Find("TimerText").GetComponent<TMPro.TMP_Text>();
+            timer.SetTime(95f);
+            Assert.AreEqual(UITypography.FontSnapped(38f), text.fontSize, 0.01f,
+                "运行时字号必须等于基础 38 经平台缩放后的值");
+
+            // 移动端档
+            timer.SetMobileLayout(true);
+            Assert.AreEqual(152f, blob.sizeDelta.x, 0.01f, "移动端计时球宽应为 152");
+            Assert.AreEqual(68f, blob.sizeDelta.y, 0.01f, "移动端计时球高应为 68");
+
+            Object.DestroyImmediate(canvasGo);
+        }
+
+        /// <summary>
+        /// 回归：倒计时的基础字号常量锁在 38（桌面）/ 26（READY）。
+        /// 字号实际值会随平台 ×1.28 变，锁常量才是真正的设计约束。
+        /// </summary>
+        [Test]
+        public void CenterTimer_BaseFontSizes_StayAtSmallTier()
+        {
+            Assert.AreEqual(38f, ReadPrivateConst(typeof(CenterTimerView), "TimerFontBaseSize"),
+                "倒计时基础字号应为 38");
+            Assert.AreEqual(26f, ReadPrivateConst(typeof(CenterTimerView), "TimerReadyFontBaseSize"),
+                "READY 文案基础字号应为 26");
+        }
+
+        private static float ReadPrivateConst(System.Type type, string fieldName)
+        {
+            var field = type.GetField(fieldName,
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.IsNotNull(field, $"{type.Name}.{fieldName} 应存在");
+            return (float)field.GetValue(null);
+        }
+
         [Test]
         public void MinimapView_EnsureBuilt_InstantiatesMarkers()
         {

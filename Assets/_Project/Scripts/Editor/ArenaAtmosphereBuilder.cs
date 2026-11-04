@@ -46,6 +46,7 @@ namespace P1.Editor
         private static readonly int SpawnChevronColorId = Shader.PropertyToID("_ChevronColor");
         private static readonly int SpawnTeamColorId = Shader.PropertyToID("_TeamColor");
         private static readonly int SpawnGlowStrengthId = Shader.PropertyToID("_GlowStrength");
+        private static readonly int SpawnTeamTintBlendId = Shader.PropertyToID("_TeamTintBlend");
         private static readonly int SpawnPulseSpeedId = Shader.PropertyToID("_PulseSpeed");
         private static readonly int SpawnShadowTintId = Shader.PropertyToID("_ShadowTint");
         private static readonly int SpawnShadowFloorId = Shader.PropertyToID("_ShadowFloor");
@@ -224,7 +225,10 @@ namespace P1.Editor
             Material mat = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (mat == null) return;
 
-            var steelBase = new Color(0.22f, 0.25f, 0.29f, 1f);
+            // 嵌板钢灰：必须与 ProjectScaffolder.CreateOrUpdateSpawnPadMaterial 的 steelCol 同值。
+            // 旧值 (0.22,0.25,0.29) 在出生台上渲染成近黑 (16,16,24)，看着像台面挖了个洞；
+            // 0.50 档实测屏上 ≈ (110,103,102)，是正常的磨砂钢板灰。
+            var steelBase = new Color(0.50f, 0.52f, 0.55f, 1f);
             mat.SetColor(SpawnBaseColorId, Linear(steelBase));
             mat.SetColor(SpawnPlatformColorId, Linear(style.concreteMid));
             mat.SetColor(SpawnRingColorId, Linear(new Color(0.92f, 0.94f, 0.98f, 1f)));
@@ -234,6 +238,9 @@ namespace P1.Editor
             mat.SetFloat(SpawnShadowFloorId, style.shadowFloor);
             mat.SetFloat(SpawnShadeSoftnessId, style.shadeSoftness);
             mat.SetFloat(SpawnGlowStrengthId, 0.25f);
+            // 队色降饱和：原始队色（A 队鲜红橙）大面积压在浅灰混凝土上太突兀，
+            // 向基台混凝土色混合 80% 后是褪色陶土/灰蓝涂料，与地面协调且仍能区分队别。
+            if (mat.HasProperty(SpawnTeamTintBlendId)) mat.SetFloat(SpawnTeamTintBlendId, 0.80f);
             if (mat.HasProperty(SpawnPulseSpeedId)) mat.SetFloat(SpawnPulseSpeedId, 1.6f);
             mat.SetFloat(SpawnForwardSignId, forwardSign);
 

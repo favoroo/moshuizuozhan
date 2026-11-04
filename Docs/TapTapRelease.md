@@ -24,8 +24,13 @@ TapTap 审核会做安装包静态检测。历史上依次卡过两条：
 2. 打 TapTap 包：菜单 **`P1/构建/13. 构建 TapTap 上架包（无联网变体）`**
    - 产物：`Builds/Android/TapTap/InkTurf-TapTap.apk`
    - 该菜单会临时写入 `P1_OFFLINE` 宏，构建结束自动还原，不会污染后续其它渠道出包。
-3. 复核包体（**必做**，见下节）
-4. 上传并提审（见下节）
+3. **先建草稿版本**（上一版已是「已上线」时必做）：
+   `taptap-cli app create-draft --app-id 1020602 --dev-id 504338 --idempotency-key p1-draft-<版本> --yes`
+   - 已上线版本字段**全锁**，不建草稿就没法绑新包。
+   - 草稿基于最新线上版本创建，资料自动继承；建完后 `analyze-app-status` 的 blockers 应为空。
+   - **假警报**：建草稿**之前**调 `analyze-app-status` 会以「无未发布草稿」的空视图报出「9 个必填项未填写 + 尚未选择主包体」，那不是资料丢失，不要去补资料。
+4. 复核包体（**必做**，见下节）
+5. 上传并提审（见下节）
 
 > 批处理出包时调用 `P1.Editor.TapTapBuildSuite.BuildTapTapApk`，同样自动切宏与还原。
 
@@ -68,13 +73,29 @@ taptap-cli app submit-app-review --app-id 1020602 --dev-id 504338 \
   --data '{"release_schedule":{"kind":"immediate"}}' --idempotency-key p1-submit-<版本> --yes
 ```
 
+两处 payload 口径：
+
+- `select.json` 的 `expected` **原样**回传同一次 `list-packages` 里的 `package_slots.main.expected`（形如 `{"kind":"apk","apk_id":"<旧包体 id>"}`），`package.id` 用本次上传返回的 `apk_id`：
+  `{"slot":"main","package":{"id":"<新 apk_id>","type":"apk"},"expected":{"kind":"apk","apk_id":"<旧 apk_id>"}}`。
+  写完必须重读 `list-packages` 核对 `package_slots.main.expected.apk_id` 已变新值。
+- `whatsnew.json` 的 `expected` 必须回填 `get-app-module("package")` 里 `apk_whatsnew` 的当次 `current_value`，`value` 是新更新日志（≤5000 字）：
+  `{"changes":[{"field_id":"apk_whatsnew","value":"<新文案>","expected":"<旧文案>"}]}`。
+  写后读回确认。
+
+提审意图是独立确认门：跑完预检必须先向用户确认，再执行 `submit-app-review`。
+
 提审前还要确认：`platform-status` 的 `region_flag_android` 仍是 `4`（开放试玩）。
 
 ## 已知坑
 
 - **CLI 默认 scope 会串应用**：`taptap-cli app +select` 存的是本地 profile，之前残留为 1006720「嘟嘟羽毛球」，导致 0.1.17 曾误传进那个游戏的包体库（未绑定槽位、未提审）。**所有上传/写入命令都显式带 `--app-id 1020602`**。
 - **`release.py build --force` 会优先复用 `build/` 里版本匹配的旧 APK**：TapTap 包必须走菜单 13，不要用 `release.py build`。
-- **宏必须还原**：菜单 13 已用 `try/finally` 保证还原。若中途强制中断了编辑器，先跑一次 `script.recompile_status` 并检查 Android 平台的 `P1_OFFLINE` 是否还在；残留会让「构建/9」也打成无联网包。
+- **宏必须还原（比想象的更容易残留）**：菜单 13 的 `try/finally` 只还原**编辑器内存**里的宏。实测 v0.1.23 出包后 `script.eval` 读到的 Android defines 已是空数组，但 `ProjectSettings.asset` 落盘停在构建中途写入的
+  ```yaml
+  scriptingDefineSymbols:
+    Android: P1_OFFLINE
+  ```
+  ——**内存对、文件错**，一眼看不出问题。**每次跑完菜单 13 必须 `git diff ProjectSettings/ProjectSettings.asset`**：若出现 `Android: P1_OFFLINE`，用 `script.eval` 写空 defines + `File/Save Project` 清掉，再 `git checkout` 该文件；否则下一次「构建/9」会静默打出无联网包。残留时用 `script.eval` 单独查 Android defines 是查不出来的，只有 diff 文件才可靠。
 - **无联网包不能自更新**：玩家从 TapTap 拿到新版本靠商店更新，游戏内不再有更新入口（右下角角签退回只读版本号）。
 
 ## 相关代码

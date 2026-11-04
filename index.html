@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>墨水大作战 InkTurf — 第三人称涂地对战 · Android / macOS 免费下载</title>
+<meta name="description" content="墨水大作战 InkTurf：类 Splatoon 单机 4v4 涂地对战。7 类主武器、2 种大招，120 秒把 40×56 米集装箱码头涂成你的颜色。免费，无需联网，支持浏览器直接试玩。">
+<meta property="og:title" content="墨水大作战 InkTurf — 把整座码头涂成你的颜色">
+<meta property="og:description" content="单机 4v4 涂地对战：潜墨恢复、涂墙攀爬、7 类武器 2 大招，120 秒结算覆盖率。支持浏览器直接试玩，Android / macOS 免费下载。">
+<meta property="og:type" content="website">
+<meta property="og:image" content="img/og.png">
+<meta name="theme-color" content="#141414">
+<link rel="icon" type="image/png" href="img/favicon-64.png?v=0.1.19.55196">
+<link rel="stylesheet" href="styles.css?v=0.1.19.55196">
+</head>
+<body>
+
+<!-- ============ 顶栏 ============ -->
+<header class="topbar" id="topbar">
+  <div class="wrap topbar-in">
+    <a class="brand" href="#top">
+      <img class="brand-ico" src="img/app_icon.png?v=0.1.19.55196" alt="墨水大作战图标" width="38" height="38">
+      <span class="brand-name">墨水大作战<small>InkTurf</small></span>
+    </a>
+    <nav class="nav" id="nav">
+      <a href="#play" data-nav>玩法</a>
+      <a href="#weapons" data-nav>武器</a>
+      <a href="#arena" data-nav>战场</a>
+      <a href="#get" data-nav>下载</a>
+      <i class="nav-ind" id="navInd" aria-hidden="true"></i>
+    </nav>
+    <a class="btn btn-sm btn-yellow topbar-cta" href="play/" target="_blank" rel="noopener">试玩</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============ Hero ============ -->
+  <section class="hero">
+    <div class="wrap hero-in">
+      <div class="hero-copy">
+        <p class="kicker hero-line">第三人称 · 涂地对战 · 单机 4v4</p>
+        <h1 class="hero-line">把整座码头<br>涂成<em class="hl">你的颜色</em></h1>
+        <p class="lead hero-line">《墨水大作战》是一款类 Splatoon 的 3D 涂地射击游戏：用墨水覆盖地面，在己方墨里潜行恢复，攒满大招扭转战局——结算时，涂得多的一方获胜。</p>
+        <div class="cta-row hero-line">
+          <a class="btn btn-yellow" href="play/" target="_blank" rel="noopener">立即试玩 · 网页版</a>
+          <a class="btn btn-ghost" href="#get">下载 Android 版</a>
+        </div>
+        <p class="hero-meta hero-line">
+          <span class="tag">免费游玩</span>
+          <span class="tag">无需联网</span>
+          <span class="tag">macOS · Android</span>
+        </p>
+      </div>
+
+      <figure class="hero-shot hero-line" id="heroShot">
+        <div class="frame">
+          <video id="heroVideo" playsinline preload="none" poster="img/hero_poster.webp?v=0.1.19.55196" width="1920" height="864">
+            <source src="video/promo.av1.mp4?v=0.1.19.55196" type='video/mp4; codecs="av01.0.08M.08"'>
+            <source src="video/promo.mp4?v=0.1.19.55196" type="video/mp4">
+          </video>
+          <button class="play" id="playBtn" type="button" aria-label="播放宣传视频">
+            <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+          </button>
+        </div>
+        <figcaption class="shot-cap">40×56 米集装箱码头实机画面</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ 数字带 ============ -->
+  <section class="band">
+    <div class="band-cell"><b data-count="7">0</b><span>类主武器</span></div>
+    <div class="band-cell"><b data-count="8">0</b><span>名战士同场</span></div>
+    <div class="band-cell"><b data-count="120">0</b><span>秒一局</span></div>
+    <div class="band-cell"><b data-count="2">0</b><span>种大招</span></div>
+  </section>
+
+  <!-- ============ 玩法规则 ============ -->
+  <section class="section" id="play">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <span class="sec-no">01</span>
+        <div>
+          <p class="sec-kicker">怎么玩</p>
+          <h2>四条规则，<em class="hl-sm">涂满即赢</em></h2>
+        </div>
+      </header>
+
+      <div class="rule-grid">
+        <article class="card rule reveal">
+          <i class="bar bar-orange"></i>
+          <span class="ico ico-orange" style="--ico:url('img/rule_turf.png?v=0.1.19.55196')" role="img" aria-label="涂地图标"></span>
+          <h3>涂地制胜</h3>
+          <p>2 分钟涂地，最后按地面覆盖率结算胜负。开枪即占领，涂得多就赢。</p>
+        </article>
+        <article class="card rule reveal">
+          <i class="bar bar-blue"></i>
+          <span class="ico ico-blue" style="--ico:url('img/rule_swim.png?v=0.1.19.55196')" role="img" aria-label="潜墨图标"></span>
+          <h3>潜墨恢复</h3>
+          <p>钻进己方墨里变身潜行：快速回墨、持续回血，还能绕后偷袭。</p>
+        </article>
+        <article class="card rule reveal">
+          <i class="bar bar-red"></i>
+          <span class="ico ico-red" style="--ico:url('img/rule_enemy.png?v=0.1.19.55196')" role="img" aria-label="敌墨图标"></span>
+          <h3>警惕敌墨</h3>
+          <p>踩上敌方墨水会持续掉血、行动迟缓——盯紧脚下，别走进别人的地盘。</p>
+        </article>
+        <article class="card rule reveal">
+          <i class="bar bar-green"></i>
+          <span class="ico ico-green" style="--ico:url('img/rule_climb.png?v=0.1.19.55196')" role="img" aria-label="攀爬图标"></span>
+          <h3>涂墙攀爬</h3>
+          <p>把墙涂成己方颜色，贴着墨墙就能上爬翻越。墙面墨不计覆盖率。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 武器库 ============ -->
+  <section class="section" id="weapons">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <span class="sec-no">02</span>
+        <div>
+          <p class="sec-kicker">武器库</p>
+          <h2><em class="hl-sm">七类主武器</em>，两种大招</h2>
+        </div>
+      </header>
+
+      <figure class="arsenal reveal">
+        <img src="img/arsenal.webp?v=0.1.19.55196" alt="七把主武器角色阵容" loading="lazy">
+        <figcaption class="shot-cap">七把主武器，同一个战场</figcaption>
+      </figure>
+
+      <div class="w-grid">
+        <article class="card wcard w-a reveal">
+          <span class="wico" style="--ico:url('img/weapon_shooter.png?v=0.1.19.55196')" role="img" aria-label="喷射小枪"></span>
+          <h3>喷射小枪</h3>
+          <p class="wen">SPRITZER</p>
+          <p class="wdesc">连发速射的稳定输出，持续开火准星扩散。</p>
+        </article>
+        <article class="card wcard w-b reveal">
+          <span class="wico" style="--ico:url('img/weapon_roller.png?v=0.1.19.55196')" role="img" aria-label="推地滚筒"></span>
+          <h3>推地滚筒</h3>
+          <p class="wen">SWELL ROLLER</p>
+          <p class="wdesc">贴地碾压开路，挥击泼出扇形墨浪。</p>
+        </article>
+        <article class="card wcard w-a reveal">
+          <span class="wico" style="--ico:url('img/weapon_charger.png?v=0.1.19.55196')" role="img" aria-label="蓄力狙击"></span>
+          <h3>蓄力狙击</h3>
+          <p class="wen">GLINT CHARGER</p>
+          <p class="wdesc">长按蓄力，贯穿一线的远程压制。</p>
+        </article>
+        <article class="card wcard w-b reveal">
+          <span class="wico" style="--ico:url('img/weapon_dualies.png?v=0.1.19.55196')" role="img" aria-label="双枪翻滚"></span>
+          <h3>双枪翻滚</h3>
+          <p class="wen">TWINFIN DUALIES</p>
+          <p class="wdesc">双手交替射击，翻滚架枪灵活突进。</p>
+        </article>
+        <article class="card wcard w-a reveal">
+          <span class="wico" style="--ico:url('img/weapon_slosher.png?v=0.1.19.55196')" role="img" aria-label="泼桶墨浪"></span>
+          <h3>泼桶墨浪</h3>
+          <p class="wen">TIDEBUCKET SLOSHER</p>
+          <p class="wdesc">抛洒墨浪越过掩体，专治高台蹲守。</p>
+        </article>
+        <article class="card wcard w-b reveal">
+          <span class="wico" style="--ico:url('img/weapon_blaster.png?v=0.1.19.55196')" role="img" aria-label="爆破空爆"></span>
+          <h3>爆破空爆</h3>
+          <p class="wen">POPPER BLASTER</p>
+          <p class="wdesc">慢速重弹直击秒杀，空中爆裂成幕。</p>
+        </article>
+        <article class="card wcard w-a reveal">
+          <span class="wico" style="--ico:url('img/weapon_splatling.png?v=0.1.19.55196')" role="img" aria-label="旋转加特林"></span>
+          <h3>旋转加特林</h3>
+          <p class="wen">GYRE SPLATLING</p>
+          <p class="wdesc">蓄力转管，释放高密度弹幕封锁全场。</p>
+        </article>
+      </div>
+
+      <div class="sp-grid">
+        <article class="card sp sp-slam reveal">
+          <span class="wico" style="--ico:url('img/special_slam.png?v=0.1.19.55196')" role="img" aria-label="砸地猛击"></span>
+          <div>
+            <h3>砸地猛击 <small>SLAM</small></h3>
+            <p>腾空砸地，墨浪四溅，一波清空身周地面。</p>
+          </div>
+        </article>
+        <article class="card sp sp-storm reveal">
+          <span class="wico" style="--ico:url('img/special_storm.png?v=0.1.19.55196')" role="img" aria-label="墨雨风暴"></span>
+          <div>
+            <h3>墨雨风暴 <small>STORM</small></h3>
+            <p>召唤风暴云，区域持续泼墨改写真势。</p>
+          </div>
+        </article>
+        <article class="card sp sp-bomb reveal">
+          <span class="wico" style="--ico:url('img/sub_bomb.png?v=0.1.19.55196')" role="img" aria-label="延时墨弹"></span>
+          <div>
+            <h3>延时墨弹 <small>BOMB</small></h3>
+            <p>消耗墨水的副武器：落地预警后爆炸开花。</p>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 战场 ============ -->
+  <section class="section" id="arena">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <span class="sec-no">03</span>
+        <div>
+          <p class="sec-kicker">战场</p>
+          <h2><em class="hl-sm">集装箱码头</em>，立体攻防</h2>
+        </div>
+      </header>
+
+      <div class="arena-in">
+        <div class="arena-copy reveal">
+          <p>一张 <b>40×56 米</b> 的集装箱码头：高低台、斜坡、可涂墨的墙面互相咬合。正面火力压制、侧翼潜墨绕后、贴墨墙攀爬翻越——同一张图，打得出完全不同的章法。</p>
+          <ul class="arena-list">
+            <li><b class="dot dot-yellow"></b>实时覆盖率战况条，涂了多少一目了然</li>
+            <li><b class="dot dot-orange"></b>最后 30 秒决胜，节奏陡然拉满</li>
+            <li><b class="dot dot-blue"></b>三档 Bot 难度：轻松 / 普通 / 硬核</li>
+          </ul>
+        </div>
+
+        <div class="arena-grid">
+          <figure class="shot reveal">
+            <img src="img/shot_overview.webp?v=0.1.19.55196" alt="码头全景俯瞰" loading="lazy">
+            <figcaption class="shot-cap">码头全景</figcaption>
+          </figure>
+          <figure class="shot reveal">
+            <img src="img/shot_combat.webp?v=0.1.19.55196" alt="双方交火" loading="lazy">
+            <figcaption class="shot-cap">正面交火</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 下载 ============ -->
+  <section class="section" id="get">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <span class="sec-no">04</span>
+        <div>
+          <p class="sec-kicker">下载</p>
+          <h2>上码头，<em class="hl-sm">现在就开涂</em></h2>
+        </div>
+      </header>
+
+      <div class="webplay reveal">
+        <div class="webplay-copy">
+          <p class="webplay-kicker">网页试玩</p>
+          <h3>不用下载，打开浏览器就能涂</h3>
+          <p class="webplay-note">桌面 Chrome / Edge / Safari · 首次加载稍慢 · 手机请下载 Android 版</p>
+        </div>
+        <a class="btn btn-ghost" href="play/" target="_blank" rel="noopener">开始试玩</a>
+      </div>
+
+      <div class="dl-grid">
+        <article class="card dl dl-main reveal">
+          <h3>Android</h3>
+          <p class="dl-meta">APK · 约 69 MB · Android 8.0+</p>
+          <p>横屏游玩，支持触屏按键布局自定义。</p>
+          <div class="dl-btns">
+            <a class="btn btn-yellow" href="https://github.com/favoroo/moshuizuozhan/releases/latest" target="_blank" rel="noopener">GitHub 下载</a>
+            <a class="btn btn-ghost" href="https://gitee.com/favo9/moshuizuozhan/releases/latest" target="_blank" rel="noopener">Gitee 镜像</a>
+          </div>
+        </article>
+        <article class="card dl reveal">
+          <h3>macOS</h3>
+          <p class="dl-meta">桌面版 · 约 81 MB</p>
+          <p>WASD + 鼠标精准操控，桌面 60 FPS 满帧体验。</p>
+          <div class="dl-btns">
+            <a class="btn btn-ghost" href="https://github.com/favoroo/moshuizuozhan/releases/latest" target="_blank" rel="noopener">前往 Releases</a>
+          </div>
+        </article>
+        <article class="card dl dl-ink reveal">
+          <h3>持续更新</h3>
+          <p class="dl-meta">免费游玩 · 持续打磨</p>
+          <p>武器手感、新地图、Bot 战术持续打磨中。</p>
+          <div class="dl-btns">
+            <a class="btn btn-paper" href="https://github.com/favoroo/moshuizuozhan/releases" target="_blank" rel="noopener">查看更新记录</a>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <img class="brand-ico" src="img/app_icon.png?v=0.1.19.55196" alt="墨水大作战图标" width="30" height="30">
+    <p>墨水大作战 InkTurf · P1Studio</p>
+    <p class="foot-links">
+      <a href="privacy.html">隐私政策</a>
+      <span>·</span>
+      <a href="terms.html">用户协议</a>
+      <span>·</span>
+      <a href="https://github.com/favoroo/moshuizuozhan" target="_blank" rel="noopener">GitHub</a>
+      <span>·</span>
+      <a href="https://gitee.com/favo9/moshuizuozhan" target="_blank" rel="noopener">Gitee</a>
+    </p>
+  </div>
+</footer>
+
+<script src="app.js?v=0.1.19.55196"></script>
+</body>
+</html>

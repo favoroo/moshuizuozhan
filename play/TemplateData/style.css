@@ -1,0 +1,275 @@
+/* InkTurf 网页试玩 — 几何大胆风（深底 / 行动黄 / 3px 墨黑框 / 零模糊硬偏移影） */
+@font-face {
+  font-family: 'MiSans';
+  src: url('../../fonts/MiSans-Semibold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'MiSans';
+  src: url('../../fonts/MiSans-Heavy.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --ink: #141414;
+  --ink-deep: #0B0B0B;
+  --paper: #FFFFFF;
+  --paper2: #F0F0F0;
+  --yellow: #FFD400;
+  --grey: #6F6F6F;
+  --bw: 3px;
+  --sh: 4px 5px 0 var(--ink-deep);
+  --sh-hover: 6px 7px 0 var(--ink-deep);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: 'MiSans', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-weight: 600;
+  overflow: hidden;
+}
+@supports (height: 100dvh) {
+  body { height: 100dvh; }
+}
+
+/* ---------- 顶栏 ---------- */
+.p1-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 64px;
+  padding: 0 22px;
+  background: var(--ink-deep);
+  border-bottom: var(--bw) solid #000;
+}
+.p1-back {
+  color: var(--yellow);
+  font-weight: 900;
+  font-size: 15px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.p1-back:hover { color: var(--paper); }
+.p1-brand {
+  margin-left: auto;
+  line-height: 1.15;
+  text-align: right;
+}
+.p1-brand-cn { display: block; font-size: 18px; font-weight: 900; }
+.p1-brand-en {
+  display: block;
+  color: var(--grey);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+.p1-full {
+  flex: 0 0 auto;
+  padding: 9px 16px;
+  background: var(--yellow);
+  color: var(--ink);
+  border: var(--bw) solid var(--ink-deep);
+  box-shadow: 3px 4px 0 var(--ink-deep);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.p1-full:hover { transform: translate(-2px, -2px); box-shadow: 5px 6px 0 var(--ink-deep); }
+.p1-full:active { transform: translate(2px, 3px); box-shadow: 0 0 0 var(--ink-deep); }
+
+/* ---------- 画布舞台 ---------- */
+.p1-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #000;
+  overflow: hidden;
+}
+#unity-container { position: absolute; inset: 0; }
+#unity-container.unity-desktop { left: 0; top: 0; transform: none; }
+#unity-fullscreen-container {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--ink);
+}
+#unity-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--ink);
+  outline: none;
+}
+
+/* ---------- 加载层 ---------- */
+#unity-loading-container {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink);
+}
+.p1-loading-card {
+  width: calc(100% - 48px);
+  max-width: 560px;
+  padding: 34px 32px;
+  background: var(--paper);
+  color: var(--ink);
+  border: var(--bw) solid #000;
+  box-shadow: var(--sh);
+}
+.p1-kicker {
+  display: inline-block;
+  margin: 0;
+  padding: 4px 10px;
+  background: var(--ink-deep);
+  color: var(--yellow);
+  border: var(--bw) solid var(--ink-deep);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 2px;
+}
+.p1-loading-card h1 {
+  margin: 16px 0 24px;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.15;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+#unity-loading-bar { width: 100%; }
+#unity-progress-bar-empty {
+  width: 100%;
+  height: 20px;
+  padding: 3px;
+  background: var(--paper2);
+  border: var(--bw) solid #000;
+}
+#unity-progress-bar-full {
+  width: 0%;
+  height: 100%;
+  background: var(--yellow);
+  border-right: 2px solid #000;
+  transition: width 120ms linear;
+}
+.p1-loading-note {
+  margin: 14px 0 0;
+  color: #2c2c2c;
+  font-size: 14px;
+}
+
+/* ---------- 底部操作提示 ---------- */
+.p1-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  height: 38px;
+  background: var(--ink-deep);
+  color: var(--grey);
+  font-size: 13px;
+  font-weight: 600;
+}
+.p1-foot i { display: block; width: 5px; height: 5px; background: var(--yellow); }
+
+/* ---------- 警告 / 错误 ---------- */
+#unity-warning {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  z-index: 20;
+  display: none;
+  width: min(90vw, 720px);
+  transform: translateX(-50%);
+}
+.p1-warn {
+  margin: 6px 0;
+  padding: 10px 14px;
+  background: var(--paper);
+  color: var(--ink);
+  border: var(--bw) solid #000;
+  box-shadow: var(--sh);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.p1-warn-error { background: #FF2E2E; color: var(--paper); }
+.p1-warn-info { background: var(--yellow); }
+
+/* ---------- 手机提示 ---------- */
+.p1-stage.is-mobile #unity-container { display: none; }
+#p1-mobile {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink);
+}
+#p1-mobile[hidden] { display: none; }
+.p1-mobile-card {
+  width: calc(100% - 40px);
+  max-width: 560px;
+  padding: 32px 28px;
+  background: var(--yellow);
+  color: var(--ink);
+  border: var(--bw) solid #000;
+  box-shadow: var(--sh);
+}
+.p1-mobile-card h1 {
+  margin: 14px 0 10px;
+  font-size: clamp(26px, 8vw, 38px);
+  line-height: 1.15;
+  font-weight: 900;
+}
+.p1-mobile-card p:not(.p1-kicker) {
+  margin: 0;
+  color: #2c2c2c;
+  font-size: 15px;
+}
+.p1-mobile-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+.p1-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 13px 20px;
+  border: var(--bw) solid #000;
+  box-shadow: 3px 4px 0 #000;
+  font-size: 16px;
+  font-weight: 900;
+  text-decoration: none;
+  transition: transform 100ms linear, box-shadow 160ms cubic-bezier(.215, .61, .355, 1);
+}
+.p1-btn:hover { transform: translate(-2px, -2px); box-shadow: var(--sh-hover); }
+.p1-btn:active { transform: translate(2px, 3px); box-shadow: 0 0 0 #000; }
+.p1-btn-yellow { background: var(--ink); color: var(--yellow); }
+.p1-btn-dark { background: var(--paper); color: var(--ink); }
+
+@media (max-width: 620px) {
+  .p1-bar { height: 58px; padding: 0 14px; gap: 10px; }
+  .p1-brand-en { display: none; }
+  .p1-brand-cn { font-size: 16px; }
+  .p1-footer, .p1-foot { display: none; }
+  .p1-loading-card { padding: 26px 20px; }
+  .p1-loading-note { font-size: 13px; }
+}

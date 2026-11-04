@@ -86,5 +86,32 @@ namespace P1.Tests
             Object.Destroy(root);
             yield return null;
         }
+
+        /// <summary>
+        /// Fixed（v0.1.23）：FPS 角标只隐藏了子节点文字、没隐藏挂 UIInkShapeGraphic 的父底板，
+        /// 导致关闭 FPS 时左上角常驻一块墨色阴影方块。这里锁死「底板随开关整块显隐」。
+        /// 必须在 PlayMode 验证：HudController 的 BuildUI 只在 Awake 里跑。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator HudController_FpsBadgeRoot_FollowsShowFpsToggle()
+        {
+            GameSettingsService.ShowFps = false;
+            GameObject root = CreateCanvas();
+            HudController hud = root.AddComponent<HudController>();
+            yield return null;
+
+            Transform badge = hud.transform.Find("HudSafeArea/FpsBadge");
+            Assert.IsNotNull(badge, "HudController 应构建 FpsBadge 底板");
+            Assert.IsFalse(badge.gameObject.activeSelf,
+                "未开启 FPS 时 FpsBadge 底板必须整块隐藏，否则左上角常驻阴影色块");
+
+            GameSettingsService.ShowFps = true;
+            yield return null;
+            Assert.IsTrue(badge.gameObject.activeSelf, "开启 FPS 后 FpsBadge 底板必须显示");
+
+            GameSettingsService.ShowFps = false;
+            Object.Destroy(root);
+            yield return null;
+        }
     }
 }

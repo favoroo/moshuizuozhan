@@ -122,6 +122,7 @@ namespace P1.UI.Menus
         private GameObject _keyBindingsViewContainer;
         private bool _isSettingsOpen;
         private bool _isKeyBindingsOpen;
+        private bool _openedKeyBindingsFromMainView;
         private bool _isListeningForKey;
         private DesktopAction _listeningAction;
         private bool _listeningIsSecondary;
@@ -579,29 +580,49 @@ namespace P1.UI.Menus
             subRt.anchoredPosition = new Vector2(24f, -26f);
             subRt.sizeDelta = new Vector2(-24f, 30f);
 
-            // 主菜单直角按钮群：宽 460、高 84（全部按钮档硬影 + 按压物理）
+            // 主菜单直角按钮群：宽 460、高 76（全部按钮档硬影 + 按压物理，匀称呼吸感排版）
+            Vector2 buttonSize = new Vector2(460f, 76f);
+            float buttonFont = UITypography.FontSnapped(26f);
+
             // 1. 继续游戏（黄底黑字直角）
-            var resumeBtn = CreateStyledButton("ResumeBtn", parent, "继续游戏", ComicStyle.Yellow, ComicStyle.Ink, new Vector2(460f, 84f), _theme, UITypography.FontSnapped(28f), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            var resumeBtn = CreateStyledButton("ResumeBtn", parent, "继续游戏", ComicStyle.Yellow, ComicStyle.Ink, buttonSize, _theme, buttonFont, ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var resumeRt = resumeBtn.GetComponent<RectTransform>();
-            resumeRt.anchoredPosition = new Vector2(PauseButtonColumnX, 90f);
+            resumeRt.anchoredPosition = new Vector2(PauseButtonColumnX, 134f);
             resumeBtn.onClick.AddListener(Resume);
 
-            // 2. 设置（白底黑字直角）
-            var settingsBtn = CreateStyledButton("SettingsBtn", parent, "系统设置", ComicStyle.Paper, ComicStyle.Ink, new Vector2(460f, 84f), _theme, UITypography.FontSnapped(28f), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            // 2. 系统设置（白底黑字直角）
+            var settingsBtn = CreateStyledButton("SettingsBtn", parent, "系统设置", ComicStyle.Paper, ComicStyle.Ink, buttonSize, _theme, buttonFont, ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var setRt = settingsBtn.GetComponent<RectTransform>();
-            setRt.anchoredPosition = new Vector2(PauseButtonColumnX, -10f);
+            setRt.anchoredPosition = new Vector2(PauseButtonColumnX, 42f);
             settingsBtn.onClick.AddListener(OpenSettings);
 
-            // 3. 重新开始比赛（红底白字直角）
-            var restartBtn = CreateStyledButton("RestartBtn", parent, "重新开始比赛", ComicStyle.Red, ComicStyle.Paper, new Vector2(460f, 84f), _theme, UITypography.FontSnapped(28f), ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            // 3. 操作按钮调整（白底黑字直角：移动端触控按键布局自定义 / 桌面端按键设置）
+            string controlsBtnText = UITypography.IsMobileLike ? "操作按钮调整" : "按键设置";
+            var controlsBtn = CreateStyledButton("ControlsBtn", parent, controlsBtnText, ComicStyle.Paper, ComicStyle.Ink, buttonSize, _theme, buttonFont, ComicStyle.CornerSharp, ComicStyle.BorderThin);
+            var controlsRt = controlsBtn.GetComponent<RectTransform>();
+            controlsRt.anchoredPosition = new Vector2(PauseButtonColumnX, -50f);
+            controlsBtn.onClick.AddListener(() =>
+            {
+                if (UITypography.IsMobileLike)
+                {
+                    OpenControlSettings();
+                }
+                else
+                {
+                    OpenKeyBindings(fromMainView: true);
+                }
+            });
+
+            // 4. 重新开始比赛（红底白字直角）
+            var restartBtn = CreateStyledButton("RestartBtn", parent, "重新开始比赛", ComicStyle.Red, ComicStyle.Paper, buttonSize, _theme, buttonFont, ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var restartRt = restartBtn.GetComponent<RectTransform>();
-            restartRt.anchoredPosition = new Vector2(PauseButtonColumnX, -110f);
+            restartRt.anchoredPosition = new Vector2(PauseButtonColumnX, -142f);
             restartBtn.onClick.AddListener(RestartMatch);
 
-            // 4. 返回主菜单（白底墨字 + 红边直角：离开本局回到赛前主菜单）
-            var returnMenuBtn = CreateStyledButton("ReturnMenuBtn", parent, "返回主菜单", ComicStyle.Paper, ComicStyle.Ink, new Vector2(460f, 84f), _theme, UITypography.FontSnapped(28f), ComicStyle.CornerSharp, ComicStyle.Border);
+            // 5. 返回主菜单（白底墨字 + 红边直角：离开本局回到赛前主菜单）
+            var returnMenuBtn = CreateStyledButton("ReturnMenuBtn", parent, "返回主菜单", ComicStyle.Paper, ComicStyle.Ink, buttonSize, _theme, buttonFont, ComicStyle.CornerSharp, ComicStyle.Border);
             var returnMenuRt = returnMenuBtn.GetComponent<RectTransform>();
-            returnMenuRt.anchoredPosition = new Vector2(PauseButtonColumnX, -210f);
+            returnMenuRt.anchoredPosition = new Vector2(PauseButtonColumnX, -234f);
             var returnMenuShape = returnMenuBtn.GetComponent<UIInkShapeGraphic>();
             if (returnMenuShape != null)
             {
@@ -614,15 +635,15 @@ namespace P1.UI.Menus
             string hintLabel = Application.isMobilePlatform ? "点击上方按钮继续" : "按 [ESC] 键或点击按钮继续";
             var hint = CreateTextMesh("Hint", parent, hintLabel, UITypography.FontSnapped(20f), ComicStyle.WithAlpha(ComicStyle.Ink, 0.72f), null, TextAlignmentOptions.Center, isDisplay: false);
             var hintRt = hint.rectTransform;
-            hintRt.anchoredPosition = new Vector2(PauseButtonColumnX, -295f);
-            hintRt.sizeDelta = new Vector2(500f, 30f);
+            hintRt.anchoredPosition = new Vector2(PauseButtonColumnX, -312f);
+            hintRt.sizeDelta = new Vector2(500f, 26f);
 
             // 隐私政策入口：同意后也能随时查看完整政策（TapTap 隐私合规要求）。
             var privacyBtn = CreateStyledButton("PrivacyBtn", parent, "隐私政策", ComicStyle.Paper, ComicStyle.Ink,
-                new Vector2(300f, 48f), _theme, UITypography.FontSnapped(20f),
+                new Vector2(300f, 44f), _theme, UITypography.FontSnapped(20f),
                 ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var privacyRt = privacyBtn.GetComponent<RectTransform>();
-            privacyRt.anchoredPosition = new Vector2(PauseButtonColumnX, -352f);
+            privacyRt.anchoredPosition = new Vector2(PauseButtonColumnX, -360f);
             privacyBtn.onClick.AddListener(PrivacyConsentDialog.OpenPolicyPage);
 
             // 右列「操作说明」卡：原 HUD 底部那排小字改由这里承载，键帽 + 动作两栏排布
@@ -1238,18 +1259,34 @@ namespace P1.UI.Menus
         private void OpenControlSettings()
         {
             Resume();
-            var touchUI = FindAnyObjectByType<MobileTouchUI>();
+            var touchUI = FindAnyObjectByType<MobileTouchUI>(FindObjectsInactive.Include);
             if (touchUI != null)
             {
+                if (!touchUI.gameObject.activeSelf)
+                {
+                    touchUI.gameObject.SetActive(true);
+                }
                 touchUI.OpenLayoutCustomizer();
+            }
+            else
+            {
+                Debug.LogWarning("[PauseMenuOverlay] 未找到 MobileTouchUI，无法打开触控按键调整");
             }
         }
 
-        public void OpenKeyBindings()
+        public void OpenKeyBindings(bool fromMainView = false)
         {
             if (_keyBindingsViewContainer == null) return;
+            _openedKeyBindingsFromMainView = fromMainView;
             _isKeyBindingsOpen = true;
-            _settingsViewContainer.SetActive(false);
+            if (fromMainView)
+            {
+                if (_mainViewContainer != null) _mainViewContainer.SetActive(false);
+            }
+            else
+            {
+                if (_settingsViewContainer != null) _settingsViewContainer.SetActive(false);
+            }
             _keyBindingsViewContainer.SetActive(true);
             RefreshKeyBindingsUI();
 
@@ -1268,7 +1305,15 @@ namespace P1.UI.Menus
 
             _isKeyBindingsOpen = false;
             if (_keyBindingsViewContainer != null) _keyBindingsViewContainer.SetActive(false);
-            if (_settingsViewContainer != null) _settingsViewContainer.SetActive(true);
+            if (_openedKeyBindingsFromMainView)
+            {
+                if (_mainViewContainer != null) _mainViewContainer.SetActive(true);
+            }
+            else
+            {
+                if (_settingsViewContainer != null) _settingsViewContainer.SetActive(true);
+            }
+            _openedKeyBindingsFromMainView = false;
 
             if (_panelMotion != null)
             {
@@ -2186,7 +2231,7 @@ namespace P1.UI.Menus
                 return;
 
             bool isPlaying = _match != null && _match.CurrentPhase == MatchManager.Phase.Playing;
-            bool isMobile = Application.isMobilePlatform || forceShowMobileButton;
+            bool isMobile = Application.isMobilePlatform || forceShowMobileButton || MobileTouchUI.IsTouchSimulationActive;
             bool shouldShow = !IsPaused && isPlaying && isMobile && !MobileLayoutCustomizer.IsEditingAny;
 
             if (_mobilePauseButton.gameObject.activeSelf != shouldShow)

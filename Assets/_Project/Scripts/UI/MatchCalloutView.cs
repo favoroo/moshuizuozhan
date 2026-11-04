@@ -32,11 +32,19 @@ namespace P1.UI
 
         private const int MaxStreakPips = 8;
         private const float HomeY = 180f;
-        private const float IconLeft = 52f;
-        private const float TextLeftWithIcon = 104f;
-        private const float TextLeftNoIcon = 22f;
-        private const float CountRight = 20f;
-        private const float CountWidth = 78f;
+
+        // 紧凑型版面尺寸常量（对齐中文短词「双杀/三杀/连杀」视觉重心，杜绝原英文 620px 巨大空洞）
+        private const float IconLeft = 36f;
+        private const float IconSizeNormal = 48f;
+        private const float IconSizeBig = 54f;
+        private const float TextLeftWithIcon = 68f;
+        private const float TextLeftNoIcon = 18f;
+        private const float CountRight = 12f;
+        private const float CountWidthNormal = 52f;
+        private const float CountWidthBig = 58f;
+        private const float TextRightNoCount = -18f;
+        private const float PipSize = 9f;
+        private const float PipPitch = 13f;
 
         [Header("主题与字体")]
         [SerializeField] private UIThemeSO theme;
@@ -305,6 +313,30 @@ namespace P1.UI
             }
         }
 
+        /// <summary>
+        /// 按「已点亮颗数」把方块串整体居中，而不是按 8 格槽位居中。
+        /// 否则 3~7 连时点亮段会偏左，看起来像贴在中文大字的左下角（数学居中、视觉不居中）。
+        /// </summary>
+        private void LayoutStreakPips(int litCount)
+        {
+            if (streakPips.Length == 0) return;
+
+            int count = Mathf.Clamp(litCount, 1, streakPips.Length);
+            float startX = -(count - 1) * PipPitch * 0.5f;
+
+            for (int i = 0; i < streakPips.Length; i++)
+            {
+                var pip = streakPips[i];
+                if (pip == null) continue;
+
+                var rect = pip.rectTransform;
+                rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.anchoredPosition = new Vector2(startX + i * PipPitch, 0f);
+                rect.sizeDelta = new Vector2(PipSize, PipSize);
+            }
+        }
+
         private void ResetPipScales(float scale)
         {
             for (int i = 0; i < streakPips.Length; i++)
@@ -366,14 +398,15 @@ namespace P1.UI
                     streakPips[i].gameObject.SetActive(i < litPips);
                 }
             }
+            if (litPips > 0) LayoutStreakPips(litPips);
 
             // 4. 文字与字体（中文必须按 CJK 分支取字体，否则标题字重会缺字形）
             string main = result.MainText ?? string.Empty;
             if (mainText != null)
             {
-                float mainFontSize = UITypography.FontSnapped(result.IsBig ? 52f : 40f);
+                float mainFontSize = UITypography.FontSnapped(result.IsBig ? 44f : 36f);
                 mainText.enableAutoSizing = true;
-                mainText.fontSizeMin = UITypography.FontSnapped(24f);
+                mainText.fontSizeMin = UITypography.FontSnapped(22f);
                 mainText.fontSizeMax = mainFontSize;
                 mainText.fontSize = mainFontSize;
                 mainText.textWrappingMode = TextWrappingModes.NoWrap;
@@ -384,9 +417,9 @@ namespace P1.UI
 
             if (subText != null)
             {
-                float subFontSize = UITypography.FontSnapped(18f);
+                float subFontSize = UITypography.FontSnapped(16f);
                 subText.enableAutoSizing = true;
-                subText.fontSizeMin = UITypography.FontSnapped(16f);
+                subText.fontSizeMin = UITypography.FontSnapped(14f);
                 subText.fontSizeMax = subFontSize;
                 subText.fontSize = subFontSize;
                 subText.textWrappingMode = TextWrappingModes.NoWrap;
@@ -547,19 +580,35 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 版面自适应：图标让出左侧 104，计数徽章占右侧 98；有副标题/连杀方块时主行上收。
+        /// 紧凑型版面自适应：
+        /// - 连杀/多杀（有计数徽章）：宽 320/330，高 80/84，左右图标与计数方块紧密包围居中中文短词；
+        /// - 首杀/反杀（无计数徽章）：宽 260，高 80，饱满利落；
+        /// - 全队击倒/终结连杀（带副标题）：宽 410，高 108/112；
+        /// - 底部连杀小方块（8 颗）：居中放置在卡片底部，对称点亮。
         /// </summary>
         private void ApplyLayout(bool isBig, bool hasSub, bool hasCount, bool isStreak)
         {
-            if (_rootRect != null)
+            float panelWidth;
+            float panelHeight;
+
+            if (hasSub)
             {
-                _rootRect.sizeDelta = hasSub
-                    ? new Vector2(700f, 126f)
-                    : new Vector2(620f, 92f);
+                panelWidth = 410f;
+                panelHeight = isBig ? 112f : 108f;
+            }
+            else
+            {
+                panelWidth = hasCount ? (isBig ? 330f : 320f) : 260f;
+                panelHeight = isBig ? 84f : 80f;
             }
 
-            float iconSize = isBig ? 72f : 62f;
-            float iconY = hasSub ? 0.67f : 0.5f;
+            if (_rootRect != null)
+            {
+                _rootRect.sizeDelta = new Vector2(panelWidth, panelHeight);
+            }
+
+            float iconSize = isBig ? IconSizeBig : IconSizeNormal;
+            float iconY = hasSub ? 0.62f : 0.5f;
             if (_iconRect != null)
             {
                 _iconRect.anchorMin = _iconRect.anchorMax = new Vector2(0f, iconY);
@@ -568,38 +617,40 @@ namespace P1.UI
                 _iconRect.sizeDelta = new Vector2(iconSize, iconSize);
             }
 
+            float countWidth = isBig ? CountWidthBig : CountWidthNormal;
             if (_countRect != null)
             {
                 _countRect.anchorMin = _countRect.anchorMax = new Vector2(1f, iconY);
                 _countRect.pivot = new Vector2(0.5f, 0.5f);
-                _countRect.anchoredPosition = new Vector2(-CountRight - CountWidth * 0.5f, 0f);
-                _countRect.sizeDelta = new Vector2(CountWidth, isBig ? 86f : CountWidth);
+                _countRect.anchoredPosition = new Vector2(-CountRight - countWidth * 0.5f, 0f);
+                _countRect.sizeDelta = new Vector2(countWidth, countWidth);
             }
 
             float textLeft = _iconAvailable ? TextLeftWithIcon : TextLeftNoIcon;
-            float textRight = hasCount ? -(CountRight + CountWidth + 14f) : -22f;
+            float textRight = hasCount ? -(CountRight + countWidth + 8f) : TextRightNoCount;
 
             if (_mainRect != null)
             {
-                float bottom = hasSub ? 0.34f : (isStreak ? 0.28f : 0f);
+                float bottom = hasSub ? 0.36f : (isStreak ? 0.20f : 0f);
                 _mainRect.anchorMin = new Vector2(0f, bottom);
                 _mainRect.anchorMax = Vector2.one;
-                _mainRect.offsetMin = new Vector2(textLeft, 4f);
-                _mainRect.offsetMax = new Vector2(textRight, -4f);
+                _mainRect.offsetMin = new Vector2(textLeft, 2f);
+                _mainRect.offsetMax = new Vector2(textRight, -2f);
             }
 
             if (_subRect != null)
             {
                 _subRect.anchorMin = Vector2.zero;
-                _subRect.anchorMax = new Vector2(1f, hasSub ? 0.36f : 0f);
-                _subRect.offsetMin = new Vector2(textLeft, 4f);
-                _subRect.offsetMax = new Vector2(-22f, -2f);
+                _subRect.anchorMax = new Vector2(1f, hasSub ? 0.38f : 0f);
+                _subRect.offsetMin = new Vector2(textLeft, 3f);
+                _subRect.offsetMax = new Vector2(hasCount ? textRight : -18f, -1f);
             }
 
             if (_pipsRect != null)
             {
-                float pipX = _iconAvailable ? TextLeftWithIcon + 2f : TextLeftNoIcon + 2f;
-                _pipsRect.anchoredPosition = new Vector2(pipX, 12f);
+                _pipsRect.anchorMin = _pipsRect.anchorMax = new Vector2(0.5f, 0f);
+                _pipsRect.pivot = new Vector2(0.5f, 0f);
+                _pipsRect.anchoredPosition = new Vector2(0f, 7f);
             }
         }
 
@@ -703,7 +754,7 @@ namespace P1.UI
             _rootRect.anchorMax = new Vector2(0.5f, 0.5f);
             _rootRect.pivot = new Vector2(0.5f, 0.5f);
             _rootRect.anchoredPosition = new Vector2(0f, HomeY);
-            _rootRect.sizeDelta = new Vector2(620f, 92f);
+            _rootRect.sizeDelta = new Vector2(320f, 80f);
             _homePosition = _rootRect.anchoredPosition;
 
             if (canvasGroup == null)
@@ -758,8 +809,8 @@ namespace P1.UI
                 accentRect.anchorMin = new Vector2(0f, 0f);
                 accentRect.anchorMax = new Vector2(0f, 1f);
                 accentRect.pivot = new Vector2(0f, 0.5f);
-                accentRect.anchoredPosition = new Vector2(6f, 0f);
-                accentRect.sizeDelta = new Vector2(10f, -16f);
+                accentRect.anchoredPosition = new Vector2(5f, 0f);
+                accentRect.sizeDelta = new Vector2(6f, -14f);
 
                 accentGraphic.Shape = UIInkShape.SharpRect;
                 accentGraphic.CornerRadius = ComicStyle.CornerSharp;
@@ -784,7 +835,7 @@ namespace P1.UI
                 _iconRect.anchorMin = _iconRect.anchorMax = new Vector2(0f, 0.5f);
                 _iconRect.pivot = new Vector2(0.5f, 0.5f);
                 _iconRect.anchoredPosition = new Vector2(IconLeft, 0f);
-                _iconRect.sizeDelta = new Vector2(62f, 62f);
+                _iconRect.sizeDelta = new Vector2(IconSizeNormal, IconSizeNormal);
 
                 iconBadgeGraphic.Shape = UIInkShape.Blob;
                 iconBadgeGraphic.CornerRadius = ComicStyle.CornerBubble;
@@ -804,14 +855,18 @@ namespace P1.UI
                 var iconRect = (RectTransform)iconGo.transform;
                 iconRect.anchorMin = Vector2.zero;
                 iconRect.anchorMax = Vector2.one;
-                iconRect.offsetMin = new Vector2(12f, 12f);
-                iconRect.offsetMax = new Vector2(-12f, -12f);
+                iconRect.offsetMin = new Vector2(9f, 9f);
+                iconRect.offsetMax = new Vector2(-9f, -9f);
 
                 iconImage = iconGo.GetComponent<Image>();
                 iconImage.preserveAspect = true;
                 iconImage.color = ComicStyle.Ink;
                 iconImage.raycastTarget = false;
                 iconImage.enabled = false;
+            }
+            else if (_iconRect == null)
+            {
+                _iconRect = iconBadgeGraphic.rectTransform;
             }
 
             // 3. 主标题文字（中文大字）
@@ -837,13 +892,17 @@ namespace P1.UI
                     mainText = mainGo.GetComponent<TextMeshProUGUI>();
                 }
             }
+            else if (_mainRect == null)
+            {
+                _mainRect = mainText.rectTransform;
+            }
 
             if (mainText != null)
             {
                 mainText.raycastTarget = false;
                 mainText.alignment = TextAlignmentOptions.Center;
                 mainText.fontStyle = FontStyles.Bold;
-                mainText.fontSize = UITypography.FontSnapped(40f);
+                mainText.fontSize = UITypography.FontSnapped(36f);
                 mainText.color = ComicStyle.Paper;
                 mainText.font = resolved.ResolveFont(true, "双杀");
             }
@@ -871,13 +930,17 @@ namespace P1.UI
                     subText = subGo.GetComponent<TextMeshProUGUI>();
                 }
             }
+            else if (_subRect == null)
+            {
+                _subRect = subText.rectTransform;
+            }
 
             if (subText != null)
             {
                 subText.raycastTarget = false;
                 subText.alignment = TextAlignmentOptions.Center;
                 subText.fontStyle = FontStyles.Bold;
-                subText.fontSize = UITypography.FontSnapped(18f);
+                subText.fontSize = UITypography.FontSnapped(16f);
                 subText.color = ComicStyle.PaperAlt;
                 subText.font = resolved.ResolveFont(false, "敌方全员倒地");
                 subText.gameObject.SetActive(false);
@@ -893,8 +956,8 @@ namespace P1.UI
                 _countRect = (RectTransform)countGo.transform;
                 _countRect.anchorMin = _countRect.anchorMax = new Vector2(1f, 0.5f);
                 _countRect.pivot = new Vector2(0.5f, 0.5f);
-                _countRect.anchoredPosition = new Vector2(-CountRight - CountWidth * 0.5f, 0f);
-                _countRect.sizeDelta = new Vector2(CountWidth, CountWidth);
+                _countRect.anchoredPosition = new Vector2(-CountRight - CountWidthNormal * 0.5f, 0f);
+                _countRect.sizeDelta = new Vector2(CountWidthNormal, CountWidthNormal);
 
                 countBadgeGraphic.Shape = UIInkShape.SharpRect;
                 countBadgeGraphic.CornerRadius = ComicStyle.CornerSharp;
@@ -922,51 +985,80 @@ namespace P1.UI
                 countText.alignment = TextAlignmentOptions.Center;
                 countText.fontStyle = FontStyles.Bold;
                 countText.enableAutoSizing = true;
-                countText.fontSizeMin = UITypography.FontSnapped(24f);
-                countText.fontSizeMax = UITypography.FontSnapped(46f);
-                countText.fontSize = UITypography.FontSnapped(46f);
+                countText.fontSizeMin = UITypography.FontSnapped(18f);
+                countText.fontSizeMax = UITypography.FontSnapped(34f);
+                countText.fontSize = UITypography.FontSnapped(34f);
                 countText.color = ComicStyle.Ink;
                 countText.font = resolved.ResolveFont(true, "×3");
                 countText.textWrappingMode = TextWrappingModes.NoWrap;
                 countText.overflowMode = TextOverflowModes.Overflow;
             }
+            else if (_countRect == null)
+            {
+                _countRect = countBadgeGraphic.rectTransform;
+            }
 
-            // 6. 连杀方块行（8 颗，逐颗点亮）
+            // 6. 连杀方块行（8 颗，逐颗点亮，水平居中）
             if (_pipsRect == null)
             {
-                var pipsGo = new GameObject("StreakPips", typeof(RectTransform));
-                pipsGo.transform.SetParent(transform, false);
-                _pipsRect = (RectTransform)pipsGo.transform;
-                _pipsRect.anchorMin = _pipsRect.anchorMax = new Vector2(0f, 0f);
-                _pipsRect.pivot = new Vector2(0f, 0f);
-                _pipsRect.anchoredPosition = new Vector2(TextLeftWithIcon + 2f, 12f);
-                _pipsRect.sizeDelta = new Vector2(220f, 14f);
-
-                for (int i = 0; i < streakPips.Length; i++)
+                Transform pTr = transform.Find("StreakPips");
+                if (pTr != null)
                 {
-                    var pipGo = new GameObject("Pip" + i,
-                        typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-                    pipGo.transform.SetParent(pipsGo.transform, false);
-                    var pipRect = (RectTransform)pipGo.transform;
-                    pipRect.anchorMin = pipRect.anchorMax = new Vector2(0f, 0.5f);
-                    pipRect.pivot = new Vector2(0f, 0.5f);
-                    pipRect.anchoredPosition = new Vector2(i * 20f, 0f);
-                    pipRect.sizeDelta = new Vector2(14f, 14f);
+                    _pipsRect = (RectTransform)pTr;
+                }
+                else
+                {
+                    var pipsGo = new GameObject("StreakPips", typeof(RectTransform));
+                    pipsGo.transform.SetParent(transform, false);
+                    _pipsRect = (RectTransform)pipsGo.transform;
+                }
+            }
 
-                    var pip = pipGo.GetComponent<UIInkShapeGraphic>();
-                    pip.Shape = UIInkShape.SharpRect;
-                    pip.CornerRadius = ComicStyle.CornerSharp;
-                    pip.BorderWidth = 0f;
-                    pip.HardShadow = false;
-                    pip.Halftone = false;
-                    pip.GlossAlpha = 0f;
-                    pip.DrawGloss = false;
-                    pip.InnerRimAlpha = 0f;
-                    pip.color = ComicStyle.Yellow;
-                    pip.raycastTarget = false;
-                    pip.gameObject.SetActive(false);
+            float totalPipsWidth = (MaxStreakPips - 1) * PipPitch + PipSize;
+            _pipsRect.anchorMin = _pipsRect.anchorMax = new Vector2(0.5f, 0f);
+            _pipsRect.pivot = new Vector2(0.5f, 0f);
+            _pipsRect.anchoredPosition = new Vector2(0f, 7f);
+            _pipsRect.sizeDelta = new Vector2(totalPipsWidth, PipSize);
 
-                    streakPips[i] = pip;
+            float startX = -(totalPipsWidth - PipSize) * 0.5f;
+
+            for (int i = 0; i < streakPips.Length; i++)
+            {
+                if (streakPips[i] == null)
+                {
+                    Transform pipTr = _pipsRect.Find("Pip" + i);
+                    if (pipTr != null)
+                    {
+                        streakPips[i] = pipTr.GetComponent<UIInkShapeGraphic>();
+                    }
+                    else
+                    {
+                        var pipGo = new GameObject("Pip" + i,
+                            typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                        pipGo.transform.SetParent(_pipsRect, false);
+                        var pip = pipGo.GetComponent<UIInkShapeGraphic>();
+                        pip.Shape = UIInkShape.SharpRect;
+                        pip.CornerRadius = ComicStyle.CornerSharp;
+                        pip.BorderWidth = 0f;
+                        pip.HardShadow = false;
+                        pip.Halftone = false;
+                        pip.GlossAlpha = 0f;
+                        pip.DrawGloss = false;
+                        pip.InnerRimAlpha = 0f;
+                        pip.color = ComicStyle.Yellow;
+                        pip.raycastTarget = false;
+                        streakPips[i] = pip;
+                    }
+                }
+
+                if (streakPips[i] != null)
+                {
+                    var pipRect = streakPips[i].rectTransform;
+                    pipRect.anchorMin = pipRect.anchorMax = new Vector2(0.5f, 0.5f);
+                    pipRect.pivot = new Vector2(0.5f, 0.5f);
+                    pipRect.anchoredPosition = new Vector2(startX + i * PipPitch, 0f);
+                    pipRect.sizeDelta = new Vector2(PipSize, PipSize);
+                    streakPips[i].gameObject.SetActive(false);
                 }
             }
 

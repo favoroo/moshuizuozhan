@@ -40,6 +40,9 @@ namespace P1.UI
         [Tooltip("在 Unity 编辑器中强制显示触控层，方便鼠标模拟与调试。桌面/编辑器默认关闭，避免全屏感应区抢鼠标视角")]
         [SerializeField] private bool showTouchUiInEditor = false;
 
+        [Tooltip("是否在 HUD 左上角生成固定按键设置入口（已整合进暂停弹窗，默认关闭）")]
+        [SerializeField] private bool showSettingsEntryButton = false;
+
         [Tooltip("旧版字段，仅保留场景序列化兼容；P9 起不再参与显示判断，请使用 showTouchUiInEditor")]
         [SerializeField] private bool forceShowInEditor = true;
 
@@ -92,6 +95,24 @@ namespace P1.UI
 
         public bool IsShown => _canvas != null && _canvas.gameObject.activeInHierarchy;
         public DynamicFloatingJoystick FloatingJoystick => _floatingJoystick;
+        /// <summary>是否在 HUD 左上角生成常驻按键设置入口（默认关闭，改由暂停菜单内承载）。</summary>
+        public bool ShowSettingsEntryButton
+        {
+            get => showSettingsEntryButton;
+            set
+            {
+                showSettingsEntryButton = value;
+                if (_settingsEntryButton != null)
+                {
+                    _settingsEntryButton.gameObject.SetActive(value);
+                }
+                else if (value && _safeArea != null)
+                {
+                    CreateSettingsEntryButton(_safeArea);
+                }
+            }
+        }
+
         public MobileLayoutCustomizer Customizer => _customizer;
         public float CanvasScaleFactor => _canvas != null ? _canvas.scaleFactor : 1.0f;
 
@@ -654,10 +675,19 @@ namespace P1.UI
 
             _customizer.OnClosed += HandleCustomizerClosed;
 
-            // 5. 屏幕左上角悬浮【⚙️ 键位】快速编辑入口（168x72，字号 24，齿轮 32px）
-            // 左上角最内侧 (24,-24) 的 88x88 留给 PauseMenuOverlay 的移动端暂停按钮，
-            // 键位入口横排在暂停按钮右侧并与之垂直居中对齐，避免占用第二行遮挡视野。
-            CreateSettingsEntryButton(_safeArea);
+            // 5. 屏幕左上角悬浮【⚙️ 键位】快速编辑入口（已整合进暂停弹窗，默认不再常驻生成）
+            if (showSettingsEntryButton)
+            {
+                CreateSettingsEntryButton(_safeArea);
+            }
+            else
+            {
+                var existingBtn = _safeArea != null ? _safeArea.Find("SettingsLayoutBtn") : null;
+                if (existingBtn != null)
+                {
+                    existingBtn.gameObject.SetActive(false);
+                }
+            }
 
             var initialMatch = MatchManager.Instance != null ? MatchManager.Instance : FindAnyObjectByType<MatchManager>();
             if (initialMatch != null && initialMatch.CurrentPhase == MatchManager.Phase.Ready)

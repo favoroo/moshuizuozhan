@@ -380,7 +380,7 @@ namespace P1.UI
 
             ReparentInto(startButton != null ? startButton.transform : null, safeRect);
             ReparentInto(checkUpdateButton != null ? checkUpdateButton.transform : null, safeRect);
-            ReparentInto(FindMenuNode("CustomLayoutButton"), safeRect);
+            RetireLegacyTopLayoutButton();
 
             // 4) 卡片：Hero → 2×2 → 角签（入场顺序 = 构建顺序）
             BuildHomeHero(theme, m, mobile);
@@ -457,7 +457,7 @@ namespace P1.UI
 
         /// <summary>
         /// 用当前安全区/画布几何重建首页（启动 settle、旋转、分屏后调用）。
-        /// 只销毁本脚本生成的节点；场景遗留按钮（开赛 / 检查更新 / 自定义按键）原样保留，
+        /// 只销毁本脚本生成的节点；场景遗留按钮（开赛 / 检查更新）原样保留，
         /// 由 EnsureReadyVisuals 重新收编与摆位。
         /// </summary>
         private void RebuildHomeVisuals()
@@ -467,14 +467,14 @@ namespace P1.UI
             // 首页重建会销毁并重建整棵卡片树：先收掉详情浮层，避免它挂在旧几何上。
             HomeInfoOverlay.CloseIfOpen();
 
-            // 场景遗留按钮（开赛 / 检查更新 / 自定义按键）是 readyPanel 的持久节点，
+            // 场景遗留按钮（开赛 / 检查更新）是 readyPanel 的持久节点，
             // 重建时必须先搬回 readyPanel 再销毁旧安全区，否则会跟着 MenuSafeArea 一起被 Destroy：
             // StartButton 的 onClick 只在 Awake 绑一次，一旦销毁 startButton 变 null，
             // PlaceHomeCta 直接 return —— 真机表现就是「首页开始游戏按钮凭空消失、整局开不了」。
             // （检查更新按钮在首页里被摆成右下角小标签，同样得先搬出再重建。）
             ReparentInto(startButton != null ? startButton.transform : null, readyPanel.transform);
             ReparentInto(checkUpdateButton != null ? checkUpdateButton.transform : null, readyPanel.transform);
-            ReparentInto(FindMenuNode("CustomLayoutButton"), readyPanel.transform);
+            RetireLegacyTopLayoutButton();
 
             Transform stage = readyPanel.transform.Find("GeometricMenuRoot");
             if (stage != null)
@@ -947,13 +947,10 @@ namespace P1.UI
                 Interactive = true,
                 ClickAction = OpenLayoutCustomizerFromHome,
             }, theme, m, mobile, out _, out _);
-
-            // 移动端顶部右侧「自定义按键」小按钮（纸白底 + 墨框 + Button 硬影）
-            if (mobile) StyleTopKeyButton(theme, m);
         }
 
         /// <summary>
-        /// 首页「修改按钮位置」卡：打开移动端触屏布局自定义器（与右上角「自定义按键」小按钮同一入口）。
+        /// 首页「按键位置」卡：打开移动端触屏布局自定义器（首页唯一入口，局内走暂停菜单）。
         /// 桌面端没有常驻触屏 UI，自定义器会按需把触屏画布显示出来供预览与拖动。
         /// </summary>
         private void OpenLayoutCustomizerFromHome()
@@ -1156,62 +1153,15 @@ namespace P1.UI
             jelly.EnableThemeHardShadow(UIHardShadowLevel.Panel);
         }
 
-        /// <summary>移动端顶部右侧「自定义按键」小按钮：纸白底 + 3px 墨框 + Button 硬影。</summary>
-        private void StyleTopKeyButton(UIThemeSO theme, HomeMenuMetrics m)
+        /// <summary>
+        /// 首页顶部右侧「自定义按键」小按钮已下线：入口与 2×2 卡阵的「按键位置」卡完全重复，
+        /// 同一屏出现两颗一模一样的入口只会让人犹豫点哪个。旧场景/旧截图里遗留的节点一律关掉，
+        /// 不再摆位、不再换肤（重开它请改回 <c>BuildHomeTiles</c> 的调用与度量）。
+        /// </summary>
+        private void RetireLegacyTopLayoutButton()
         {
-            Transform node = FindMenuNode("CustomLayoutButton");
-            if (node == null) return;
-
-            ReparentInto(node, _menuSafeArea);
-            var rect = node.GetComponent<RectTransform>();
-            if (rect == null) return;
-
-            HomeBox box = m.TopButton;
-            rect.anchorMin = new Vector2(1f, 1f);
-            rect.anchorMax = new Vector2(1f, 1f);
-            rect.pivot = new Vector2(1f, 1f);
-            rect.anchoredPosition = new Vector2(-m.Margin, -box.Y);
-            rect.sizeDelta = box.Size;
-
-            var img = node.GetComponent<Image>();
-            if (img != null)
-            {
-                img.color = new Color(1f, 1f, 1f, 0f);
-                img.raycastTarget = true;
-            }
-
-            var shape = node.GetComponentInChildren<UIInkShapeGraphic>(true);
-            if (shape == null) shape = UIInkShapeGraphic.CreateChildBackground(rect, "GeometricBg");
-            if (shape != null)
-            {
-                shape.Shape = UIInkShape.SharpRect;
-                shape.CornerRadius = ComicStyle.CornerSharp;
-                shape.BorderWidth = ComicStyle.BorderThin;
-                shape.BorderColor = ComicStyle.Ink;
-                shape.color = ComicStyle.Paper;
-                shape.Halftone = false;
-                shape.GlossAlpha = 0f;
-                shape.raycastTarget = false;
-                theme.ApplyHardShadow(shape, UIHardShadowLevel.Button);
-            }
-
-            var legacyLabel = node.GetComponentInChildren<Text>(true);
-            if (legacyLabel != null) legacyLabel.gameObject.SetActive(false);
-
-            var label = CreateOrReplaceTmpLabel(rect, "LabelTmp", "自定义按键",
-                UITypography.FontSnapped(m.SecondaryFont), false, ComicStyle.Ink, TextAlignmentOptions.Center);
-
-            var btn = node.GetComponent<Button>();
-            if (btn != null && shape != null)
-            {
-                var jelly = node.GetComponent<UIJellyButton>();
-                if (jelly == null) jelly = node.gameObject.AddComponent<UIJellyButton>();
-                jelly.Configure(theme, btn, shape);
-                if (label != null) jelly.SetPressContent(label.rectTransform);
-                jelly.EnableThemeHardShadow(UIHardShadowLevel.Button);
-            }
-
-            node.gameObject.SetActive(true);
+            Transform legacy = FindMenuNode("CustomLayoutButton");
+            if (legacy != null && legacy.gameObject.activeSelf) legacy.gameObject.SetActive(false);
         }
 
         /// <summary>左下 / 右下角签：左「游戏共创」只读、右「检查更新」可点，落在卡片区之外（移动端左下设让给整备卡）。</summary>
@@ -2599,34 +2549,6 @@ namespace P1.UI
 
                 checkUpdateButton = btnGo.GetComponent<Button>();
                 checkUpdateButton.targetGraphic = img;
-            }
-
-            Transform layoutBtnTrans = FindMenuNode("CustomLayoutButton");
-            if (layoutBtnTrans == null)
-            {
-                var lbtnGo = new GameObject("CustomLayoutButton", typeof(RectTransform), typeof(Image), typeof(Button));
-                lbtnGo.transform.SetParent(readyPanel.transform, false);
-                var lbtnRt = lbtnGo.GetComponent<RectTransform>();
-                lbtnRt.anchorMin = new Vector2(0.5f, 0f);
-                lbtnRt.anchorMax = new Vector2(0.5f, 0f);
-                lbtnRt.anchoredPosition = new Vector2(115f, 48f);
-                lbtnRt.sizeDelta = new Vector2(210f, 58f);
-
-                var limg = lbtnGo.GetComponent<Image>();
-                limg.color = new Color(1f, 1f, 1f, 0f);
-
-                var lbtn = lbtnGo.GetComponent<Button>();
-                lbtn.targetGraphic = limg;
-                lbtn.onClick.AddListener(() =>
-                {
-                    var touchUI = FindAnyObjectByType<MobileTouchUI>();
-                    if (touchUI != null) touchUI.OpenLayoutCustomizer();
-                });
-
-                if (!Application.isMobilePlatform && !MobileTouchUI.IsTouchSimulationActive)
-                {
-                    lbtnGo.SetActive(false);
-                }
             }
 
             if (checkUpdateButton != null)

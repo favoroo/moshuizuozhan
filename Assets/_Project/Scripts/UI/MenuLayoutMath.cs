@@ -181,7 +181,15 @@ namespace P1.UI
         public Vector2 VersionTagSize;
         public float FooterInset;
 
-        /// <summary>是否显示顶部右侧小按钮（「自定义按键」只在移动端出现）。</summary>
+        /// <summary>是否移动端度量（决定 Hero 卡整备卡尺寸与 CTA 底带留白），与按钮显隐无关。</summary>
+        public bool Mobile;
+
+        /// <summary>
+        /// 遗留：顶部右侧「自定义按键」小按钮的显隐开关。首页已移除该按钮
+        /// （入口收敛到 2×2 卡阵的「按键位置」卡），字段只为旧调用兼容保留，构造时恒为 false。
+        /// 需要判断平台请用 <see cref="Mobile"/>——它此前被当作「是否移动端」的替身传给
+        /// <c>LoadoutCard()</c> / <c>ResolveHeroFlow()</c>。
+        /// </summary>
         public bool ShowTopButton;
 
         public float BoardHeight => MenuLayoutMath.RefHeight - CardTop - CardBottom;
@@ -225,11 +233,11 @@ namespace P1.UI
             get
             {
                 float innerWidth = HeroBox.x - HeroPadding.x * 2f;
-                Vector2 cardSize = MenuLayoutMath.LoadoutCard(ShowTopButton).Size;
+                Vector2 cardSize = MenuLayoutMath.LoadoutCard(Mobile).Size;
                 float width = Mathf.Min(innerWidth, cardSize.x);
                 float height = cardSize.y;
                 float x = Margin + HeroPadding.x;
-                float y = CenteredBoardTop + MenuLayoutMath.ResolveHeroFlow(this, BoardHeight, ShowTopButton).WeaponTop;
+                float y = CenteredBoardTop + MenuLayoutMath.ResolveHeroFlow(this, BoardHeight, Mobile).WeaponTop;
                 return new HomeBox(x, y, width, height);
             }
         }
@@ -243,7 +251,7 @@ namespace P1.UI
             get
             {
                 float innerWidth = HeroBox.x - HeroPadding.x * 2f;
-                HeroFlowLayout flow = MenuLayoutMath.ResolveHeroFlow(this, BoardHeight, ShowTopButton);
+                HeroFlowLayout flow = MenuLayoutMath.ResolveHeroFlow(this, BoardHeight, Mobile);
                 DifficultyBarLayout layout = MenuLayoutMath.ResolveHeroDifficulty(this, innerWidth);
                 return new HomeBox(
                     Margin + HeroPadding.x + innerWidth - layout.TotalWidth,
@@ -262,7 +270,7 @@ namespace P1.UI
             get
             {
                 float innerWidth = HeroBox.x - HeroPadding.x * 2f;
-                HeroFlowLayout flow = MenuLayoutMath.ResolveHeroFlow(this, BoardHeight, ShowTopButton);
+                HeroFlowLayout flow = MenuLayoutMath.ResolveHeroFlow(this, BoardHeight, Mobile);
                 MatchDurationBarLayout layout = MenuLayoutMath.ResolveHeroDuration(this, innerWidth);
                 return new HomeBox(
                     Margin + HeroPadding.x + innerWidth - layout.TotalWidth,
@@ -279,7 +287,7 @@ namespace P1.UI
             CtaSize.x,
             CtaSize.y);
 
-        /// <summary>顶部右侧小按钮（移动端「自定义按键」；桌面端返回空盒）。</summary>
+        /// <summary>遗留：顶部右侧小按钮盒子。首页已移除该按钮，恒返回空盒，仅为旧调用兼容保留。</summary>
         public HomeBox TopButton => !ShowTopButton
             ? default
             : new HomeBox(
@@ -488,11 +496,13 @@ namespace P1.UI
                     FooterTagFont = 18f,
                     VersionTagSize = new Vector2(300f, 36f),
                     FooterInset = 18f,
+                    Mobile = false,
                     ShowTopButton = false,
                 };
             }
 
-            // 移动端：顶部留出「自定义按键」小按钮；卡片区 1856×704，横向占屏 97%。
+            // 移动端：卡片区 1856×704，横向占屏 97%。顶部不再留「自定义按键」小按钮的位置
+            // （入口收敛到 2×2 卡阵的「按键位置」卡），Hero 排版仍按移动端参数走。
             // CTA 860×160、Hero 940 宽：手机逻辑画布不宽，靠"更大更高的盒子"而不是继续放大字号。
             return new HomeMenuMetrics
             {
@@ -548,7 +558,8 @@ namespace P1.UI
                 FooterTagFont = 18f,
                 VersionTagSize = new Vector2(360f, 44f),
                 FooterInset = 20f,
-                ShowTopButton = true,
+                Mobile = true,
+                ShowTopButton = false,
             };
         }
 
@@ -705,7 +716,7 @@ namespace P1.UI
             // 桌面 CTA 上方要放「SPACE / ENTER」提示，留一条底带；移动端只留呼吸位。
             float limitBottom = mobile ? ctaTop - 12f : ctaTop - 38f;
 
-            float cardH = LoadoutCard(m.ShowTopButton).Size.y;
+            float cardH = LoadoutCard(m.Mobile).Size.y;
             float diffH = m.DifficultySegmentSize.y;
             float durH = m.DurationSegmentSize.y;
             float rowGap = m.DurationRowGap;
@@ -738,7 +749,7 @@ namespace P1.UI
         /// <summary>向后兼容：读取流式排版中武器整备卡的顶端 Y 坐标。</summary>
         public static float ResolveHeroWeaponSlotTop(HomeMenuMetrics m, float heroHeight)
         {
-            return ResolveHeroFlow(m, heroHeight, m.ShowTopButton).WeaponTop;
+            return ResolveHeroFlow(m, heroHeight, m.Mobile).WeaponTop;
         }
 
         /// <summary>

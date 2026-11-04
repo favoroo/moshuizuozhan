@@ -178,7 +178,7 @@ namespace P1.UI
         public static string GamepadHint =>
             "手柄：左摇杆 移动 · RT 开火 · LT 潜墨 · A 跳跃 · RB 手雷 · LB 大招 · Start 暂停";
 
-        public static string MobileLayoutHint => "右上角「自定义按键」可调整按键位置与大小";
+        public static string MobileLayoutHint => "首页「按键位置」或暂停菜单可调整按键位置与大小";
 
         /// <summary>从现有档案计算战绩快照；空档案 / 脏数据全部安全回退。</summary>
         public static RecordSummary Summarize(PlayerProfile profile)

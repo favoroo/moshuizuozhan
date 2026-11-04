@@ -480,6 +480,7 @@ namespace P1.UI
         private bool _phaseSubscribed;
 
         // 系统设置消费端：FPS 角标 + 小地图开关（改动经 GameSettingsService 事件推送）
+        private GameObject _fpsBadgeRoot;
         private TextMeshProUGUI _fpsBadgeText;
         private bool _showFpsBadge;
         private bool _showMinimapEnabled = true;
@@ -538,8 +539,24 @@ namespace P1.UI
         private void ApplyFpsBadgeVisibility()
         {
             _showFpsBadge = GameSettingsService.ShowFps;
-            if (_fpsBadgeText != null)
+            if (_fpsBadgeRoot != null)
+            {
+                _fpsBadgeRoot.SetActive(_showFpsBadge);
+                if (_showFpsBadge)
+                {
+                    // 若处于移动端/触控界面，FPS 避让至左上角暂停齿轮右侧 (124, -24)，避免与暂停键重叠
+                    var rt = _fpsBadgeRoot.GetComponent<RectTransform>();
+                    if (rt != null)
+                    {
+                        bool mobile = UITypography.IsMobileLike;
+                        rt.anchoredPosition = mobile ? new Vector2(124f, -24f) : new Vector2(20f, -16f);
+                    }
+                }
+            }
+            else if (_fpsBadgeText != null)
+            {
                 _fpsBadgeText.gameObject.SetActive(_showFpsBadge);
+            }
         }
 
         /// <summary>小地图开关：整组隐藏（新 MinimapView 与旧 RawImage 兜底路径都盖到）。</summary>
@@ -602,11 +619,14 @@ namespace P1.UI
                 if (font != null)
                     tmp.font = font;
 
+                _fpsBadgeRoot = badgeGo;
                 _fpsBadgeText = tmp;
+                ApplyFpsBadgeVisibility();
             }
             catch (System.Exception ex)
             {
                 Debug.LogWarning($"[HudController] FPS 角标构建失败（不影响游戏）：{ex.Message}");
+                _fpsBadgeRoot = null;
                 _fpsBadgeText = null;
             }
         }

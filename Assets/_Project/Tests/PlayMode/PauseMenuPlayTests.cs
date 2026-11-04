@@ -3,7 +3,9 @@ using System.Reflection;
 using NUnit.Framework;
 using P1.Core;
 using P1.Player;
+using P1.UI;
 using P1.UI.Menus;
+using TMPro;
 using UnityEngine;
 using UnityEngine.TestTools;
 
@@ -203,6 +205,31 @@ namespace P1.Tests
 
             Object.Destroy(overlay.gameObject);
             Object.Destroy(matchGo);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator PauseMenu_MainView_ExposesControlsLayoutEntry()
+        {
+            var overlay = PauseMenuOverlay.CreateInstance();
+            yield return null;
+
+            Transform controlsBtn = overlay.transform.Find("ModalRoot/PausePanel/MainView/ControlsBtn");
+            Assert.IsNotNull(controlsBtn, "暂停面板主视图必须包含 ControlsBtn（操作按钮调整/按键设置入口）");
+
+            // 文案随平台切换：移动端唤起触控布局拖拽编辑器，桌面端唤起按键设置
+            TMP_Text label = controlsBtn.Find("Label") != null ? controlsBtn.Find("Label").GetComponent<TMP_Text>() : null;
+            Assert.IsNotNull(label, "ControlsBtn 必须带 Label 文本");
+            Assert.AreEqual(UITypography.IsMobileLike ? "操作按钮调整" : "按键设置", label.text,
+                "ControlsBtn 文案必须按平台切换");
+
+            // 原有四颗按钮仍在，避免「加了新入口压掉旧入口」
+            Assert.IsNotNull(overlay.transform.Find("ModalRoot/PausePanel/MainView/ResumeBtn"), "ResumeBtn 丢失");
+            Assert.IsNotNull(overlay.transform.Find("ModalRoot/PausePanel/MainView/SettingsBtn"), "SettingsBtn 丢失");
+            Assert.IsNotNull(overlay.transform.Find("ModalRoot/PausePanel/MainView/RestartBtn"), "RestartBtn 丢失");
+            Assert.IsNotNull(overlay.transform.Find("ModalRoot/PausePanel/MainView/ReturnMenuBtn"), "ReturnMenuBtn 丢失");
+
+            Object.Destroy(overlay.gameObject);
             yield return null;
         }
     }

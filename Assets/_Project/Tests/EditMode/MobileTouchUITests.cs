@@ -822,5 +822,21 @@ namespace P1.Tests
 
             Object.DestroyImmediate(host);
         }
+
+        /// <summary>
+        /// 只断言静态默认值。运行时的界面层级（暂停面板 ControlsBtn、HUD FpsBadge 底板）
+        /// 必须在 PlayMode 下验证：`PauseMenuOverlay` / `HudController` 是普通 MonoBehaviour，
+        /// EditMode 里 AddComponent 不触发 Awake，BuildUI 不会执行，`transform.Find` 永远返回 null。
+        /// 层级断言分别在 `PauseMenuPlayTests` 与 `UIFoundationPlayTests`。
+        /// </summary>
+        [Test]
+        public void MobileTouchUI_SettingsEntryButton_IsDefaultDisabled()
+        {
+            var touchGo = new GameObject("TestTouchUI", typeof(MobileTouchUI));
+            var touchUI = touchGo.GetComponent<MobileTouchUI>();
+            Assert.IsFalse(touchUI.ShowSettingsEntryButton, "默认不应在 HUD 左上角生成常驻按键设置入口（已整合进暂停弹窗）");
+
+            Object.DestroyImmediate(touchGo);
+        }
     }
 }

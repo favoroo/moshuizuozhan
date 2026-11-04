@@ -349,4 +349,120 @@ namespace P1.Tests
             Assert.AreEqual(CalloutKind.FirstSplat, r.Kind);
         }
     }
+
+    [TestFixture]
+    public class MatchCalloutViewLayoutTests
+    {
+        private GameObject _go;
+        private MatchCalloutView _view;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _go = new GameObject("TestCalloutView", typeof(RectTransform), typeof(CanvasRenderer), typeof(CanvasGroup));
+            _view = _go.AddComponent<MatchCalloutView>();
+            _view.EnsureBuilt();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            if (_go != null)
+            {
+                Object.DestroyImmediate(_go);
+            }
+        }
+
+        [Test]
+        public void MultiSplat_IsCompact_DoesNotExceed360Width()
+        {
+            var callout = new CalloutResult
+            {
+                Kind = CalloutKind.MultiSplat,
+                MainText = "双杀",
+                Count = 2,
+                Priority = 5,
+                IconKey = "mark_splat"
+            };
+
+            _view.PlayCallout(callout);
+            var rt = (RectTransform)_go.transform;
+
+            Assert.LessOrEqual(rt.sizeDelta.x, 340f, "双杀连杀播报必须紧凑利落，杜绝旧版 620px 空洞长条");
+            Assert.GreaterOrEqual(rt.sizeDelta.x, 280f, "双杀连杀播报宽度应能饱满容纳图标、中文大字与徽章");
+            Assert.LessOrEqual(rt.sizeDelta.y, 90f, "高度应收拢在 80-84 之间");
+        }
+
+        [Test]
+        public void SubtitledCallout_IsCompact_DoesNotExceed440Width()
+        {
+            var callout = new CalloutResult
+            {
+                Kind = CalloutKind.Shutdown,
+                MainText = MatchCalloutMath.TextShutdown,
+                SubText = MatchCalloutMath.SubShutdown,
+                Priority = 2,
+                IconKey = "glyph_bolt"
+            };
+
+            _view.PlayCallout(callout);
+            var rt = (RectTransform)_go.transform;
+
+            Assert.LessOrEqual(rt.sizeDelta.x, 430f, "带副标题播报必须收敛，杜绝旧版 700px 巨大黑条");
+            Assert.GreaterOrEqual(rt.sizeDelta.x, 380f, "带副标题播报宽度需容纳完整说明句");
+        }
+
+        [Test]
+        public void StreakCallout_PipsAreCenteredAndCompact()
+        {
+            var callout = new CalloutResult
+            {
+                Kind = CalloutKind.Streak,
+                MainText = "连杀",
+                Count = 4,
+                Priority = 1,
+                IconKey = "glyph_star"
+            };
+
+            _view.PlayCallout(callout);
+
+            var pipsTr = _go.transform.Find("StreakPips");
+            Assert.IsNotNull(pipsTr, "应存在 StreakPips 容器");
+            var pipsRt = (RectTransform)pipsTr;
+            Assert.AreEqual(0.5f, pipsRt.anchorMin.x, 0.01f, "连杀方块容器应水平居中");
+            Assert.AreEqual(0.5f, pipsRt.anchorMax.x, 0.01f, "连杀方块容器应水平居中");
+
+            var pip0 = pipsTr.Find("Pip0");
+            Assert.IsNotNull(pip0);
+            var pip0Rt = (RectTransform)pip0;
+            Assert.LessOrEqual(pip0Rt.sizeDelta.x, 10f, "方块尺寸应为紧凑 9x9");
+        }
+
+        [Test]
+        public void StreakCallout_LitPipsAreCenteredAsARun()
+        {
+            var callout = new CalloutResult
+            {
+                Kind = CalloutKind.Streak,
+                MainText = "连杀",
+                Count = 5,
+                Priority = 1,
+                IconKey = "glyph_star"
+            };
+
+            _view.PlayCallout(callout);
+
+            var pipsTr = _go.transform.Find("StreakPips");
+            Assert.IsNotNull(pipsTr);
+
+            // 5 连：点亮段应围绕父节点中心对称（-26 / 0 / +26 …），而不是贴在最左 5 格
+            var p0 = (RectTransform)pipsTr.Find("Pip0");
+            var p2 = (RectTransform)pipsTr.Find("Pip2");
+            var p4 = (RectTransform)pipsTr.Find("Pip4");
+
+            Assert.AreEqual(0f, p2.anchoredPosition.x, 0.5f, "5 连的中颗方块应居中");
+            Assert.AreEqual(-p4.anchoredPosition.x, p0.anchoredPosition.x, 0.5f, "点亮段应左右对称");
+            Assert.Less(p0.anchoredPosition.x, 0f, "首颗应在中心左侧");
+        }
+    }
 }

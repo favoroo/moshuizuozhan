@@ -345,40 +345,52 @@ namespace P1.UI
                 card, map, previewSize, _theme, "Preview_" + map.Id);
             preview.anchorMin = preview.anchorMax = new Vector2(0f, 1f);
             preview.pivot = new Vector2(0f, 1f);
-            preview.anchoredPosition = new Vector2((size.x - previewSize.x) * 0.5f, -previewTop);
+            preview.anchoredPosition = new Vector2(pad, -previewTop);
 
-            float textTop = previewTop + previewSize.y + pad * 0.45f;
-            float textWidth = size.x - pad * 2f;
             float titleFont = UITypography.FontSnapped(m.CardTitleFont);
+            float englishFont = UITypography.FontSnapped(m.CardEnglishFont);
+            float descriptorFont = UITypography.FontSnapped(m.CardDescriptorFont);
+
+            float textLeft = pad + previewSize.x + 26f;
+            float textWidth = Mathf.Max(96f, size.x - textLeft - pad);
+            float titleHeight = titleFont * 1.25f;
+            float englishHeight = englishFont * 1.55f;
+            // 描述在中/英两图都可能超过一列宽，按两行预留高度并允许换行，避免文字压出卡片边框。
+            float descriptorHeight = descriptorFont * 1.45f * 2f;
+            float textBlock = titleHeight + englishHeight + descriptorHeight;
+            // 文字块与左侧预览垂直居中对齐，卡片右半边不再留出空白带。
+            float textTop = previewTop + Mathf.Max(0f, (previewSize.y - textBlock) * 0.5f);
+
             CreateText(card, "MapName", map.DisplayName, titleFont, true, ComicStyle.Ink,
-                new Vector2(pad, textTop),
-                new Vector2(textWidth, titleFont * 1.25f),
+                new Vector2(textLeft, textTop),
+                new Vector2(textWidth, titleHeight),
                 TextAlignmentOptions.MidlineLeft, 1f, FontStyles.Bold);
 
-            float englishFont = UITypography.FontSnapped(m.CardEnglishFont);
-            float englishTop = textTop + titleFont * 1.2f;
+            float englishTop = textTop + titleHeight * 0.86f;
             CreateText(card, "MapEnglishName", map.EnglishName, englishFont, false,
                 ComicStyle.WithAlpha(ComicStyle.Ink, 0.55f),
-                new Vector2(pad, englishTop),
-                new Vector2(textWidth, englishFont * 1.5f),
+                new Vector2(textLeft, englishTop),
+                new Vector2(textWidth, englishHeight),
                 TextAlignmentOptions.MidlineLeft, 1.5f, FontStyles.Bold);
 
-            float descriptorFont = UITypography.FontSnapped(m.CardDescriptorFont);
-            float descriptorTop = englishTop + englishFont * 1.55f;
+            float descriptorTop = englishTop + englishHeight * 0.92f;
             CreateText(card, "MapDescriptor", map.Descriptor, descriptorFont, false, ComicStyle.Ink,
-                new Vector2(pad, descriptorTop),
-                new Vector2(textWidth, descriptorFont * 1.6f),
-                TextAlignmentOptions.MidlineLeft, 0.5f, FontStyles.Bold);
+                new Vector2(textLeft, descriptorTop),
+                new Vector2(textWidth, descriptorHeight),
+                TextAlignmentOptions.TopLeft, 0.5f, FontStyles.Bold, true);
 
             string buttonLabel = selected ? "当前地图" : "切换到此图";
-            Color buttonFill = selected ? map.Accent : ComicStyle.Ink;
-            CreateCardButton(card, m, buttonLabel, buttonFill, map,
+            Color buttonFill = selected ? map.Accent : ComicStyle.Paper;
+            Color buttonBorder = selected ? map.Accent : ComicStyle.Ink;
+            CreateCardButton(card, m, buttonLabel, buttonFill, buttonBorder, selected ? 0f : 2.5f,
+                selected ? ComicStyle.Paper : ComicStyle.Ink, map,
                 new Vector2(pad, size.y - pad - m.CardButtonHeight),
-                new Vector2(textWidth, m.CardButtonHeight));
+                new Vector2(size.x - pad * 2f, m.CardButtonHeight));
         }
 
         private void CreateCardButton(RectTransform card, MapSelectMetrics m, string label, Color fill,
-            MapDefinition map, Vector2 topLeft, Vector2 size)
+            Color borderColor, float borderWidth, Color labelColor, MapDefinition map, Vector2 topLeft,
+            Vector2 size)
         {
             var go = new GameObject("SelectButton", typeof(RectTransform), typeof(CanvasRenderer),
                 typeof(UIInkShapeGraphic), typeof(Button));
@@ -393,7 +405,8 @@ namespace P1.UI
             var shape = go.GetComponent<UIInkShapeGraphic>();
             shape.Shape = UIInkShape.SharpRect;
             shape.CornerRadius = ComicStyle.CornerSharp;
-            shape.BorderWidth = 0f;
+            shape.BorderWidth = borderWidth;
+            shape.BorderColor = borderColor;
             shape.color = fill;
             shape.GlossAlpha = 0f;
             shape.Halftone = false;
@@ -401,7 +414,7 @@ namespace P1.UI
             _theme.ApplyHardShadow(shape, UIHardShadowLevel.Tag);
 
             float font = UITypography.FontSnapped(m.CardButtonFont);
-            TextMeshProUGUI text = CreateText(rect, "Label", label, font, true, ComicStyle.Paper,
+            TextMeshProUGUI text = CreateText(rect, "Label", label, font, true, labelColor,
                 new Vector2(0f, 0f), size, TextAlignmentOptions.Center, 1f, FontStyles.Bold);
             if (text != null)
             {
@@ -564,7 +577,7 @@ namespace P1.UI
 
         private TextMeshProUGUI CreateText(Transform parent, string name, string text, float fontSize,
             bool display, Color color, Vector2 topLeft, Vector2 size, TextAlignmentOptions align,
-            float spacing = 0f, FontStyles style = FontStyles.Bold)
+            float spacing = 0f, FontStyles style = FontStyles.Bold, bool wrap = false)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
             go.transform.SetParent(parent, false);
@@ -583,7 +596,7 @@ namespace P1.UI
             tmp.color = color;
             tmp.fontStyle = style;
             tmp.raycastTarget = false;
-            tmp.textWrappingMode = TextWrappingModes.NoWrap;
+            tmp.textWrappingMode = wrap ? TextWrappingModes.Normal : TextWrappingModes.NoWrap;
             tmp.overflowMode = TextOverflowModes.Overflow;
             tmp.enableAutoSizing = false;
 

@@ -193,5 +193,37 @@ namespace P1.Tests
             Assert.Greater(desktop.x, 0f);
             Assert.Greater(desktop.y, 0f);
         }
+
+        /// <summary>
+        /// 横版卡片（预览在左、文字在右、按钮通栏）：预览既不能横向吃掉文字列，
+        /// 也不能纵向压到底部按钮——这两条是「手机端卡片文字被遮挡」的回归门禁。
+        /// </summary>
+        [Test]
+        public void PreviewSize_LeavesRoomForTextColumnAndButton()
+        {
+            AssertPreviewLeavesRoom(false, 420f, 620f, "桌面");
+            AssertPreviewLeavesRoom(true, 760f, 720f, "移动端 16:9");
+            AssertPreviewLeavesRoom(true, 925f, 572f, "移动端 20:9");
+
+            Vector2 phone = MapSelectLayoutMath.PreviewSize(true, 925f, 572f);
+            Assert.Greater(phone.y, 300f, "20:9 手机上预览应撑满卡片左列，避免右半边留白");
+        }
+
+        private static void AssertPreviewLeavesRoom(bool mobile, float cardWidth, float cardHeight, string label)
+        {
+            MapSelectMetrics m = MapSelectLayoutMath.Metrics(mobile);
+            Vector2 preview = MapSelectLayoutMath.PreviewSize(mobile, cardWidth, cardHeight);
+            float innerWidth = cardWidth - m.CardInnerPadding * 2f;
+
+            Assert.LessOrEqual(preview.x, innerWidth * 0.46f + 0.5f,
+                label + " 预览宽度超过卡片内宽一半，右侧留不出文字列");
+
+            float buttonTop = cardHeight - m.CardInnerPadding - m.CardButtonHeight;
+            float previewBottom = m.CardBandHeight + m.CardInnerPadding * 0.55f + preview.y;
+            Assert.Less(previewBottom, buttonTop, label + " 预览压到底部按钮，文字块无处安放");
+
+            Assert.LessOrEqual(preview.y, cardHeight - m.CardInnerPadding * 2f - m.CardBandHeight - m.CardButtonHeight,
+                label + " 预览高度超出卡片可用高度");
+        }
     }
 }

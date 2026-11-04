@@ -1,15 +1,22 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace P1.UI
 {
     /// <summary>
-    /// 地图小预览：把 40×56 的玩法范围等比压进一个小矩形，用纯色块表达出生台、
-    /// 掩体、坡道与地标。只做辨识，不参与任何玩法判定，也不加载截图资产。
+    /// 地图小预览：优先用 <c>Resources/MapPreview/&lt;mapId&gt;</c> 的实景缩略图
+    /// （菜单 <c>P1/关卡与地图/8</c> 出图，3/4 正交沙盘视角），图缺失时回落到程序化示意图——
+    /// 示意图按 40×56 玩法范围等比压进小矩形，用纯色块表达出生台、掩体、坡道与地标。
+    /// 只做辨识，不参与任何玩法判定。
     /// </summary>
     public static class MapPreviewBuilder
     {
         private const float MapSizeX = 40f;
         private const float MapSizeZ = 56f;
+        private const string PhotoFolder = "MapPreview";
+
+        private static readonly Dictionary<string, Sprite> PhotoCache = new Dictionary<string, Sprite>();
 
         public static RectTransform BuildPreview(
             RectTransform parent,
@@ -20,6 +27,13 @@ namespace P1.UI
         {
             RectTransform root = CreateBlock(parent, name, ComicStyle.PaperAlt, 2f, ComicStyle.Ink);
             root.sizeDelta = size;
+
+            Sprite photo = map != null ? LoadPhoto(map.Id) : null;
+            if (photo != null)
+            {
+                BuildPhoto(root, photo);
+                return root;
+            }
 
             float pad = Mathf.Clamp(Mathf.Min(size.x, size.y) * 0.04f, 4f, 10f);
             float scale = Mathf.Min((size.x - pad * 2f) / MapSizeX, (size.y - pad * 2f) / MapSizeZ);
@@ -74,6 +88,46 @@ namespace P1.UI
                 rt.sizeDelta = new Vector2(block.Width * scale, block.Depth * scale);
                 rt.anchoredPosition = new Vector2(block.X * scale, -block.Z * scale);
             }
+        }
+
+        /// <summary>实景缩略图（Resources）按需加载并缓存；缺图返回 null 走示意图回落。</summary>
+        private static Sprite LoadPhoto(string mapId)
+        {
+            if (string.IsNullOrEmpty(mapId)) return null;
+            if (PhotoCache.TryGetValue(mapId, out Sprite cached) && cached != null) return cached;
+
+            var texture = Resources.Load<Texture2D>(PhotoFolder + "/" + mapId);
+            if (texture == null) return null;
+
+            var sprite = Sprite.Create(
+                texture,
+                new Rect(0f, 0f, texture.width, texture.height),
+                new Vector2(0.5f, 0.5f),
+                100f,
+                0,
+                SpriteMeshType.FullRect);
+            sprite.name = "MapPhoto_" + mapId;
+            PhotoCache[mapId] = sprite;
+            return sprite;
+        }
+
+        /// <summary>照片铺满预览框内圈（留 2px 让外框的墨色描边露出来）。</summary>
+        private static void BuildPhoto(RectTransform root, Sprite photo)
+        {
+            var go = new GameObject("Photo", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(root, false);
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = new Vector2(2f, 2f);
+            rect.offsetMax = new Vector2(-2f, -2f);
+
+            var image = go.GetComponent<Image>();
+            image.sprite = photo;
+            image.color = Color.white;
+            image.type = Image.Type.Simple;
+            image.preserveAspect = false;   // 出图比例与预览框相同（40:56），直接铺满不裁切
+            image.raycastTarget = false;
         }
 
         private static RectTransform CreateBlock(

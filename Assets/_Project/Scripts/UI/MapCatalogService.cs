@@ -92,6 +92,7 @@ namespace P1.UI
         private static readonly MapDefinition[] AllMaps = { PhaseAMap, KelpMap };
 
         private static bool _loading;
+        private static int _loadRequestFrame;
 
         public static IReadOnlyList<MapDefinition> Maps => AllMaps;
 
@@ -114,9 +115,38 @@ namespace P1.UI
         {
             get
             {
-                MapDefinition active = MapForScene(SceneManager.GetActiveScene().path);
+                MapDefinition active = MapForActiveScene();
                 return active ?? Selected;
             }
+        }
+
+        /// <summary>
+        /// 当前激活场景对应的地图。玩家包里 <see cref="Scene.path"/> 可能为空字符串，
+        /// 所以路径匹配不上时再按场景名兜底，否则「当前地图」会永远停在存档/默认值上。
+        /// </summary>
+        public static MapDefinition MapForActiveScene()
+        {
+            Scene active = SceneManager.GetActiveScene();
+            MapDefinition byPath = MapForScene(active.path);
+            if (byPath != null) return byPath;
+
+            if (string.IsNullOrEmpty(active.name)) return null;
+            for (int i = 0; i < AllMaps.Length; i++)
+            {
+                string fileName = System.IO.Path.GetFileNameWithoutExtension(AllMaps[i].ScenePath);
+                if (string.Equals(fileName, active.name, System.StringComparison.Ordinal))
+                {
+                    return AllMaps[i];
+                }
+            }
+            return null;
+        }
+
+        /// <summary>当前场景是否就是选中的那张图（路径或场景名任一匹配即可）。</summary>
+        public static bool IsSelectedSceneActive()
+        {
+            MapDefinition active = MapForActiveScene();
+            return active != null && active.Id == Selected.Id;
         }
 
         public static MapDefinition MapForId(string id)
@@ -153,11 +183,6 @@ namespace P1.UI
             return null;
         }
 
-        public static bool IsSelectedSceneActive()
-        {
-            return SceneManager.GetActiveScene().path == Selected.ScenePath;
-        }
-
         /// <summary>只写 PlayerPrefs；真实切图必须紧接着调用 <see cref="LoadMap"/>。</summary>
         public static bool TrySelect(string id)
         {
@@ -179,22 +204,64 @@ namespace P1.UI
             }
             if (_loading)
             {
-                return false;
+                // 真机上在 AfterSceneLoad 阶段发起的切图可能被引擎吞掉、sceneLoaded 不回调，
+                // 标记就会永久卡死（此后所有切图与「开始游戏」补切全部静默失败）。
+                // 只拦同帧连点，超过 2 帧视为过期请求，允许重新发起。
+                if (Time.frameCount - _loadRequestFrame <= 2)
+                {
+                    return false;
+                }
+                Debug.LogWarning("[MapCatalog] 上一次切图请求未生效，重新发起：" + map.Id);
+                _loading = false;
             }
-            int buildIndex = SceneUtility.GetBuildIndexByScenePath(map.ScenePath);
+            int buildIndex = ResolveBuildIndex(map);
             if (buildIndex < 0)
             {
                 Debug.LogError($"[MapCatalog] 场景未加入 Build Settings，无法加载：{map.ScenePath}");
                 return false;
             }
             _loading = true;
-            SceneManager.LoadScene(buildIndex, LoadSceneMode.Single);
+            _loadRequestFrame = Time.frameCount;
+            AsyncOperation op = SceneManager.LoadSceneAsync(buildIndex, LoadSceneMode.Single);
+            if (op == null)
+            {
+                _loading = false;
+                Debug.LogError($"[MapCatalog] LoadSceneAsync 被拒绝：{map.ScenePath}");
+                return false;
+            }
             return true;
         }
+
+        /// <summary>
+        /// 解析场景的 Build Settings 索引。玩家包里 <see cref="SceneUtility.GetBuildIndexByScenePath"/>
+        /// 可能回 -1（路径不可用），此时按场景名扫一遍 Build Settings 兜底，避免真机上切图永远失败。
+        /// </summary>
+        private static int ResolveBuildIndex(MapDefinition map)
+        {
+            int index = SceneUtility.GetBuildIndexByScenePath(map.ScenePath);
+            if (index >= 0) return index;
+
+            string fileName = System.IO.Path.GetFileNameWithoutExtension(map.ScenePath);
+            int count = SceneManager.sceneCountInBuildSettings;
+            for (int i = 0; i < count; i++)
+            {
+                string path = SceneUtility.GetScenePathByBuildIndex(i);
+                if (string.IsNullOrEmpty(path)) continue;
+                if (!string.Equals(System.IO.Path.GetFileNameWithoutExtension(path), fileName,
+                        System.StringComparison.Ordinal)) continue;
+
+                Debug.LogWarning($"[MapCatalog] 按路径找不到场景，已按场景名兜底：{map.ScenePath} -> index {i}");
+                return i;
+            }
+            return -1;
+        }
+
+        public static bool IsLoading => _loading;
 
         public static void ResetRuntimeState()
         {
             _loading = false;
+            _loadRequestFrame = 0;
         }
 
         /// <summary>测试专用：清掉选择存档，回到默认 PhaseA。</summary>

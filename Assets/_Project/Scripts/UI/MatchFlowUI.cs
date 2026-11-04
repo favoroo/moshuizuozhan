@@ -2666,11 +2666,15 @@ namespace P1.UI
             if (match == null) return;
             if (match.CurrentPhase != MatchManager.Phase.Ready && match.CurrentPhase != MatchManager.Phase.Result) return;
 
-            // 存档里的选中图与当前场景不一致（例如外部改过存档）：先真实切图，避免开错场地。
-            if (MapCatalogService.IsMapScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().path) &&
-                !MapCatalogService.IsSelectedSceneActive())
+            // 存档里的选中图与当前场景不一致（例如外部改过存档 / 启动补切失败）：先真实切图，避免开错场地。
+            // 用 MapForActiveScene 而不是 Scene.path：玩家包里 Scene.path 可能为空，
+            // 旧写法会让这里与地图选择浮层的判断不一致，表现为「点了开始游戏什么都不发生」。
+            if (MapCatalogService.MapForActiveScene() != null && !MapCatalogService.IsSelectedSceneActive())
             {
-                MapCatalogService.LoadMap(MapCatalogService.Selected);
+                if (!MapCatalogService.LoadMap(MapCatalogService.Selected))
+                {
+                    Debug.LogWarning("[MatchFlow] 当前场景与选定地图不一致，且切图请求未被接受；本次开赛已放弃。");
+                }
                 return;
             }
 

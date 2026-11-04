@@ -38,7 +38,6 @@ namespace P1.UI
         public float CardBadgeFont;
         public float CardButtonHeight;
         public float CardButtonFont;
-        public float CardPreviewMaxHeight;
         public float NoteFont;
     }
 
@@ -79,7 +78,6 @@ namespace P1.UI
                     CardBadgeFont = 18f,
                     CardButtonHeight = 64f,
                     CardButtonFont = 22f,
-                    CardPreviewMaxHeight = 300f,
                     NoteFont = 18f,
                 };
             }
@@ -115,7 +113,6 @@ namespace P1.UI
                 CardBadgeFont = 24f,
                 CardButtonHeight = 84f,
                 CardButtonFont = 28f,
-                CardPreviewMaxHeight = 360f,
                 NoteFont = 23f,
             };
         }
@@ -140,32 +137,29 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 卡片内预览尺寸：先扣掉文字块与按钮，再按 40×56 等比收进剩余空间。
-        /// 保证不会压到标题/按钮，也不会横向溢出。
+        /// 卡片内预览尺寸：卡片是「预览在左、文字在右、按钮通栏」的横版结构，
+        /// 预览先扣掉顶部色带与底部按钮，再按 40×56 等比；宽度不超过卡片内宽的一半，
+        /// 保证右侧始终留得下标题、英文名与描述。
         /// </summary>
         public static Vector2 PreviewSize(bool mobile, float cardWidth, float cardHeight)
         {
             MapSelectMetrics m = Metrics(mobile);
-            float textHeight =
-                m.CardTitleFont * 1.25f +
-                m.CardEnglishFont * 1.45f +
-                m.CardDescriptorFont * 1.4f +
-                m.CardButtonHeight +
-                m.CardInnerPadding * 0.9f;
-            float available = cardHeight
+            float available = Mathf.Max(120f, cardHeight
                 - m.CardInnerPadding * 2f
                 - m.CardBandHeight
-                - textHeight;
+                - m.CardButtonHeight
+                - 28f);
 
             float innerWidth = Mathf.Max(1f, cardWidth - m.CardInnerPadding * 2f);
-            float height = Mathf.Clamp(available, 60f, m.CardPreviewMaxHeight);
+            float maxWidth = Mathf.Max(80f, innerWidth * 0.46f);
+            float height = available;
             float width = height * 40f / 56f;
-            if (width > innerWidth)
+            if (width > maxWidth)
             {
-                width = innerWidth;
+                width = maxWidth;
                 height = width * 56f / 40f;
             }
-            return new Vector2(width, height);
+            return new Vector2(width, Mathf.Min(height, available));
         }
     }
 }

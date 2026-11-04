@@ -7,6 +7,9 @@
 > **不记**：逐项 `Added` / `Changed` / `Verified` 流水账、测试项数与 exit 状态明细、selftest 细节、用户原话、设计推导、临时出图路径。
 > 2026-11-01 之前的条目按 GitHub Release 说明回填（仅版本里程碑）；逐条根因记录自 v0.1.8 起。
 
+## 2026-11-04 #21
+【发布墨水作战 v0.1.21】本版一并发出 2026-11-04 #09–#20：① 首页比赛时长可选 2/3/5 分钟（`GameSettingsService.MatchDurationMinutes` 持久化，`MatchManager` 四处 `_remaining` 初始化统一走 `ResolveMatchDurationSeconds()`）；② 首页 Hero 卡改「流式排版」（Header → 武器整备卡 → 难度行 → 时长行 → CTA，`MenuLayoutMath.ResolveHeroFlow` 单一数据源，运行时用 `HomeHeroCard.sizeDelta.y` 重算避免短屏错位）；③ 战斗播报与击杀信息全面中文化（`MatchCalloutMath/View` 改「首杀/双杀/反杀…」，击杀卡改「击倒」，横幅补时钟图标，手雷徽标改图标）；④ 武器朝向对齐 INKWAVE `firingPose`（`WeaponController.WantsAimFacing` 扩到完整开火姿态含双枪架枪站桩、手雷按住瞄准经 `InkCharacterMotor.SetFrameIntent` 新增末位可选参 `aimFacingRequested` 传入、泼桶出手方向改甩出瞬间读准星）；⑤ 启动流程改「启动 logo → 黑屏 → 直接首页」（`LaunchIntroView` 新增 `coverOnly` 模式，`MatchFlowUI.Awake` 首次构建改 `EnsureReadyVisuals(false)` 不播错峰入场）；⑥ 设置页三板块 Tab + 固定高度 + 点空白返回（修手机端底部按钮被裁出屏外）；⑦ BGM 默认音量 1.0→0.2；⑧ 按键布局编辑器背景改不透明深墨舞台底。版本 `GameVersion.APP_VERSION` 0.1.21、`PlayerSettings.bundleVersion` 0.1.21、`AndroidBundleVersionCode` 121 三方一致，APK `build/moshuizuozhan-v0.1.21-arm64-v8a.apk`（64.4 MB，SHA-256 `e522f88d7b288d9c5120f4f8d10528121873cb97db948fbf913c23839d3fffaf`），双端 tag 与 Release 均已就绪（GitHub + Gitee 附件同名同体积）。**坑：新增上屏中文必须先更新 `tools/font_charset.txt` 并重跑 `P1/画风/漫画风/0` 重烘字集，否则 `FontCoverageTests` 判红；`bump --write` 这次经编辑器同步 `PlayerSettings` 已正常落盘（v0.1.20 的落盘陷阱未复现）。**
+
 ## 2026-11-04 #20
 【手雷徽标换图标后回归测试失配】Fixed: #10 把手雷冷却徽标左侧从 "BOMB" 文字改成手雷图标（`UIIconLibrary.Get("sub_bomb")`，取不到才退回中文「手雷」），`WeaponReticleUI.BuildSubAimBadge` 在有图标时不再建名为 "Text" 的子节点——旧回归用例 `ReticleAndTrajectoryTests.SubAimBadge_TextFitsItsBoxes` 仍无条件 `badge.Find("Text").GetComponent<TMP_Text>()`，图标分支下 `Find` 返回 null 直接 NRE。改为「Icon / Text 二选一」断言：两种形态都必须存在其一，文字形态额外校验 `preferredWidth` 不溢出自己的框，倒计时与就绪文案、进度条不压倒计时的断言原样保留。涉及 `Tests/EditMode/ReticleAndTrajectoryTests.cs`。
 

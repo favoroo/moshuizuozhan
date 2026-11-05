@@ -865,11 +865,12 @@ namespace P1.Environment
                 float sign = mirror == 0 ? 1f : -1f;
                 string tag = mirror == 0 ? "A" : "B";
 
-                // 塔吊基座：1.0m 高混凝土台（扩展至 3.6m，方便装配工业细节），黄黑警示压顶
+                // 塔吊基座：1.0m 高混凝土台（3.2m 见方，45° 斜置），黄黑警示压顶
+                // 尺寸统一取布局常量，避免与地面烘焙贴花/通行缝审计脱节
                 Vector3 cranePos = ArenaLayoutSkatepark.CranePos;
                 Vector3 craneWorld = new Vector3(cranePos.x * sign, 0f, cranePos.z * sign);
                 float craneYaw = ArenaLayoutSkatepark.CraneYaw + (mirror == 0 ? 0f : 180f);
-                Vector3 craneBaseSize = new Vector3(3.6f, ArenaLayoutSkatepark.CraneBaseHeight, 3.6f);
+                Vector3 craneBaseSize = ArenaLayoutSkatepark.CraneBaseSize;
                 var craneBase = CreateSolidRotated(parent, "Skatepark_Crane_Base_" + tag,
                     craneWorld + Vector3.up * (ArenaLayoutSkatepark.CraneBaseHeight * 0.5f),
                     craneBaseSize, concreteMat,

@@ -115,6 +115,12 @@ namespace P1.Core
         [Tooltip("爆炸/大招震屏的距离衰减半径（米）：半径内按距离平方衰减，半径外不震")]
         public float shakeExplosionRadius = 14f;
 
+        /// <summary>
+        /// 默认最低越界高度：霓虹滑板场的下沉碗池池底为 -2.1m，属于合法玩法区；
+        /// 阈值必须低于池底（-6m 留 3.9m 余量），否则角色下碗池会被误判坠落拉回出生点。
+        /// </summary>
+        public const float DefaultOutOfBoundsMinY = -6f;
+
         [Header("越界回收与防坠落 (P16-B)")]
         [Tooltip("越界检测轮询周期（秒）")]
         public float outOfBoundsCheckIntervalSeconds = 0.25f;
@@ -122,8 +128,8 @@ namespace P1.Core
         public float outOfBoundsMarginX = 0.3f;
         [Tooltip("Z 方向允许超出边界的缓冲距离（米）")]
         public float outOfBoundsMarginZ = 0.3f;
-        [Tooltip("最低允许高度（米），低于此高度立即判定越界回收")]
-        public float outOfBoundsMinY = -1f;
+        [Tooltip("最低允许高度（米），低于此高度立即判定越界回收；须低于滑板场碗池底 -2.1m")]
+        public float outOfBoundsMinY = DefaultOutOfBoundsMinY;
 
         [Header("出生禁入圈 (P16-A)")]
         [Tooltip("出生禁入圈半径（米）")]

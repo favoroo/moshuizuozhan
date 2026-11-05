@@ -63,6 +63,6 @@ MonoBehaviour:
   outOfBoundsCheckIntervalSeconds: 0.25
   outOfBoundsMarginX: 0.3
   outOfBoundsMarginZ: 0.3
-  outOfBoundsMinY: -1
+  outOfBoundsMinY: -6
   spawnZoneRadius: 6
   spawnZonePushSpeed: 8

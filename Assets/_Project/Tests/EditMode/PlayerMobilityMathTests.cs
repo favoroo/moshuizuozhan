@@ -83,10 +83,13 @@ namespace P1.Tests
         [Test]
         public void ShouldRecover_InAirPhase_StillRecoversVerticalFalls()
         {
+            // 显式传 -1f：本用例验证的是「阶段门禁不拦坠落」，不是阈值数值本身
+            // （默认阈值已随滑板场碗池降到 -6m）。
+            const float legacyMinY = -1f;
             Vector3 falling = new Vector3(0f, -3f, 0f);
-            Assert.IsTrue(OutOfBoundsGuard.ShouldRecover(falling, allowHorizontalRecovery: false),
+            Assert.IsTrue(OutOfBoundsGuard.ShouldRecover(falling, allowHorizontalRecovery: false, minY: legacyMinY),
                 "y 低于下限时任何阶段都要回收（否则哨响瞬间越界会无限坠落）");
-            Assert.IsTrue(OutOfBoundsGuard.ShouldRecover(falling, allowHorizontalRecovery: true));
+            Assert.IsTrue(OutOfBoundsGuard.ShouldRecover(falling, allowHorizontalRecovery: true, minY: legacyMinY));
         }
 
         [Test]
@@ -115,9 +118,11 @@ namespace P1.Tests
         [Test]
         public void IsOutOfBounds_KeepsLegacySemantics()
         {
-            // 旧 API 语义不变：XZ 越界与 y 坠落都算越界
+            // 旧 API 语义不变：XZ 越界与 y 坠落都算越界。
+            // y 阈值不再走默认值 —— 默认值已随滑板场碗池降到 -6m，这里显式传 -1f 才能保住「-1.5m 算坠落」的旧口径。
+            const float legacyMinY = -1f;
             Assert.IsTrue(OutOfBoundsGuard.IsOutOfBounds(new Vector3(ArenaLayoutV2.BoundaryX + 0.4f, 0f, 0f)));
-            Assert.IsTrue(OutOfBoundsGuard.IsOutOfBounds(new Vector3(0f, -1.5f, 0f)));
+            Assert.IsTrue(OutOfBoundsGuard.IsOutOfBounds(new Vector3(0f, -1.5f, 0f), 0.3f, 0.3f, legacyMinY));
             Assert.IsFalse(OutOfBoundsGuard.IsOutOfBounds(Vector3.zero));
         }
 

@@ -258,9 +258,9 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 1:00 决战横幅。当前正式流程的 1:00 提示由 <see cref="CenterTimerView"/> 负责
-        /// （MatchFlowUI 仍会调用本方法，但场景里的 MatchBannerView 是停用状态，不会显示）。
-        /// 若以后重新启用本 View，务必同步移除 MatchFlowUI 的 1:00 触发，否则会出现两条重复提示。
+        /// 1:00 决战横幅（已退役的旧实现）。正式流程的 1:00 提示只由
+        /// <see cref="CenterTimerView"/> 负责，<see cref="MatchFlowUI"/> 已不再调用本方法；
+        /// 保留仅为单测与旧场景兼容。若有人重新接回本方法，同一时刻会出现两条「最后 1 分钟」提示。
         /// </summary>
         public void ShowOneMinute()
         {

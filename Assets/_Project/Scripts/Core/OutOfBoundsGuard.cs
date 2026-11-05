@@ -10,6 +10,8 @@ namespace P1.Core
     /// 定期扫描全部存活战斗单位，当角色翻出边界墙或坠落至指定高度以下时，
     /// 立即传回本队出生锚点并清空速度，不判死、不清血量、不触发击杀事件，
     /// 彻底防止玩家翻越北墙软锁或卡在场外死区。
+    /// 注意：滑板场的下沉碗池（池底 -2.1m）是合法玩法区，y 阈值必须低于池底，
+    /// 不能沿用所有地图都在 y=0 时的 -1m 平地默认值。
     /// </summary>
     public class OutOfBoundsGuard : MonoBehaviour
     {
@@ -66,7 +68,7 @@ namespace P1.Core
             GameConfigSO cfg = Config;
             float marginX = cfg != null ? cfg.outOfBoundsMarginX : 0.3f;
             float marginZ = cfg != null ? cfg.outOfBoundsMarginZ : 0.3f;
-            float minY = cfg != null ? cfg.outOfBoundsMinY : -1f;
+            float minY = cfg != null ? cfg.outOfBoundsMinY : GameConfigSO.DefaultOutOfBoundsMinY;
 
             var all = CombatantHealthRegistry.All;
             int recoveredCount = 0;
@@ -127,7 +129,8 @@ namespace P1.Core
         /// 纯静态越界判定（XZ 越界 + y 坠落，全部按越界处理），保留给外部/测试使用。
         /// 阶段门禁请用 <see cref="ShouldRecover"/>。
         /// </summary>
-        public static bool IsOutOfBounds(Vector3 pos, float marginX = 0.3f, float marginZ = 0.3f, float minY = -1f)
+        public static bool IsOutOfBounds(Vector3 pos, float marginX = 0.3f, float marginZ = 0.3f,
+            float minY = GameConfigSO.DefaultOutOfBoundsMinY)
         {
             return ShouldRecover(pos, true, marginX, marginZ, minY);
         }
@@ -142,7 +145,7 @@ namespace P1.Core
             bool allowHorizontalRecovery,
             float marginX = 0.3f,
             float marginZ = 0.3f,
-            float minY = -1f)
+            float minY = GameConfigSO.DefaultOutOfBoundsMinY)
         {
             if (pos.y < minY) return true;
             if (!allowHorizontalRecovery) return false;

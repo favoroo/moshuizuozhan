@@ -6,6 +6,18 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-05 #15
+【发布 v0.1.28】含 `#12`~`#14`；APK `moshuizuozhan-v0.1.28-arm64-v8a.apk`。陷阱：本轮 GUI 编辑器是用 `-logFile Logs/editor_ink.log` 启动的，而 `release.py build` 的 Pipeline 通道只盯 `Logs/Editor.log`（该文件停在 06:31），构建其实 54s 就成功了脚本却看不见完成标记、一路空等——编辑器日志名不是 `Logs/Editor.log` 时，构建成功后直接重跑一次 `build --version X` 复用已通过 aapt2 校验的 `Builds/Android/InkTurf.apk` 即可收尾。
+
+## 2026-11-05 #14
+【Fixed: 霓虹滑板场「看着能过、走过去卡住」的集装箱/塔吊基座夹缝】根因：基座在 `SkateparkGeometryBuilder` 里**硬编码 3.6m**（布局常量 `CraneBaseSize` 实为 3.2m），45° 斜置后南角与双层堆东北角只剩 **0.84m**——小于角色胶囊直径 0.9m，视觉像条缝、实际进不去；地面贴花与通行审计都按常量 3.2m 算，口径本身已漂移。现基座统一取 `ArenaLayoutSkatepark.CraneBaseSize`，`CranePos` 沿双层堆北面法线外移 0.4m（(17.4,16.2)→(17.54,16.58)），缝宽提到 **1.50m**（`Physics.OverlapCapsule` 实测胶囊可通，SW 镜像位对称同样通过），基座与 ExtraA 高层堆仍咬合、不新开第二条缝。涉及 `Scripts/Environment/{ArenaLayoutSkatepark,SkateparkGeometryBuilder}.cs`、`Scenes/NeonSkatepark.unity`、`Art/Textures/Arena/SkateparkGround_Albedo|RMO.png`（基座黄黑警示框随位置重烘）。
+
+## 2026-11-05 #13
+【Fixed: 霓虹滑板场下到碗池底部被直接传回出生点】根因：`OutOfBoundsGuard` 的坠落阈值 `GameConfig.outOfBoundsMinY` 仍是为全平地地图设的 `-1m`，而碗池底是 `-2.1m`（`ArenaLayoutSkatepark.BowlFloorY`），角色下到半坡就被当成「坠出世界」直接 Teleport 回出生锚点（不判死、不清血）。现将默认阈值降到 `-6m`（`GameConfigSO.DefaultOutOfBoundsMinY`，池底下方留 3.9m 余量），并补 EditMode 断言「碗池底不回收 / 真正掉出世界仍回收」；`ShouldRecover` / `IsOutOfBounds` 的 `minY` 默认参数也改指该常量（原来硬编码 `-1f`，新调用点会静默踩回同一个坑，旧口径用例改为显式传值）。涉及 `Scripts/Core/{GameConfigSO,OutOfBoundsGuard}.cs`、`ScriptableObjects/GameConfig.asset`、`Tests/EditMode/{OutOfBoundsMathTests,PlayerMobilityMathTests}.cs`。
+
+## 2026-11-05 #12
+【Fixed: 「最后 1 分钟」决战横幅同时弹两条】根因：1:00 有两套独立触发——`CenterTimerView`（计时球下方红卡）与 `MatchFlowUI` 调 `MatchBannerView.ShowOneMinute`（屏幕中央大横幅）；`PhaseA_Playbox` 的 MatchBannerView 是停用状态（`m_IsActive: 0`）所以只看到一条，海鸥港湾 / 霓虹滑板场两张地图里它是激活的，于是同帧弹两条。现删除 `MatchFlowUI` 的 1:00 触发（`_oneMinuteTriggered` 一并移除），1:00 只归 `CenterTimerView`；`MatchBannerView.ShowOneMinute` 保留给单测并注明已退役，另加源码断言防回接。涉及 `Scripts/UI/{MatchFlowUI,MatchBannerView}.cs`、`Tests/EditMode/UiMatchResetTests.cs`。
+
 ## 2026-11-05 #11
 【发布 v0.1.27】含 `#01`~`#10`；APK `moshuizuozhan-v0.1.27-arm64-v8a.apk`。
 

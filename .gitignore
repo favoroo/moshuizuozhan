@@ -88,3 +88,6 @@ crashlytics-build.properties
 
 # Burst/WebGL 构建在项目根生成的临时目录
 /[Dd]ata/
+
+# 场地审计的过程产物（前后对比截图 + 夹缝 JSON，由 tools/audit_gaps.py 生成，体积大且可重跑）
+/Artifacts/

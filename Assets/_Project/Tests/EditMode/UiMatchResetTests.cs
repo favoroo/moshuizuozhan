@@ -1,3 +1,4 @@
+using System.IO;
 using NUnit.Framework;
 using P1.UI;
 using UnityEngine;
@@ -61,6 +62,20 @@ namespace P1.Tests
             view.SetTime(120f);
             view.SetTime(59.9f);
             Assert.IsTrue(view.BannerShown, "第二局必须能再次弹出「最后 1 分钟」横幅");
+        }
+
+        [Test]
+        public void MatchFlowUI_DoesNotTriggerMatchBannerOneMinute()
+        {
+            // 1:00 决战横幅只归 CenterTimerView 独家负责。海鸥港湾 / 霓虹滑板场两张地图的
+            // MatchBannerView 是激活状态（PhaseA_Playbox 才是停用），MatchFlowUI 若再调
+            // ShowOneMinute 就会和计时球横幅同时弹出两条「最后 1 分钟」。
+            const string path = "Assets/_Project/Scripts/UI/MatchFlowUI.cs";
+            Assert.IsTrue(File.Exists(path), $"找不到比赛流程 UI 源码：{path}");
+
+            string source = File.ReadAllText(path);
+            Assert.IsFalse(source.Contains("ShowOneMinute()"),
+                "MatchFlowUI 不能再触发 MatchBannerView.ShowOneMinute：1:00 横幅只归 CenterTimerView，否则两条提示会同时弹出");
         }
 
         [Test]

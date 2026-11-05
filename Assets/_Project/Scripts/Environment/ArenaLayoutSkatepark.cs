@@ -115,8 +115,12 @@ namespace P1.Environment
         // =====================================================================================
         // 工业地标
         // =====================================================================================
-        /// <summary>塔吊：东北象限，吊臂伸向碗池上方；镜像件在西南象限。</summary>
-        public static readonly Vector3 CranePos = new Vector3(17.4f, 0f, 16.2f);
+        /// <summary>
+        /// 塔吊：东北象限，吊臂伸向碗池上方；镜像件在西南象限。
+        /// 基座沿双层堆北面法线 (+0.342, +0.940) 外移 0.4m，使基座与双层堆之间留出 ~1.55m 可通行缝
+        /// （玩家胶囊直径 0.9m）；基座与 ExtraA 高层堆仍保持咬合，不会新开第二条缝。
+        /// </summary>
+        public static readonly Vector3 CranePos = new Vector3(17.54f, 0f, 16.58f);
         public const float CraneYaw = 225f;
         public const float CraneBaseHeight = 1.0f;
         public static readonly Vector3 CraneBaseSize = new Vector3(3.2f, CraneBaseHeight, 3.2f);

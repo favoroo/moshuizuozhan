@@ -140,7 +140,6 @@ namespace P1.UI
         private GameObject _fullscreenUnderlay;
         private float _resultElapsed;
         private MatchManager.Phase _lastPhase = (MatchManager.Phase)(-1);
-        private bool _oneMinuteTriggered;
         private bool _badgePlayed;
         private bool _numbersSettled;
 
@@ -2764,15 +2763,9 @@ namespace P1.UI
                 HandlePhaseChanged(match, firstSync);
             }
 
-            if (match.CurrentPhase == MatchManager.Phase.Playing)
-            {
-                // 1:00 决战时刻横幅
-                if (!_oneMinuteTriggered && match.RemainingSeconds <= 60f)
-                {
-                    _oneMinuteTriggered = true;
-                    if (bannerView != null) bannerView.ShowOneMinute();
-                }
-            }
+            // 1:00 决战横幅由 CenterTimerView 独家负责（每局一次、ResetForMatch 复位）。
+            // 这里不要再触发 MatchBannerView.ShowOneMinute：海鸥港湾 / 霓虹滑板场两张地图的
+            // MatchBannerView 是激活的，会和计时球横幅同时弹出「最后 1 分钟」两条提示。
 
             if (match.CurrentPhase == MatchManager.Phase.Result && resultPanel != null && resultPanel.activeSelf)
             {
@@ -2822,7 +2815,6 @@ namespace P1.UI
                 // 入场墨幕在 HUD 画布（0），晚一帧关闭就会看到菜单盖在墨幕上。
                 if (readyPanel != null) readyPanel.SetActive(false);
                 if (resultPanel != null) resultPanel.SetActive(false);
-                _oneMinuteTriggered = false;
                 _badgePlayed = false;
                 _numbersSettled = false;
                 s_SettledThisMatch = false;

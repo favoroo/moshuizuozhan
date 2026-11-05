@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using P1.Core;
 using P1.Environment;
+using UnityEditor;
 using UnityEngine;
 
 namespace P1.Tests
@@ -66,6 +67,36 @@ namespace P1.Tests
             // 自定义较高 minY
             Assert.IsTrue(OutOfBoundsGuard.IsOutOfBounds(new Vector3(0f, 0.2f, 0f), 0.3f, 0.3f, 0.5f));
             Assert.IsFalse(OutOfBoundsGuard.IsOutOfBounds(new Vector3(0f, 0.6f, 0f), 0.3f, 0.3f, 0.5f));
+        }
+
+        [Test]
+        public void ShouldRecover_SkateparkBowlFloor_IsNotAFall()
+        {
+            // 霓虹滑板场碗池底 y=-2.1m 是合法玩法区；阈值若停在旧值 -1m，
+            // 角色下到半坡就会被当成坠落拉回出生点。
+            Vector3 bowlFloor = new Vector3(0f, ArenaLayoutSkatepark.BowlFloorY, 0f);
+            Assert.Less(GameConfigSO.DefaultOutOfBoundsMinY, ArenaLayoutSkatepark.BowlFloorY - 1f,
+                "默认坠落阈值必须低于碗池底并留出余量");
+
+            Assert.IsFalse(OutOfBoundsGuard.ShouldRecover(
+                bowlFloor, allowHorizontalRecovery: true, minY: GameConfigSO.DefaultOutOfBoundsMinY));
+            Assert.IsFalse(OutOfBoundsGuard.ShouldRecover(
+                bowlFloor, allowHorizontalRecovery: false, minY: GameConfigSO.DefaultOutOfBoundsMinY));
+
+            // 真正掉出世界时仍要回收
+            Assert.IsTrue(OutOfBoundsGuard.ShouldRecover(
+                new Vector3(0f, GameConfigSO.DefaultOutOfBoundsMinY - 0.1f, 0f),
+                allowHorizontalRecovery: false, minY: GameConfigSO.DefaultOutOfBoundsMinY));
+        }
+
+        [Test]
+        public void GameConfigAsset_OutOfBoundsMinY_LeavesSkateparkBowlPlayable()
+        {
+            var config = AssetDatabase.LoadAssetAtPath<GameConfigSO>(
+                "Assets/_Project/ScriptableObjects/GameConfig.asset");
+            Assert.IsNotNull(config, "GameConfig.asset 必须存在（菜单 P1/构建/1 生成）");
+            Assert.Less(config.outOfBoundsMinY, ArenaLayoutSkatepark.BowlFloorY - 1f,
+                "GameConfig.asset 的 outOfBoundsMinY 必须低于滑板场碗池底，否则碗池不可玩");
         }
 
         [Test]

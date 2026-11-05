@@ -925,7 +925,7 @@ namespace P1.UI
                 ClickAction = OpenHomeSettings,
             }, theme, m, mobile, out _homeSettingsInfo, out _);
 
-            MapDefinition currentMap = MapCatalogService.ActiveOrSelected;
+            MapDefinition currentMap = MapCatalogService.Selected;
             MapDefinition otherMap = MapCatalogService.OtherThan(currentMap);
             BuildHomeTile(new HomeTileSpec
             {
@@ -957,11 +957,21 @@ namespace P1.UI
             return other == null ? "当前地图" : $"当前 · 还可选「{other.DisplayName}」";
         }
 
-        /// <summary>首页地图卡：打开地图选择浮层；选择后真实加载对应场景。</summary>
+        /// <summary>
+        /// 首页地图卡：打开地图选择浮层。浮层里切换只改存档（不再立刻重载场景），
+        /// 关窗后若选择变了就重建首页地图卡，让标题/预览/信息立刻跟着选中项走；
+        /// 真正的场景载入发生在「开始游戏」。
+        /// </summary>
         private void OpenMapSelect()
         {
             if (readyPanel == null) return;
-            MapSelectOverlay.Show(readyPanel.transform as RectTransform, UIThemeSO.Resolve(uiTheme));
+
+            string selectedBefore = MapCatalogService.Selected.Id;
+            MapSelectOverlay.Show(readyPanel.transform as RectTransform, UIThemeSO.Resolve(uiTheme), () =>
+            {
+                if (MapCatalogService.Selected.Id == selectedBefore) return;
+                if (isActiveAndEnabled) RebuildHomeVisuals();
+            });
         }
 
         /// <summary>
@@ -1563,7 +1573,7 @@ namespace P1.UI
 
             if (_homeMapInfo != null)
             {
-                MapDefinition currentMap = MapCatalogService.ActiveOrSelected;
+                MapDefinition currentMap = MapCatalogService.Selected;
                 _homeMapInfo.text = BuildMapInfo(currentMap, MapCatalogService.OtherThan(currentMap));
                 FitTileInfoText(_homeMapInfo);
             }
@@ -2666,19 +2676,45 @@ namespace P1.UI
             if (match == null) return;
             if (match.CurrentPhase != MatchManager.Phase.Ready && match.CurrentPhase != MatchManager.Phase.Result) return;
 
-            // 存档里的选中图与当前场景不一致（例如外部改过存档 / 启动补切失败）：先真实切图，避免开错场地。
+            // 存档里的选中图与当前场景不一致（例如刚在地图浮层里换了图 / 外部改过存档）：
+            // 先真实切图，加载完成后由 MapStartupRouter 自动开赛，玩家不用按第二次。
             // 用 MapForActiveScene 而不是 Scene.path：玩家包里 Scene.path 可能为空，
             // 旧写法会让这里与地图选择浮层的判断不一致，表现为「点了开始游戏什么都不发生」。
             if (MapCatalogService.MapForActiveScene() != null && !MapCatalogService.IsSelectedSceneActive())
             {
-                if (!MapCatalogService.LoadMap(MapCatalogService.Selected))
+                MapDefinition target = MapCatalogService.Selected;
+                if (!MapCatalogService.CanLoadMap(target))
                 {
-                    Debug.LogWarning("[MatchFlow] 当前场景与选定地图不一致，且切图请求未被接受；本次开赛已放弃。");
+                    // 老安装包只打了主场景：必须给出可见提示，不能继续静默失败。
+                    ShowHomeMapHint($"缺少「{target.DisplayName}」场地 · 请更新客户端");
+                    Debug.LogError($"[MatchFlow] 安装包里没有选中的地图场景，无法开赛：{target.ScenePath}");
+                    return;
+                }
+
+                MapStartupRouter.RequestAutoStart();
+                if (!MapCatalogService.LoadMap(target))
+                {
+                    // 场景已经在加载（例如启动补切/上一次点击仍在跑）：保留刚挂上的自动开赛，
+                    // 不能在这里 Cancel，否则加载完成后会停在首页、玩家以为又没反应。
+                    if (MapCatalogService.IsLoading) return;
+
+                    MapStartupRouter.CancelAutoStart();
+                    ShowHomeMapHint("场地载入未开始 · 请再点一次开始");
+                    Debug.LogWarning("[MatchFlow] 切图请求未被接受；本次开赛已放弃：" + target.Id);
                 }
                 return;
             }
 
             match.StartMatch();
+        }
+
+        /// <summary>首页地图卡的信息行兼作错误提示：手机端看不到 Debug.Log，失败必须落在屏幕文字上。</summary>
+        private void ShowHomeMapHint(string message)
+        {
+            if (_homeMapInfo == null) return;
+            _homeMapInfo.text = message;
+            _homeMapInfo.color = ComicStyle.Red;
+            FitTileInfoText(_homeMapInfo);
         }
 
         private void Update()

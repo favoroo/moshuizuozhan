@@ -69,7 +69,7 @@ namespace P1.UI
     {
         public const string SelectedMapPrefsKey = "P1.Map.SelectedId";
         public const string PhaseAScenePath = "Assets/_Project/Scenes/PhaseA_Playbox.unity";
-        public const string KelpScenePath = "Assets/_Project/Scenes/KelpTerminal.unity";
+        public const string GullScenePath = "Assets/_Project/Scenes/GullHarbor.unity";
 
         private static readonly MapDefinition PhaseAMap = new MapDefinition(
             "phase_a",
@@ -80,21 +80,34 @@ namespace P1.UI
             ComicStyle.Red,
             PhaseASchematic());
 
-        private static readonly MapDefinition KelpMap = new MapDefinition(
-            "kelp_terminal",
-            KelpScenePath,
-            "潮汐货站",
-            "KELP TERMINAL",
-            "中央长货台 · 东西坡道 · 信标柱地标",
+        private static readonly MapDefinition GullMap = new MapDefinition(
+            "gull_harbor",
+            GullScenePath,
+            "海鸥港湾",
+            "GULL HARBOR",
+            "中央渡轮 · 浅湾水线 · 木栈道绕后",
             ComicStyle.Blue,
-            KelpSchematic());
+            GullSchematic());
 
-        private static readonly MapDefinition[] AllMaps = { PhaseAMap, KelpMap };
+        private static readonly MapDefinition[] AllMaps = { PhaseAMap, GullMap };
 
         private static bool _loading;
-        private static int _loadRequestFrame;
+        private static AsyncOperation _loadOperation;
+        private static float _loadStartRealtime;
+        private const float LoadStaleSeconds = 8f;
 
         public static IReadOnlyList<MapDefinition> Maps => AllMaps;
+
+        /// <summary>
+        /// 全部地图场景路径（Build Index 0 的默认图在最前）。出包脚本必须把它整体塞进
+        /// <c>BuildPlayerOptions.scenes</c>：只打主场景时，运行期第二张图永远拿不到 Build Index。
+        /// </summary>
+        public static string[] AllScenePaths()
+        {
+            var paths = new string[AllMaps.Length];
+            for (int i = 0; i < AllMaps.Length; i++) paths[i] = AllMaps[i].ScenePath;
+            return paths;
+        }
 
         public static MapDefinition DefaultMap => PhaseAMap;
 
@@ -174,6 +187,12 @@ namespace P1.UI
             return MapForScene(scenePath) != null;
         }
 
+        /// <summary>该地图的场景是否真的在本次安装包里：玩家包只带主场景时，切图会必然失败。</summary>
+        public static bool CanLoadMap(MapDefinition map)
+        {
+            return map != null && ResolveBuildIndex(map) >= 0;
+        }
+
         public static MapDefinition OtherThan(MapDefinition map)
         {
             for (int i = 0; i < AllMaps.Length; i++)
@@ -202,16 +221,17 @@ namespace P1.UI
                 Debug.LogError("[MapCatalog] LoadMap 收到空地图。");
                 return false;
             }
-            if (_loading)
+            if (_loadOperation != null)
             {
-                // 真机上在 AfterSceneLoad 阶段发起的切图可能被引擎吞掉、sceneLoaded 不回调，
-                // 标记就会永久卡死（此后所有切图与「开始游戏」补切全部静默失败）。
-                // 只拦同帧连点，超过 2 帧视为过期请求，允许重新发起。
-                if (Time.frameCount - _loadRequestFrame <= 2)
+                // 只要场景真的还在加载就拒绝重复请求：手机加载一张图可能几十帧，
+                // 按帧号判过期会在加载途中反复重发 LoadSceneAsync(Single)，把加载自己打断。
+                if (!_loadOperation.isDone && Time.realtimeSinceStartup - _loadStartRealtime < LoadStaleSeconds)
                 {
                     return false;
                 }
-                Debug.LogWarning("[MapCatalog] 上一次切图请求未生效，重新发起：" + map.Id);
+                // 超过 LoadStaleSeconds 仍未完成（被引擎吞掉/编辑器暂停）才视为过期请求，允许重发。
+                Debug.LogWarning("[MapCatalog] 上一次切图请求未完成，重新发起：" + map.Id);
+                _loadOperation = null;
                 _loading = false;
             }
             int buildIndex = ResolveBuildIndex(map);
@@ -221,9 +241,9 @@ namespace P1.UI
                 return false;
             }
             _loading = true;
-            _loadRequestFrame = Time.frameCount;
-            AsyncOperation op = SceneManager.LoadSceneAsync(buildIndex, LoadSceneMode.Single);
-            if (op == null)
+            _loadStartRealtime = Time.realtimeSinceStartup;
+            _loadOperation = SceneManager.LoadSceneAsync(buildIndex, LoadSceneMode.Single);
+            if (_loadOperation == null)
             {
                 _loading = false;
                 Debug.LogError($"[MapCatalog] LoadSceneAsync 被拒绝：{map.ScenePath}");
@@ -261,7 +281,8 @@ namespace P1.UI
         public static void ResetRuntimeState()
         {
             _loading = false;
-            _loadRequestFrame = 0;
+            _loadOperation = null;
+            _loadStartRealtime = 0f;
         }
 
         /// <summary>测试专用：清掉选择存档，回到默认 PhaseA。</summary>
@@ -308,32 +329,38 @@ namespace P1.UI
             };
         }
 
-        private static MapSchematicBlock[] KelpSchematic()
+        private static MapSchematicBlock[] GullSchematic()
         {
             return new[]
             {
                 // 出生台（南北）
                 new MapSchematicBlock(0f, -25.2f, 14f, 6.4f, MapSchematicRole.Spawn),
                 new MapSchematicBlock(0f, 25.2f, 14f, 6.4f, MapSchematicRole.Spawn),
-                // 中央长货台 + 东西坡道
-                new MapSchematicBlock(0f, 0f, 10f, 6f, MapSchematicRole.Landmark),
-                new MapSchematicBlock(-7.4f, 0f, 5f, 4.4f, MapSchematicRole.Terrain),
-                new MapSchematicBlock(7.4f, 0f, 5f, 4.4f, MapSchematicRole.Terrain),
-                // 中央信标
-                new MapSchematicBlock(1.2f, 0f, 1.6f, 1.6f, MapSchematicRole.Cover),
-                // 中部低位掩体
-                new MapSchematicBlock(-8.1f, -5.5f, 3.2f, 2.4f, MapSchematicRole.Cover),
-                new MapSchematicBlock(8.1f, -5.5f, 3.2f, 2.4f, MapSchematicRole.Cover),
-                new MapSchematicBlock(-8.1f, 5.5f, 3.2f, 2.4f, MapSchematicRole.Cover),
-                new MapSchematicBlock(8.1f, 5.5f, 3.2f, 2.4f, MapSchematicRole.Cover),
-                // 侧翼长条箱体
-                new MapSchematicBlock(-16.75f, 0f, 3.2f, 9f, MapSchematicRole.Cover),
-                new MapSchematicBlock(16.75f, 0f, 3.2f, 9f, MapSchematicRole.Cover),
-                // 侧翼花箱 / 系缆柱
-                new MapSchematicBlock(-10.4f, -12f, 1.4f, 5f, MapSchematicRole.Terrain),
-                new MapSchematicBlock(10.4f, -12f, 1.4f, 5f, MapSchematicRole.Terrain),
-                new MapSchematicBlock(-10.4f, 12f, 1.4f, 5f, MapSchematicRole.Terrain),
-                new MapSchematicBlock(10.4f, 12f, 1.4f, 5f, MapSchematicRole.Terrain),
+                // 中央渡轮（船体 + 客舱）
+                new MapSchematicBlock(0f, 0f, 23.6f, 9.2f, MapSchematicRole.Landmark),
+                new MapSchematicBlock(0f, 0f, 10.4f, 4.6f, MapSchematicRole.Cover),
+                // 南北登船坡道
+                new MapSchematicBlock(0f, -7.2f, 3.8f, 5.2f, MapSchematicRole.Terrain),
+                new MapSchematicBlock(0f, 7.2f, 3.8f, 5.2f, MapSchematicRole.Terrain),
+                // 浅湾水线（坡道左右两段）
+                new MapSchematicBlock(-8.55f, -7.2f, 13.3f, 5.2f, MapSchematicRole.Terrain),
+                new MapSchematicBlock(8.55f, -7.2f, 13.3f, 5.2f, MapSchematicRole.Terrain),
+                new MapSchematicBlock(-8.55f, 7.2f, 13.3f, 5.2f, MapSchematicRole.Terrain),
+                new MapSchematicBlock(8.55f, 7.2f, 13.3f, 5.2f, MapSchematicRole.Terrain),
+                // 加油亭
+                new MapSchematicBlock(0f, -15.4f, 2.8f, 2.8f, MapSchematicRole.Cover),
+                new MapSchematicBlock(0f, 15.4f, 2.8f, 2.8f, MapSchematicRole.Cover),
+                // 船坞拖船（每队左翼）
+                new MapSchematicBlock(-15.6f, -14.2f, 5.4f, 6.6f, MapSchematicRole.Cover),
+                new MapSchematicBlock(15.6f, 14.2f, 5.4f, 6.6f, MapSchematicRole.Cover),
+                // 系泊游艇
+                new MapSchematicBlock(-8.6f, -12.1f, 2.4f, 4.4f, MapSchematicRole.Cover),
+                new MapSchematicBlock(8.6f, 12.1f, 2.4f, 4.4f, MapSchematicRole.Cover),
+                // 出生闸口与侧翼箱堆
+                new MapSchematicBlock(-5f, -21.4f, 3f, 1.2f, MapSchematicRole.Cover),
+                new MapSchematicBlock(5f, 21.4f, 3f, 1.2f, MapSchematicRole.Cover),
+                new MapSchematicBlock(-18.8f, -11.6f, 2f, 2f, MapSchematicRole.Cover),
+                new MapSchematicBlock(18.8f, 11.6f, 2f, 2f, MapSchematicRole.Cover),
             };
         }
     }

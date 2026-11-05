@@ -162,9 +162,13 @@ namespace P1.Editor
             CreateRendererChild(decorRoot.transform, "Decor_Cloth", clothMesh, mats?.propCloth ?? mats?.propMatte, true, false);
 
             // 4. 边界墙内侧图集横幅 (12 个 Banner，含折角造型与安装挂梁)
-            Mesh bannersMesh = BuildWallBannersMesh(metalDecorBucket, pal);
-            SaveAsset(bannersMesh, $"{MeshFolder}/{meshPrefix}_banners.asset");
-            CreateRendererChild(decorRoot.transform, "Banners", bannersMesh, mats?.bannerAtlas ?? mats?.propMatte, false);
+            //    港湾图关闭：图集内容（CARGO / DOCK / CRANE ZONE）与港湾主题冲突。
+            if (style == null || style.buildWallBanners)
+            {
+                Mesh bannersMesh = BuildWallBannersMesh(metalDecorBucket, pal);
+                SaveAsset(bannersMesh, $"{MeshFolder}/{meshPrefix}_banners.asset");
+                CreateRendererChild(decorRoot.transform, "Banners", bannersMesh, mats?.bannerAtlas ?? mats?.propMatte, false);
+            }
 
             return decorRoot;
         }
@@ -199,23 +203,32 @@ namespace P1.Editor
             var matteBucket = new MeshCombiner();
             var metalBucket = new MeshCombiner();
 
-            // 2.1 码头混凝土高台基座 (74 x 1.2 x 84m，边缘护舷、系船柱、登船梯)
-            BuildPierBase(matteBucket, metalBucket, palette);
+            if (style != null && style.backdropTheme == ArenaBackdropTheme.Marina)
+            {
+                // 港湾主题：近景栈桥/游艇 + 对岸彩色小镇，不再生成岸桥与集装箱堆场。
+                BuildMarinaScenery(matteBucket, metalBucket, palette);
+                BuildMarinaTown(matteBucket, metalBucket, palette);
+            }
+            else
+            {
+                // 2.1 码头混凝土高台基座 (74 x 1.2 x 84m，边缘护舷、系船柱、登船梯)
+                BuildPierBase(matteBucket, metalBucket, palette);
 
-            // 2.2 场外集装箱堆场 (3 排进深层次，前排鲜艳，后排压暗，走廊分明)
-            BuildContainerYards(matteBucket, metalBucket, palette);
+                // 2.2 场外集装箱堆场 (3 排进深层次，前排鲜艳，后排压暗，走廊分明)
+                BuildContainerYards(matteBucket, metalBucket, palette);
 
-            // 2.3 岸桥/大型集装箱龙门吊 (4 座黄色钢构桁架，高 25m，含 CARGO 标识、黄黑警示条、起吊集装箱)
-            BuildGantryCranes(metalBucket, matteBucket, palette);
+                // 2.3 岸桥/大型集装箱龙门吊 (4 座黄色钢构桁架，高 25m，含 CARGO 标识、黄黑警示条、起吊集装箱)
+                BuildGantryCranes(metalBucket, matteBucket, palette);
 
-            // 2.4 仓库 4 座 + 货船 3 艘 (含甲板起重机与深色船体)
-            BuildWarehousesAndShips(matteBucket, metalBucket, palette);
+                // 2.4 仓库 4 座 + 货船 3 艘 (含甲板起重机与深色船体)
+                BuildWarehousesAndShips(matteBucket, metalBucket, palette);
 
-            // 2.5 远景悬索桥剪影 (跨度 190m，双塔 + 主缆 + 吊杆)
-            BuildSuspensionBridge(matteBucket, metalBucket, palette);
+                // 2.5 远景悬索桥剪影 (跨度 190m，双塔 + 主缆 + 吊杆)
+                BuildSuspensionBridge(matteBucket, metalBucket, palette);
 
-            // 2.6 远景城市剪影 + 双层绿丘 + 灯塔 + 水塔 + 帆船
-            BuildCityAndHills(matteBucket, metalBucket, palette);
+                // 2.6 远景城市剪影 + 双层绿丘 + 灯塔 + 水塔 + 帆船
+                BuildCityAndHills(matteBucket, metalBucket, palette);
+            }
 
             // 3. 保存合并资产并创建子物体
             Mesh matteMesh = matteBucket.BuildMesh(meshPrefix + "_matte");
@@ -1125,6 +1138,248 @@ namespace P1.Editor
                 Vector3 v1 = bp + new Vector3(0f, 0.8f, 0.4f);
                 Vector3 v2 = bp + new Vector3(0f, 4.8f, -0.4f);
                 matteComb.AddQuadRaw(v0, v1, v2, v2, Vector3.right, Vector2.zero, Vector2.right, Vector2.up, Vector2.up, pal.ConcreteLight);
+            }
+        }
+
+        /// <summary>
+        /// 港湾近景（backdropTheme = Marina）：竞技场坐落在伸入海面的混凝土栈桥上，
+        /// 四周是浮桥、游艇、航道标与港务小屋；远景城市/山丘由 <see cref="BuildCityAndHills"/> 负责。
+        /// 全部无碰撞、无墨面、无阴影，合并为 Matte / Metal 两张网格。
+        /// </summary>
+        private static void BuildMarinaScenery(MeshCombiner matteComb, MeshCombiner metalComb, BackdropPalette pal)
+        {
+            const float waterY = -1.35f;
+            Color whiteHull = Color.Lerp(pal.ConcreteLight, Color.white, 0.55f);
+            Color teal = pal.ContainerTeal;
+            Color coral = pal.ContainerRust;
+            Color woodDeck = pal.Wood;
+
+            // ---- 1. 竞技场脚下的码头大平台（场界外扩 4m，水面从边缘开始）----
+            //     台面不能刷成纯白：在俯视角下会把整圈读成"雪地"，用暖灰压一档。
+            matteComb.AddBox(new Vector3(0f, -0.62f, 0f), new Vector3(48f, 1.2f, 64f), pal.ConcreteMid);
+            // 顶板只铺竞技场外的 3.8m 环带：整块 47.6×63.6 顶板与竞技场地面（40×56，顶面 y=0）
+            // 完全共面重叠，会在场内整片 z-fighting —— 相机一移动就出现横向白色条带闪烁。
+            // 现在拆成四条环带，顶面仍保持 y=0 与场地齐平，但不再有任何一块覆盖场内。
+            Color plateColor = Color.Lerp(pal.ConcreteLight, pal.ConcreteMid, 0.45f);
+            matteComb.AddBox(new Vector3(0f, -0.03f, 29.9f), new Vector3(47.6f, 0.06f, 3.8f), plateColor);
+            matteComb.AddBox(new Vector3(0f, -0.03f, -29.9f), new Vector3(47.6f, 0.06f, 3.8f), plateColor);
+            matteComb.AddBox(new Vector3(21.9f, -0.03f, 0f), new Vector3(3.8f, 0.06f, 56f), plateColor);
+            matteComb.AddBox(new Vector3(-21.9f, -0.03f, 0f), new Vector3(3.8f, 0.06f, 56f), plateColor);
+
+            // 沿口黄安全线：近景一圈细黄线，给码头一个可读的边界
+            for (int side = -1; side <= 1; side += 2)
+            {
+                matteComb.AddBox(new Vector3(0f, 0.012f, side * 31.55f), new Vector3(46.8f, 0.02f, 0.16f), pal.HazardYellow);
+                matteComb.AddBox(new Vector3(side * 23.55f, 0.012f, 0f), new Vector3(0.16f, 0.02f, 62.8f), pal.HazardYellow);
+            }
+
+            // 沿口压边 + 系缆桩
+            for (int side = -1; side <= 1; side += 2)
+            {
+                matteComb.AddBox(new Vector3(0f, 0.22f, side * 32.2f), new Vector3(48.6f, 0.5f, 0.45f), pal.ConcreteDark);
+                matteComb.AddBox(new Vector3(side * 24.2f, 0.22f, 0f), new Vector3(0.45f, 0.5f, 64.6f), pal.ConcreteDark);
+            }
+            for (int side = -1; side <= 1; side += 2)
+            {
+                for (int i = 0; i < 7; i++)
+                {
+                    float x = -18f + i * 6f;
+                    metalComb.AddCylinder(new Vector3(x, -0.02f, side * 31.6f), 0.20f, 0.55f, 8, pal.SteelDark);
+                }
+            }
+
+            // ---- 2. 四座浮桥：从平台伸出，端部 T 头 ----
+            for (int zSide = -1; zSide <= 1; zSide += 2)
+            {
+                for (int xSide = -1; xSide <= 1; xSide += 2)
+                {
+                    float px = xSide * 10.5f;
+                    float pierCenterZ = zSide * 41f;
+                    matteComb.AddBox(new Vector3(px, -0.20f, pierCenterZ), new Vector3(4.2f, 0.36f, 16f), woodDeck);
+                    matteComb.AddBox(new Vector3(px, -0.20f, zSide * 48.6f), new Vector3(9.0f, 0.36f, 4.4f), woodDeck);
+
+                    // 木桩
+                    for (int p = 0; p < 4; p++)
+                    {
+                        float sz = pierCenterZ + (p % 2 == 0 ? -7.4f : 7.4f);
+                        float sx = px + (p < 2 ? -1.9f : 1.9f);
+                        metalComb.AddCylinder(new Vector3(sx, waterY, sz), 0.20f, 1.5f, 7, pal.WoodDark);
+                    }
+                    for (int p = 0; p < 4; p++)
+                    {
+                        float sx = px + (p < 2 ? -4.2f : 4.2f);
+                        float sz = zSide * 48.6f + (p % 2 == 0 ? -2.0f : 2.0f);
+                        metalComb.AddCylinder(new Vector3(sx, waterY, sz), 0.20f, 1.5f, 7, pal.WoodDark);
+                    }
+
+                    // T 头小屋（港务/寄存）
+                    matteComb.AddBox(new Vector3(px, 1.6f, zSide * 49.4f), new Vector3(5.2f, 3.2f, 3.4f), whiteHull);
+                    matteComb.AddBox(new Vector3(px, 3.26f, zSide * 49.4f), new Vector3(5.8f, 0.24f, 4.0f), teal);
+                    matteComb.AddBox(new Vector3(px, 2.0f, zSide * (49.4f - 1.72f)), new Vector3(2.4f, 0.7f, 0.06f), pal.SteelDark);
+
+                    // ---- 3. 游艇（泊在浮桥两侧）----
+                    for (int b = 0; b < 4; b++)
+                    {
+                        float bx = px + (b % 2 == 0 ? -4.3f : 4.3f);
+                        float bz = zSide * (35.5f + (b / 2) * 7.2f);
+                        AddYacht(matteComb, metalComb, new Vector3(bx, waterY, bz), teal, whiteHull, coral, pal.SteelDark);
+                    }
+                }
+            }
+
+            // ---- 4. 航道标：红白相间的入口柱 ----
+            for (int zSide = -1; zSide <= 1; zSide += 2)
+            {
+                for (int xSide = -1; xSide <= 1; xSide += 2)
+                {
+                    Vector3 p = new Vector3(xSide * 19.0f, -0.02f, zSide * 34.2f);
+                    metalComb.AddCylinder(p, 0.42f, 1.6f, 8, coral);
+                    metalComb.AddCylinder(p + Vector3.up * 1.6f, 0.44f, 0.62f, 8, whiteHull);
+                    metalComb.AddCylinder(p + Vector3.up * 2.2f, 0.42f, 1.2f, 8, coral);
+                    metalComb.AddCylinder(p + Vector3.up * 3.4f, 0.44f, 0.55f, 8, whiteHull);
+                    metalComb.AddBox(p + Vector3.up * 4.15f, new Vector3(0.5f, 0.5f, 0.5f), pal.LampGlass);
+                }
+            }
+
+            // ---- 5. 防波堤：两端各一道，围出港湾入口 ----
+            for (int zSide = -1; zSide <= 1; zSide += 2)
+            {
+                for (int xSide = -1; xSide <= 1; xSide += 2)
+                {
+                    matteComb.AddBox(new Vector3(xSide * 38f, -0.55f, zSide * 58f), new Vector3(42f, 1.6f, 3.2f), pal.ConcreteDark);
+                    metalComb.AddBox(new Vector3(xSide * 38f, 0.30f, zSide * 58f), new Vector3(42.4f, 0.16f, 3.5f), pal.ConcreteLight);
+                }
+            }
+
+            // ---- 6. 平台上的港务小楼（点对称两座，给出生侧一个近景建筑）----
+            for (int side = -1; side <= 1; side += 2)
+            {
+                float bx = side * 21.2f;
+                float bz = -side * 29.0f;
+                matteComb.AddBox(new Vector3(bx, 2.0f, bz), new Vector3(6.0f, 4.0f, 5.2f), pal.ConcreteLight);
+                matteComb.AddBox(new Vector3(bx, 4.12f, bz), new Vector3(6.6f, 0.24f, 5.8f), teal);
+                matteComb.AddBox(new Vector3(bx, 2.2f, bz + (bz < 0f ? 2.62f : -2.62f)), new Vector3(3.2f, 1.1f, 0.06f), pal.SteelDark);
+            }
+        }
+
+        /// <summary>远景游艇：白船体 + 青绿舱室 + 珊瑚吃水线 + 桅杆与三角帆（全部合并进远景网格）。</summary>
+        private static void AddYacht(
+            MeshCombiner matteComb,
+            MeshCombiner metalComb,
+            Vector3 waterAnchor,
+            Color cabinColor,
+            Color hullColor,
+            Color accentColor,
+            Color mastColor)
+        {
+            // 船体（水线以上 0.9m）
+            matteComb.AddBox(waterAnchor + Vector3.up * 0.45f, new Vector3(2.4f, 0.9f, 7.4f), hullColor);
+            // 吃水线
+            matteComb.AddBox(waterAnchor + Vector3.up * 0.10f, new Vector3(2.46f, 0.14f, 7.36f), accentColor);
+            // 舱室
+            matteComb.AddBox(waterAnchor + Vector3.up * 1.35f, new Vector3(1.9f, 1.0f, 2.6f), cabinColor);
+            matteComb.AddBox(waterAnchor + Vector3.up * 1.92f, new Vector3(2.0f, 0.12f, 2.7f), hullColor);
+            // 桅杆
+            metalComb.AddBox(waterAnchor + Vector3.up * 4.4f, new Vector3(0.12f, 5.6f, 0.12f), mastColor);
+            // 三角帆（两面，读作帆船）
+            Vector3 s0 = waterAnchor + new Vector3(0f, 1.0f, -1.2f);
+            Vector3 s1 = waterAnchor + new Vector3(0f, 1.0f, 0.8f);
+            Vector3 s2 = waterAnchor + new Vector3(0f, 6.2f, -0.2f);
+            matteComb.AddQuadRaw(s0, s1, s2, s2, Vector3.right, Vector2.zero, Vector2.right, Vector2.up, Vector2.up, hullColor);
+            matteComb.AddQuadRaw(s0, s1, s2, s2, Vector3.left, Vector2.zero, Vector2.right, Vector2.up, Vector2.up, hullColor);
+        }
+
+        /// <summary>
+        /// 对岸港湾小镇：四段远岸 + 彩色低层建筑（奶油白/薄荷/珊瑚/黄油/港青）+ 屋顶 + 远景山丘。
+        /// 替换集装箱主题的灰色城市剪影，让港湾图在俯视角下也有明确的"海滨小镇"读形。
+        /// </summary>
+        private static void BuildMarinaTown(MeshCombiner matteComb, MeshCombiner metalComb, BackdropPalette pal)
+        {
+            const float waterY = -1.35f;
+
+            Color[] facades =
+            {
+                Color.Lerp(pal.ConcreteLight, Color.white, 0.35f),
+                Color.Lerp(pal.ContainerTeal, pal.ConcreteLight, 0.45f),
+                Color.Lerp(pal.ContainerRust, pal.ConcreteLight, 0.42f),
+                Color.Lerp(pal.ContainerMustard, pal.ConcreteLight, 0.40f),
+                Color.Lerp(pal.ConcreteMid, pal.ContainerTeal, 0.28f),
+            };
+            Color roofDark = Color.Lerp(pal.SteelDark, pal.ContainerTeal, 0.25f);
+            Color shoreTop = Color.Lerp(pal.ConcreteLight, pal.ConcreteMid, 0.35f);
+
+            // ---- 1. 四段远岸：台面比水面高 1.4m，小镇坐在上面 ----
+            float[] shoreZ = { 62f, -62f };
+            for (int s = 0; s < shoreZ.Length; s++)
+            {
+                float z = shoreZ[s];
+                matteComb.AddBox(new Vector3(0f, waterY + 0.55f, z), new Vector3(150f, 1.7f, 26f), pal.ConcreteDark);
+                matteComb.AddBox(new Vector3(0f, waterY + 1.42f, z), new Vector3(149f, 0.1f, 25f), shoreTop);
+                matteComb.AddBox(new Vector3(0f, waterY + 1.48f, z + (z > 0 ? -12.2f : 12.2f)),
+                    new Vector3(148f, 0.04f, 0.3f), pal.HazardYellow);
+            }
+            float[] shoreX = { 58f, -58f };
+            for (int s = 0; s < shoreX.Length; s++)
+            {
+                float x = shoreX[s];
+                matteComb.AddBox(new Vector3(x, waterY + 0.55f, 0f), new Vector3(26f, 1.7f, 120f), pal.ConcreteDark);
+                matteComb.AddBox(new Vector3(x, waterY + 1.42f, 0f), new Vector3(25f, 0.1f, 119f), shoreTop);
+            }
+
+            // ---- 2. 南北岸各 7 栋、东西岸各 5 栋彩色建筑 ----
+            for (int s = 0; s < 2; s++)
+            {
+                float z = shoreZ[s];
+                float faceSign = z > 0 ? -1f : 1f;
+                for (int i = 0; i < 7; i++)
+                {
+                    float x = -63f + i * 19.5f + (i % 2) * 3.5f;
+                    float w = 8f + (i % 3) * 2.4f;
+                    float d = 8f + ((i + 1) % 3) * 2f;
+                    float h = 5.5f + ((i * 7) % 5) * 1.6f;
+                    Color body = facades[i % facades.Length];
+                    Vector3 pos = new Vector3(x, waterY + 1.45f + h * 0.5f, z + faceSign * 6f);
+                    matteComb.AddBox(pos, new Vector3(w, h, d), body);
+                    matteComb.AddBox(pos + Vector3.up * (h * 0.5f + 0.18f), new Vector3(w + 0.5f, 0.36f, d + 0.5f), roofDark);
+                    metalComb.AddBox(new Vector3(x, pos.y + h * 0.15f, z + faceSign * (6f + d * 0.5f + 0.02f)),
+                        new Vector3(w * 0.62f, 0.8f, 0.06f), Color.Lerp(pal.SteelDark, body, 0.25f));
+                    if (i % 2 == 0)
+                    {
+                        matteComb.AddBox(pos + new Vector3(w * 0.22f, h * 0.5f + 0.5f, 0f),
+                            new Vector3(0.8f, 0.7f, 0.8f), pal.ConcreteDark);
+                    }
+                }
+            }
+            for (int s = 0; s < 2; s++)
+            {
+                float x = shoreX[s];
+                float faceSign = x > 0 ? -1f : 1f;
+                for (int i = 0; i < 5; i++)
+                {
+                    float z = -48f + i * 24f;
+                    float w = 9f + (i % 3) * 2f;
+                    float d = 8f + ((i + 1) % 3) * 2f;
+                    float h = 5.5f + ((i * 5) % 5) * 1.5f;
+                    Color body = facades[(i + 2) % facades.Length];
+                    Vector3 pos = new Vector3(x + faceSign * 6f, waterY + 1.45f + h * 0.5f, z);
+                    matteComb.AddBox(pos, new Vector3(w, h, d), body);
+                    matteComb.AddBox(pos + Vector3.up * (h * 0.5f + 0.18f),
+                        new Vector3(w + 0.5f, 0.36f, d + 0.5f), roofDark);
+                }
+            }
+
+            // ---- 3. 远景山丘：雾里只留剪影，给小镇一层纵深 ----
+            var hills = new[]
+            {
+                new { pos = new Vector3(-70f, waterY, 118f), r = 34f, h = 26f },
+                new { pos = new Vector3(-10f, waterY, 126f), r = 40f, h = 31f },
+                new { pos = new Vector3(52f, waterY, 120f), r = 36f, h = 28f },
+                new { pos = new Vector3(-95f, waterY, 40f), r = 30f, h = 22f },
+                new { pos = new Vector3(95f, waterY, 30f), r = 30f, h = 22f },
+            };
+            for (int i = 0; i < hills.Length; i++)
+            {
+                matteComb.AddCone(hills[i].pos, hills[i].r, 2.5f, hills[i].h, 10, pal.HillFarColor);
             }
         }
         #endregion

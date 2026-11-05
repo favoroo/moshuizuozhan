@@ -12,7 +12,7 @@ namespace P1.Tests
     /// 2. 2.0s 从满血被敌墨压到 60 底线；
     /// 3. 无敌帧 / 阵亡状态下敌墨不结算；
     /// 4. 治疗封顶、友军伤害拒绝、阵亡 4s 复活计时与复位；
-    /// 5. 潜墨回墨 42/s（空罐 2.4s 回满）、回血 60/s、敌墨受击槽 2.0/s 退出速率；
+    /// 5. 潜墨回墨 34/s（空罐约 2.9s 回满）、回血 60/s、敌墨受击槽 2.0/s 退出速率；
     /// 6. 隐匿速度阈值 1.5 m/s、出水过渡 0.07s、开火缓冲 0.16s 的配置契约。
     /// </summary>
     public class InkLifecycleRulesTests
@@ -153,7 +153,7 @@ namespace P1.Tests
                 Assert.AreEqual(2.4f, cfg.enemyInkMoveSpeed, 0.001f, "踩敌墨减速到 2.4 m/s（约 40% 跑速）");
                 Assert.AreEqual(30f, cfg.enemyInkAccel, 0.001f, "敌墨加速度 30（Inkwave enemyInkAccel）");
                 Assert.AreEqual(30f, cfg.enemyInkDecel, 0.001f, "敌墨减速度 30（Inkwave enemyInkDecel）");
-                Assert.AreEqual(42f, cfg.swimInkRefillRate, 0.001f, "潜墨回墨 42/s");
+                Assert.AreEqual(34f, cfg.swimInkRefillRate, 0.001f, "潜墨回墨 34/s");
                 Assert.AreEqual(60f, cfg.swimHealthRegenRate, 0.001f, "潜墨回血 60/s");
                 Assert.AreEqual(20f, cfg.enemyInkDamagePerSec, 0.001f, "敌墨 DOT 20/s");
                 Assert.AreEqual(60f, cfg.enemyInkMinHealthFloor, 0.001f, "敌墨保护底线 60 HP");
@@ -165,8 +165,8 @@ namespace P1.Tests
                 Assert.AreEqual(0.16f, cfg.fireBufferTime, 0.001f, "开火缓冲 0.16s");
                 Assert.AreEqual(4f, cfg.respawnDelay, 0.001f);
 
-                // 空罐 2.4s 回满；满血 1.0s 内从 60 回满（60/s）
-                Assert.LessOrEqual(cfg.maxInk / cfg.swimInkRefillRate, 2.4f, "空罐回满应不超过 2.4s");
+                // 空罐约 2.9s 回满；满血 1.0s 内从 60 回满（60/s）
+                Assert.LessOrEqual(cfg.maxInk / cfg.swimInkRefillRate, 3.0f, "空罐回满应不超过 3.0s");
                 Assert.LessOrEqual(40f / cfg.swimHealthRegenRate, 0.67f, "60 → 100 回血约 0.667s");
                 Assert.AreEqual(0.5f, 1f / cfg.enemyInkRecoveryRatePerSec, 0.001f, "离开敌墨 0.5s 完全恢复");
             }

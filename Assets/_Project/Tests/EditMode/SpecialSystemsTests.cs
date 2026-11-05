@@ -80,7 +80,7 @@ namespace P1.Tests
         {
             WeaponConfigSO config = CreateConfig();
 
-            Assert.AreEqual(0f, config.bombInkCost, 0.0001f, "手雷与墨水脱钩（0 耗墨，只受冷却限制）");
+            Assert.AreEqual(55f, config.bombInkCost, 0.0001f, "手雷 55 墨 + 6s 冷却双重限制");
             Assert.AreEqual(6f, config.bombCooldown, 0.0001f, "手雷冷却 6s");
             Assert.AreEqual(22f, config.bombMaxThrowDistance, 0.0001f, "准星最远投掷 22m（40×56 场地）");
             Assert.AreEqual(0.5f, config.bombThrowFlightTimeNear, 0.0001f, "近距投掷 0.5s（干脆）");

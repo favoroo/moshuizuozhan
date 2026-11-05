@@ -161,9 +161,9 @@ namespace P1.Tests
             Assert.Greater(_mix.botShotMaxDistance, 5f);
             Assert.Greater(_mix.botShotThrottleSeconds, 0.01f);
 
-            // 战斗 ducking：温和档，不与播报/阵亡 duck 冲突
+            // 战斗 ducking：温和档，不与流程提示/阵亡 duck 冲突
             Assert.Greater(_mix.combatDuckAmount, 0f);
-            Assert.Less(_mix.combatDuckAmount, _mix.announcementDuckAmount, "战斗 duck 应弱于播报 duck");
+            Assert.Less(_mix.combatDuckAmount, _mix.matchCueDuckAmount, "战斗 duck 应弱于流程提示 duck");
             Assert.LessOrEqual(_mix.combatDuckAmount, 0.5f);
             Assert.Greater(_mix.combatDuckHoldSeconds, 0f);
         }

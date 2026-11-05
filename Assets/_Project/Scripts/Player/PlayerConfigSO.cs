@@ -74,10 +74,11 @@ namespace P1.Player
 
         [Header("墨水槽与回复")]
         public float maxInk = 100f;
-        [Tooltip("潜墨回墨速率 (点/秒)。42 点/秒 = 空罐约 2.4 秒回满（对齐 Inkwave inkRefillSwim）")]
-        public float swimInkRefillRate = 42f;
+        [Tooltip("潜墨回墨速率 (点/秒)。34 点/秒 = 空罐约 2.9 秒回满（INKWAVE inkRefillSwim = 42 在 4v4 里回补过快，按手感收紧）")]
+        public float swimInkRefillRate = 34f;
         public float passiveInkRefillRate = 4f;
-        public float inkRefillDelayAfterShot = 0.25f;
+        [Tooltip("开火后开始被动回墨的延迟 (秒)。0.5s 让点射/连发不能靠射击间隙白嫖回墨；潜墨不受该延迟限制")]
+        public float inkRefillDelayAfterShot = 0.5f;
 
         [Header("生命值与敌墨伤害")]
         public float maxHealth = 100f;

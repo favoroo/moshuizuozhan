@@ -17,9 +17,9 @@
 ## 2. 已确认的现状（决策依据）
 
 - 启动链路**当前没有动态选场景**：全项目无 `SceneManager.LoadScene`；构建包固定从 Build Index 0 = `Assets/_Project/Scenes/PhaseA_Playbox.unity` 启动。
-- `EditorBuildSettings.asset` 已是：0 `PhaseA_Playbox`、1 `KelpTerminal`、2 `SampleScene`（本次不改）。
+- `EditorBuildSettings.asset` 已是：0 `PhaseA_Playbox`、1 `GullHarbor`（潮汐货站 KelpTerminal 已被海鸥港湾替换并删除）。
 - 两张图都是完整可玩场景（`ProjectScaffolder.BuildArenaScene` 生成 `MatchManager` / 玩家 / Bot / HUD / 触控 / 墨面），玩法常量统一来自 `ArenaLayoutV2`（40×56），场景内各自持有出生点、掩体、NavGrid 构建源与 `InkGridConfigSO`。
-- `KelpTerminal` 场景内有 `ArenaStyleSceneAnchor`，运行时 `RenderEnvGlobals.SetStyle` 推新图雾/天空；PhaseA 无锚点，切回时必须清掉上一张图的静态样式（否则会沿用 Kelp 天空）。
+- `GullHarbor` 场景内有 `ArenaStyleSceneAnchor`，运行时 `RenderEnvGlobals.SetStyle` 推新图雾/天空；PhaseA 无锚点，切回时必须清掉上一张图的静态样式（否则会沿用港湾天空）。
 - 首页牌面与浮层已有成熟范式：`HomeInfoOverlay` / `HomeInfoLayoutMath` / `ComicStyle` / `UITypography` / `MenuItem` 版面表 / `MenuInputRouter`。
 
 ## 3. 架构决策
@@ -37,7 +37,7 @@ namespace P1.UI
     {
         public const string PrefsKey = "P1.Map.SelectedId";
         public const string PhaseAScenePath = "Assets/_Project/Scenes/PhaseA_Playbox.unity";
-        public static IReadOnlyList<MapDefinition> Maps;       // [0]=PhaseA 默认，[1]=Kelp
+        public static IReadOnlyList<MapDefinition> Maps;       // [0]=PhaseA 默认，[1]=GullHarbor
         public static MapDefinition DefaultMap;
         public static string SelectedId;                        // 读 Prefs；非法/缺失 → PhaseA（不写盘）
         public static MapDefinition Selected;
@@ -56,7 +56,7 @@ namespace P1.UI
 | Id | ScenePath | 显示名 | 英文 | 一句话差异 | Accent |
 |---|---|---|---|---|---|
 | `phase_a` | `PhaseA_Playbox.unity` | 货柜码头 | CONTAINER DOCKS | 中央高台 · 四向坡道 · 集装箱掩体 | `ComicStyle.Red` |
-| `kelp_terminal` | `KelpTerminal.unity` | 潮汐货站 | KELP TERMINAL | 中央长货台 · 东西坡道 · 信标柱地标 | `ComicStyle.Blue` |
+| `gull_harbor` | `GullHarbor.unity` | 海鸥港湾 | GULL HARBOR | 中央渡轮 · 浅湾水线 · 木栈道绕后 | `ComicStyle.Blue` |
 
 - `SelectedId` 只在 Prefs 有合法值时返回它，否则返回默认 id，**不自动写盘**（保证老玩家首进仍是 PhaseA）。
 - `LoadMap`：`SceneUtility.GetBuildIndexByScenePath(map.ScenePath)`，`< 0` 直接 `Debug.LogError` 返回 false；否则 `SceneManager.LoadScene(index, LoadSceneMode.Single)`。静态 `_loading` 防连点，`sceneLoaded` 时清零。
@@ -67,7 +67,7 @@ namespace P1.UI
 - `[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]` 重置静态标记（Domain Reload 关闭时仍能跨 Play 会话复位）。
 - `[RuntimeInitializeOnLoadMethod(AfterSceneLoad)]`：
   - 若当前场景是地图场景且与 `Selected` 不同 → `MapCatalogService.LoadMap(Selected)`。首次帧内完成，不产生可见闪屏；`SampleScene` / 空场景 / 测试 `InitTestScene` 一律跳过。
-  - 挂钩 `SceneManager.sceneLoaded`：每次载入地图场景时 `MapCatalogService.ResetRuntimeState()`；若载入的是 `PhaseAScenePath`，调用 `RenderEnvGlobals.ResetStyleToDefault()`，避免 Kelp 的天空/雾/湿润参数残留到主图。
+  - 挂钩 `SceneManager.sceneLoaded`：每次载入地图场景时 `MapCatalogService.ResetRuntimeState()`；若载入的是 `PhaseAScenePath`，调用 `RenderEnvGlobals.ResetStyleToDefault()`，避免港湾图的天空/雾/湿润参数残留到主图。
 - `RenderEnvGlobals` 只新增 `ResetStyleToDefault()`：`_style = null; _styleLookupDone = true; Pump();` 走既有回退默认（注释已声明与 `ArenaStyleSO.asset` 一致），不修改既有 `SetStyle` / `Pump` 行为。
 
 ### 3.3 场景切换的连带修复：武器选择订阅
@@ -115,7 +115,7 @@ _subscribedMatch = true;
 - 底：`PaperAlt` 填充 + `Ink` 细框；按 40×56 世界范围等比映射（留 6px 内边距）。
 - 图元颜色全部来自注册表：地形 α0.10 Ink、掩体 `InkSoft`、出生盘 `theme.teamAColor` / `theme.teamBColor`（南北对半）、地标 = 地图 Accent。
 - 绘制顺序 Terrain → Cover → Landmark → Spawn；所有子节点 `raycastTarget=false`、无硬影。
-- 两张图的图元表在 `MapCatalogService` 中手写（PhaseA：中心 10×10 台 + 四向坡道 + 两侧掩体/侧翼；Kelp：中央 10×6 长货台 + 东西坡道 + 中央信标 + 两侧低位掩体），只服务辨识，不参与玩法判定。
+- 两张图的图元表在 `MapCatalogService` 中手写（PhaseA：中心 10×10 台 + 四向坡道 + 两侧掩体/侧翼；GullHarbor：中央渡轮 + 南北浅湾水线 + 东西木栈道 + 船坞拖船），只服务辨识，不参与玩法判定。
 
 ### 4.4 操作指南的收纳
 
@@ -159,7 +159,7 @@ _subscribedMatch = true;
 - `tools/font_charset.txt`：`python3 tools/font_charset.py` 自动重算后提交。
 
 不动：
-- 任何 `.unity` / `.prefab` / `.asset` / `.meta` YAML；`ProjectSettings/EditorBuildSettings.asset`（已含两张图）；`ArenaLayoutV2` / `ArenaLayoutKelp` / 玩法判定；他人未提交的战斗、角色、音频、材质文件。
+- 任何 `.unity` / `.prefab` / `.asset` / `.meta` YAML；`ProjectSettings/EditorBuildSettings.asset`（已含两张图）；`ArenaLayoutV2` / `ArenaLayoutHarbor` / 玩法判定；他人未提交的战斗、角色、音频、材质文件。
 
 ## 7. 验证方案
 
@@ -167,13 +167,13 @@ _subscribedMatch = true;
 2. 编译：`"$U" command script.recompile_status` → `compilationFailed: false`，`console.get --level error` 无本任务报错。
 3. **改后首页**：
    - 默认（PhaseA）：`Logs/verify-map-select/home_after_phase_a.png`
-   - 选中 Kelp 后：`Logs/verify-map-select/home_after_kelp.png`
+   - 选中海鸥港湾后：`Logs/verify-map-select/home_after_gull.png`
    - 浮层：`Logs/verify-map-select/map_select_overlay.png`
 4. **真实切图对局**：两张图各进一局（倒计时结束进入 Playing）截图：
    - `Logs/verify-map-select/match_phase_a.png`
-   - `Logs/verify-map-select/match_kelp.png`
-   - 画面必须能看出 Kelp 的中央长货台/信标与 PhaseA 的中央方形高台不同。
-5. **持久化**：`PlayerPrefs.GetString("P1.Map.SelectedId")` 打印为 `kelp_terminal`；退出 Play 后重新进入（不改选择）首页直接是 Kelp（截图同上）；再切回 PhaseA 复验。`MapCatalogTests` 用 `PlayerPrefs` 断言默认值、非法值回退、写盘与读取。
+   - `Logs/verify-map-select/match_gull.png`
+   - 画面必须能看出港湾图的中央渡轮/水线与 PhaseA 的中央方形高台不同。
+5. **持久化**：`PlayerPrefs.GetString("P1.Map.SelectedId")` 打印为 `gull_harbor`；退出 Play 后重新进入（不改选择）首页直接是海鸥港湾（截图同上）；再切回 PhaseA 复验。`MapCatalogTests` 用 `PlayerPrefs` 断言默认值、非法值回退、写盘与读取。
 6. 测试：`./tools/run_tests.sh fast` 全绿（EditMode + PlayMode UI 子集）；新增 EditMode：
    - 默认选择 PhaseA、非法 id 回退、`TrySelect` 持久化；
    - 两张图路径均在 `EditorBuildSettings.scenes` 且 enabled；
@@ -185,7 +185,7 @@ _subscribedMatch = true;
 ## 8. 风险与取舍
 
 - **切场景会触发一次完整重建**（DDOL 的选枪画布/启动页/更新管理器保留）；已识别并修复 `WeaponSelectBootstrap` 订阅 bug，其余管理器按场景重建属预期。若实测发现其他悬挂订阅，追加最小修复并在报告列出。
-- **启动双加载**：玩家记住的是 Kelp 时，构建包仍先载入 Build Index 0 再在首帧内切到 Kelp；`AfterSceneLoad` 在首帧渲染前完成，预期无可见闪屏，但会多一次场景初始化开销（两图规模相近，可接受）。不做 Boot 场景，避免改构建顺序与其他人冲突。
+- **启动双加载**：玩家记住的是海鸥港湾时，构建包仍先载入 Build Index 0 再在首帧内切到港湾图；`AfterSceneLoad` 在首帧渲染前完成，预期无可见闪屏，但会多一次场景初始化开销（两图规模相近，可接受）。不做 Boot 场景，避免改构建顺序与其他人冲突。
 - **PhaseA 切回后的环境样式**：走 `RenderEnvGlobals` 回退默认（代码注释声明与 `ArenaStyleSO.asset` 一致）；若截图发现天空/雾与基线有肉眼差异，再评估给 PhaseA 场景补 `ArenaStyleSceneAnchor`（需改主场景，另行确认）。
 - **`Logs/` 与他人共享**：截图只写 `Logs/verify-map-select/`，不改他人的日志/截图。
 - **字体门禁**：新增中文字面量必然触发，已纳入验证；不改字体资产本身，只用既有烘焙菜单。

@@ -37051,6 +37051,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: P1.Game::P1.UI.MobileTouchUI
   showTouchUiInEditor: 0
+  showSettingsEntryButton: 0
   forceShowInEditor: 0
   moveStickRadius: 120
   moveDeadZone: 8
@@ -37212,12 +37213,8 @@ MonoBehaviour:
   uiSliderClip: {fileID: 0}
   uiErrorClip: {fileID: 0}
   lowInkWarningClip: {fileID: 0}
-  voiceCount3Clip: {fileID: 8300000, guid: e386ccf49dce7455aa747d8d9bb389ed, type: 3}
-  voiceCount2Clip: {fileID: 8300000, guid: 17ba6f35a44234657b8b0173df5fac53, type: 3}
-  voiceCount1Clip: {fileID: 8300000, guid: f03ad48dcb88347cab3289821e81d478, type: 3}
-  voiceGoClip: {fileID: 8300000, guid: 5d2274f489616414ab84b0871afba375, type: 3}
-  voiceOneMinuteClip: {fileID: 8300000, guid: fcf33974259784bfeac3696b14f5b50f, type: 3}
-  voiceFinishClip: {fileID: 8300000, guid: cc1884e787d3747eeb17f80ffb25f00b, type: 3}
+  goCueClip: {fileID: 8300000, guid: 7c2e46149cfc1428d9cc4f4a7b426f83, type: 3}
+  oneMinuteCueClip: {fileID: 8300000, guid: 32d6c861cfe2d4452a23f351cfcad7e0, type: 3}
   bgmMainClip: {fileID: 8300000, guid: 63a33b527358246ad94c9e386557a197, type: 3}
   bgmFinalClip: {fileID: 8300000, guid: 88121875802cd4bf58fe94274a06f57a, type: 3}
   mixConfig: {fileID: 11400000, guid: 38fcbd6456d1f4c3dbda2e8a60f31c32, type: 2}
@@ -53224,6 +53221,7 @@ MonoBehaviour:
   autoBuildScreenInkTransition: 1
   matchCallout: {fileID: 0}
   autoBuildMatchCallout: 1
+  autoBuildFpsBadge: 1
   hideHudOutsideMatch: 1
 --- !u!114 &517113691
 MonoBehaviour:

@@ -27,14 +27,22 @@ namespace P1.Ink
         public const float RippleMergeRadius = 0.55f;
 
         /// <summary>
-        /// 墨迹图集向场地四周外扩的默认可视边距（米）：计分网格仍是 40x56，
-        /// 但边界墙顶、场边沿这些落在网格外、玩家仍能打到的表面需要图集多覆盖一圈才能显墨。
+        /// 墨迹图集向场地四周外扩的默认边距（米）：只用于避免场地边界处的双线性过滤/写入被图集边缘截断。
+        /// 计分网格和可见受墨范围仍是 40x56 —— 场外表面（场外码头、边界墙顶）由
+        /// <see cref="GlobalInkPlayableRectProp"/> 屏蔽，不显墨。
         /// </summary>
         private const float DefaultAtlasVisualMargin = 1.5f;
 
         [SerializeField] private InkGridConfigSO config;
         [SerializeField] private List<Renderer> inkableSurfaceRenderers = new List<Renderer>();
         [SerializeField] private List<Collider> blockedColliders = new List<Collider>();
+
+        /// <summary>
+        /// 没有碰撞体、但必须从计分里剔除的矩形禁区（xmin, zmin, xmax, zmax）。
+        /// 用于可按可行走、却涂不上墨的地形（例如「海鸥港湾」的浅湾水线）：
+        /// 若给水面加碰撞体会挡住角色/子弹，若不加又会被算进可涂面积。
+        /// </summary>
+        [SerializeField] private List<Vector4> blockedWorldRects = new List<Vector4>();
 
         [Header("动态墨水与材质参数")]
         [Tooltip("全局湿润度乘数，随时间或比赛阶段可动态调节")]
@@ -89,6 +97,7 @@ namespace P1.Ink
         private static readonly int GlobalTeamBColorProp = Shader.PropertyToID("_GlobalTeamBColor");
         private static readonly int GlobalWetnessFactorProp = Shader.PropertyToID("_GlobalWetnessFactor");
         private static readonly int GlobalInkGlowProp = Shader.PropertyToID("_GlobalInkGlow");
+        private static readonly int GlobalInkPlayableRectProp = Shader.PropertyToID("_GlobalInkPlayableRect");
 
         public InkGrid Grid => _grid;
 
@@ -175,12 +184,28 @@ namespace P1.Ink
 
         public void Configure(InkGridConfigSO gridConfig, IEnumerable<Renderer> renderers, IEnumerable<Collider> obstacles)
         {
+            Configure(gridConfig, renderers, obstacles, null);
+        }
+
+        /// <summary>
+        /// 增量扩展：追加"无碰撞体的计分禁区矩形"（xmin, zmin, xmax, zmax）。
+        /// 旧三参签名保持原语义（禁区列表清空），旧调用方无需改动。
+        /// </summary>
+        public void Configure(
+            InkGridConfigSO gridConfig,
+            IEnumerable<Renderer> renderers,
+            IEnumerable<Collider> obstacles,
+            IEnumerable<Vector4> blockedRects)
+        {
             config = gridConfig;
             inkableSurfaceRenderers.Clear();
             if (renderers != null) inkableSurfaceRenderers.AddRange(renderers);
 
             blockedColliders.Clear();
             if (obstacles != null) blockedColliders.AddRange(obstacles);
+
+            blockedWorldRects.Clear();
+            if (blockedRects != null) blockedWorldRects.AddRange(blockedRects);
 
             RebuildGridAndTexture();
         }
@@ -294,6 +319,15 @@ namespace P1.Ink
                 Vector2 minXZ = new Vector2(b.min.x, b.min.z);
                 Vector2 maxXZ = new Vector2(b.max.x, b.max.z);
                 _grid.SetBlockedWorldRect(minXZ, maxXZ, true);
+            }
+
+            // 无碰撞体的地形禁区（浅湾水线等）：必须在 SealNarrowSlits 之前写入，
+            // 否则窄缝补偿看不到这些区域，会把水线两侧的窄条判成可涂。
+            for (int i = 0; i < blockedWorldRects.Count; i++)
+            {
+                Vector4 rect = blockedWorldRects[i];
+                if (rect.z <= rect.x || rect.w <= rect.y) continue;
+                _grid.SetBlockedWorldRect(new Vector2(rect.x, rect.y), new Vector2(rect.z, rect.w), true);
             }
 
             // P16-D 窄缝自动剔除：封闭两面受夹且净宽 ≤ 0.9m 的不可行/不可涂死缝
@@ -709,6 +743,15 @@ namespace P1.Ink
             Shader.SetGlobalVector(GlobalInkTexelSizeProp, texelSize);
             Shader.SetGlobalVector(InkMapOriginProp, originAndSize);
             Shader.SetGlobalVector(GlobalInkMapOriginProp, originAndSize);
+
+            // 计分场地矩形 (minX, minZ, sizeX, sizeZ)：顶面/地面着色器用它把场外表面
+            // （74x84m 码头基座、远景堆场等同样带墨迹采样的几何）直接判为无墨。
+            // 只传图集外扩矩形时，场外坐标会被 saturate 钳到图集边界纹素，
+            // 整片场外沿边界拉伸成"一条一条"的墨色。
+            Vector2 playOrigin = _grid.OriginXZ;
+            Vector2 playSize = _grid.MapSize;
+            Shader.SetGlobalVector(GlobalInkPlayableRectProp,
+                new Vector4(playOrigin.x, playOrigin.y, playSize.x, playSize.y));
             Shader.SetGlobalColor(TeamAColorProp, colorA);
             Shader.SetGlobalColor(GlobalTeamAColorProp, colorA);
             Shader.SetGlobalColor(TeamBColorProp, colorB);

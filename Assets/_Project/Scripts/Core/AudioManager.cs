@@ -31,7 +31,7 @@ namespace P1.Core
 
     /// <summary>
     /// 轻量音效管理器：管理 AudioSource 对象池，支持随机音高微调、高频音效节流、
-    /// 播报员语音通道、双段动态 BGM（主阶段/决战段）、BGM Ducking 闪避以及独立循环音通道。
+    /// 比赛流程提示音通道（无语音）、双段动态 BGM（主阶段/决战段）、BGM Ducking 闪避以及独立循环音通道。
     /// 原有 SFX 与 BGM 公共接口保持向后兼容。
     /// </summary>
     public class AudioManager : MonoBehaviour
@@ -100,13 +100,9 @@ namespace P1.Core
         [Header("HUD 低墨告警（P4-C）")]
         public AudioClip lowInkWarningClip;
 
-        [Header("播报员语音（P5-C）")]
-        public AudioClip voiceCount3Clip;
-        public AudioClip voiceCount2Clip;
-        public AudioClip voiceCount1Clip;
-        public AudioClip voiceGoClip;
-        public AudioClip voiceOneMinuteClip;
-        public AudioClip voiceFinishClip;
+        [Header("比赛流程提示音（P5-C 无语音版）")]
+        public AudioClip goCueClip;
+        public AudioClip oneMinuteCueClip;
 
         [Header("双段动态 BGM（P5-C）")]
         public AudioClip bgmMainClip;
@@ -135,7 +131,7 @@ namespace P1.Core
 
         private AudioSource _musicMainSource;
         private AudioSource _musicFinalSource;
-        private AudioSource _voiceSource;
+        private AudioSource _matchCueSource;
         private Coroutine _musicRoutine;
 
         private float _musicMainGain;
@@ -236,7 +232,7 @@ namespace P1.Core
                 var src = child.AddComponent<AudioSource>();
                 src.playOnAwake = false;
                 src.spatialBlend = 0f;
-                // P30 优先级阶梯：SFX(96) > 循环(128) > BGM(180)，语音 0。
+                // P30 优先级阶梯：SFX(96) > 循环(128) > BGM(180)，流程提示 16。
                 // 默认 128 会让 SFX 在发声数超限时不合理地先于 BGM 被抢占。
                 src.priority = 96;
                 _pool[i] = src;
@@ -247,7 +243,8 @@ namespace P1.Core
         {
             _musicMainSource = CreatePersistentSource("BGM_Main", true, 180);
             _musicFinalSource = CreatePersistentSource("BGM_Final", true, 180);
-            _voiceSource = CreatePersistentSource("AnnouncerVoice", false, 0);
+            // 比赛流程提示音独立通道：优先级高于战斗 SFX(96)，避免开赛/终场提示被枪声挤掉。
+            _matchCueSource = CreatePersistentSource("MatchCue", false, 16);
         }
 
         private void BuildLoopSources()
@@ -327,15 +324,17 @@ namespace P1.Core
                 case MatchManager.Phase.Countdown:
                     ResetMusicForNewMatch();
                     StopAllLoops();
+                    // 墨幕入场期间只播「蓄势」音效，GO 号角留到 Playing 首帧，避免两段提示叠在一起
+                    PlayMatchCue(matchStartClip);
                     break;
 
                 case MatchManager.Phase.Playing:
                     StartMatchMusic();
-                    PlayAnnouncement(voiceGoClip, Mix.announcementDuckAmount);
+                    PlayMatchCue(goCueClip);
                     break;
 
                 case MatchManager.Phase.Finished:
-                    PlayAnnouncement(voiceFinishClip, Mix.announcementDuckAmount);
+                    PlayMatchCue(matchEndClip);
                     FadeOutMusic(Mix.bgmFadeOutSeconds);
                     StopAllLoops();
                     break;
@@ -344,12 +343,13 @@ namespace P1.Core
 
         private void OnCountdownTicked(int shown)
         {
+            // 旧 3-2-1 倒计时模式（introSeconds < 0）的逐秒提示：只留滴答音效，不再有人声。
             if (shown == 3)
-                PlayAnnouncement(voiceCount3Clip, Mix.announcementDuckAmount);
+                PlayMatchCue(countdownTickClip, 0f);
             else if (shown == 2)
-                PlayAnnouncement(voiceCount2Clip, Mix.announcementDuckAmount);
+                PlayMatchCue(countdownTickClip, 0f);
             else if (shown == 1)
-                PlayAnnouncement(voiceCount1Clip, Mix.announcementDuckAmount);
+                PlayMatchCue(countdownTickClip, 0f);
         }
 
         private void UpdateFinalStage()
@@ -364,7 +364,7 @@ namespace P1.Core
                 return;
 
             _finalStage = true;
-            PlayAnnouncement(voiceOneMinuteClip, Mix.announcementDuckAmount);
+            PlayMatchCue(oneMinuteCueClip);
             CrossfadeToFinalMusic();
         }
 
@@ -375,7 +375,7 @@ namespace P1.Core
             StopMusicRoutine();
             StopSource(_musicMainSource);
             StopSource(_musicFinalSource);
-            StopSource(_voiceSource);
+            StopSource(_matchCueSource);
             _musicMainGain = 0f;
             _musicFinalGain = 0f;
             _duckFactor = 1f;
@@ -565,16 +565,30 @@ namespace P1.Core
             _duckFactor = Mathf.MoveTowards(_duckFactor, _duckTarget, speed * deltaTime);
         }
 
-        public void PlayAnnouncement(AudioClip clip, float duckAmount = 0.55f)
+        /// <summary>
+        /// 兼容旧签名：流程提示已全部改为音效，本方法转发到 <see cref="PlayMatchCue"/>。
+        /// duckAmount 传负值表示使用配置里的默认闪避量。
+        /// </summary>
+        public void PlayAnnouncement(AudioClip clip, float duckAmount = -1f)
         {
-            if (clip == null || _voiceSource == null)
+            PlayMatchCue(clip, duckAmount);
+        }
+
+        /// <summary>
+        /// 播放比赛流程提示音（开赛蓄势 / GO / 一分钟 / 终场）。
+        /// 走独立通道，优先级高于战斗 SFX，不会被 8 人混战的枪声挤掉；
+        /// 同时按流程提示音闪避量下压 BGM，给提示让出频段。
+        /// </summary>
+        public void PlayMatchCue(AudioClip clip, float duckAmount = -1f)
+        {
+            if (clip == null || _matchCueSource == null)
                 return;
 
-            _voiceSource.volume = Mix.voiceVolume * GameSettingsService.SfxVolume;
-            _voiceSource.clip = clip;
-            _voiceSource.Play();
-            Duck(duckAmount, clip.length);
-            LogAudio($"播报：{clip.name} ({clip.length:F2}s)");
+            _matchCueSource.volume = Mix.matchCueVolume * GameSettingsService.SfxVolume;
+            _matchCueSource.clip = clip;
+            _matchCueSource.Play();
+            Duck(duckAmount < 0f ? Mix.matchCueDuckAmount : duckAmount, clip.length);
+            LogAudio($"流程提示：{clip.name} ({clip.length:F2}s)");
         }
 
         // ---------------------------------------------------------------- 原有 SFX 接口（保持不变）
@@ -755,7 +769,7 @@ namespace P1.Core
             float strength = Mathf.Clamp01(strength01);
 
             // P30 战斗 ducking：持续开火期间把 BGM 稳定压低一档（默认 -18%），停火后自动恢复。
-            // 与播报/大招 duck 取 min 合并，不会互相抵消。
+            // 与流程提示/大招 duck 取 min 合并，不会互相抵消。
             Duck(Mix.combatDuckAmount, Mix.combatDuckHoldSeconds);
 
             switch (kind)
@@ -1272,6 +1286,8 @@ namespace P1.Core
 
             EnsureClip(ref countdownTickClip, library, "countdown_tick_1");
             EnsureClip(ref matchStartClip, library, "match_start_1");
+            EnsureClip(ref goCueClip, library, "go_horn_1");
+            EnsureClip(ref oneMinuteCueClip, library, "one_minute_1");
             EnsureClip(ref matchEndClip, library, "match_end_1");
             EnsureClip(ref resultWinClip, library, "result_win_1");
             EnsureClip(ref resultLoseClip, library, "result_lose_1");
@@ -1362,6 +1378,15 @@ namespace P1.Core
             if (bombBeepClip == null) bombBeepClip = LoadClip("bomb_beep_1");
             if (bombExplodeClip == null) bombExplodeClip = LoadClip("bomb_explode_1");
             if (specialSlamClip == null) specialSlamClip = LoadClip("special_slam_1");
+
+            // 比赛流程提示音：场景引用缺省时按文件名兜底（编辑器内），保证无语音版本仍能出声
+            if (countdownTickClip == null) countdownTickClip = LoadClip("countdown_tick_1");
+            if (matchStartClip == null) matchStartClip = LoadClip("match_start_1");
+            if (goCueClip == null) goCueClip = LoadClip("go_horn_1");
+            if (oneMinuteCueClip == null) oneMinuteCueClip = LoadClip("one_minute_1");
+            if (matchEndClip == null) matchEndClip = LoadClip("match_end_1");
+            if (resultWinClip == null) resultWinClip = LoadClip("result_win_1");
+            if (resultLoseClip == null) resultLoseClip = LoadClip("result_lose_1");
 
             if (uiHoverClip == null) uiHoverClip = LoadClip("ui_hover_1");
             if (uiConfirmClip == null) uiConfirmClip = LoadClip("ui_confirm_1");

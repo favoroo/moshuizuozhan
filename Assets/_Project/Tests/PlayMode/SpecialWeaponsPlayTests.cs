@@ -16,7 +16,7 @@ namespace P1.Tests
     /// P3-B 双大招与副武器手雷的运行时验收（真实加载 PhaseA_Playbox）：
     /// 1. Tidal Slam：升空/滞空期间无敌 → 落地 5m 墨斑 + 核心秒杀 + 外圈重伤；
     /// 2. Ink Tempest：发生器落点上空生成云层 → 1.1m/s 漂移 → 雨点涂地 + 34 DPS → 6.5s 消散；
-    /// 3. Splat Bomb：70 墨耗 → 0.95s 引信 → 核心 180 秒杀 + 2.7m 涂地。
+    /// 3. Splat Bomb：55 墨耗 + 6s 冷却 → 0.95s 引信 → 核心 180 秒杀 + 2.7m 涂地。
     /// PlayMode 会把任何运行时 log error 判为失败，因此本测试同时覆盖对象池/粒子创建的隐性问题。
     /// </summary>
     public class SpecialWeaponsPlayTests
@@ -294,22 +294,22 @@ namespace P1.Tests
         }
 
         [UnityTest]
-        public IEnumerator SplatBomb_IndependentOfInk_AndKillsWith95SecondFuse()
+        public IEnumerator SplatBomb_Spends55Ink_AndKillsWith95SecondFuse()
         {
             yield return LoadPlaybox();
 
             var player = PlayerController.LocalPlayer;
             var weapon = player.Weapon;
-            // 手雷与墨水脱钩（设计变更）：清空墨水也必须能投，投掷不扣墨，只受冷却限制
-            player.Motor.TryConsumeInk(player.Motor.CurrentInk);
+            // 手雷 55 墨 + 6s 冷却：满墨投出，扣 55 墨
+            player.Motor.RefillInkFull();
             float inkBefore = player.Motor.CurrentInk;
 
             Vector3 target = player.transform.position + Vector3.forward * 4f;
             target.y = 0f;
             float coverageBefore = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
 
-            Assert.IsTrue(weapon.TryThrowSubBomb(target), "手雷已与墨水脱钩：空墨也应能投掷");
-            Assert.AreEqual(inkBefore, player.Motor.CurrentInk, 0.5f, "投掷手雷不得消耗墨水");
+            Assert.IsTrue(weapon.TryThrowSubBomb(target), "满墨应能投掷手雷");
+            Assert.AreEqual(inkBefore - 55f, player.Motor.CurrentInk, 0.5f, "投掷手雷应消耗 55 墨");
 
             var victim = CreateCombatant("BombVictim", Team.TeamB, new Vector3(target.x, 0f, target.z));
             var victimHealth = victim.GetComponent<CombatantHealth>();

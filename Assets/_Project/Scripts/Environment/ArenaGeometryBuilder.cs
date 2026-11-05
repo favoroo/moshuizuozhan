@@ -350,11 +350,64 @@ namespace P1.Environment
             go.transform.localScale = scale;
             // 竞技场几何从不移动：整棵 arena 树标静态，构建期/运行期静态合批才能合并这几十个 Cube
             go.isStatic = true;
+            BakeBoxBoundsUV(go, scale);
             if (mat != null)
             {
                 go.GetComponent<Renderer>().sharedMaterial = mat;
             }
             return go;
+        }
+
+        /// <summary>
+        /// 把盒子的世界轴对齐包围盒烘进 uv2/uv3/uv4（(minX,minZ) / (maxX,maxZ) / (minY,maxY)）。
+        ///
+        /// 用途：ObstacleDitherLit 的"掩体边界线"需要每个盒子的世界尺寸画四周一圈硬边。
+        /// 掩体全部标记 BatchingStatic，静态合批把顶点烘成世界坐标后 positionOS 就是世界坐标、
+        /// UNITY_MATRIX_M 退化为单位阵 —— 着色器再也拿不到对象尺度，object-space 盒体距离恒为负，
+        /// 整张表面会被涂成 _EdgeLineColor（船甲板/掩体大面积全黑）。UV 通道合批后仍保留，
+        /// 所以把 AABB 放在这里，着色器直接用 positionWS 求"到最近棱边的米距离"。
+        /// </summary>
+        private static void BakeBoxBoundsUV(GameObject box, Vector3 scale)
+        {
+            var mf = box.GetComponent<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null)
+                return;
+
+            // 按 8 个角点求世界 AABB（父级/自身带旋转时同样成立）
+            Transform t = box.transform;
+            Vector3 h = scale * 0.5f;
+            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+            for (int i = 0; i < 8; i++)
+            {
+                var corner = new Vector3(
+                    ((i & 1) == 0 ? -h.x : h.x),
+                    ((i & 2) == 0 ? -h.y : h.y),
+                    ((i & 4) == 0 ? -h.z : h.z));
+                Vector3 w = t.TransformPoint(corner);
+                min = Vector3.Min(min, w);
+                max = Vector3.Max(max, w);
+            }
+
+            Mesh mesh = Object.Instantiate(mf.sharedMesh);
+            mesh.name = mf.sharedMesh.name + "_Bounds";
+            int n = mesh.vertexCount;
+            var u2 = new Vector2[n];
+            var u3 = new Vector2[n];
+            var u4 = new Vector2[n];
+            var minXZ = new Vector2(min.x, min.z);
+            var maxXZ = new Vector2(max.x, max.z);
+            var minMaxY = new Vector2(min.y, max.y);
+            for (int i = 0; i < n; i++)
+            {
+                u2[i] = minXZ;
+                u3[i] = maxXZ;
+                u4[i] = minMaxY;
+            }
+            mesh.uv2 = u2;
+            mesh.uv3 = u3;
+            mesh.uv4 = u4;
+            mf.sharedMesh = mesh;
         }
 
         /// <summary>

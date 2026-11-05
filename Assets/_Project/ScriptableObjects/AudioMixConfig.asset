@@ -16,10 +16,44 @@ MonoBehaviour:
   bgmCrossfadeSeconds: 1.2
   bgmFadeOutSeconds: 1.4
   finalStageLeadSeconds: 60
-  voiceVolume: 0.95
-  announcementDuckAmount: 0.55
+  matchCueVolume: 0.95
+  matchCueDuckAmount: 0.55
   ultDuckAmount: 0.45
   deathDuckAmount: 0.55
   duckAttackSeconds: 0.08
   duckReleaseSeconds: 0.55
   duckTailSeconds: 0.25
+  combatDuckAmount: 0.18
+  combatDuckHoldSeconds: 0.45
+  shotVolume: 0.72
+  rollerFlickVolume: 0.6
+  chargerShotVolumeMin: 0.5
+  chargerShotVolumeMax: 0.66
+  blasterShotVolume: 0.58
+  sloshThrowVolume: 0.58
+  hitBodyVolume: 0.5
+  hitMarkerVolume: 0.55
+  jumpVolume: 0.5
+  landVolume: 0.55
+  squidTransformVolume: 0.6
+  stepDryVolume: 0.26
+  stepInkVolume: 0.3
+  stepEnemyInkVolume: 0.36
+  swimSplashVolume: 0.45
+  botShotVolume: 0.3
+  botShotMaxDistance: 24
+  botShotThrottleSeconds: 0.05
+  loopMasterVolume: 0.85
+  loopFadeSeconds: 0.1
+  rollerLoopVolume: 0.55
+  splatlingSpinLoopVolume: 0.5
+  swimLoopVolume: 0.45
+  climbLoopVolume: 0.45
+  enemyInkSizzleLoopVolume: 0.52
+  stormRainLoopVolume: 0.6
+  chargerChargeLoopVolume: 0.5
+  footstepThrottleSeconds: 0.16
+  swimSplashThrottleSeconds: 0.12
+  hurtThrottleSeconds: 0.1
+  hitMarkerThrottleSeconds: 0.035
+  uiThrottleSeconds: 0.03

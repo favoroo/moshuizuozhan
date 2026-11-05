@@ -9,10 +9,7 @@ EditorBuildSettings:
     path: Assets/_Project/Scenes/PhaseA_Playbox.unity
     guid: 42441d92df64c41acbb9ac2e3f2a634b
   - enabled: 1
-    path: Assets/_Project/Scenes/KelpTerminal.unity
-    guid: 84526cf54381747e4aa829bb6c31deff
-  - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+    path: Assets/_Project/Scenes/GullHarbor.unity
+    guid: eb8a44dd7bd76413ab530ff45b9736e2
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

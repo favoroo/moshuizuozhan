@@ -132,6 +132,8 @@ Shader "P1/InkGround"
             TEXTURE2D(_GlobalInkAtlasTex);
             float4 _GlobalInkMapOriginXZ;
             float4 _GlobalInkTexelSize;
+            // 计分场地矩形 (minX, minZ, sizeX, sizeZ)：地面盒体侧面/场外片元落在场地外时不显墨。
+            float4 _GlobalInkPlayableRect;
 
             // 队伍色改为吃全局：InkSurfaceController 每帧推送的 _GlobalTeamA/BColor 已做过
             // sRGB→Linear 转换（见 UpdateDynamicMaterialProperties 注释）。材质里的 _TeamAColor
@@ -286,11 +288,24 @@ Shader "P1/InkGround"
                 float2 mapSize = max(float2(0.001, 0.001), _GlobalInkMapOriginXZ.zw);
                 float2 inkUV = saturate((input.positionWS.xz - mapOrigin) / mapSize);
 
+                // 计分场地之外不显墨：地面盒体外侧等片元的世界 XZ 落在图集外，
+                // saturate 会把整片场外钳到边界纹素，拉伸成"一条一条"的墨色。
+                bool inkInPlayableMap = true;
+                if (_GlobalInkPlayableRect.z > 0.001 && _GlobalInkPlayableRect.w > 0.001)
+                {
+                    float2 playMin = _GlobalInkPlayableRect.xy;
+                    float2 playMax = playMin + _GlobalInkPlayableRect.zw;
+                    inkInPlayableMap = input.positionWS.x >= playMin.x && input.positionWS.x <= playMax.x &&
+                                       input.positionWS.z >= playMin.y && input.positionWS.z <= playMax.y;
+                }
+
                 // 图集采样：图集已是高分辨率的连续覆盖率场，不再是二值网格
                 float2 texelUV = _GlobalInkTexelSize.xy > 0.000001
                     ? _GlobalInkTexelSize.xy
                     : float2(1.0 / 4096.0, 1.0 / 4096.0);
                 float4 inkSample = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, inkUV);
+                if (!inkInPlayableMap)
+                    inkSample = float4(0.0, 0.0, 0.0, 0.0);
 
                 // 4 邻域采样：解析覆盖率 / 队伍比例 / 湿润度梯度
                 float2 uvOffset = texelUV;
@@ -302,8 +317,12 @@ Shader "P1/InkGround"
                 // R/G/B 均按覆盖率预乘，这里反预乘回真实数据：
                 // G = 最新落墨时间戳 × 覆盖率（InkAtlasStamp Pass 预乘后 Max 混合写入），
                 // 预乘保证双线性/mip 过滤下 G/A 恒等于真实时间戳（原始时间戳在墨斑边缘会被插值污染）。
+                // 反除下限 0.02 → 0.2（P48 移动端修复）：墨斑边缘 amt≈2/255 时 invA≈50，
+                // ARGB32 的 8-bit 量化误差被放大 50 倍 → 湿润时间戳逐纹素乱跳，
+                // 相机一滑动（采样点变化）整片墨缘都在闪。0.2 下限把放大系数压到 ≤5 倍，
+                // 代价只是 amt<0.2 的不可见边缘纹素（inkMask≈0）湿润度读数偏移，观感无差。
                 float amt = inkSample.a;
-                float invA = 1.0 / max(amt, 0.02);
+                float invA = 1.0 / max(amt, 0.2);
                 float tRaw = saturate(inkSample.r * invA);
                 float tone = saturate(inkSample.b * invA);
 
@@ -353,6 +372,11 @@ Shader "P1/InkGround"
                 amtEff = lerp(amtEff, amtCorr, saturate(_P1InkEdgeSmoothStrength));
                 #endif
 
+                // 场外强制无墨：亚纹素修正会用邻域采样把边界覆盖率带回来，必须在修正后再清一次，
+                // 否则场外仍会出现淡墨/接触阴影（只是比 clamp 拉伸弱）。
+                if (!inkInPlayableMap)
+                    amtEff = 0.0;
+
                 // 覆盖率边缘：图集内已有约 3 texel 的柔和过渡，这里只补一层屏幕空间抗锯齿
                 float fw = fwidth(amtEff);
                 float edgeWidth = clamp(fw * _EdgeSoftness, 0.012, 0.35);
@@ -370,12 +394,13 @@ Shader "P1/InkGround"
                 #endif
 
                 // 2m 混凝土板缝仅作为无贴图时的兜底；烘焙贴图已经包含板缝/标线/AO，优先级更高。
+                // 乘上 _GridLineColor.a 允许木栈道等非混凝土地面通过 a=0 彻底关闭该过程线，避免走样闪烁。
                 float2 gridCoord = abs(frac(input.positionWS.xz * 0.5) - 0.5);
                 float gridLine = smoothstep(0.47, 0.495, max(gridCoord.x, gridCoord.y));
 
                 half4 groundTex = SAMPLE_TEXTURE2D(_GroundTex, sampler_GroundTex, inkUV);
                 half3 bakedGround = lerp(_BaseColor.rgb, groundTex.rgb, _GroundTexStrength);
-                half3 groundCol = lerp(bakedGround, _GridLineColor.rgb, gridLine * 0.12);
+                half3 groundCol = lerp(bakedGround, _GridLineColor.rgb, gridLine * 0.12 * _GridLineColor.a);
 
                 // 高度阶梯增强：高台/斜坡顶面略提亮，但不过度洗掉混凝土细节
                 float heightFactor = saturate((input.positionWS.y - 0.05) / 1.05);
@@ -440,11 +465,13 @@ Shader "P1/InkGround"
 
                 // -------------------------------------------------------------
                 // 4. 两队墨水交界重叠缝与暗影
+                // 邻域反除下限同步抬到 0.2（P48）：中心 amt>0.52 时邻域纹素可以是接近 0 的边缘纹素，
+                // 0.02 下限会让 tR/tsR 在缝附近逐纹素爆炸 → 接缝暗影/法线随视角闪烁。
+                float aR = max(sampR.a, 0.2);
+                float aL = max(sampL.a, 0.2);
+                float aU = max(sampU.a, 0.2);
+                float aD = max(sampD.a, 0.2);
                 // -------------------------------------------------------------
-                float aR = max(sampR.a, 0.02);
-                float aL = max(sampL.a, 0.02);
-                float aU = max(sampU.a, 0.02);
-                float aD = max(sampD.a, 0.02);
                 float tR = saturate(sampR.r / aR);
                 float tL = saturate(sampL.r / aL);
                 float tU = saturate(sampU.r / aU);
@@ -516,8 +543,13 @@ Shader "P1/InkGround"
                 // -------------------------------------------------------------
                 // 6. 胶体与颗粒微表面 (P1_INK_HIGH vs 移动端程序化噪声)
                 // -------------------------------------------------------------
-                float gelFade = 1.0 - smoothstep(0.02, 0.14, length(fwidth(input.positionWS.xz)));
-                float2 baseLipOffsetXZ = (lipNormalOffsetXZ + seamNormalOffsetXZ + rippleNormalOffsetXZ) * inkMask;
+                // P48 移动端闪烁修复：1 像素跨度超过 ~0.6cm（墨斑 3cm 过渡带开始欠采样）
+                // 就逐步压平法线扰动。唇缘/接缝/颗粒法线在掠射角下逐像素混沌，
+                // 叠加湿墨高 specular 会射出随视角起舞的白色碎钻闪点
+                // （手机上"视角一滑地板就闪"的主体）。近景 pxSpan 小，观感不变。
+                float pxSpanM = length(fwidth(input.positionWS.xz));
+                float gelFade = 1.0 - smoothstep(0.006, 0.045, pxSpanM);
+                float2 baseLipOffsetXZ = (lipNormalOffsetXZ + seamNormalOffsetXZ + rippleNormalOffsetXZ) * inkMask * gelFade;
                 float3 baseNormalWS = normalize(geomN + float3(baseLipOffsetXZ.x, 0.0, baseLipOffsetXZ.y));
 
                 #if defined(P1_INK_HIGH)

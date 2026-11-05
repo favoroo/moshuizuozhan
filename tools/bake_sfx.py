@@ -400,16 +400,53 @@ def _f_countdown_tick(buf, v, n):
 
 
 def _f_match_start(buf, v, n):
-    """对局开场：三音上行，明快不拖沓。"""
-    arp(buf, [440, 660, 880], t_step=0.085, dur=0.26, peak=0.19, wtype="triangle",
-        echo=(0.075, 0.22, 0.14))
+    """对局开场前的蓄势：墨幕吸气般的上扬扫频 + 加速脉冲，尾部留白交给 GO 号角。
+
+    不写旋律：0.86s 的墨幕入场里，连续三音上行会和 GO 抢拍；这里只做「要开始了」的张力。
+    """
+    # 低频体积：55→110Hz 慢慢打开，给扫频垫底
+    tone(buf, wtype="sine", f0=55, f1=110, dur=0.50, peak=0.13, a0=0.10, a1=0.35)
+    # 上行风压：带通从 300 扫到 2200Hz，再收一段，避免尾端硬切
+    noise(buf, dur=0.38, peak=0.13, ftype="bandpass", f0=300, f1=2200, q=0.7,
+          a0=0.02, a1=0.95)
+    noise(buf, t0=0.36, dur=0.16, peak=0.12, ftype="bandpass", f0=2400, q=0.8,
+          a0=0.9, a1=0.02)
+    # 高频空气：让墨幕撕开有亮度
+    noise(buf, t0=0.12, dur=0.34, peak=0.05, ftype="highpass", f0=4200,
+          a0=0.05, a1=0.40)
+    # 加速脉冲：间隔越来越短，把期待感推上去（每声都自然衰减，不残留）
+    for k, t in enumerate((0.04, 0.17, 0.29, 0.39)):
+        tone(buf, wtype="sine", f0=880 + k * 140, f1=960 + k * 140, t0=t,
+             dur=0.030, peak=0.075, a0=0.9, a1=0.04)
+    # 落锁：低音一记轻顿，提示「马上开打」
+    tone(buf, wtype="sine", f0=140, f1=72, t0=0.47, dur=0.10, peak=0.13, a0=1.0, a1=0.01)
+    space(buf, delay=0.080, fb=0.20, mix=0.08)
 
 
 def _f_match_end(buf, v, n):
-    """时间到：两记下行钟感，明确「结束了」。"""
-    tone(buf, wtype="sine", f0=680, f1=640, dur=0.55, peak=0.26, a1=0.02)
-    tone(buf, wtype="sine", f0=452, f1=430, t0=0.13, dur=0.70, peak=0.24, a1=0.02)
-    space(buf, delay=0.11, fb=0.30, mix=0.16)
+    """终场定格：定格闷响 + 裁判双音哨 + 三音下行钟。
+
+    哨音用两只轻微失谐的高音叠出拍频颤音（合成器没有 vibrato，靠 detune 做「裁判哨」）。
+    终止式比开场更重、更长，但不盖住随后的结算音。
+    """
+    # 定格冲击：时间被踩住的低频下潜 + 低通噪声
+    tone(buf, wtype="sine", f0=96, f1=42, dur=0.45, peak=0.20, a0=1.0, a1=0.01)
+    noise(buf, dur=0.09, peak=0.13, ftype="lowpass", f0=900, a0=1.0, a1=0.02)
+    # 裁判哨第一声：两只高音失谐制造 58Hz 拍频
+    tone(buf, wtype="sine", f0=2320, dur=0.30, peak=0.11, a0=0.9, a1=0.25)
+    tone(buf, wtype="sine", f0=2378, dur=0.30, peak=0.09, a0=0.9, a1=0.25)
+    noise(buf, t0=0.02, dur=0.30, peak=0.035, ftype="highpass", f0=4200,
+          a0=0.8, a1=0.15)
+    # 裁判哨第二声：更短更低，明确「全场结束」
+    tone(buf, wtype="sine", f0=2262, t0=0.40, dur=0.16, peak=0.09, a0=0.8, a1=0.06)
+    tone(buf, wtype="sine", f0=2318, t0=0.40, dur=0.16, peak=0.07, a0=0.8, a1=0.06)
+    noise(buf, t0=0.40, dur=0.16, peak=0.03, ftype="highpass", f0=4200,
+          a0=0.7, a1=0.10)
+    # 终场三音下行钟（C5→G4→C4）
+    arp(buf, [523, 392, 262], t_step=0.14, dur=0.50, peak=0.13, wtype="triangle",
+        echo=(0.10, 0.26, 0.13))
+    # 低频长尾：把「定格」托住
+    tone(buf, wtype="sine", f0=110, t0=0.10, dur=0.85, peak=0.07, a0=0.6, a1=0.01)
 
 
 def _f_result_win(buf, v, n):
@@ -734,11 +771,25 @@ def _f_ready(buf, v, n):
 
 
 def _f_go_horn(buf, v, n):
-    """GO 号角：饱和基音 + 五度泛音，短促有冲劲。"""
-    sat_tone(buf, f0=330, dur=0.42, peak=0.22, drive=2.2, a0=0.6, a1=0.35, lp=(2600,))
-    tone(buf, wtype="sawtooth", f0=495, dur=0.42, peak=0.12, a0=0.5, a1=0.30, lp=(3000,))
-    tone(buf, wtype="sine", f0=165, dur=0.42, peak=0.10, a0=0.6, a1=0.30)
-    space(buf, delay=0.095, fb=0.25, mix=0.14)
+    """GO 冲击号角：低频下潜 + 饱和 A 大三和弦 + 墨点爆音。
+
+    这是「GO」的人声替代：必须有起跑的重量，所以先给一记低频落点，
+    再用 220/330/440Hz 叠出号角和弦；尾巴收干净，不拖到开火节奏里。
+    """
+    # 起跑落点：低频瞬间下潜
+    tone(buf, wtype="sine", f0=150, f1=52, dur=0.28, peak=0.16, a0=1.0, a1=0.01)
+    # 号角主体：A3-E4-A4，轻微下滑像真号；保持住 0.1s 的号身，别做成一次性「噗」
+    sat_tone(buf, f0=220, f1=214, dur=0.38, peak=0.24, drive=2.6, a0=0.85, a1=0.10,
+             lp=(3200,))
+    tone(buf, wtype="sawtooth", f0=330, f1=322, dur=0.36, peak=0.14, a0=0.75, a1=0.06,
+         lp=(3600,))
+    tone(buf, wtype="sawtooth", f0=440, f1=430, dur=0.30, peak=0.08, a0=0.65, a1=0.05,
+         lp=(4200,))
+    # 起始咬字：湿墨爆点 + 高频气，让 GO 有「喷出来」的质感
+    noise(buf, dur=0.09, peak=0.17, ftype="bandpass", f0=2600, f1=850, q=0.9,
+          a0=1.0, a1=0.02)
+    noise(buf, dur=0.030, peak=0.08, ftype="highpass", f0=5600, a0=1.0, a1=0.05)
+    space(buf, delay=0.075, fb=0.22, mix=0.10)
 
 
 def _f_one_minute(buf, v, n):

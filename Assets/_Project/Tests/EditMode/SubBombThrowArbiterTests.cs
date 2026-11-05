@@ -104,6 +104,41 @@ namespace P1.Tests
         }
 
         [Test]
+        public void Advance_NoInkOnPress_DeniesAimingAndThrow()
+        {
+            var arbiter = new SubBombThrowArbiter();
+
+            var press = arbiter.Advance(true, true, false, false, false, false, false, hasInkForThrow: false);
+            Assert.IsTrue(press.DeniedByInk, "空墨按下必须标记 DeniedByInk（调用方播「弹药耗尽」提示）");
+            Assert.IsFalse(press.IsAiming, "空墨按下不得进入瞄准（不出弹道预览）");
+            Assert.IsFalse(press.StartedAiming, "空墨按下不得打断潜墨形态");
+            Assert.IsFalse(arbiter.IsAiming);
+
+            var release = arbiter.Advance(false, false, true, false, false, false, false, hasInkForThrow: false);
+            Assert.IsFalse(release.ExecuteThrow, "空墨被拒后松手不得投出");
+            Assert.IsFalse(arbiter.IsAiming);
+        }
+
+        [Test]
+        public void Advance_InkRecoveredAfterDeniedPress_StillNeedsNewPress()
+        {
+            var arbiter = new SubBombThrowArbiter();
+
+            arbiter.Advance(true, true, false, false, false, false, false, hasInkForThrow: false);
+
+            // 按住不放、墨水回满：被拒的那次按下不补进入瞄准，必须重新按一次
+            var hold = arbiter.Advance(false, true, false, false, false, false, false, hasInkForThrow: true);
+            Assert.IsFalse(hold.IsAiming, "被拒的按住不得因为墨水回满而自动进入瞄准");
+            Assert.IsFalse(hold.ExecuteThrow);
+
+            var release = arbiter.Advance(false, false, true, false, false, false, false, hasInkForThrow: true);
+            Assert.IsFalse(release.ExecuteThrow, "被拒的按住松手也不得投出");
+
+            var repress = arbiter.Advance(true, true, false, false, false, false, false, hasInkForThrow: true);
+            Assert.IsTrue(repress.IsAiming, "重新按下（墨水已够）才进入瞄准");
+        }
+
+        [Test]
         public void Advance_Reset_ClearsAiming()
         {
             var arbiter = new SubBombThrowArbiter();

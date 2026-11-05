@@ -13,6 +13,9 @@ Shader "P1/Water"
         _GlitterThreshold ("Glitter Threshold", Range(0.7, 0.999)) = 0.972
         _ShoreDistance ("Shore Distance", Float) = 12.0
         _FoamStrength ("Foam Strength", Range(0.0, 1.0)) = 0.65
+        // 岸边方形平台半尺寸（x,z）：默认对齐集装箱码头 74x84m 基座（±26, ±34）。
+        // 场内浅水线要把它设成大于水面所在位置，否则 distToPier 恒为 0 → 整片水被岸沫糊白。
+        _ShoreHalfExtents ("Shore Half Extents (x,z)", Vector) = (26, 34, 0, 0)
     }
 
     SubShader
@@ -70,6 +73,7 @@ Shader "P1/Water"
                 float _GlitterThreshold;
                 float _ShoreDistance;
                 float _FoamStrength;
+                float4 _ShoreHalfExtents;
             CBUFFER_END
 
             Varyings vert(Attributes input)
@@ -118,8 +122,10 @@ Shader "P1/Water"
                 float2 gradH = (dw1 + dw2) * (0.35 * _WaveScale) + (dw3 + dw4) * (0.15 * _WaveScale);
                 float3 N = normalize(float3(-gradH.x * _WaveNormalStrength, 1.0, -gradH.y * _WaveNormalStrength));
 
-                // 近岸浅水渐变到 waterShallow（码头混凝土基座占地 52x68m，边界在 ±26, ±34）
-                float2 pierDist2D = max(abs(input.positionWS.xz) - float2(26.0, 34.0), 0.0);
+                // 近岸浅水渐变到 waterShallow（码头基座半尺寸由材质给定：远景海面 26/34，场内浅水线按地图自定义）
+                float2 shoreHalf = _ShoreHalfExtents.xy;
+                if (shoreHalf.x < 0.001 || shoreHalf.y < 0.001) shoreHalf = float2(26.0, 34.0);
+                float2 pierDist2D = max(abs(input.positionWS.xz) - shoreHalf, 0.0);
                 float distToPier = length(pierDist2D);
                 float shoreFactor = 1.0 - smoothstep(0.0, _ShoreDistance, distToPier);
                 half3 waterColor = lerp(_DeepColor.rgb, _ShallowColor.rgb, saturate(shoreFactor * 0.70 + wave01 * _WaveStrength * 0.5));

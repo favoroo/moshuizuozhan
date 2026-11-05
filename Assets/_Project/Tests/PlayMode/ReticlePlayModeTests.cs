@@ -217,6 +217,12 @@ namespace P1.Tests
         [UnityTest]
         public IEnumerator WeaponReticleUI_OutOfInk_ShowsWarningAndEmptyToast()
         {
+            // 本用例不加载场景，但准星 LateUpdate 受 MatchManager.InputAllowed 门控：
+            // 全量跑时前序用例（如 MobileBombTouchPlayTests）会留下停在 Ready 相位的 MatchManager，
+            // 此时 InputAllowed=false → 准星整帧早退、_isOutOfInk 永不更新，断言会误报。
+            // 单条跑时 Instance==null 反而是绿的。这里显式把相位推进到 Playing，消除顺序依赖。
+            yield return EnsureMatchInputAllowed();
+
             var canvasGo = new GameObject("TestCanvas", typeof(Canvas));
             var canvas = canvasGo.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -288,6 +294,30 @@ namespace P1.Tests
             Object.Destroy(cfg);
             Object.Destroy(playerGo);
             Object.Destroy(canvasGo);
+        }
+
+        /// <summary>
+        /// 保证 <see cref="MatchManager.InputAllowed"/> 为真：没有 MatchManager（纯 UI 用例）时直接返回，
+        /// 有残留实例但停在 Ready/Finished/Result 时把它推进到 Playing，避免顺序依赖造成的假红。
+        /// </summary>
+        private static IEnumerator EnsureMatchInputAllowed()
+        {
+            if (MatchManager.InputAllowed) yield break;
+
+            MatchManager match = MatchManager.Instance;
+            if (match == null) yield break;
+
+            if (match.CurrentPhase == MatchManager.Phase.Finished ||
+                match.CurrentPhase == MatchManager.Phase.Result)
+            {
+                match.ReturnToMenu();
+                yield return null;
+            }
+
+            PlayModeTestKit.ShortenMatchTimers();
+            match.StartMatch();
+            yield return PlayModeTestKit.WaitForPhase(match, MatchManager.Phase.Playing, 8f);
+            Assert.IsTrue(MatchManager.InputAllowed, "前置：准星用例需要允许输入的比赛相位");
         }
     }
 }

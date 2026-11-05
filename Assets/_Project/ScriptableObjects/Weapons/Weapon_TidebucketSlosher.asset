@@ -22,7 +22,7 @@ MonoBehaviour:
   spreadMinDegrees: 1.2
   bloomPerShot: 0.3
   bloomRecoverSeconds: 0.3
-  inkCostPerShot: 7.5
+  inkCostPerShot: 8.6
   projectileRadius: 0.18
   projectileGravity: 22
   trailStartDistance: 2.5
@@ -37,7 +37,7 @@ MonoBehaviour:
   rollForwardReach: 1.35
   rollDamage: 140
   rollDamageInterval: 0.5
-  rollInkPerMeter: 1.1
+  rollInkPerMeter: 1.25
   rollMinInkToStart: 0.5
   rollPaintRadius: 0.34
   rollMaxStepMeters: 1.5
@@ -48,7 +48,7 @@ MonoBehaviour:
   flickRecoverMoveFactor: 0.6
   flickInterval: 0.62
   flickWindup: 0.22
-  flickInkCost: 9
+  flickInkCost: 10.5
   flickDrops: 9
   flickDamageNear: 125
   flickDamageFar: 30
@@ -64,13 +64,13 @@ MonoBehaviour:
   chargeRangeMax: 27
   chargeDamageMin: 40
   chargeDamageMax: 160
-  chargeInkCostFull: 18
+  chargeInkCostFull: 21
   chargeMinInkFraction: 0.2
   chargeLineSplatEvery: 1.2
   chargeLineRadius: 0.55
   chargeImpactRadius: 1.2
   chargeReleaseCooldown: 0.28
-  dualiesRollInkCost: 7
+  dualiesRollInkCost: 8
   dualiesRollDuration: 0.3
   dualiesRollDistance: 2.8
   dualiesMaxRolls: 2
@@ -95,7 +95,7 @@ MonoBehaviour:
   splatlingBurstMaxDuration: 1.7
   splatlingMoveSpeedCharging: 2.4
   splatlingMoveSpeedFiring: 3.4
-  bombInkCost: 0
+  bombInkCost: 55
   bombCooldown: 6
   bombThrowSpeed: 13.5
   bombThrowGravity: 24
@@ -131,6 +131,7 @@ MonoBehaviour:
   specialOuterDamage: 55
   specialOuterFalloffWeight: 0.3
   specialImpactTrauma: 1
+  specialImpactHitstopSeconds: 0.045
   stormDuration: 6.5
   stormRadius: 3.4
   stormDps: 34

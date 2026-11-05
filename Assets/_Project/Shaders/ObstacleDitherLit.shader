@@ -110,6 +110,10 @@ Shader "P1/ObstacleDitherLit"
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
                 float2 uv         : TEXCOORD0;
+                // 世界 AABB：由 ArenaGeometryBuilder.CreateBox 烘进 uv2/uv3/uv4。
+                float2 uv2        : TEXCOORD1;   // (minX, minZ)
+                float2 uv3        : TEXCOORD2;   // (maxX, maxZ)
+                float2 uv4        : TEXCOORD3;   // (minY, maxY)
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -120,7 +124,8 @@ Shader "P1/ObstacleDitherLit"
                 float3 normalWS   : TEXCOORD1;
                 float2 uv         : TEXCOORD2;
                 half   fogFactor  : TEXCOORD3;
-                float3 edgeDist3  : TEXCOORD4; // 到三条棱边组的距离（米，见 vert）
+                float3 boxMinWS   : TEXCOORD4;
+                float3 boxMaxWS   : TEXCOORD5;
             };
 
             CBUFFER_START(UnityPerMaterial)
@@ -174,21 +179,13 @@ Shader "P1/ObstacleDitherLit"
                 VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
-                // 掩体均为轴对齐盒（object space 半径恒 0.5）：每轴乘世界尺度，
-                // 得到"到该轴两侧棱边的米距离"，fragment 里取 min 即到最近棱边的距离。
-                // 用 UNITY_MATRIX_M 而非 unity_ObjectToWorld，兼容 GPU Resident Drawer 实例化矩阵。
-                float3 objScale = float3(
-                    length(UNITY_MATRIX_M._11_21_31),
-                    length(UNITY_MATRIX_M._12_22_32),
-                    length(UNITY_MATRIX_M._13_23_33));
-                float3 edgeDist3 = (0.5 - abs(input.positionOS.xyz)) * objScale;
-
                 output.positionCS = posInputs.positionCS;
                 output.positionWS = posInputs.positionWS;
                 output.normalWS = normInputs.normalWS;
                 output.uv = input.uv;
-                output.edgeDist3 = edgeDist3;
                 output.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
+                output.boxMinWS = float3(input.uv2.x, input.uv4.x, input.uv2.y);
+                output.boxMaxWS = float3(input.uv3.x, input.uv4.y, input.uv3.y);
                 return output;
             }
 
@@ -346,28 +343,22 @@ Shader "P1/ObstacleDitherLit"
                 half3 shaded = diffuse + specular + rimLight + envSpec;
                 ApplyTopInkOverlay(shaded, input.positionWS, geomN, shadowAtten, L, V);
 
-                // 4. 掩体边界线（P17-A）：到最近棱边的世界米距离 → 四周一圈深色硬边。
+                // 4. 掩体边界线（P17-A）：每个面四周一圈深色硬边。
                 // 必须压在墨水叠加之后：顶面/立面涂满墨后轮廓仍然可辨，掩体不会"消失"在同色地面里。
-                // WebGL (GLES3/HLSLcc) 平台对 UNITY_MATRIX_M swizzle 支持有限会导致尺度为 0 变黑，WebGL 端跳过该装饰线。
-#if !UNITY_WEBGL
-                float3 normAbs = abs(geomN);
-                float edgeDist = 1000.0;
-                if (normAbs.x > 0.5)
-                {
-                    edgeDist = min(input.edgeDist3.y, input.edgeDist3.z);
-                }
-                else if (normAbs.y > 0.5)
-                {
-                    edgeDist = min(input.edgeDist3.x, input.edgeDist3.z);
-                }
-                else
-                {
-                    edgeDist = min(input.edgeDist3.x, input.edgeDist3.y);
-                }
+                //
+                // 盒体范围来自 uv2/uv3/uv4（ArenaGeometryBuilder.CreateBox 烘焙的世界 AABB）：
+                // 掩体都标记了 BatchingStatic，静态合批把顶点烘成世界坐标后 positionOS 就是世界坐标、
+                // UNITY_MATRIX_M 退化为单位阵，object-space 盒体距离会恒为负、把整张表面涂成
+                // _EdgeLineColor（船甲板/掩体大面积全黑）。UV 通道合批后仍保留，所以把 AABB 放在那里，
+                // 这里直接用 positionWS 求"到最近棱边的米距离"。未烘焙（全零）时跳过，避免退化盒体整面涂黑。
+                float3 boxSize = input.boxMaxWS - input.boxMinWS;
+                float boxValid = step(1e-3, max(boxSize.x, max(boxSize.y, boxSize.z)));
+                float3 dFace = min(input.positionWS - input.boxMinWS, input.boxMaxWS - input.positionWS);
+                // 到最近一条棱边的距离 = 三个面距离里最小的两项之和
+                float edgeDist = min(dFace.x + dFace.y, min(dFace.y + dFace.z, dFace.x + dFace.z));
                 float edgeFw = max(fwidth(edgeDist), 0.005);
-                float edgeLine = 1.0 - smoothstep(_EdgeLineWidth, _EdgeLineWidth + edgeFw, edgeDist);
+                float edgeLine = (1.0 - smoothstep(_EdgeLineWidth, _EdgeLineWidth + edgeFw, edgeDist)) * boxValid;
                 shaded = lerp(shaded, _EdgeLineColor.rgb, edgeLine * _EdgeLineStrength);
-#endif
 
                 half3 finalColor = MixFog(shaded, input.fogFactor);
                 return half4(finalColor, 1.0);

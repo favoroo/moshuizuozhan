@@ -9,7 +9,7 @@ namespace P1.Tests
     /// <summary>
     /// [P6-B] 全武器库回归契约（7 类主武器）：
     /// 1. 工厂分派与配置档案（射程 / 单发伤害 / 每次攻击耗墨）；
-    /// 2. 真实策略耗墨比例（小枪 0.95、双枪 0.85、泼桶 7.5、爆破枪 9、加特林 0.6/发、蓄力狙 18 满蓄）；
+    /// 2. 真实策略耗墨比例（小枪 1.1、双枪 1.0、泼桶 8.6、爆破枪 10.4、加特林 0.7/发、蓄力狙 21 满蓄）；
     /// 3. 伤害衰减曲线（滚筒挥击 125→30；蓄力狙 40→160；爆破枪 125 直击 + 70/30 溅射）；
     /// 4. 特殊状态（双枪翻滚/架枪、泼桶 Volley 聚合、加特林蓄力释放）；
     /// 5. 空墨罐时 7 类武器一律拒绝开火（不产生幽灵弹丸）。
@@ -82,7 +82,7 @@ namespace P1.Tests
             WeaponConfigSO shooter = CreateSpecConfig(WeaponKind.Shooter);
             Assert.AreEqual(12f, shooter.maxRange, 0.0001f);
             Assert.AreEqual(36f, shooter.damage, 0.0001f);
-            Assert.AreEqual(0.95f, shooter.inkCostPerShot, 0.0001f);
+            Assert.AreEqual(1.1f, shooter.inkCostPerShot, 0.0001f);
             Assert.AreEqual(34f, shooter.projectileSpeed, 0.0001f);
 
             // 滚筒 Swell Roller
@@ -90,10 +90,10 @@ namespace P1.Tests
             Assert.AreEqual(8.5f, roller.flickRange, 0.0001f, "挥击射程 8.5m");
             Assert.AreEqual(125f, roller.flickDamageNear, 0.0001f, "近距 125 伤");
             Assert.AreEqual(30f, roller.flickDamageFar, 0.0001f, "远距 30 伤");
-            Assert.AreEqual(9f, roller.flickInkCost, 0.0001f, "挥击耗墨 9");
+            Assert.AreEqual(10.5f, roller.flickInkCost, 0.0001f, "挥击耗墨 10.5");
             Assert.AreEqual(140f, roller.rollDamage, 0.0001f, "碾压 140");
             Assert.AreEqual(1.9f, roller.rollWidth, 0.0001f, "墨带 1.9m");
-            Assert.AreEqual(1.1f, roller.rollInkPerMeter, 0.0001f, "推地 1.1 墨/米");
+            Assert.AreEqual(1.25f, roller.rollInkPerMeter, 0.0001f, "推地 1.25 墨/米");
 
             // 蓄力狙 Glint Charger
             WeaponConfigSO charger = CreateSpecConfig(WeaponKind.Charger);
@@ -101,14 +101,14 @@ namespace P1.Tests
             Assert.AreEqual(27f, charger.chargeRangeMax, 0.0001f, "满蓄射程 27m");
             Assert.AreEqual(40f, charger.chargeDamageMin, 0.0001f);
             Assert.AreEqual(160f, charger.chargeDamageMax, 0.0001f);
-            Assert.AreEqual(18f, charger.chargeInkCostFull, 0.0001f, "满蓄耗墨 18");
+            Assert.AreEqual(21f, charger.chargeInkCostFull, 0.0001f, "满蓄耗墨 21");
 
             // 双枪 Twinfin Dualies
             WeaponConfigSO dualies = CreateSpecConfig(WeaponKind.Dualies);
             Assert.AreEqual(11f, dualies.maxRange, 0.0001f);
             Assert.AreEqual(30f, dualies.damage, 0.0001f);
-            Assert.AreEqual(0.85f, dualies.inkCostPerShot, 0.0001f);
-            Assert.AreEqual(7f, dualies.dualiesRollInkCost, 0.0001f);
+            Assert.AreEqual(1.0f, dualies.inkCostPerShot, 0.0001f);
+            Assert.AreEqual(8f, dualies.dualiesRollInkCost, 0.0001f);
             Assert.AreEqual(2.8f, dualies.dualiesRollDistance, 0.0001f);
 
             // 泼桶 Tidebucket Slosher
@@ -116,14 +116,14 @@ namespace P1.Tests
             Assert.AreEqual(9.5f, slosher.maxRange, 0.0001f);
             Assert.AreEqual(70f, slosher.slosherHeadDamage, 0.0001f);
             Assert.AreEqual(34f, slosher.slosherTailDamage, 0.0001f);
-            Assert.AreEqual(7.5f, slosher.inkCostPerShot, 0.0001f);
+            Assert.AreEqual(8.6f, slosher.inkCostPerShot, 0.0001f);
             Assert.AreEqual(8, slosher.slosherDrops);
 
             // 爆破枪 Popper Blaster
             WeaponConfigSO blaster = CreateSpecConfig(WeaponKind.Blaster);
             Assert.AreEqual(10.5f, blaster.maxRange, 0.0001f);
             Assert.AreEqual(125f, blaster.damage, 0.0001f);
-            Assert.AreEqual(9f, blaster.inkCostPerShot, 0.0001f);
+            Assert.AreEqual(10.4f, blaster.inkCostPerShot, 0.0001f);
             Assert.AreEqual(2.6f, blaster.blasterSplashRadius, 0.0001f);
             Assert.AreEqual(70f, blaster.blasterSplashDamageMax, 0.0001f);
             Assert.AreEqual(30f, blaster.blasterSplashDamageMin, 0.0001f);
@@ -132,7 +132,7 @@ namespace P1.Tests
             WeaponConfigSO splatling = CreateSpecConfig(WeaponKind.Splatling);
             Assert.AreEqual(15f, splatling.maxRange, 0.0001f);
             Assert.AreEqual(28f, splatling.damage, 0.0001f);
-            Assert.AreEqual(0.6f, splatling.inkCostPerShot, 0.0001f);
+            Assert.AreEqual(0.7f, splatling.inkCostPerShot, 0.0001f);
             Assert.AreEqual(40f, splatling.projectileSpeed, 0.0001f);
             Assert.AreEqual(0.85f, splatling.splatlingChargeTime, 0.0001f);
         }
@@ -155,7 +155,7 @@ namespace P1.Tests
             }
 
             Assert.AreEqual(10, host.Shots.Count);
-            Assert.AreEqual(100f - 10f * 0.95f, host.CurrentInk, 0.005f, "小枪每发耗墨 0.95");
+            Assert.AreEqual(100f - 10f * 1.1f, host.CurrentInk, 0.005f, "小枪每发耗墨 1.1");
         }
 
         [Test]
@@ -170,7 +170,7 @@ namespace P1.Tests
             fullStrategy.Tick(1f, true, aim, fullHost);
             fullStrategy.Tick(1f / 60f, false, aim, fullHost);
             Assert.AreEqual(1, fullHost.Beams.Count);
-            Assert.AreEqual(100f - 18f, fullHost.CurrentInk, 0.01f, "满蓄力 100% 耗墨 18");
+            Assert.AreEqual(100f - 21f, fullHost.CurrentInk, 0.01f, "满蓄力 100% 耗墨 21");
 
             var halfHost = new FakeHost { Config = config, CurrentInk = 100f };
             var halfStrategy = new ChargerWeaponStrategy(config);
@@ -178,7 +178,7 @@ namespace P1.Tests
             halfStrategy.Tick(0.5f, true, aim, halfHost);
             halfStrategy.Tick(1f / 60f, false, aim, halfHost);
             Assert.AreEqual(1, halfHost.Beams.Count);
-            Assert.AreEqual(100f - 9f, halfHost.CurrentInk, 0.01f, "50% 蓄力按比例耗墨 9");
+            Assert.AreEqual(100f - 10.5f, halfHost.CurrentInk, 0.01f, "50% 蓄力按比例耗墨 10.5");
         }
 
         [Test]
@@ -190,14 +190,14 @@ namespace P1.Tests
             WeaponAim aim = ForwardAim(8f);
 
             Assert.IsTrue(strategy.OnTriggerHeld(aim, 1f / 60f, host));
-            Assert.AreEqual(100f - 0.85f, host.CurrentInk, 0.005f, "双枪单发耗墨 0.85");
+            Assert.AreEqual(100f - 1.0f, host.CurrentInk, 0.005f, "双枪单发耗墨 1.0");
 
             Assert.IsTrue(strategy.TryPerformDodgeRoll(Vector3.right, host));
-            Assert.AreEqual(100f - 0.85f - 7f, host.CurrentInk, 0.005f, "战术翻滚额外耗墨 7");
+            Assert.AreEqual(100f - 1.0f - 8f, host.CurrentInk, 0.005f, "战术翻滚额外耗墨 8");
         }
 
         [Test]
-        public void Slosher_OneVolley_Consumes7Point5Ink_AndKeepsSharedContext()
+        public void Slosher_OneVolley_Consumes8Point6Ink_AndKeepsSharedContext()
         {
             WeaponConfigSO config = CreateSpecConfig(WeaponKind.Slosher);
             var host = new FakeHost { Config = config, CurrentInk = 100f };
@@ -205,7 +205,7 @@ namespace P1.Tests
             WeaponAim aim = ForwardAim(9f);
 
             strategy.OnTriggerHeld(aim, 1f / 60f, host);
-            Assert.AreEqual(100f - 7.5f, host.CurrentInk, 0.005f, "一次泼洒耗墨 7.5");
+            Assert.AreEqual(100f - 8.6f, host.CurrentInk, 0.005f, "一次泼洒耗墨 8.6");
             strategy.Tick(config.slosherWindup + 0.01f, true, aim, host);
 
             Assert.AreEqual(8, host.Shots.Count);
@@ -221,7 +221,7 @@ namespace P1.Tests
         }
 
         [Test]
-        public void Blaster_OneShot_Consumes9Ink_AndCarriesAirburstEnvelope()
+        public void Blaster_OneShot_Consumes10Point4Ink_AndCarriesAirburstEnvelope()
         {
             WeaponConfigSO config = CreateSpecConfig(WeaponKind.Blaster);
             var host = new FakeHost { Config = config, CurrentInk = 100f };
@@ -229,7 +229,7 @@ namespace P1.Tests
             WeaponAim aim = ForwardAim(8f);
 
             Assert.IsTrue(strategy.OnTriggerHeld(aim, 1f / 60f, host));
-            Assert.AreEqual(100f - 9f, host.CurrentInk, 0.005f, "爆破枪单发耗墨 9");
+            Assert.AreEqual(100f - 10.4f, host.CurrentInk, 0.005f, "爆破枪单发耗墨 10.4");
             Assert.AreEqual(1, host.Shots.Count);
 
             WeaponShot shot = host.Shots[0];
@@ -268,9 +268,9 @@ namespace P1.Tests
             }
 
             Assert.That(host.Shots.Count, Is.InRange(24, 27), $"满蓄力约 25 发，实际 {host.Shots.Count}");
-            float expectedInk = 100f - host.Shots.Count * 0.6f;
-            Assert.AreEqual(expectedInk, host.CurrentInk, 0.05f, "加特林每发耗墨 0.6");
-            Assert.Greater(100f - host.CurrentInk, 14f, "一次满蓄力扫射应消耗约 15 墨");
+            float expectedInk = 100f - host.Shots.Count * 0.7f;
+            Assert.AreEqual(expectedInk, host.CurrentInk, 0.05f, "加特林每发耗墨 0.7");
+            Assert.Greater(100f - host.CurrentInk, 16f, "一次满蓄力扫射应消耗约 17 墨");
         }
 
         // ------------------------------------------------------------------ 伤害衰减
@@ -336,7 +336,7 @@ namespace P1.Tests
 
             int fired = host.Shots.Count - before;
             Assert.That(fired, Is.InRange(7, 9), $"0.5s 架枪约 7~9 发（15 发/秒），实际 {fired}");
-            Assert.AreEqual(100f - 7f - fired * 0.85f, host.CurrentInk, 0.01f, "架枪每发仍耗墨 0.85");
+            Assert.AreEqual(100f - 8f - fired * 1.0f, host.CurrentInk, 0.01f, "架枪每发仍耗墨 1.0");
         }
 
         [Test]

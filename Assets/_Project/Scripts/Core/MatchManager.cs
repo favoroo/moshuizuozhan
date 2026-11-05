@@ -195,11 +195,7 @@ namespace P1.Core
             _finalA = 0f;
             _finalB = 0f;
             SetPhase(Phase.Countdown);
-
-            if (AudioManager.Instance != null && AudioManager.Instance.matchStartClip != null)
-            {
-                AudioManager.Instance.PlayOne(AudioManager.Instance.matchStartClip, 0.6f, 0.98f, 1.02f);
-            }
+            // 赛前蓄势音由 AudioManager 在 PhaseChanged(Countdown) 统一播放，流程音只留一个出口。
         }
 
         /// <summary>
@@ -236,11 +232,7 @@ namespace P1.Core
 
             _freeze = finishFreezeSeconds;
             SetPhase(Phase.Finished);
-
-            if (AudioManager.Instance != null && AudioManager.Instance.matchEndClip != null)
-            {
-                AudioManager.Instance.PlayOne(AudioManager.Instance.matchEndClip, 0.8f, 0.98f, 1.02f);
-            }
+            // 终场定格音由 AudioManager 在 PhaseChanged(Finished) 统一播放（含 BGM 闪避与淡出）。
         }
 
         private void SetPhase(Phase phase)

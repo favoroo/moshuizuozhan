@@ -6,6 +6,58 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-05 #06
+【Fixed: `WeaponReticleUI_OutOfInk_ShowsWarningAndEmptyToast` 单条跑绿、全量跑红】根因是**测试顺序污染**而非空墨逻辑：该用例不加载场景，但准星 `LateUpdate` 受 `MatchManager.InputAllowed` 门控，前序加载场景的用例（`MobileBombTouchPlayTests` 等）会留下停在 `Ready` 的 `MatchManager` → `InputAllowed=false` → 准星整帧早退、`_isOutOfInk` 永不更新。现用例开头调 `EnsureMatchInputAllowed()` 把残留实例推进到 `Playing`（无实例时直接返回）。涉及 `Tests/PlayMode/ReticlePlayModeTests.cs`。
+
+## 2026-11-05 #05
+【Fixed: `FontCoverageTests.SourceLiterals_AreCovered_ByLedgers` 报「若抑」未收录】根因：`OcclusionFader` 新增迟滞参数的 `[Tooltip]` 是字符串字面量，扫描器会把它算上屏文案，而字集账本未同步。Tooltip 汉字在本项目一律进账本（该 Tooltip 其余 69 字均已在册），故跑 `python3 tools/font_charset.py` 后重跑菜单 `P1/画风/漫画风/0` 重烘正文图集（1330 字）。涉及 `tools/font_charset.txt`、`Art/Fonts/TMP/MiSans-*-SDF.asset`。
+
+## 2026-11-05 #04
+【Fixed: 海鸥港湾渡轮甲板涂地整片发暗/发黑、掩体边界线全丢】根因：掩体全部标记了 BatchingStatic，静态合批把顶点烘成世界坐标后 `positionOS` 就是世界坐标、`UNITY_MATRIX_M` 退化为单位阵，`(0.5 - abs(positionOS)) * 列长` 的盒体距离恒为负 → `edgeLine=1` 把整张表面涂成 `_EdgeLineColor`（橙墨被压成暗砖色，甲板读作"巨大黑墨块"）。
+现由 `ArenaGeometryBuilder.CreateBox` 把每个盒子的世界 AABB 烘进 uv2/uv3/uv4（UV 通道合批后保留），`ObstacleDitherLit` 用 `positionWS` 与该 AABB 求"到最近棱边的米距离"，AABB 全零时跳过（防退化盒体整面涂黑）；场景已用菜单 `P1/关卡与地图/生成新地图：海鸥港湾` 重建。涉及 `Shaders/ObstacleDitherLit.shader`、`Scripts/Environment/ArenaGeometryBuilder.cs`、`Tests/EditMode/ObstacleEdgeLineRegressionTests.cs`。
+
+## 2026-11-05 #03
+【Fixed: 场地地面横向白色条带闪烁（z-fighting）】根因：`ArenaDecorationBuilder.BuildMarinaScenery` 的码头大平台顶板（47.6×63.6，顶面 y=0）与竞技场地面（40×56，顶面 y=0）**整片完全共面**，相机移动时两块面片交替抢占深度，在场内渲染出整片横向白色条带（不是掩体网点的逐帧闪变，`OcclusionFader` 那条是另一处独立问题）。现把顶板拆成**四条只覆盖场外 3.8m 的环带**（顶面仍保持 y=0 与场地齐平）；当前海鸥港湾场景中的 `Backdrop_Matte` 同步下沉 3cm 并已保存。涉及 `Scripts/Editor/ArenaDecorationBuilder.cs`。
+
+## 2026-11-05 #02
+【Fixed: 掩体边缘网点 dither 逐帧闪变】根因：`OcclusionFader._targetAlpha` 直接跟随球探针当帧命中结果，第三人称相机下探针在掩体边缘逐帧命中/未命中，目标透明度在 0.35↔1.0 间以帧率翻转，Screen-Door 网点随之闪变（60% 帧翻转）。现加 0.25s 遮挡保持窗口（迟滞）：最后一次命中后继续淡化，边缘抖动不再传到网点；仿真验证目标翻转 23 次→0 次、alpha 标准差 0.25→0.049。涉及 `Scripts/Environment/OcclusionFader.cs`。
+
+## 2026-11-05 #01
+【Fixed: 海鸥港湾旋转视角时甲板贴图闪烁 + 渡轮/水面配色精修】根因有三：① 渡轮甲板/船壳挂了 `OcclusionFader`，第三人称相机旋转时遮挡球探针擦到甲板，Bayer 4×4 屏幕空间 dither 网点在转动中动态跳变；② 甲板与坡道上挂了 2mm 浮动贴地盒（车道虚线/踏步/警示条），在斜视远视角下与底面产生 Z-Fighting 深度冲突；③ 木栈道法线图在板缝中心存在 ±0.85 的不连续阶跃跳变，镜头转动时光影走样。
+现彻底移除渡轮上的 `OcclusionFader` 与全部浮动贴片，`TopDownOcclusionManager` 过滤脚底平台；木栈道法线改平滑连续凹槽斜率（槽心归零）；贴图开启 Trilinear 与 8× 各向异性过滤；渡轮与水面配色对齐 INKWAVE Halyard（象牙白客舱、海军蓝船身、蓝灰钢甲板、薄荷青浅水与柔和天光）。
+涉及 `Scripts/Environment/{HarborGeometryBuilder,ArenaLayoutHarbor,TopDownOcclusionManager}.cs`、`Scripts/Editor/{ProjectScaffolder,HarborGroundTextureBaker,ToonStyleInstaller}.cs`、`Shaders/InkGround.shader`。
+
+## 2026-11-04 #49
+【Fixed: 地图切回海鸥港湾后，选枪抽屉在屏幕左缘残留一条白纸黑边竖条】根因：场景里烘焙的开发期开关 `MobileTouchUI.forceShowInEditor`（GullHarbor=1、货柜码头=0）让 `UITypography.IsMobileLike` 在桌面编辑器里为真，首页整屏按移动端度量排版；切图时平台观感在运行中翻转，而 `WeaponSelectView.SyncHomeLayout` 只重算字段——DrawerPanel 仍是最初构建的宽度（移动端 1574），收起位移却按桌面 1204 算，位移小于宽度 → 左缘露出约 330 宽的一截抽屉。
+现删除该开关（需要预览触屏直接勾 `showTouchUiInEditor`），并让 `SyncHomeLayout` 在度量变化时整棵重建并保留选中武器/抽屉开合（重建后直接落到目标 X，不插值滑入）；顺带修 `ApplyPlatformMetrics` 首次调用不初始化度量会建出 0 宽抽屉（被既有 `WeaponSelectView_LoadoutCard_*` 断言抓住）。
+涉及 `Scripts/UI/{MobileTouchUI,WeaponSelect/WeaponSelectView}.cs`、`Tests/PlayMode/WeaponSelectPlayTests.cs`。
+
+## 2026-11-04 #48
+【新地图「海鸥港湾 / GULL HARBOR」替换潮汐货站】删除 `KelpTerminal` 场景与 `ArenaLayoutKelp`/`KelpTerminalGeometryBuilder`/`ArenaStyle_KelpTerminal`/`Mat_KT_*`；新图复刻 INKWAVE `halyard`：中央渡轮（甲板 1.5m，只有南北两条登船坡道）+ 南北浅湾水线（可行走、无碰撞，用矩形禁区从计分剔除）+ 东西木栈道 + 船坞拖船，40×56 玩法常量仍复用 `ArenaLayoutV2`。画风档 `ArenaStyle_GullHarbor` + `Mat_GH_*` + `HarborGroundTextureBaker`（2048 木板/码头 albedo + 1024 N/RMO）+ 港湾远景（`ArenaStyleSO.backdropTheme`）。
+两个坑：① 新建 `ObstacleDitherLit` 材质必须逐材质调 `ToonStyleInstaller.ApplyStyleToMaterial` **并挂 `_SurfaceRMO`**——RMO 为空时 AO 被压到 0.35，整块只剩三成亮度（暖木色×冷阴影读作「酒红塑料」）；② 整块盖板式强调色会把客舱/加油亭屋顶刷成深红，压顶改四边压条。
+涉及 `Scripts/Environment/{ArenaLayoutHarbor,HarborGeometryBuilder}.cs`、`Scripts/Editor/{ProjectScaffolder,HarborGroundTextureBaker,ArenaDecorationBuilder,ToonStyleInstaller}.cs`、`Scripts/Ink/InkSurfaceController.cs`、`Scripts/UI/MapCatalogService.cs`。
+
+## 2026-11-04 #47
+【空墨按手雷键改为「按下即拒 + 空墨提示」，不再进入瞄准】原实现空墨也能按住 E 进入瞄准并显示变灰的弹道预览，松手才被拒；现在 `SubBombThrowArbiter.Advance` 新增 `hasInkForThrow`（默认 true 保持旧调用兼容），墨水 < `bombInkCost` 时按下沿返回 `DeniedByInk` 且不置 `IsAiming`，`PlayerController` 复用 `WeaponController.ReportEmptyFeedback()`（空打音效 + 准星红叉/震颤 + 「弹药耗尽」toast）并把拒绝原因记为 `NotEnoughInk`。
+冷却中若墨水已回够（≥ 55）仍按旧行为进入瞄准（灰线 + 松手冷却反馈），墨水不足时空墨门槛优先；`SubBombDenyStamp`/按钮闪红语义不变。空墨被拒后按住不放不会因回墨自动补瞄准，必须重新按。涉及 `Scripts/Player/{SubBombThrowArbiter,PlayerController}.cs`、`Scripts/Weapons/WeaponController.cs`、`Tests/{EditMode/SubBombThrowArbiterTests,PlayMode/MobileBombTouchPlayTests}.cs`。
+
+## 2026-11-04 #46
+【墨水经济收紧：单发 +15% / 潜墨 34/s / 手雷恢复 55 墨】原数值几乎逐项照抄 INKWAVE（小枪 0.95@10 发/秒、潜墨 42/s、手雷 0 墨），满罐输出 10.5s : 补给 2.4s = 4.4:1，墨水几乎不构成资源；现小枪 1.1、双枪 1.0、加特林 0.7、泼桶 8.6、爆破 10.4、蓄力狙 21、滚筒 1.25/米、挥击 10.5，潜墨回墨 42→34/s、开枪后回墨延迟 0.25→0.5s → 满罐约 8.5~9.5s 输出 / 2.9s 回满（约 3:1）。手雷改 55 墨 + 6s 冷却双重限制，空墨投不出并补空打音效/准星戳记（旧版 0 墨的静默失败是刻意改的，恢复耗墨必须同时补反馈）。
+数值落在 `PlayerConfig.asset` 与 7 份武器 `.asset`：重跑菜单 6/7 会整份重刷其它调参，日常改墨水走新菜单 `P1/构建/15. 同步墨水资源数值 (Ink Economy)`（只写耗墨/回墨字段，PlayMode 需同步改硬编码断言）。涉及 `Scripts/{Player/PlayerConfigSO,Player/InkCharacterMotor,Weapons/WeaponConfigSO,Weapons/WeaponController}.cs`、`Tests/{EditMode,PlayMode}/*Ink*|*Weapon*|*Bomb*|*Motor*`。
+
+## 2026-11-04 #45
+【Fixed: 场外码头/边界墙顶被涂成「一条一条」墨色】根因：场外 `Backdrop_Matte`（74x84m 码头基座）等几何同样走 PropLit/ObstacleDitherLit 的顶面墨迹采样，世界 XZ 落在图集外时被 `saturate` 钳到边界纹素，整片场外沿边界拉伸成墨色条纹。现由 `InkSurfaceController` 推送 `_GlobalInkPlayableRect`（40x56 计分场），`InkSurfaceOverlay.hlsl` / `InkGround.shader` 对场外片元直接判无墨（地面侧须在亚纹素修正后再清一次 `amtEff`，否则邻域采样会把边界覆盖率带回来）；副作用：边界墙顶不再受墨。
+涉及 `Scripts/Ink/{InkSurfaceController,InkGridConfigSO}.cs`、`Shaders/{InkSurfaceOverlay.hlsl,InkGround.shader}`、`Tests/EditMode/InkMapBoundsPaintTests.cs`。
+
+## 2026-11-04 #44
+【去掉全部播报员语音，开赛/终场改用音效】删除 `Audio/Voice` 的 6 条语音与 `AudioManager` 语音通道，新增独立 `MatchCue` 通道（优先级 16，不会被战斗 SFX 抢占）：墨幕入场播 0.58s 蓄势扫频、Playing 首帧播 GO 冲击号角、终场播定格闷响 + 裁判双哨、一分钟提示改 `one_minute_1`、旧 3-2-1 改 `countdown_tick_1`；`tools/bake_sfx.py` 重写了 `match_start` / `go_horn` / `match_end` 三条音色。
+主场景 `AudioManager` 的 6 个语音字段引用已随 `P1/音频/1` 重新绑定清除，`goCueClip` / `oneMinuteCueClip` 已写入场景；运行时仍有 `EnsureRuntimeClips` / `EnsureEditorClips` 按文件名兜底，重建场景时 `ProjectScaffolder.WireAudioClips` 也会写入。
+涉及 `Scripts/Core/{AudioManager,AudioMixConfigSO,MatchManager}.cs`、`Scripts/Editor/{AudioSetupTools,ProjectScaffolder}.cs`、`tools/bake_sfx.py`、`Tests/EditMode/AudioSfxTests.cs`。
+
+## 2026-11-04 #43
+【Fixed: 手机端切图不生效 / 开始游戏无反应（真根因：APK 里没有第二张场景）】`BuildAndProfilerSuite` 与 `TapTapBuildSuite` 的 `BuildPlayerOptions.scenes` 只传了 `MainScenePath`，出包只有 `level0`；编辑器两图都在 Build Settings 所以测不出来，真机上 `LoadMap` 必然拿不到 Build Index → 浮层走失败分支关闭、选中态不变、开赛静默失败。现新增 `MapCatalogService.AllScenePaths()` + `BuildAndProfilerSuite.MapScenePaths()` 供所有出包入口使用，`EnsureSceneInBuildSettings` 覆盖全部地图场景；重出 APK 已确认含 `level0`(PhaseA)+`level1`(Kelp)。
+浮层改为切换只写存档、原地刷新「当前」角标与文案（不再自动关闭），关窗后首页地图卡同步换图；「开始游戏」发现图不一致时先切场景，再由 `MapStartupRouter.RequestAutoStart()` 自动开赛；安装包缺场景时在首页地图卡显示可见错误而非静默失败。切图守卫改按 `AsyncOperation.isDone` 判定（8s 超时才视为过期），手机慢加载不会在途中反复重发 `LoadSceneAsync(Single)` 把自己打断。涉及 `Scripts/Editor/{BuildAndProfilerSuite,TapTapBuildSuite}.cs`、`Scripts/UI/{MapCatalogService,MapSelectOverlay,MapStartupRouter,MatchFlowUI}.cs`、`Tests/EditMode/MapCatalogTests.cs`。
+
 ## 2026-11-04 #42
 【发布 v0.1.25（双端 Release）】含 #39–#41；版本三方一致 0.1.25 / versionCode 125；APK `build/moshuizuozhan-v0.1.25-arm64-v8a.apk`（65.4 MB）。
 

@@ -17,6 +17,9 @@ TEXTURE2D(_GlobalInkAtlasTex);
 
 float4 _GlobalInkMapOriginXZ;
 float4 _GlobalInkTexelSize;
+// 计分场地矩形 (minX, minZ, sizeX, sizeZ)：由 InkSurfaceController 推送。
+// 场地之外（场外码头、远景堆场）虽然也使用带顶面墨迹的着色器，但不显墨。
+float4 _GlobalInkPlayableRect;
 half4  _GlobalTeamAColor;
 half4  _GlobalTeamBColor;
 float  _GlobalWetnessFactor;
@@ -219,6 +222,20 @@ bool P1EvaluateTopInk(
     half upness = smoothstep(0.28, 0.68, normalWS.y);
     if (upness <= 0.002)
         return false;
+
+    // 计分场地之外不显墨：场外码头/远景堆场也挂本函数（PropLit 等），
+    // 图集外坐标经 saturate 会固定采到边界纹素，整片场外被拉伸成"一条一条"的墨色。
+    // 矩形未推送（size=0，编辑器预览等）时跳过屏蔽，保持旧行为。
+    if (_GlobalInkPlayableRect.z > 0.001 && _GlobalInkPlayableRect.w > 0.001)
+    {
+        float2 playMin = _GlobalInkPlayableRect.xy;
+        float2 playMax = playMin + _GlobalInkPlayableRect.zw;
+        if (positionWS.x < playMin.x || positionWS.x > playMax.x ||
+            positionWS.z < playMin.y || positionWS.z > playMax.y)
+        {
+            return false;
+        }
+    }
 
     float2 mapOrigin = _GlobalInkMapOriginXZ.xy;
     float2 mapSize = max(float2(0.001, 0.001), _GlobalInkMapOriginXZ.zw);

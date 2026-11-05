@@ -37,5 +37,6 @@ Material:
     - _DeepColor: {r: 0.0048963088, g: 0.07323897, b: 0.16264722, a: 1}
     - _HorizonColor: {r: 0.47699985, g: 0.67385954, b: 0.78741235, a: 1}
     - _ShallowColor: {r: 0.033104762, g: 0.26327342, b: 0.34239164, a: 1}
+    - _ShoreHalfExtents: {r: 26, g: 34, b: 0, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

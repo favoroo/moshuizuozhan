@@ -23,6 +23,11 @@ namespace P1.Environment
         [Tooltip("淡入淡出速度 (越大过渡越快)")]
         [SerializeField] private float fadeSpeed = 7.0f;
 
+        [Header("抖动迟滞")]
+        [Tooltip("失去视线后继续保持淡化的时间（秒）。球探针在掩体边缘逐帧命中/未命中时，"
+                 + "若目标透明度直接跟随瞬时检测，网点 dither 会以帧率闪变；0.25s 保持窗口抑制该抖动。")]
+        [SerializeField] private float occlusionHoldSeconds = 0.25f;
+
         [Header("角色周围视野轮廓")]
         [Tooltip("角色周围额外镂空轮廓半径")]
         [SerializeField] private float focusRadius = 2.2f;
@@ -41,6 +46,7 @@ namespace P1.Environment
         private float _targetFocusWeight = 0.0f;
         private Vector3 _focusWorldPos;
         private bool _isOccludingThisFrame;
+        private float _timeSinceLastOccluded = 999f;
 
         private static readonly int DitherAlphaProp = Shader.PropertyToID("_DitherAlpha");
         private static readonly int FocusPosProp = Shader.PropertyToID("_FocusPos");
@@ -99,6 +105,7 @@ namespace P1.Environment
         {
             _isOccludingThisFrame = true;
             _focusWorldPos = characterWorldPos;
+            _timeSinceLastOccluded = 0f;
         }
 
         /// <summary>
@@ -106,8 +113,13 @@ namespace P1.Environment
         /// </summary>
         public void EvaluateStep(float deltaTime)
         {
-            _targetAlpha = _isOccludingThisFrame ? minAlpha : 1.0f;
-            _targetFocusWeight = _isOccludingThisFrame ? 1.0f : 0.0f;
+            // 迟滞：最后一次命中后 occlusionHoldSeconds 内继续视为遮挡，
+            // 避免球探针在掩体边缘逐帧命中/未命中导致目标透明度来回翻转、网点闪烁。
+            _timeSinceLastOccluded += deltaTime;
+            bool occluded = _isOccludingThisFrame || _timeSinceLastOccluded < occlusionHoldSeconds;
+
+            _targetAlpha = occluded ? minAlpha : 1.0f;
+            _targetFocusWeight = occluded ? 1.0f : 0.0f;
 
             float prevAlpha = _currentAlpha;
             _currentAlpha = Mathf.MoveTowards(_currentAlpha, _targetAlpha, fadeSpeed * deltaTime);
@@ -209,6 +221,7 @@ namespace P1.Environment
             _currentFocusWeight = 0.0f;
             _targetFocusWeight = 0.0f;
             _isOccludingThisFrame = false;
+            _timeSinceLastOccluded = 999f;
             RestoreOpaqueProperties();
         }
     }

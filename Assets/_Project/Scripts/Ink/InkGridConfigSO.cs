@@ -75,8 +75,8 @@ namespace P1.Ink
         [Range(0.1f, 2f)]
         public float atlasMipIntervalSeconds = 0.5f;
 
-        [Tooltip("墨迹图集向场地四周外扩的可视边距（米）：边界墙顶、场边沿等落在 40x56 计分网格之外、" +
-                 "但玩家仍能打到的表面靠它才能受墨。0 = 使用默认 1.5m；计分网格本身不变")]
+        [Tooltip("墨迹图集向场地四周外扩的边距（米）：避免场地边界处的双线性过滤/写入被图集边缘截断。" +
+                 "可见受墨范围仍是 40x56 计分场 —— 场外表面（场外码头、边界墙顶）不再显墨。0 = 默认 1.5m；计分网格本身不变")]
         [Range(0f, 4f)]
         public float atlasVisualMargin = 1.5f;
 

@@ -106,6 +106,8 @@ MonoBehaviour:
   splitToningStrength: 0.15
   decorationDensity: 1
   buildBackdrop: 1
+  backdropTheme: 0
+  buildWallBanners: 1
   postProcessingEnabled: 1
   inkProbeStrength: 1.15
   inkCoatStrength: 1.5

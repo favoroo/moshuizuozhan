@@ -401,7 +401,7 @@ namespace P1.UI
         {
             if (thresholdMarker == null) return;
 
-            // 手雷已与墨水脱钩（bombInkCost = 0）：刻度线无意义，直接隐藏，避免条首出现误导性红线
+            // 手雷不耗墨（bombInkCost <= 0，如自定义配置）时刻度线无意义，直接隐藏，避免条首出现误导性红线
             bool visible = _threshold01 > 0.001f;
             if (thresholdMarker.gameObject.activeSelf != visible)
             {

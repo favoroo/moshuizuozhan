@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -7,7 +8,8 @@ namespace P1.UI
 {
     /// <summary>
     /// 首页地图选择浮层（运行时装配，不改场景 YAML）：
-    /// 两张地图的大选项卡 + 程序化小预览；点另一张 = 写存档并真实加载对应场景。
+    /// 两张地图的大选项卡 + 实景缩略图；点另一张 = 写存档并在浮层内就地刷新选中态，
+    /// 不重载场景、也不自动关闭——真正载入发生在「开始游戏」时（先切图再自动开赛）。
     /// 静态 <see cref="IsOpen"/> / <see cref="MenuInputConsumedThisFrame"/> 给开赛快捷键、
     /// 暂停菜单与武器抽屉做同帧输入仲裁。
     /// </summary>
@@ -26,7 +28,20 @@ namespace P1.UI
         private int _lastScreenHeight;
         private Rect _lastSafeArea;
 
-        public static MapSelectOverlay Show(RectTransform host, UIThemeSO theme)
+        private readonly List<GameObject> _cardRoots = new List<GameObject>();
+        private RectTransform _cardsPanel;
+        private MapSelectMetrics _cardsMetrics;
+        private bool _cardsMobile;
+        private Vector2 _cardsPanelSize;
+        private float _cardsContentTop;
+        private float _cardsContentHeight;
+        private bool _rebuildCardsQueued;
+        private string _statusMessage;
+        private Color _statusColor = ComicStyle.Ink;
+        private TextMeshProUGUI _footerNote;
+        private System.Action _onClosed;
+
+        public static MapSelectOverlay Show(RectTransform host, UIThemeSO theme, System.Action onClosed = null)
         {
             if (host == null) return null;
 
@@ -47,6 +62,7 @@ namespace P1.UI
             var overlay = go.AddComponent<MapSelectOverlay>();
             overlay._host = host;
             overlay._theme = UIThemeSO.Resolve(theme);
+            overlay._onClosed = onClosed;
             overlay.Rebuild();
             overlay.CacheGeometry();
             _instance = overlay;
@@ -75,6 +91,22 @@ namespace P1.UI
         {
             if (_instance == this) _instance = null;
             ClearSelection();
+
+            System.Action onClosed = _onClosed;
+            _onClosed = null;
+            if (onClosed != null)
+            {
+                // 关窗回调只做首页换肤/刷新，失败不该把浮层卡在半关状态。
+                try
+                {
+                    onClosed();
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogWarning("[MapSelect] 关闭回调失败：" + ex.Message);
+                }
+            }
+
             if (gameObject != null)
             {
                 gameObject.SetActive(false);
@@ -94,6 +126,14 @@ namespace P1.UI
 
         private void Update()
         {
+            // 选中态切换安排在下一帧重建卡片：按钮的 onClick 还在派发时销毁自身节点不安全。
+            if (_rebuildCardsQueued)
+            {
+                _rebuildCardsQueued = false;
+                RebuildCards();
+                return;
+            }
+
             if (Screen.width == _lastScreenWidth && Screen.height == _lastScreenHeight &&
                 Screen.safeArea == _lastSafeArea)
             {
@@ -263,9 +303,19 @@ namespace P1.UI
         private void BuildCards(RectTransform panel, MapSelectMetrics m, bool mobile, Vector2 panelSize,
             float contentTop, float contentHeight)
         {
+            _cardsPanel = panel;
+            _cardsMetrics = m;
+            _cardsMobile = mobile;
+            _cardsPanelSize = panelSize;
+            _cardsContentTop = contentTop;
+            _cardsContentHeight = contentHeight;
+            _cardRoots.Clear();
+
             float innerWidth = panelSize.x - m.Padding * 2f;
             float cardWidth = (innerWidth - m.CardGap) * 0.5f;
-            MapDefinition active = MapCatalogService.ActiveOrSelected;
+            // 选中态以「存档里的选择」为准，而不是当前场景：选完图浮层不重载场景，
+            // 但玩家必须立刻看到选中态已经换到另一张卡上。
+            MapDefinition active = MapCatalogService.Selected;
 
             for (int i = 0; i < MapCatalogService.Maps.Count; i++)
             {
@@ -276,12 +326,33 @@ namespace P1.UI
             }
         }
 
+        /// <summary>只重建卡片区：保留遮罩、标题与页脚，避免整块浮层重播入场动画。</summary>
+        private void RebuildCards()
+        {
+            if (_cardsPanel == null)
+            {
+                Rebuild();
+                return;
+            }
+
+            for (int i = 0; i < _cardRoots.Count; i++)
+            {
+                GameObject root = _cardRoots[i];
+                if (root == null) continue;
+                root.SetActive(false);
+                Destroy(root);
+            }
+            _cardRoots.Clear();
+            BuildCards(_cardsPanel, _cardsMetrics, _cardsMobile, _cardsPanelSize, _cardsContentTop, _cardsContentHeight);
+        }
+
         private void BuildCard(RectTransform panel, MapSelectMetrics m, bool mobile, MapDefinition map,
             bool selected, Vector2 topLeft, Vector2 size)
         {
             var go = new GameObject("Card_" + map.Id, typeof(RectTransform), typeof(CanvasRenderer),
                 typeof(UIInkShapeGraphic), typeof(Button));
             go.transform.SetParent(panel, false);
+            _cardRoots.Add(go);
             var card = (RectTransform)go.transform;
             card.anchorMin = new Vector2(0f, 1f);
             card.anchorMax = new Vector2(0f, 1f);
@@ -436,23 +507,41 @@ namespace P1.UI
             UISoundBinder.EnsureBinder(button);
         }
 
+        /// <summary>
+        /// 卡片 / 「切换到此图」：只保存选择并在浮层内就地换选中态，不重载场景、也不关闭浮层。
+        /// 场景载入交给「开始游戏」：选中的图与当前场景不一致时先切图再自动开赛，
+        /// 玩家能先看到「已选择」再自己关掉浮层。
+        /// </summary>
         private void OnCardClicked(MapDefinition map)
         {
             if (map == null) return;
 
-            MapDefinition active = MapCatalogService.ActiveOrSelected;
-            if (map.Id == active.Id)
+            if (map.Id == MapCatalogService.Selected.Id)
             {
-                MapCatalogService.TrySelect(map.Id);
-                Close();
+                SetStatus($"「{map.DisplayName}」已是当前选择", ComicStyle.WithAlpha(ComicStyle.Ink, 0.62f));
+                return;
+            }
+
+            if (!MapCatalogService.CanLoadMap(map))
+            {
+                // 老安装包只打了主场景：宁可不改存档，也不能让玩家选到一张打不开的图。
+                SetStatus($"安装包缺少「{map.DisplayName}」场地，请更新客户端", ComicStyle.Red);
+                Debug.LogError($"[MapSelect] 安装包中找不到地图场景：{map.ScenePath}");
                 return;
             }
 
             MapCatalogService.TrySelect(map.Id);
-            if (!MapCatalogService.LoadMap(map))
-            {
-                Close();
-            }
+            SetStatus($"已选择「{map.DisplayName}」· 开始游戏时载入该场地", map.Accent);
+            _rebuildCardsQueued = true;
+        }
+
+        private void SetStatus(string message, Color color)
+        {
+            _statusMessage = message;
+            _statusColor = color;
+            if (_footerNote == null) return;
+            _footerNote.text = message;
+            _footerNote.color = color;
         }
 
         private void BuildFooter(RectTransform panel, MapSelectMetrics m, bool mobile, Vector2 panelSize)
@@ -460,13 +549,16 @@ namespace P1.UI
             float noteFont = UITypography.FontSnapped(m.NoteFont);
             float noteTop = panelSize.y - m.FooterHeight + (m.FooterHeight - noteFont * 1.5f) * 0.5f;
 
-            CreateText(panel, "FooterNote", "选择即保存 · 切换会重新载入场地", noteFont, false,
-                ComicStyle.WithAlpha(ComicStyle.Ink, 0.62f),
+            bool hasStatus = !string.IsNullOrEmpty(_statusMessage);
+            _footerNote = CreateText(panel, "FooterNote",
+                hasStatus ? _statusMessage : "选择即保存 · 开始游戏时载入场地",
+                noteFont, false,
+                hasStatus ? _statusColor : ComicStyle.WithAlpha(ComicStyle.Ink, 0.62f),
                 new Vector2(m.Padding, noteTop),
                 new Vector2(panelSize.x * 0.62f, noteFont * 1.6f),
                 TextAlignmentOptions.MidlineLeft, 0.5f, FontStyles.Bold);
 
-            string closeHint = mobile ? "点击空白处关闭" : "ESC / 点击空白处关闭";
+            string closeHint = mobile ? "点 × 或空白处关闭" : "ESC / 点 × / 空白处关闭";
             CreateText(panel, "FooterCloseHint", closeHint, noteFont, false,
                 ComicStyle.WithAlpha(ComicStyle.Ink, 0.62f),
                 new Vector2(m.Padding, noteTop),

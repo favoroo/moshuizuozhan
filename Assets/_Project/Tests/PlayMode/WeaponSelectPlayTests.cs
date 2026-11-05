@@ -449,5 +449,76 @@ namespace P1.Tests
             Assert.AreEqual(Vector2.zero, resultRt.anchorMin, "ResultPanel 必须铺满全屏，anchorMin 为 0");
             Assert.AreEqual(Vector2.one, resultRt.anchorMax, "ResultPanel 必须铺满全屏，anchorMax 为 1");
         }
+
+        /// <summary>
+        /// 运行中平台观感翻转（桌面 ↔ 移动端，例如从强制触屏预览的场景切回桌面场景）时，
+        /// 抽屉必须按新度量整棵重建：只更新字段会让 DrawerPanel 保持旧宽度、收起位移却按新宽度算，
+        /// 屏幕左缘残留一条白纸+黑边抽屉（回归：选枪抽屉 1574 宽 vs 位移 -1244）。
+        /// 本用例自带视图与触屏组件，不依赖当前打开的场景。
+        /// </summary>
+        [UnityTest]
+        [Category("UI")]
+        public IEnumerator WeaponSelectView_PlatformFlip_RebuildsDrawerAtNewMetrics()
+        {
+            yield return null;
+
+            var touch = Object.FindAnyObjectByType<MobileTouchUI>();
+            if (touch == null)
+            {
+                var touchGo = new GameObject("TestMobileTouchUI");
+                _createdObjects.Add(touchGo);
+                touch = touchGo.AddComponent<MobileTouchUI>();
+            }
+
+            var view = WeaponSelectView.Instance;
+            if (view == null)
+            {
+                var viewGo = new GameObject("TestWeaponSelectView", typeof(RectTransform), typeof(Canvas));
+                _createdObjects.Add(viewGo);
+                view = viewGo.AddComponent<WeaponSelectView>();
+
+                var configs = new WeaponConfigSO[WeaponSelectMath.WeaponCount];
+                for (int i = 0; i < configs.Length; i++)
+                {
+                    configs[i] = CreateConfig(WeaponSelectMath.IndexToKind(i), "TestWeapon" + i);
+                }
+                view.Configure(null, configs, null, 0);
+                yield return null;
+            }
+
+            var drawer = view.transform.Find("SafeAreaContainer/DrawerPanel") as RectTransform;
+            Assert.IsNotNull(drawer, "抽屉面板应存在");
+            Assert.IsFalse(view.IsDrawerOpen, "默认收起，便于验证屏幕边缘是否残留");
+
+            bool original = touch.ShowTouchUiInEditor;
+            try
+            {
+                touch.ShowTouchUiInEditor = true;
+                yield return null;
+                yield return null;
+
+                Assert.IsTrue(view.IsMobileLayout, "打开触屏模拟后应按移动端度量排版");
+                var mobileDrawer = view.transform.Find("SafeAreaContainer/DrawerPanel") as RectTransform;
+                Assert.AreEqual(MenuLayoutMath.Drawer(true).Width, mobileDrawer.sizeDelta.x, 0.5f,
+                    "翻转后抽屉必须换成移动端宽度");
+                Assert.Less(mobileDrawer.anchoredPosition.x + mobileDrawer.sizeDelta.x, -0.5f,
+                    "收起的抽屉必须整块退出画布左缘，不得残留竖条");
+
+                touch.ShowTouchUiInEditor = false;
+                yield return null;
+                yield return null;
+
+                Assert.IsFalse(view.IsMobileLayout, "关掉触屏模拟后应回到桌面度量");
+                var desktopDrawer = view.transform.Find("SafeAreaContainer/DrawerPanel") as RectTransform;
+                Assert.AreEqual(MenuLayoutMath.Drawer(false).Width, desktopDrawer.sizeDelta.x, 0.5f,
+                    "翻转回来抽屉必须换回桌面宽度");
+                Assert.Less(desktopDrawer.anchoredPosition.x + desktopDrawer.sizeDelta.x, -0.5f,
+                    "切回桌面后同样不得在屏幕左缘残留抽屉");
+            }
+            finally
+            {
+                touch.ShowTouchUiInEditor = original;
+            }
+        }
     }
 }

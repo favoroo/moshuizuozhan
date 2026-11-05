@@ -226,7 +226,7 @@ namespace P1.Tests
             strategy.OnTriggerHeld(aim, 1f / 60f, host);
 
             Assert.IsEmpty(host.Shots, "挥击前摇期间不应立即出弹");
-            Assert.AreEqual(100f - 9f, host.CurrentInk, 0.01f, "按下瞬间扣除一次挥击墨水");
+            Assert.AreEqual(100f - 10.5f, host.CurrentInk, 0.01f, "按下瞬间扣除一次挥击墨水");
 
             strategy.Tick(0.25f, true, aim, host);
 
@@ -280,7 +280,7 @@ namespace P1.Tests
             Assert.AreEqual(0f, sweep.From.z, 0.001f);
             Assert.AreEqual(0.5f, sweep.To.z, 0.001f);
 
-            Assert.AreEqual(100f - 1.1f * 0.5f, host.CurrentInk, 0.01f, "推地按 1.1 墨/米计费");
+            Assert.AreEqual(100f - 1.25f * 0.5f, host.CurrentInk, 0.01f, "推地按 1.25 墨/米计费");
 
             strategy.Tick(1f / 60f, false, aim, host);
             Assert.IsFalse(strategy.IsRolling, "松开扳机应停止推地");
@@ -370,7 +370,7 @@ namespace P1.Tests
             Assert.AreEqual(27f, beam.Range, 0.01f, "满蓄力射程 27m");
             Assert.IsTrue(beam.Pierce, "光柱应贯穿");
             Assert.AreEqual(1f, beam.Intensity01, 0.001f);
-            Assert.AreEqual(100f - 18f, host.CurrentInk, 0.01f, "满蓄力消耗 18 墨");
+            Assert.AreEqual(100f - 21f, host.CurrentInk, 0.01f, "满蓄力消耗 21 墨");
             Assert.IsFalse(strategy.IsCharging);
         }
 
@@ -397,14 +397,14 @@ namespace P1.Tests
         public void Charger_InkCapLimitsChargeToAvailableInk()
         {
             WeaponConfigSO config = CreateConfig(WeaponKind.Charger);
-            var host = new FakeHost { Config = config, CurrentInk = 9f };
+            var host = new FakeHost { Config = config, CurrentInk = 10.5f };
             var strategy = new ChargerWeaponStrategy(config);
             WeaponAim aim = WeaponAim.FromDirection(Vector3.forward, new Vector3(0f, 0f, 10f));
 
             strategy.OnTriggerHeld(aim, 1f / 60f, host);
             strategy.Tick(1f, true, aim, host);
 
-            Assert.AreEqual(0.5f, strategy.Charge01, 0.01f, "只有 9 墨时最多蓄到 50%");
+            Assert.AreEqual(0.5f, strategy.Charge01, 0.01f, "只有 10.5 墨（半罐）时最多蓄到 50%");
 
             strategy.Tick(1f / 60f, false, aim, host);
             Assert.AreEqual(1, host.Beams.Count);
@@ -452,7 +452,7 @@ namespace P1.Tests
             Assert.AreEqual(WeaponKind.Dualies, dualies.weaponKind);
             Assert.AreEqual(0.083f, dualies.fireInterval, 0.001f, "双枪 12 发/秒");
             Assert.AreEqual(30f, dualies.damage, 0.001f, "双枪单发 30 伤");
-            Assert.AreEqual(7f, dualies.dualiesRollInkCost, 0.001f, "翻滚耗墨 7");
+            Assert.AreEqual(8f, dualies.dualiesRollInkCost, 0.001f, "翻滚耗墨 8");
             Assert.AreEqual(2.8f, dualies.dualiesRollDistance, 0.001f, "翻滚距离 2.8m");
             Assert.AreEqual(0.5f, dualies.dualiesTurretDuration, 0.001f, "站桩架枪 0.5s");
             Assert.AreEqual(0.0664f, dualies.dualiesTurretFireInterval, 0.001f, "架枪射速提升 20%");
@@ -547,7 +547,7 @@ namespace P1.Tests
 
             Assert.IsTrue(rolled, "成功触发战术翻滚");
             Assert.AreEqual(1, strategy.RollsRemaining, "翻滚后剩余 1 次");
-            Assert.AreEqual(100f - 7f, host.CurrentInk, 0.01f, "翻滚消耗 7 墨水");
+            Assert.AreEqual(100f - 8f, host.CurrentInk, 0.01f, "翻滚消耗 8 墨水");
             Assert.IsTrue(strategy.IsRollingDodge, "处于翻滚状态");
 
             // 翻滚中无法开火
@@ -616,7 +616,7 @@ namespace P1.Tests
 
             // 刚按下扳机进入前摇，尚未生成弹丸
             Assert.IsTrue(strategy.OnTriggerHeld(aim, 1f / 60f, host));
-            Assert.AreEqual(100f - 7.5f, host.CurrentInk, 0.01f, "泼墨扣除 7.5 墨");
+            Assert.AreEqual(100f - 8.6f, host.CurrentInk, 0.01f, "泼墨扣除 8.6 墨");
             Assert.IsTrue(strategy.IsWindingUp, "进入 0.13s 前摇");
             Assert.IsEmpty(host.Shots, "前摇期间尚未泼出墨滴");
 
@@ -717,7 +717,7 @@ namespace P1.Tests
 
             bool fired = strategy.OnTriggerHeld(aim, 1f / 60f, host);
             Assert.IsTrue(fired);
-            Assert.AreEqual(100f - 9f, host.CurrentInk, 0.01f, "爆破枪消耗 9 墨水");
+            Assert.AreEqual(100f - 10.4f, host.CurrentInk, 0.01f, "爆破枪消耗 10.4 墨水");
             Assert.AreEqual(1, host.Shots.Count);
 
             WeaponShot shot = host.Shots[0];

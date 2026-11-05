@@ -30,7 +30,8 @@ namespace P1.Weapons
         [Tooltip("松开扳机后从满 Bloom 恢复到首发精度所需秒数")]
         public float bloomRecoverSeconds = 0.3f;
 
-        public float inkCostPerShot = 0.95f;
+        [Tooltip("单发耗墨（默认小枪 1.1 = 满罐 90 发 / 约 9 秒持续开火；INKWAVE 0.95 在 4v4 里消耗感偏弱，整体 +15%）")]
+        public float inkCostPerShot = 1.1f;
         public float projectileRadius = 0.18f;
 
         [Header("主武器弹道：重力与发射仰角反解")]
@@ -78,7 +79,7 @@ namespace P1.Weapons
         public float rollDamageInterval = 0.5f;
 
         [Tooltip("每推行 1 米消耗的墨水量")]
-        public float rollInkPerMeter = 1.1f;
+        public float rollInkPerMeter = 1.25f;
 
         [Tooltip("低于该墨水量时无法开始推地")]
         public float rollMinInkToStart = 0.5f;
@@ -116,7 +117,7 @@ namespace P1.Weapons
         public float flickWindup = 0.22f;
 
         [Tooltip("一次挥击消耗的墨水量")]
-        public float flickInkCost = 9f;
+        public float flickInkCost = 10.5f;
 
         [Tooltip("一次挥击抛出的墨滴数量（扇形）")]
         public int flickDrops = 9;
@@ -165,7 +166,7 @@ namespace P1.Weapons
         public float chargeDamageMax = 160f;
 
         [Tooltip("满蓄力消耗的墨水量（蓄力过程中按比例结算）")]
-        public float chargeInkCostFull = 18f;
+        public float chargeInkCostFull = 21f;
 
         [Tooltip("起手蓄力所需的最低墨水比例（0~1）")]
         [Range(0f, 1f)]
@@ -185,7 +186,7 @@ namespace P1.Weapons
 
         [Header("主武器：双枪 (Twinfin Dualies)")]
         [Tooltip("战术翻滚耗墨量")]
-        public float dualiesRollInkCost = 7f;
+        public float dualiesRollInkCost = 8f;
 
         [Tooltip("翻滚持续时间（秒）")]
         public float dualiesRollDuration = 0.3f;
@@ -263,9 +264,9 @@ namespace P1.Weapons
         public float splatlingMoveSpeedFiring = 3.4f;
 
         [Header("副武器：弹道手雷 (Splat Bomb，对齐 inkwave)")]
-        [Tooltip("投掷一次消耗的墨水量：默认 0 = 手雷与墨水脱钩，只受冷却限制（配置为正数时恢复扣墨行为）")]
-        public float bombInkCost = 0f;
-        [Tooltip("投掷冷却（秒）：默认 6s。手雷不再受墨水限制，用冷却防刷")]
+        [Tooltip("投掷一次消耗的墨水量：默认 55（约半罐），空墨投不出、准星弧线变灰；仍保留 6s 冷却防刷")]
+        public float bombInkCost = 55f;
+        [Tooltip("投掷冷却（秒）：默认 6s。与耗墨双重限制，防连续投雷")]
         public float bombCooldown = 6f;
         [Tooltip("（旧俯仰模型）出手初速（米/秒）：inkwave SUB.bomb.throwSpeed = 13.5。现行玩家链路按准星落点反解动态初速，本字段仅供旧 API/兼容测试")]
         public float bombThrowSpeed = 13.5f;
@@ -506,6 +507,8 @@ namespace P1.Weapons
             roller.weaponKind = WeaponKind.Roller;
             roller.displayName = "Swell Roller";
             roller.maxRange = 6f;
+            roller.rollInkPerMeter = 1.25f;
+            roller.flickInkCost = 10.5f;
             UnityEditor.EditorUtility.SetDirty(roller);
 
             // 3. Glint Charger (蓄力狙)
@@ -514,6 +517,7 @@ namespace P1.Weapons
             charger.weaponKind = WeaponKind.Charger;
             charger.displayName = "Glint Charger";
             charger.maxRange = charger.chargeRangeMax;
+            charger.chargeInkCostFull = 21f;
             UnityEditor.EditorUtility.SetDirty(charger);
 
             // 4. Twinfin Dualies (双枪)
@@ -547,7 +551,7 @@ namespace P1.Weapons
             config.displayName = "Twinfin Dualies";
             config.fireInterval = 0.083f;
             config.damage = 30f;
-            config.inkCostPerShot = 0.85f;
+            config.inkCostPerShot = 1.0f;
             config.projectileSpeed = 32f;
             config.maxRange = 11f;
             config.spreadMinDegrees = 0.5f;
@@ -561,7 +565,7 @@ namespace P1.Weapons
             config.endSplatRadiusMax = 0.85f;
             config.endSplatRadius = 0.75f;
 
-            config.dualiesRollInkCost = 7f;
+            config.dualiesRollInkCost = 8f;
             config.dualiesRollDuration = 0.3f;
             config.dualiesRollDistance = 2.8f;
             config.dualiesMaxRolls = 2;
@@ -578,7 +582,7 @@ namespace P1.Weapons
             config.displayName = "Tidebucket Slosher";
             config.fireInterval = 0.62f;
             config.damage = 70f;
-            config.inkCostPerShot = 7.5f;
+            config.inkCostPerShot = 8.6f;
             config.projectileSpeed = 15f;
             config.projectileGravity = 22f;
             config.maxRange = 9.5f;
@@ -604,7 +608,7 @@ namespace P1.Weapons
             config.displayName = "Popper Blaster";
             config.fireInterval = 0.78f;
             config.damage = 125f; // 直击秒杀
-            config.inkCostPerShot = 9f;
+            config.inkCostPerShot = 10.4f;
             config.projectileSpeed = 23f;
             config.projectileGravity = 0f; // 直线飞行空爆
             config.maxRange = 10.5f;
@@ -626,7 +630,7 @@ namespace P1.Weapons
             config.displayName = "Gyre Splatling";
             config.fireInterval = 0.066f; // 15发/秒
             config.damage = 28f;
-            config.inkCostPerShot = 0.6f;
+            config.inkCostPerShot = 0.7f;
             config.projectileSpeed = 40f;
             config.maxRange = 15f;
             config.spreadMinDegrees = 0.6f;
@@ -706,10 +710,63 @@ namespace P1.Weapons
             Debug.Log($"[WeaponConfigSO] P3-B 大招/副武器配置已同步到 {applied} 份武器资产");
         }
 
-        /// <summary>副武器 Splat Bomb 规范：与墨水脱钩（0 耗墨）、6s 冷却、准星最远 22m、落地 0.95s 引信、核心 180 秒杀、涂地 2.7m。</summary>
+        /// <summary>
+        /// 只同步「墨水经济」字段（单发耗墨 / 滚筒推地 / 挥击 / 满蓄力 / 翻滚 / 手雷 + 潜墨回墨与回墨延迟），
+        /// 不碰射速、伤害、散布、射程等其它已调参字段 —— 菜单 6/7 会重刷整份配置，日常调墨水用本菜单。
+        /// 菜单：P1/构建/15. 同步墨水资源数值 (Ink Economy)
+        /// </summary>
+        [UnityEditor.MenuItem("P1/构建/15. 同步墨水资源数值 (Ink Economy)", false, 17)]
+        public static void SyncInkEconomy()
+        {
+            const string runtimeFolder = "Assets/_Project/ScriptableObjects";
+            const string weaponsFolder = runtimeFolder + "/Weapons";
+
+            // 小枪 1.1（+15%）；滚筒/蓄力狙的墨水字段只来自这里；手雷统一 55 墨
+            ApplyInkEconomy($"{runtimeFolder}/WeaponConfig.asset", 1.1f, 1.25f, 10.5f, 21f, 8f);
+            ApplyInkEconomy($"{weaponsFolder}/Weapon_SwellRoller.asset", 1.1f, 1.25f, 10.5f, 21f, 8f);
+            ApplyInkEconomy($"{weaponsFolder}/Weapon_GlintCharger.asset", 1.1f, 1.25f, 10.5f, 21f, 8f);
+            ApplyInkEconomy($"{weaponsFolder}/Weapon_TwinfinDualies.asset", 1.0f, 1.25f, 10.5f, 21f, 8f);
+            ApplyInkEconomy($"{weaponsFolder}/Weapon_TidebucketSlosher.asset", 8.6f, 1.25f, 10.5f, 21f, 8f);
+            ApplyInkEconomy($"{weaponsFolder}/Weapon_PopperBlaster.asset", 10.4f, 1.25f, 10.5f, 21f, 8f);
+            ApplyInkEconomy($"{weaponsFolder}/Weapon_GyreSplatling.asset", 0.7f, 1.25f, 10.5f, 21f, 8f);
+
+            P1.Player.PlayerConfigSO playerConfig =
+                UnityEditor.AssetDatabase.LoadAssetAtPath<P1.Player.PlayerConfigSO>($"{runtimeFolder}/PlayerConfig.asset");
+            if (playerConfig != null)
+            {
+                playerConfig.swimInkRefillRate = 34f;
+                playerConfig.inkRefillDelayAfterShot = 0.5f;
+                UnityEditor.EditorUtility.SetDirty(playerConfig);
+            }
+
+            UnityEditor.AssetDatabase.SaveAssets();
+            UnityEditor.AssetDatabase.Refresh();
+            Debug.Log("[WeaponConfigSO] 墨水经济已同步：单发耗墨 +15% / 潜墨回墨 34 每秒 / 开枪后延迟 0.5s / 手雷 55 墨");
+        }
+
+        private static void ApplyInkEconomy(
+            string path, float perShot, float rollPerMeter, float flickCost, float chargeFullCost, float dualiesRollCost)
+        {
+            WeaponConfigSO config = UnityEditor.AssetDatabase.LoadAssetAtPath<WeaponConfigSO>(path);
+            if (config == null)
+            {
+                Debug.LogWarning($"[WeaponConfigSO] 墨水经济同步跳过（资产不存在）：{path}");
+                return;
+            }
+
+            config.inkCostPerShot = perShot;
+            config.rollInkPerMeter = rollPerMeter;
+            config.flickInkCost = flickCost;
+            config.chargeInkCostFull = chargeFullCost;
+            config.dualiesRollInkCost = dualiesRollCost;
+            config.bombInkCost = 55f;
+            UnityEditor.EditorUtility.SetDirty(config);
+        }
+
+        /// <summary>副武器 Splat Bomb 规范：55 墨 + 6s 冷却（双限制）、准星最远 22m、落地 0.95s 引信、核心 180 秒杀、涂地 2.7m。</summary>
         public static void ApplyBombSpec(WeaponConfigSO config)
         {
-            config.bombInkCost = 0f;
+            config.bombInkCost = 55f;
             config.bombCooldown = 6f;
             config.bombThrowSpeed = 13.5f;
             config.bombThrowGravity = 24f;
@@ -778,7 +835,7 @@ namespace P1.Weapons
             // 对齐 GamePlan / INKWAVE 的小枪射程与弹速：12m / 34m/s（弹道更平，准星=落点）。
             config.maxRange = 12f;
             config.projectileSpeed = 34f;
-            config.inkCostPerShot = 0.95f;
+            config.inkCostPerShot = 1.1f;
             config.spreadMinDegrees = 1.2f;
             config.spreadDegrees = 5.5f;
             config.bloomPerShot = 0.3f;

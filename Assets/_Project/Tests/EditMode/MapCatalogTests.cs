@@ -1,9 +1,11 @@
 using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
+using P1.Editor;
 using P1.UI;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace P1.Tests
 {
@@ -62,13 +64,13 @@ namespace P1.Tests
         [Test]
         public void TrySelect_PersistsAndReadsBack()
         {
-            Assert.IsTrue(MapCatalogService.TrySelect("kelp_terminal"));
-            Assert.AreEqual("kelp_terminal", PlayerPrefs.GetString(MapCatalogService.SelectedMapPrefsKey));
-            Assert.AreEqual(MapCatalogService.KelpScenePath, MapCatalogService.Selected.ScenePath);
+            Assert.IsTrue(MapCatalogService.TrySelect("gull_harbor"));
+            Assert.AreEqual("gull_harbor", PlayerPrefs.GetString(MapCatalogService.SelectedMapPrefsKey));
+            Assert.AreEqual(MapCatalogService.GullScenePath, MapCatalogService.Selected.ScenePath);
 
             // 已选同一张且存档存在时不再重复写盘（返回 false，但仍指向同一张图）。
-            Assert.IsFalse(MapCatalogService.TrySelect("kelp_terminal"));
-            Assert.AreEqual(MapCatalogService.KelpScenePath, MapCatalogService.Selected.ScenePath);
+            Assert.IsFalse(MapCatalogService.TrySelect("gull_harbor"));
+            Assert.AreEqual(MapCatalogService.GullScenePath, MapCatalogService.Selected.ScenePath);
         }
 
         [Test]
@@ -82,7 +84,7 @@ namespace P1.Tests
         [Test]
         public void ResetForTests_RemovesSelection()
         {
-            MapCatalogService.TrySelect("kelp_terminal");
+            MapCatalogService.TrySelect("gull_harbor");
             MapCatalogService.ResetForTests();
 
             Assert.IsFalse(PlayerPrefs.HasKey(MapCatalogService.SelectedMapPrefsKey));
@@ -135,14 +137,51 @@ namespace P1.Tests
         public void MapForScene_AndOtherThan_RoundTrip()
         {
             MapDefinition phaseA = MapCatalogService.MapForScene(MapCatalogService.PhaseAScenePath);
-            MapDefinition kelp = MapCatalogService.MapForScene(MapCatalogService.KelpScenePath);
+            MapDefinition gull = MapCatalogService.MapForScene(MapCatalogService.GullScenePath);
 
             Assert.IsNotNull(phaseA);
-            Assert.IsNotNull(kelp);
+            Assert.IsNotNull(gull);
             Assert.IsNull(MapCatalogService.MapForScene("Assets/_Project/Scenes/SampleScene.unity"));
 
-            Assert.AreEqual(kelp, MapCatalogService.OtherThan(phaseA));
-            Assert.AreEqual(phaseA, MapCatalogService.OtherThan(kelp));
+            Assert.AreEqual(gull, MapCatalogService.OtherThan(phaseA));
+            Assert.AreEqual(phaseA, MapCatalogService.OtherThan(gull));
+        }
+
+        /// <summary>
+        /// 出包场景列表门禁：APK 只打主场景时，运行期第二张图永远拿不到 Build Index
+        /// （v0.1.25 手机端「切图不生效、开始游戏无反应」的根因）。这里锁住
+        /// BuildPlayerOptions 用的那份列表，而不是只看 EditorBuildSettings。
+        /// </summary>
+        [Test]
+        public void BuildSceneList_StartsWithMainMap_AndIncludesEveryMap()
+        {
+            string[] scenes = BuildAndProfilerSuite.MapScenePaths();
+
+            Assert.GreaterOrEqual(scenes.Length, MapCatalogService.Maps.Count);
+            Assert.AreEqual(BuildAndProfilerSuite.MainScenePath, scenes[0], "Build Index 0 必须是启动主场景");
+
+            var unique = new HashSet<string>(scenes);
+            Assert.AreEqual(scenes.Length, unique.Count, "出包场景列表有重复项");
+
+            for (int i = 0; i < MapCatalogService.Maps.Count; i++)
+            {
+                string path = MapCatalogService.Maps[i].ScenePath;
+                CollectionAssert.Contains(scenes, path, "出包场景列表漏了地图场景：" + path);
+            }
+        }
+
+        [Test]
+        public void CanLoadMap_ReflectsBuildSettings()
+        {
+            Assert.IsFalse(MapCatalogService.CanLoadMap(null));
+
+            for (int i = 0; i < MapCatalogService.Maps.Count; i++)
+            {
+                string path = MapCatalogService.Maps[i].ScenePath;
+                Assert.AreNotEqual(-1, SceneUtility.GetBuildIndexByScenePath(path),
+                    "地图场景不在 Build Settings：" + path);
+                Assert.IsTrue(MapCatalogService.CanLoadMap(MapCatalogService.Maps[i]));
+            }
         }
 
         [Test]

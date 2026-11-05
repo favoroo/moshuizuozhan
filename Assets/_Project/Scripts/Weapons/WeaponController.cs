@@ -664,6 +664,9 @@ namespace P1.Weapons
         /// <summary>手雷冷却总时长（当前配置值，未配置时回退 0.6s）。</summary>
         public float BombCooldownDuration => config != null ? config.bombCooldown : 0.6f;
 
+        /// <summary>手雷单次耗墨（0 = 不耗墨）：输入门槛与 HUD 刻度线共用。</summary>
+        public float BombInkCost => config != null ? Mathf.Max(0f, config.bombInkCost) : 0f;
+
         /// <summary>
         /// 当前是否满足投掷条件（存活 / 非大招演出 / 不在冷却 / 终场前 / 墨水足够）：
         /// 弹道预览用它决定虚线是否变灰闪烁，与 <see cref="TryThrowSubBombBallistic"/> 的门禁保持一致。
@@ -694,11 +697,12 @@ namespace P1.Weapons
             if (!MatchManager.CombatSettlementAllowed)
                 return false;
 
-            // 手雷与墨水脱钩（设计变更）：只受冷却限制，不再挂 70 墨。
-            // 仅当配置显式要求耗墨（bombInkCost > 0）才扣墨，杜绝「喷几枪就丢不出雷 + 静默失败」。
-            float bombCost = config != null ? config.bombInkCost : 0f;
+            // 手雷恢复耗墨（55 墨，思路同 INKWAVE 的 70 墨），并与 6s 冷却双重限制；
+            // 墨水不足时必须给显性反馈（空打音效 + 准星戳记），否则就是旧版「喷几枪丢不出雷、按了没反应」的静默失败。
+            float bombCost = BombInkCost;
             if (bombCost > 0f && !_motor.TryConsumeInk(bombCost))
             {
+                ReportEmptyFeedback();
                 return false;
             }
 
@@ -1577,7 +1581,11 @@ namespace P1.Weapons
             }
         }
 
-        void IWeaponRuntimeHost.ReportEmptyFeedback()
+        /// <summary>
+        /// 播放「空墨」反馈：空打音效 + 递增 <see cref="EmptyFeedbackStamp"/>（准星据此播红叉/震颤/「弹药耗尽」toast）。
+        /// 主武器空墨拒射与副武器墨水不足共用；内部按 <see cref="EmptyFeedbackMinInterval"/> 节流，避免连发刷屏。
+        /// </summary>
+        public void ReportEmptyFeedback()
         {
             // 空墨拒射戳记：准星轮询它播放「空打」红叉/震颤/toast；节流避免连发武器刷屏。
             float now = Time.unscaledTime;
@@ -1592,5 +1600,7 @@ namespace P1.Weapons
                 AudioManager.Instance.PlayInkEmpty();
             }
         }
+
+        void IWeaponRuntimeHost.ReportEmptyFeedback() => ReportEmptyFeedback();
     }
 }

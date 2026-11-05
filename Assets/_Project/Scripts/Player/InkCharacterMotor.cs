@@ -525,8 +525,8 @@ namespace P1.Player
             else if (IsSwimming)
             {
                 CurrentMoveSpeed = swimSpd;
-                // 回墨 42 点/秒（空罐约 2.4s 回满）、回血 60 点/秒（对齐 Inkwave inkRefillSwim / regenRateSwim）
-                float refillRate = config != null ? config.swimInkRefillRate : 42f;
+                // 回墨 34 点/秒（空罐约 2.9s 回满）、回血 60 点/秒（回血对齐 Inkwave regenRateSwim，回墨按 4v4 手感收紧）
+                float refillRate = config != null ? config.swimInkRefillRate : 34f;
                 float regenRate = config != null ? config.swimHealthRegenRate : 60f;
 
                 if (_currentInk < MaxInk)
@@ -580,7 +580,7 @@ namespace P1.Player
             else
             {
                 // 人形状态
-                float delayAfterShot = config != null ? config.inkRefillDelayAfterShot : 0.25f;
+                float delayAfterShot = config != null ? config.inkRefillDelayAfterShot : 0.5f;
                 if (!_isFiringOrThrowing && _timeSinceLastInkSpend >= delayAfterShot)
                 {
                     float passiveRate = config != null ? config.passiveInkRefillRate : 4f;

@@ -46,8 +46,8 @@ U="$HOME/.unity/bin/unity"
 | `P1/构建/2. 一键生成并打开第一阶段试玩场景 (Phase A Playbox)` | 重建并打开 `Assets/_Project/Scenes/PhaseA_Playbox.unity` |
 | `P1/构建/3. 应用项目 PlayerSettings` | 横屏 / 包名 / minSdk 26 / ARM64 |
 | `P1/构建/4. 渲染场景涂地自检预览图` | 输出 `Logs/phaseA_preview.png` |
-| `P1/音频/1. 绑定播报语音与双段 BGM` | 把 `Audio/Voice`、`Audio/Music` 与 `AudioMixConfig` 绑进当前场景的 `AudioManager`（会保存场景） |
-| `P1/音频/2. 体检音频导入设置` | 等价 `MediaTools.ReportMedia()`，确认 Voice/Music 导入设置 |
+| `P1/音频/1. 绑定比赛流程音效与双段 BGM` | 把 `Audio/SFX` 的流程提示音、`Audio/Music` 与 `AudioMixConfig` 绑进当前场景的 `AudioManager`（会保存场景） |
+| `P1/音频/2. 体检音频导入设置` | 等价 `MediaTools.ReportMedia()`，确认 SFX/Music 导入设置 |
 
 菜单调用（注意名字必须完全一致，含后缀）：
 
@@ -172,7 +172,6 @@ tools/run_tests.sh all    # EditMode + PlayMode 全量
 | 世界贴图 | `Assets/_Project/Art/Textures/` | Default、mips on、Repeat |
 | BGM | `Assets/_Project/Audio/Music/` | Streaming + Vorbis |
 | 音效 | `Assets/_Project/Audio/SFX/` | DecompressOnLoad + PCM |
-| 语音 | `Assets/_Project/Audio/Voice/` | CompressedInMemory + Vorbis |
 
 ```bash
 "$U" command script.eval --code 'UnityEditor.AssetDatabase.Refresh();'

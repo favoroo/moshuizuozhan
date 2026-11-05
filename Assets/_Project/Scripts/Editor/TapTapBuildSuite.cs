@@ -86,7 +86,7 @@ namespace P1.Editor
 
                 var options = new BuildPlayerOptions
                 {
-                    scenes = new[] { BuildAndProfilerSuite.MainScenePath },
+                    scenes = BuildAndProfilerSuite.MapScenePaths(),
                     locationPathName = outputPath,
                     target = BuildTarget.Android,
                     options = BuildOptions.None

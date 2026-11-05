@@ -9,6 +9,13 @@ namespace P1.Environment
         Neutral = 1
     }
 
+    /// <summary>场外远景主题：集装箱码头（主图）或港湾码头（海鸥港湾）。</summary>
+    public enum ArenaBackdropTheme
+    {
+        ContainerPort = 0,
+        Marina = 1
+    }
+
     /// <summary>
     /// 竞技场环境视觉风格档案（P7-B）：集中管理「集装箱码头 · 白天清爽」的配色、光照、
     /// 雾、天空与后处理参数。所有材质由 ProjectScaffolder 按此资产生成，场景里不散落硬编码色值。
@@ -168,6 +175,10 @@ namespace P1.Environment
         [Tooltip("1 = 完整道具；0.5 = 只保留主要掩体与出生区道具（移动端可降）")]
         [Range(0f, 1f)] public float decorationDensity = 1f;
         public bool buildBackdrop = true;
+        [Tooltip("场外远景主题：ContainerPort = 岸桥/集装箱堆场；Marina = 港湾栈桥/游艇/灯塔/城市天际线")]
+        public ArenaBackdropTheme backdropTheme = ArenaBackdropTheme.ContainerPort;
+        [Tooltip("是否在边界墙内侧挂 12 面图集横幅。横幅图集是码头货运主题（CARGO/DOCK），港湾图应关闭")]
+        public bool buildWallBanners = true;
 
         [Header("画质增强（P29 渲染基础设施）")]
         [Tooltip("是否启用主相机 URP 后处理")]

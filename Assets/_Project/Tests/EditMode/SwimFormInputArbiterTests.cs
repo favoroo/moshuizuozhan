@@ -248,13 +248,13 @@ namespace P1.Tests
                 Assert.AreEqual(2.4f, cfg.enemyInkMoveSpeed, 0.001f, "踩敌墨移速 2.4（约 40% 跑速，已从 Inkwave 1.9 上调）");
                 Assert.AreEqual(30f, cfg.enemyInkAccel, 0.001f, "敌墨加速度对齐 Inkwave enemyInkAccel");
                 Assert.AreEqual(30f, cfg.enemyInkDecel, 0.001f, "敌墨减速度对齐 Inkwave enemyInkDecel");
-                Assert.AreEqual(42f, cfg.swimInkRefillRate, 0.001f, "潜墨回墨对齐 inkRefillSwim");
+                Assert.AreEqual(34f, cfg.swimInkRefillRate, 0.001f, "潜墨回墨 34/s（INKWAVE 42 收紧）");
                 Assert.AreEqual(60f, cfg.swimHealthRegenRate, 0.001f, "潜墨回血对齐 regenRateSwim");
                 Assert.AreEqual(20f, cfg.enemyInkDamagePerSec, 0.001f, "敌墨 DOT 对齐 enemyInkDps");
                 Assert.AreEqual(60f, cfg.enemyInkMinHealthFloor, 0.001f, "敌墨保护底线 = hp - damageCap");
                 Assert.AreEqual(0.07f, cfg.emergeTransitionTime, 0.0001f, "出水过渡对齐 emergeDelay");
                 Assert.AreEqual(0.16f, cfg.fireBufferTime, 0.0001f, "开火缓冲对齐 fireBuffer");
-                Assert.AreEqual(2.4f, cfg.maxInk / cfg.swimInkRefillRate, 0.05f, "空罐回满约 2.4s");
+                Assert.AreEqual(2.94f, cfg.maxInk / cfg.swimInkRefillRate, 0.05f, "空罐回满约 2.9s");
             }
             finally
             {

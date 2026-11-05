@@ -23,12 +23,16 @@ namespace P1.Player
             /// <summary>瞄准被大招/死亡/暂停打断（调用方应收起预览）。</summary>
             public readonly bool Canceled;
 
-            public Intent(bool isAiming, bool executeThrow, bool startedAiming, bool canceled)
+            /// <summary>按下时墨水不足：未进入瞄准、不出弹道预览，调用方应播放「弹药耗尽」反馈。</summary>
+            public readonly bool DeniedByInk;
+
+            public Intent(bool isAiming, bool executeThrow, bool startedAiming, bool canceled, bool deniedByInk = false)
             {
                 IsAiming = isAiming;
                 ExecuteThrow = executeThrow;
                 StartedAiming = startedAiming;
                 Canceled = canceled;
+                DeniedByInk = deniedByInk;
             }
 
             public static Intent None => new Intent(false, false, false, false);
@@ -53,6 +57,10 @@ namespace P1.Player
         /// <param name="touchHeld">触屏手雷键是否按住。</param>
         /// <param name="touchReleased">触屏手雷键 pointer-up 注入。</param>
         /// <param name="specialActive">大招演出中（期间取消瞄准并屏蔽副武器）。</param>
+        /// <param name="hasInkForThrow">
+        /// 当前墨量是否够一次投掷。false 时按下沿直接拒绝（不进入瞄准、不出弹道预览），
+        /// 由调用方播「弹药耗尽」提示；默认 true 保持旧调用方行为不变。
+        /// </param>
         public Intent Advance(
             bool pressedEdge,
             bool held,
@@ -60,7 +68,8 @@ namespace P1.Player
             bool touchPressed,
             bool touchHeld,
             bool touchReleased,
-            bool specialActive)
+            bool specialActive,
+            bool hasInkForThrow = true)
         {
             // 大招期间屏蔽副武器：正在瞄准也立刻取消，避免演出中突然丢雷
             if (specialActive)
@@ -77,6 +86,10 @@ namespace P1.Player
             bool startedAiming = false;
             if (!IsAiming && press)
             {
+                // 空墨按副武器键：不进入瞄准、不出抛物线，直接让调用方播空墨提示
+                if (!hasInkForThrow)
+                    return new Intent(false, false, false, false, true);
+
                 IsAiming = true;
                 startedAiming = true;
             }

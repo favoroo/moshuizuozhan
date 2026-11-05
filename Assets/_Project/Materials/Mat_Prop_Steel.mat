@@ -42,7 +42,7 @@ Material:
     - _DetailNoiseStrength: 0.04
     - _DitherAlpha: 1
     - _EdgeHighlight: 0.25
-    - _EdgeLineStrength: 0.85
+    - _EdgeLineStrength: 0
     - _EdgeLineWidth: 0.05
     - _EnableCorrugation: 0
     - _FocusMinAlpha: 0.25

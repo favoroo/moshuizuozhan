@@ -122,9 +122,15 @@ namespace P1.UI.WeaponSelect
                 _icons = icons;
             }
 
-            _mobile = UITypography.IsMobileLike;
-            _metrics = MenuLayoutMath.Drawer(_mobile);
-            _loadoutMetrics = MenuLayoutMath.LoadoutCard(_mobile);
+            bool platformChanged = ApplyPlatformMetrics();
+
+            if (_built && platformChanged)
+            {
+                // 度量在首次构建之后才变（场景切换 / 强制触屏预览）：旧组件树整棵都是上一套尺寸，
+                // 只重算字段会让 DrawerPanel 保持旧宽度、收起位移却按新宽度算，屏幕边缘残留一条抽屉。
+                RebuildHierarchy(_selectedIndex, _isDrawerOpen);
+                return;
+            }
 
             BuildCanvasAndHierarchy();
             PopulateCards();
@@ -133,6 +139,86 @@ namespace P1.UI.WeaponSelect
             SelectWeapon(clamped, silent: true);
 
             SetDrawerOpen(false);
+        }
+
+        /// <summary>
+        /// 采样当前平台观感（桌面/移动端）并同步版面度量。
+        /// 返回 true 表示度量与上次构建时不同，组件树必须整棵重建才能对齐新尺寸；
+        /// 首次调用只做初始化（此时还没有可重建的组件树），返回 false 让调用方走正常构建。
+        /// </summary>
+        private bool ApplyPlatformMetrics()
+        {
+            bool newMobile = UITypography.IsMobileLike;
+            bool initialized = _metrics.Width > 0f;
+            if (initialized && _mobile == newMobile)
+            {
+                return false;
+            }
+
+            _mobile = newMobile;
+            _metrics = MenuLayoutMath.Drawer(_mobile);
+            _loadoutMetrics = MenuLayoutMath.LoadoutCard(_mobile);
+            return initialized;
+        }
+
+        /// <summary>
+        /// 按当前 <see cref="ApplyPlatformMetrics"/> 的度量重建整棵组件树，并保持选中武器与抽屉开合状态。
+        /// Canvas/Scaler/Raycaster 挂在视图根节点上复用，只销毁运行时自建的子节点。
+        /// </summary>
+        private void RebuildHierarchy(int selectIndex, bool open)
+        {
+            DestroyBuiltHierarchy();
+
+            BuildCanvasAndHierarchy();
+            PopulateCards();
+            SelectWeapon(WeaponSelectMath.ClampIndex(selectIndex), silent: true);
+            SetDrawerOpen(open);
+
+            // 重建后直接落到目标 X，避免用旧位移插值出一帧滑入。
+            _currentDrawerX = _targetDrawerX;
+            if (_drawerRoot != null)
+            {
+                _drawerRoot.anchoredPosition = new Vector2(_currentDrawerX, 0f);
+            }
+        }
+
+        private void DestroyBuiltHierarchy()
+        {
+            if (_backdropGo != null)
+            {
+                _backdropGo.SetActive(false);
+                _backdropGo.transform.SetParent(null, false);
+                Destroy(_backdropGo);
+            }
+            if (_safeAreaRoot != null)
+            {
+                _safeAreaRoot.gameObject.SetActive(false);
+                _safeAreaRoot.SetParent(null, false);
+                Destroy(_safeAreaRoot.gameObject);
+            }
+
+            _backdropGo = null;
+            _safeAreaRoot = null;
+            _drawerRoot = null;
+            _drawerBg = null;
+            _contentRoot = null;
+            _toggleButtonRoot = null;
+            _toggleButton = null;
+            _toggleButtonBg = null;
+            _toggleButtonText = null;
+            _toggleWeaponText = null;
+            _toggleIconImage = null;
+            _toggleIconPlate = null;
+            _toggleChevronRect = null;
+            _toggleChevronText = null;
+            _toggleMotion = null;
+            _headerTitle = null;
+            _closeButton = null;
+            _profileBadgeRoot = null;
+            _profileBadgeText = null;
+            _profileBadgeXpFill = null;
+            _cards.Clear();
+            _built = false;
         }
 
         private void BuildCanvasAndHierarchy()
@@ -802,7 +888,12 @@ namespace P1.UI.WeaponSelect
         /// </summary>
         private float ClosedDrawerX()
         {
-            return -(_drawerWidth + 40f + SafeAreaLeftInCanvasUnits());
+            // 位移按「面板真实宽度」算，而不是按 _drawerWidth 字段：
+            // 两者一旦不同步（例如度量在构建之后才切换），按字段算出的位移会把旧宽度的抽屉顶回屏幕内，留下一竖条白纸+黑边。
+            float panelWidth = _drawerRoot != null && _drawerRoot.sizeDelta.x > 0f
+                ? _drawerRoot.sizeDelta.x
+                : _drawerWidth;
+            return -(panelWidth + 40f + SafeAreaLeftInCanvasUnits());
         }
 
         /// <summary>SafeArea 左侧内缩换算成画布单位（0 = 屏幕左缘没有内缩）。</summary>
@@ -863,14 +954,12 @@ namespace P1.UI.WeaponSelect
         /// </summary>
         public void SyncHomeLayout()
         {
-            bool newMobile = UITypography.IsMobileLike;
-            if (_mobile != newMobile)
+            if (ApplyPlatformMetrics())
             {
-                _mobile = newMobile;
-                _metrics = MenuLayoutMath.Drawer(_mobile);
-                _loadoutMetrics = MenuLayoutMath.LoadoutCard(_mobile);
-                _drawerWidth = _metrics.Width;
+                // 桌面 ↔ 移动端观感切换：整棵树都要换尺寸，不能只更新字段。
+                RebuildHierarchy(_selectedIndex, _isDrawerOpen);
             }
+
             ApplySafeArea();
             RelayoutToggleButton();
             UpdateToggleButtonState();

@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using P1.Core;
+using P1.UI;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -27,6 +29,23 @@ namespace P1.Editor
         public const string AndroidOutputPath = "Builds/Android/InkTurf.apk";
         public const string WebGLOutputPath = "Builds/WebGL";
 
+        /// <summary>
+        /// 出包场景列表：Build Index 0 固定主场景，其余全部地图场景按 <see cref="MapCatalogService"/> 顺序补齐。
+        /// 只传 MainScenePath 会让 APK 里只有 level0，运行期切第二张图必然找不到 Build Index
+        /// （v0.1.25 手机端「切图不生效、开始游戏无反应」的根因）。新增地图后不要再逐处手写场景数组。
+        /// </summary>
+        public static string[] MapScenePaths()
+        {
+            string[] mapPaths = MapCatalogService.AllScenePaths();
+            var scenes = new List<string>(mapPaths.Length + 1) { MainScenePath };
+            for (int i = 0; i < mapPaths.Length; i++)
+            {
+                if (string.IsNullOrEmpty(mapPaths[i]) || scenes.Contains(mapPaths[i])) continue;
+                scenes.Add(mapPaths[i]);
+            }
+            return scenes.ToArray();
+        }
+
         /// <summary>真实采样报告的输出路径（写入方为 PlayModeProfilerSession）。</summary>
         public const string ProfilerReportPath = "Docs/ProfilerReport_P6C.md";
 
@@ -41,7 +60,7 @@ namespace P1.Editor
 
             var options = new BuildPlayerOptions
             {
-                scenes = new[] { MainScenePath },
+                scenes = MapScenePaths(),
                 locationPathName = StandaloneOutputPath,
                 target = BuildTarget.StandaloneOSX,
                 options = BuildOptions.None
@@ -81,7 +100,7 @@ namespace P1.Editor
 
             var options = new BuildPlayerOptions
             {
-                scenes = new[] { MainScenePath },
+                scenes = MapScenePaths(),
                 locationPathName = "Builds/StandaloneOSX/InkTurf_Dev.app",
                 target = BuildTarget.StandaloneOSX,
                 options = BuildOptions.Development | BuildOptions.ConnectWithProfiler
@@ -161,7 +180,7 @@ namespace P1.Editor
 
                 var options = new BuildPlayerOptions
                 {
-                    scenes = new[] { MainScenePath },
+                    scenes = MapScenePaths(),
                     locationPathName = outputDir,
                     target = BuildTarget.WebGL,
                     options = BuildOptions.None
@@ -261,7 +280,7 @@ namespace P1.Editor
 
             var options = new BuildPlayerOptions
             {
-                scenes = new[] { MainScenePath },
+                scenes = MapScenePaths(),
                 locationPathName = outputPath,
                 target = BuildTarget.Android,
                 options = BuildOptions.None
@@ -305,28 +324,36 @@ namespace P1.Editor
 
         public static void EnsureSceneInBuildSettings()
         {
-            var scenes = EditorBuildSettings.scenes;
-            bool found = false;
-            for (int i = 0; i < scenes.Length; i++)
+            var current = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
+            string[] wanted = MapScenePaths();
+            bool changed = false;
+
+            // 主场景固定在索引 0（启动场景），其余地图场景依次补齐并启用。
+            for (int i = 0; i < wanted.Length; i++)
             {
-                if (scenes[i].path == MainScenePath)
+                int found = current.FindIndex(scene => scene.path == wanted[i]);
+                if (found < 0)
                 {
-                    scenes[i].enabled = true;
-                    found = true;
-                    break;
+                    current.Insert(i, new EditorBuildSettingsScene(wanted[i], true));
+                    changed = true;
+                    continue;
+                }
+
+                if (!current[found].enabled)
+                {
+                    current[found] = new EditorBuildSettingsScene(wanted[i], true);
+                    changed = true;
+                }
+                if (found != i)
+                {
+                    EditorBuildSettingsScene scene = current[found];
+                    current.RemoveAt(found);
+                    current.Insert(i, scene);
+                    changed = true;
                 }
             }
 
-            if (!found)
-            {
-                var newScenes = new EditorBuildSettingsScene[scenes.Length + 1];
-                newScenes[0] = new EditorBuildSettingsScene(MainScenePath, true);
-                for (int i = 0; i < scenes.Length; i++)
-                {
-                    newScenes[i + 1] = scenes[i];
-                }
-                EditorBuildSettings.scenes = newScenes;
-            }
+            if (changed) EditorBuildSettings.scenes = current.ToArray();
         }
 
         public static void ApplyDesktopPlayerSettings()

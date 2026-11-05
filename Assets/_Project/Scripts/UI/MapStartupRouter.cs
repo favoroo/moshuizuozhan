@@ -13,6 +13,7 @@ namespace P1.UI
     {
         private static bool _hooked;
         private static bool _autoApplied;
+        private static bool _autoStartPending;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
@@ -22,6 +23,7 @@ namespace P1.UI
             if (_hooked) SceneManager.sceneLoaded -= OnSceneLoaded;
             _hooked = false;
             _autoApplied = false;
+            _autoStartPending = false;
             MapCatalogService.ResetRuntimeState();
         }
 
@@ -59,11 +61,31 @@ namespace P1.UI
             go.AddComponent<PersistedSelectionDriver>();
         }
 
-        /// <summary>启动补切图：最多尝试若干帧，切成功或放弃后自毁；DontDestroyOnLoad 跨场景存活。</summary>
+        /// <summary>
+        /// 「开始游戏」发现选中的图与当前场景不一致时调用：目标场景加载完成后自动开赛，
+        /// 玩家不需要在场地重载后再按一次开始。加载失败由调用方 <see cref="CancelAutoStart"/>。
+        /// </summary>
+        public static void RequestAutoStart()
+        {
+            _autoStartPending = true;
+        }
+
+        public static void CancelAutoStart()
+        {
+            _autoStartPending = false;
+        }
+
+        /// <summary>
+        /// 启动补切图：按“真实时间”每 0.5s 重试一次，最多 10s，切成功或放弃后自毁。
+        /// 不能用帧数计数：手机加载一张场景可能几十帧，帧数预算会在加载完成前就耗光。
+        /// LoadMap 在加载途中会直接拒绝重复请求，所以这里的轮询不会打断正在进行的加载。
+        /// </summary>
         private sealed class PersistedSelectionDriver : MonoBehaviour
         {
-            private const int MaxAttempts = 8;
-            private int _attempts;
+            private const float RetryInterval = 0.5f;
+            private const float GiveUpAfterSeconds = 10f;
+            private float _elapsed;
+            private float _nextAttempt;
 
             private void Awake()
             {
@@ -72,12 +94,45 @@ namespace P1.UI
 
             private void Update()
             {
-                if (MapCatalogService.IsSelectedSceneActive() || _attempts++ >= MaxAttempts)
+                _elapsed += Time.unscaledDeltaTime;
+                if (MapCatalogService.IsSelectedSceneActive() || _elapsed >= GiveUpAfterSeconds)
                 {
                     Destroy(gameObject);
                     return;
                 }
+                if (_elapsed < _nextAttempt) return;
+
+                _nextAttempt = _elapsed + RetryInterval;
                 MapCatalogService.LoadMap(MapCatalogService.Selected);
+            }
+        }
+
+        /// <summary>
+        /// 切图后自动开赛。等两帧让新场景里的 MatchManager / MatchFlowUI 完成 Awake/Start，
+        /// 否则开赛事件（PhaseChanged）会被还没订阅的 UI 漏掉，画面停在首页。
+        /// </summary>
+        private sealed class AutoStartDriver : MonoBehaviour
+        {
+            private int _frames;
+
+            private void Awake()
+            {
+                DontDestroyOnLoad(gameObject);
+            }
+
+            private void Update()
+            {
+                if (_frames++ < 2) return;
+
+                MatchManager match = MatchManager.Instance;
+                if (match == null || match.CurrentPhase != MatchManager.Phase.Ready)
+                {
+                    if (_frames > 300) Destroy(gameObject);   // ~5 秒还没就绪就放弃，别留幽灵驱动
+                    return;
+                }
+
+                Destroy(gameObject);
+                match.StartMatch();
             }
         }
 
@@ -94,6 +149,15 @@ namespace P1.UI
             {
                 RenderEnvGlobals.ResetStyleToDefault();
             }
+
+            if (!_autoStartPending) return;
+
+            // 只有「加载完成的就是选中的那张图」才自动开赛；任何其它场景载入都视为切图失败/外部载入。
+            _autoStartPending = false;
+            if (loaded == null || loaded.Id != MapCatalogService.Selected.Id) return;
+
+            var go = new GameObject("~MapAutoStartDriver") { hideFlags = HideFlags.HideAndDontSave };
+            go.AddComponent<AutoStartDriver>();
         }
     }
 }

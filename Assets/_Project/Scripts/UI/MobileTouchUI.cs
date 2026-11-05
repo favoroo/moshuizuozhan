@@ -43,9 +43,6 @@ namespace P1.UI
         [Tooltip("是否在 HUD 左上角生成固定按键设置入口（已整合进暂停弹窗，默认关闭）")]
         [SerializeField] private bool showSettingsEntryButton = false;
 
-        [Tooltip("旧版字段，仅保留场景序列化兼容；P9 起不再参与显示判断，请使用 showTouchUiInEditor")]
-        [SerializeField] private bool forceShowInEditor = true;
-
         [Header("左侧动态浮动摇杆参数")]
         [SerializeField] private float moveStickRadius = 170f;
         [SerializeField] private float moveDeadZone = 8f;
@@ -121,6 +118,17 @@ namespace P1.UI
 
         /// <summary>是否处于触屏驱动模式（真机，或编辑器里手动勾选 showTouchUiInEditor 的模拟）。</summary>
         public static bool IsTouchSimulationActive { get; private set; }
+
+        /// <summary>
+        /// 关闭 Domain Reload 时静态字段会跨 Play 会话、跨 EditMode 用例残留；
+        /// 残留的 true 会让新一局主菜单先按移动端度量排版、之后才被真实平台纠正，
+        /// 面板宽度与收起位移错位（屏幕左缘留一条抽屉）。每次进入运行态先归零。
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetTouchSimulationState()
+        {
+            IsTouchSimulationActive = false;
+        }
 
         public void OpenLayoutCustomizer()
         {
@@ -207,8 +215,10 @@ namespace P1.UI
 
         private bool ShouldShowTouchUi()
         {
+            // 只认平台与显式调试开关。旧场景烘焙的 forceShowInEditor 已废弃：
+            // 它会在桌面编辑器里把整局主菜单按移动端度量排版，切场景再翻回桌面时留下错位 UI。
             return Application.isMobilePlatform ||
-                   (Application.isEditor && (showTouchUiInEditor || forceShowInEditor));
+                   (Application.isEditor && showTouchUiInEditor);
         }
 
         private void OnEnable()

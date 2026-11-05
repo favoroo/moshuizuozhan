@@ -12,7 +12,7 @@ namespace P1.Tests
 {
     /// <summary>
     /// [P6-B] 角色机动/潜墨/踩敌墨/复活的 PlayMode 生命周期回归：
-    /// 1. 己方墨水中潜行 11.8 m/s、回墨 42/s（空罐约 2.4s 回满）；
+    /// 1. 己方墨水中潜行 11.8 m/s、回墨 34/s（空罐约 2.9s 回满）；
     /// 2. 静止潜墨进入隐匿（IsStealthed + OnStealthChanged），移动超过 1.5 m/s 立即解除；
     /// 3. 踩敌墨减速到 1.9 m/s，DOT 20/s 但被 60 HP 保护底线钳制、绝不致死；
     /// 4. 离开敌墨后 0.5s 内完全摆脱惩罚状态并恢复 6.0 m/s；
@@ -70,7 +70,7 @@ namespace P1.Tests
             Assert.IsTrue(motor.IsSwimming, "己方墨水上按住潜行键应进入潜行形态");
             Assert.AreEqual(11.8f, motor.CurrentMoveSpeed, 0.01f, "潜墨移速 11.8 m/s");
 
-            // 消耗到只剩 5 墨，验证 42/s 回墨速度
+            // 消耗到只剩 5 墨，验证 34/s 回墨速度
             Assert.IsTrue(motor.TryConsumeInk(motor.CurrentInk - 5f));
             Assert.AreEqual(5f, motor.CurrentInk, 0.01f);
 
@@ -87,9 +87,9 @@ namespace P1.Tests
             }
 
             float oneSecondInk = motor.CurrentInk;
-            float expectedInk = Mathf.Min(100f, 5f + 42f * simulatedSeconds);
+            float expectedInk = Mathf.Min(100f, 5f + 34f * simulatedSeconds);
             Assert.That(oneSecondInk, Is.InRange(expectedInk - 1.5f, expectedInk + 1.5f),
-                $"潜墨回墨应约 42/s（模拟 {simulatedSeconds:F2}s，预期 {expectedInk:F1}，实际 {oneSecondInk:F1}）");
+                $"潜墨回墨应约 34/s（模拟 {simulatedSeconds:F2}s，预期 {expectedInk:F1}，实际 {oneSecondInk:F1}）");
             Assert.IsTrue(motor.IsStealthed, "静止潜墨应进入隐匿");
 
             // 订阅隐匿事件：先验证「移动退出」，再验证「静止重新进入」

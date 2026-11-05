@@ -13,7 +13,7 @@ namespace P1.Tests
     /// <summary>
     /// 触屏手雷真实链路测试：不关 MobileTouchUI，用 ExecuteEvents 驱动手雷按钮的
     /// pointer-down / pointer-up，回归「按住瞄准（显示弹道预览）、松手投出」。
-    /// 同时验证手雷与墨水脱钩（设计变更：只受冷却限制）与拒绝显性反馈。
+    /// 同时验证手雷 55 墨门槛（空墨拒绝、准星弧线变灰）与被拒时的显性反馈。
     /// </summary>
     public class MobileBombTouchPlayTests
     {
@@ -80,7 +80,7 @@ namespace P1.Tests
         }
 
         [UnityTest]
-        public IEnumerator TouchBombButton_Press_ThrowsEvenWithEmptyInk()
+        public IEnumerator TouchBombButton_Press_Spends55Ink_AndDeniesEmptyInkWithFeedback()
         {
             yield return LoadPlayingMatch();
 
@@ -89,15 +89,30 @@ namespace P1.Tests
             var player = PlayerController.LocalPlayer;
             var motor = player.Motor;
 
-            // 清空墨水：手雷必须与墨水脱钩（旧实现 70 墨门槛会让投掷被静默拒绝）
+            // 空墨：55 墨门槛在「按下」就拒绝——不进入瞄准（不出弹道预览）、不投弹，
+            // 但必须复用主武器空墨反馈（EmptyFeedbackStamp +1 → 准星红叉/「弹药耗尽」toast），不做静默失败。
             motor.TryConsumeInk(motor.CurrentInk);
             Assert.Less(motor.CurrentInk, 1f, "前置：墨水应已被清空");
+            Assert.IsFalse(player.Weapon.CanThrowSubBombNow, "空墨必须拒绝投掷（55 墨门槛）");
 
+            int bombsAtEmpty = InkBombPool.Instance.ActiveBombCount;
+            int emptyStampBefore = player.Weapon.EmptyFeedbackStamp;
+            yield return PressAndRelease(bombGo, 0f);
+
+            Assert.AreEqual(bombsAtEmpty, InkBombPool.Instance.ActiveBombCount, "空墨按下不得投出");
+            Assert.IsFalse(player.IsAimingBomb, "空墨按下不得进入手雷瞄准态（不显示抛物线）");
+            Assert.Greater(player.Weapon.EmptyFeedbackStamp, emptyStampBefore,
+                "空墨按手雷键必须递增 EmptyFeedbackStamp（准星弹出「弹药耗尽」提示）");
+            Assert.AreEqual(PlayerController.SubBombDenyReason.NotEnoughInk, player.LastSubBombDenyReason,
+                "拒绝原因应记录为墨水不足");
+
+            // 满墨：按下即真实投出，并扣 55 墨
+            motor.RefillInkFull();
             int before = InkBombPool.Instance.ActiveBombCount;
             yield return PressAndRelease(bombGo, 0f);
 
             Assert.AreEqual(before + 1, InkBombPool.Instance.ActiveBombCount, "按下必须真实投出一颗手雷");
-            Assert.Less(motor.CurrentInk, 1f, "手雷与墨水脱钩：投掷不得扣墨");
+            Assert.AreEqual(45f, motor.CurrentInk, 0.5f, "投掷手雷应扣 55 墨（100 → 45）");
 
             // 桌面/移动端共用的准星冷却徽标：投出后 6s 内必须可见，给玩家明确的冷却反馈
             var reticle = Object.FindFirstObjectByType<P1.UI.WeaponReticleUI>();
@@ -155,6 +170,9 @@ namespace P1.Tests
 
             yield return PressAndRelease(bombGo, 0f);
             Assert.AreEqual(before + 1, InkBombPool.Instance.ActiveBombCount, "第一发必须成功投出");
+
+            // 补满墨，把失败原因隔离到「冷却」上（墨水不足会先被 55 墨门槛拦下）
+            player.Motor.RefillInkFull();
 
             // 冷却期内立刻再投：必须被拒且给显性反馈（拒绝戳递增驱动按钮闪红），不再静默
             yield return PressAndRelease(bombGo, 0f);

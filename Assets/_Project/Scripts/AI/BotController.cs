@@ -1301,7 +1301,7 @@ namespace P1.AI
             if (_motor.IsInOwnInk)
             {
                 _hasMoveTarget = false;
-                // 潜进己方墨原地补给：回墨 42/s、回血 60/s
+                // 潜进己方墨原地补给：回墨 34/s、回血 60/s
                 _motor.SetFrameIntent(Vector3.zero, AimDirection(), true, false);
                 return;
             }

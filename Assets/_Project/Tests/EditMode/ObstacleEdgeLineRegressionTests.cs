@@ -34,12 +34,34 @@ namespace P1.Tests.EditMode
         }
 
         [Test]
-        public void ObstacleShader_EdgeDistanceUsesWorldScale()
+        public void ObstacleShader_EdgeDistanceSurvivesStaticBatching()
         {
             string source = File.ReadAllText(ObstacleShaderPath);
-            Assert.IsTrue(source.Contains("UNITY_MATRIX_M._11_21_31"),
-                "边线距离必须按世界尺度换算（UNITY_MATRIX_M 列向量长度），" +
-                "否则不同尺寸的掩体线宽不一致；用 UNITY_MATRIX_M 而非 unity_ObjectToWorld 以兼容 GRD 实例化");
+
+            // 掩体全部标记 BatchingStatic：静态合批把顶点烘焙成世界坐标，positionOS 不再是
+            // object space 的 ±0.5 盒、UNITY_MATRIX_M 退化为单位阵，任何
+            // (0.5 - abs(positionOS)) * 列向量长度 形式的盒体距离都会恒为负值，
+            // 把整张表面涂成 _EdgeLineColor（船甲板/掩体大面积全黑的根因）。
+            Assert.IsFalse(source.Contains("edgeDist3"),
+                "边线距离不能再用 object-space 盒体距离：静态合批后 positionOS 是世界坐标，会整面涂黑");
+            Assert.IsFalse(source.Contains("UNITY_MATRIX_M._11_21_31"),
+                "边线距离不能靠 UNITY_MATRIX_M 取世界尺度：静态合批后它是单位阵");
+
+            // 每个盒子的世界 AABB 由 CreateBox 烘进 uv2/uv3/uv4（合批保留 UV 通道）。
+            Assert.IsTrue(source.Contains("input.boxMinWS") && source.Contains("input.boxMaxWS"),
+                "边线距离必须来自烘焙进 UV 的世界 AABB，否则静态合批后拿不到每个盒子的尺寸");
+            Assert.IsTrue(source.Contains("boxValid"),
+                "缺少退化保护：AABB 未烘焙（全零）时整面会被判成贴边并涂成 _EdgeLineColor");
+        }
+
+        [Test]
+        public void ArenaBoxBakesWorldBoundsIntoUV()
+        {
+            string source = File.ReadAllText("Assets/_Project/Scripts/Environment/ArenaGeometryBuilder.cs");
+            Assert.IsTrue(source.Contains("BakeBoxBoundsUV"),
+                "CreateBox 必须把盒子的世界 AABB 烘进 uv2/uv3/uv4，否则掩体边界线在静态合批后失效");
+            Assert.IsTrue(source.Contains("mesh.uv2") && source.Contains("mesh.uv3") && source.Contains("mesh.uv4"),
+                "AABB 需要写满 uv2(minXZ) / uv3(maxXZ) / uv4(minY,maxY) 三个通道");
         }
 
         [Test]

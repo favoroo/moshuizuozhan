@@ -6,18 +6,19 @@ using UnityEngine;
 namespace P1.Editor
 {
     /// <summary>
-    /// P5-C 音频绑定工具：把播报员语音、双段 BGM 与 AudioMixConfig 写进当前场景的 AudioManager。
+    /// 比赛流程音效绑定工具：把开赛/GO/一分钟/终场等流程音效、双段 BGM 与 AudioMixConfig
+    /// 写进当前场景的 AudioManager。播报员语音已移除，流程提示全部由音效承担。
     /// 遵守 AGENTS.md 规则 1：不改 .unity/.asset 的 YAML，用 Editor 脚本改并在保存前 MarkSceneDirty。
     /// </summary>
     public static class AudioSetupTools
     {
-        private const string VoiceDir = "Assets/_Project/Audio/Voice";
+        private const string SfxDir = "Assets/_Project/Audio/SFX";
         private const string MusicDir = "Assets/_Project/Audio/Music";
         private const string SoDir = "Assets/_Project/ScriptableObjects";
         private const string ConfigPath = SoDir + "/AudioMixConfig.asset";
 
-        [MenuItem("P1/音频/1. 绑定播报语音与双段 BGM", false, 20)]
-        public static void WireAnnouncerAndMusic()
+        [MenuItem("P1/音频/1. 绑定比赛流程音效与双段 BGM", false, 20)]
+        public static void WireMatchFlowAndMusic()
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             {
@@ -35,12 +36,13 @@ namespace P1.Editor
             AudioMixConfigSO config = LoadOrCreateConfig();
             int missing = 0;
 
-            manager.voiceCount3Clip = LoadClip($"{VoiceDir}/vo_announcer_count_3_01.wav", ref missing);
-            manager.voiceCount2Clip = LoadClip($"{VoiceDir}/vo_announcer_count_2_01.wav", ref missing);
-            manager.voiceCount1Clip = LoadClip($"{VoiceDir}/vo_announcer_count_1_01.wav", ref missing);
-            manager.voiceGoClip = LoadClip($"{VoiceDir}/vo_announcer_go_01.wav", ref missing);
-            manager.voiceOneMinuteClip = LoadClip($"{VoiceDir}/vo_announcer_one_minute_01.wav", ref missing);
-            manager.voiceFinishClip = LoadClip($"{VoiceDir}/vo_announcer_finish_01.wav", ref missing);
+            manager.countdownTickClip = LoadClip($"{SfxDir}/countdown_tick_1.wav", ref missing);
+            manager.matchStartClip = LoadClip($"{SfxDir}/match_start_1.wav", ref missing);
+            manager.goCueClip = LoadClip($"{SfxDir}/go_horn_1.wav", ref missing);
+            manager.oneMinuteCueClip = LoadClip($"{SfxDir}/one_minute_1.wav", ref missing);
+            manager.matchEndClip = LoadClip($"{SfxDir}/match_end_1.wav", ref missing);
+            manager.resultWinClip = LoadClip($"{SfxDir}/result_win_1.wav", ref missing);
+            manager.resultLoseClip = LoadClip($"{SfxDir}/result_lose_1.wav", ref missing);
 
             manager.bgmMainClip = LoadClip($"{MusicDir}/bgm_match_main.ogg", ref missing);
             manager.bgmFinalClip = LoadClip($"{MusicDir}/bgm_match_final.ogg", ref missing);
@@ -50,8 +52,14 @@ namespace P1.Editor
             EditorSceneManager.MarkSceneDirty(manager.gameObject.scene);
             EditorSceneManager.SaveScene(manager.gameObject.scene);
 
-            Debug.Log($"[P5-C] 音频绑定完成：6 条播报 + 2 段 BGM + AudioMixConfig；缺失 {missing} 项。" +
+            Debug.Log($"[P5-C] 比赛流程音效绑定完成：7 条提示音效 + 2 段 BGM + AudioMixConfig；缺失 {missing} 项。" +
                       $"场景：{manager.gameObject.scene.path}");
+        }
+
+        /// <summary>旧入口名保留（脚本/文档里可能还在调用），等价于 <see cref="WireMatchFlowAndMusic"/>。</summary>
+        public static void WireAnnouncerAndMusic()
+        {
+            WireMatchFlowAndMusic();
         }
 
         [MenuItem("P1/音频/2. 体检音频导入设置", false, 21)]

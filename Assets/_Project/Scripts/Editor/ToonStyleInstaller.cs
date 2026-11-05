@@ -482,6 +482,44 @@ namespace P1.Editor
             ProjectScaffolder.RefreshSpawnPadMaterials(style);
         }
 
+        /// <summary>多地图材质可选的表面细节图族（法线 + RMO）。</summary>
+        public enum StyleSurfaceKind
+        {
+            None = 0,
+            Concrete = 1,
+            Metal = 2,
+            Wood = 3
+        }
+
+        /// <summary>
+        /// 给多地图材质挂上表面细节图（法线 + RMO）。
+        /// **必须调用**：ObstacleDitherLit 的 _SurfaceRMO 默认是 black，G=0 时 AO 被 lerp 到 0.35，
+        /// 整块材质的亮度只剩 35%（实测新图船甲板/船壳比同色地面暗一大截，读作"酒红塑料"）。
+        /// </summary>
+        public static void ApplySurfaceToMaterial(Material mat, StyleSurfaceKind kind, ArenaStyleSO style,
+            float texelScale = 0.5f, float smoothnessScale = 1.0f)
+        {
+            if (mat == null || style == null || kind == StyleSurfaceKind.None) return;
+            string nPath;
+            string rmoPath;
+            switch (kind)
+            {
+                case StyleSurfaceKind.Metal:
+                    nPath = MetalNPath;
+                    rmoPath = MetalRmoPath;
+                    break;
+                case StyleSurfaceKind.Wood:
+                    nPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Wood_N.png";
+                    rmoPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Wood_RMO.png";
+                    break;
+                default:
+                    nPath = ConcreteNPath;
+                    rmoPath = ConcreteRmoPath;
+                    break;
+            }
+            ApplySurfacePbr(mat, nPath, rmoPath, texelScale, smoothnessScale, style);
+        }
+
         private static void ApplySurfacePbr(
             Material mat, string normalPath, string rmoPath, float texelScale, float smoothnessScale, ArenaStyleSO style)
         {
@@ -772,6 +810,41 @@ namespace P1.Editor
 
             AssetDatabase.SaveAssets();
             Debug.Log($"[P31] albedo 细节层已应用：{characterCount} 个角色材质 + Mat_Prop_Cloth。");
+        }
+
+        /// <summary>
+        /// 把画风档位的三渲二参数写到任意材质（多地图材质集共用）。
+        /// 新地图的 Mat_GH_* 不经过 <see cref="ApplyEnvironmentMaterials"/> 的固定路径，必须显式调用本方法，
+        /// 否则材质会停在 Shader 默认阴影底线 0.42，背光面被压成脏紫（实际症状：船甲板读作"酒红塑料"）。
+        /// </summary>
+        public static void ApplyStyleToMaterial(Material mat, ArenaStyleSO style, float rimScale = 1.0f)
+        {
+            if (mat == null || style == null) return;
+            ApplyToonProperties(mat, style, rimScale);
+            if (mat.HasProperty(EdgeLineColorId)) mat.SetColor(EdgeLineColorId, Linear(style.coverEdgeLineColor));
+            if (mat.HasProperty(EdgeLineWidthId)) mat.SetFloat(EdgeLineWidthId, style.coverEdgeLineWidth);
+            if (mat.HasProperty(EdgeLineStrengthId)) mat.SetFloat(EdgeLineStrengthId, style.coverEdgeLineStrength);
+            if (mat.HasProperty(TopLiftId)) mat.SetFloat(TopLiftId, style.coverTopLift);
+            EditorUtility.SetDirty(mat);
+        }
+
+        /// <summary>地面材质的画风参数（含墨水色阶与胶质内发光），供多地图的 _InkGround 变体复用。</summary>
+        public static void ApplyGroundStyleToMaterial(Material mat, ArenaStyleSO style,
+            float groundShadowFloor = 0.55f, float inkGlow = 0.20f)
+        {
+            if (mat == null || style == null) return;
+            if (mat.HasProperty(GridLineColorId)) mat.SetColor(GridLineColorId, Linear(style.groundSeam));
+            if (mat.HasProperty(CliffColorId)) mat.SetColor(CliffColorId, Linear(style.groundCliff));
+            ApplyToonProperties(mat, style, 1f);
+            if (mat.HasProperty(ShadeThresholdId)) mat.SetFloat(ShadeThresholdId, style.shadeThreshold);
+            if (mat.HasProperty(ShadeSoftnessId)) mat.SetFloat(ShadeSoftnessId, style.shadeSoftness);
+            if (mat.HasProperty(ShadowFloorId)) mat.SetFloat(ShadowFloorId, groundShadowFloor);
+            if (mat.HasProperty(InkShadeThresholdId)) mat.SetFloat(InkShadeThresholdId, style.inkShadeThreshold);
+            if (mat.HasProperty(InkShadeSoftnessId)) mat.SetFloat(InkShadeSoftnessId, style.inkShadeSoftness);
+            if (mat.HasProperty(InkShadowFloorId)) mat.SetFloat(InkShadowFloorId, style.inkShadowFloor);
+            if (mat.HasProperty("_GelNoiseStrength")) mat.SetFloat("_GelNoiseStrength", 0.022f);
+            if (mat.HasProperty("_InkGlow")) mat.SetFloat("_InkGlow", inkGlow);
+            EditorUtility.SetDirty(mat);
         }
 
         private static void ApplyToonProperties(Material mat, ArenaStyleSO style, float rimScale)

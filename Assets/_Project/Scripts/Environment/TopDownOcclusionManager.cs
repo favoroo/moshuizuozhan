@@ -207,6 +207,11 @@ namespace P1.Environment
                 // 排除角色自身的碰撞体
                 if (col.GetComponentInParent<CombatantHealth>() != null) continue;
 
+                // 排除角色正踩着的平台（大甲板/高台顶面）：球探针擦到脚下平台会把整块地面
+                // 判成遮挡并持续走 screen-door dither，相机一转整片甲板都在闪。
+                // 判据：碰撞体顶面不高于脚底太多——脚下的地面/甲板挡不住自己的视线。
+                if (col.bounds.max.y <= characterRoot.y + 0.25f) continue;
+
                 var fader = col.GetComponentInParent<OcclusionFader>();
                 if (fader != null)
                 {

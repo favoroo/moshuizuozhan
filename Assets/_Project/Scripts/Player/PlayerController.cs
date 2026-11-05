@@ -96,7 +96,9 @@ namespace P1.Player
             /// <summary>大招演出中（旧版行为：直接屏蔽副武器）。</summary>
             SpecialActive,
             /// <summary>已死亡。</summary>
-            Dead
+            Dead,
+            /// <summary>墨水不足一次投掷：按下即拒绝，不进入瞄准（直接播空墨提示）。</summary>
+            NotEnoughInk
         }
 
         /// <summary>
@@ -292,6 +294,9 @@ namespace P1.Player
             UpdateAimPoint();
 
             // 4.1 手雷：按住瞄准（显示弹道预览）、松手按准星落点投出（inkwave 手感）
+            // 墨水不足一次投掷时按下沿直接拒绝：不进入瞄准、不出抛物线，改播「弹药耗尽」提示。
+            bool bombHasInk = _weapon == null || _weapon.BombInkCost <= 0.001f
+                              || (_motor != null && _motor.CurrentInk >= _weapon.BombInkCost);
             SubBombThrowArbiter.Intent bombIntent = _bombArbiter.Advance(
                 bombPressed,
                 bombHeld,
@@ -299,7 +304,15 @@ namespace P1.Player
                 touchBombPressed,
                 touchBombHeld,
                 touchBombReleased,
-                _weapon.IsPerformingSpecial);
+                _weapon.IsPerformingSpecial,
+                bombHasInk);
+
+            if (bombIntent.DeniedByInk)
+            {
+                LastSubBombDenyReason = SubBombDenyReason.NotEnoughInk;
+                // 复用主武器空墨反馈：空打音效 + 准星红叉/震颤 + 底部「弹药耗尽」toast
+                _weapon.ReportEmptyFeedback();
+            }
 
             // 预览与实飞共用同一初速：本帧瞄准/投掷只解算一次，所见即所得
             Vector3 bombThrowVelocity = default;

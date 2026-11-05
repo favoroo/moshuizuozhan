@@ -25,11 +25,18 @@ namespace P1.Editor
         private const string SoFolder = "Assets/_Project/ScriptableObjects";
         private const string MatFolder = "Assets/_Project/Materials";
         private const string ScenePath = "Assets/_Project/Scenes/PhaseA_Playbox.unity";
-        private const string KelpScenePath = "Assets/_Project/Scenes/KelpTerminal.unity";
+        private const string GullScenePath = "Assets/_Project/Scenes/GullHarbor.unity";
         private const string ArenaStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle.asset";
-        private const string KelpStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle_KelpTerminal.asset";
-        private const string KelpMeshPrefix = "kelp";
-        private const string KelpGroundMatPath = "Assets/_Project/Materials/Mat_KT_InkGround.mat";
+        private const string GullStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle_GullHarbor.asset";
+        private const string GullMeshPrefix = "gull";
+        private const string GullGroundMatPath = "Assets/_Project/Materials/Mat_GH_InkGround.mat";
+
+        /// <summary>场景构建变体：主图（集装箱码头）或港湾图（海鸥港湾）。</summary>
+        private enum ArenaVariant
+        {
+            ContainerDock,
+            GullHarbor
+        }
 
         [MenuItem("P1/构建/1. 生成默认配置与材质 (SO & Materials)", false, 10)]
         public static void GenerateConfigsAndMaterials()
@@ -120,26 +127,27 @@ namespace P1.Editor
         [MenuItem("P1/构建/2. 一键生成并打开第一阶段试玩场景 (Phase A Playbox)", false, 11)]
         public static void BuildPhaseAPlayboxScene()
         {
-            BuildArenaScene(ScenePath, false);
+            BuildArenaScene(ScenePath, ArenaVariant.ContainerDock);
         }
 
         /// <summary>
-        /// 新地图「潮汐货站 / Kelp Terminal」独立构建入口。
-        /// 与既有竞技场共用玩法常量（40×56 边界、出生甲板、出生线、涂地网格），
-        /// 但拥有独立的场内布局、地标、画风资产与材质集，不会覆盖 PhaseA 主场景与共享材质。
+        /// 新地图「海鸥港湾 / GULL HARBOR」独立构建入口（复刻 INKWAVE `halyard` 渡轮码头）。
+        /// 与主图共用 40×56 玩法常量与出生线，但拥有独立的渡轮/浅湾布局、画风资产与材质集，
+        /// 不会覆盖 PhaseA 主场景与共享材质。
         /// </summary>
-        [MenuItem("P1/关卡与地图/生成新地图：潮汐货站 (Kelp Terminal)", false, 31)]
-        public static void BuildKelpTerminalScene()
+        [MenuItem("P1/关卡与地图/生成新地图：海鸥港湾 (Gull Harbor)", false, 31)]
+        public static void BuildGullHarborScene()
         {
-            BuildArenaScene(KelpScenePath, true);
+            BuildArenaScene(GullScenePath, ArenaVariant.GullHarbor);
         }
 
-        private static void BuildArenaScene(string scenePath, bool kelpTerminal)
+        private static void BuildArenaScene(string scenePath, ArenaVariant variant)
         {
             GenerateConfigsAndMaterials();
-            if (kelpTerminal)
+            bool gullHarbor = variant == ArenaVariant.GullHarbor;
+            if (gullHarbor)
             {
-                EnsureKelpTerminalArt();
+                EnsureGullHarborArt();
             }
 
             ApplyProjectPlayerSettings();
@@ -158,8 +166,8 @@ namespace P1.Editor
             var teamAMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamA_Body.mat");
             var teamBMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamB_Body.mat");
             var visorMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_VisorDark.mat");
-            var arenaStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(kelpTerminal ? KelpStylePath : ArenaStylePath);
-            var arenaMats = kelpTerminal ? BuildKelpMaterialSet(arenaStyle) : BuildArenaMaterialSet(arenaStyle);
+            var arenaStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(gullHarbor ? GullStylePath : ArenaStylePath);
+            var arenaMats = gullHarbor ? BuildGullHarborMaterialSet(arenaStyle) : BuildArenaMaterialSet(arenaStyle);
 
             // 1. 主光源与环境光
             var lightGo = new GameObject("Directional Light");
@@ -182,12 +190,12 @@ namespace P1.Editor
             var navigator = managersRoot.AddComponent<ArenaNavigator>();
             managersRoot.AddComponent<TopDownOcclusionManager>();
 
-            // 3. 搭建 40×56 竞技场（新旧两图共用边界/出生/涂地口径，仅场内布局不同）
+            // 3. 搭建 40×56 竞技场（两图共用边界/出生/涂地口径，仅场内布局不同）
             var inkableRenderers = new List<Renderer>();
             var blockedColliders = new List<Collider>();
-            if (kelpTerminal)
+            if (gullHarbor)
             {
-                KelpTerminalGeometryBuilder.BuildArenaGeometry(
+                HarborGeometryBuilder.BuildArenaGeometry(
                     arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
             }
             else
@@ -196,7 +204,9 @@ namespace P1.Editor
                     arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
             }
 
-            inkSurface.Configure(inkCfg, inkableRenderers, blockedColliders);
+            // 海鸥港湾的浅湾水线没有碰撞体（角色可涉水），必须作为"无碰撞计分禁区"单独传给涂地网格。
+            inkSurface.Configure(inkCfg, inkableRenderers, blockedColliders,
+                gullHarbor ? ArenaLayoutHarbor.WaterBlockedRects : null);
             navigator.Configure(inkCfg != null ? inkCfg.mapSize : ArenaLayoutV2.MapSize, 0.5f, ~0);
 
             // 4. 双方各 4 个出生点（Team A = 玩家 + 3 Bot，Team B = 4 Bot）
@@ -244,7 +254,7 @@ namespace P1.Editor
             camFollow.Configure(playerGo.transform, gameCfg);
 
             // 7.1 P7-B：烘焙地面/横幅贴图、生成装饰与港口远景、应用日光/雾/天空/后处理
-            BakeArenaVisualsVariant(arenaMats, arenaStyle, kelpTerminal);
+            BakeArenaVisualsVariant(arenaMats, arenaStyle, variant);
 
             // 8. 创建战斗 HUD（含顶部覆盖率条、右上角实时涂地小地图、底部墨水/手雷/大招槽与操作说明）
             BuildHudCanvas();
@@ -258,7 +268,7 @@ namespace P1.Editor
             managersRoot.AddComponent<MobileTouchUI>();
 
             // 10.1 新地图：场景级画风锚点，让运行时全局反射/天空/涂层参数取自本图风格资产
-            if (kelpTerminal)
+            if (gullHarbor)
             {
                 var styleAnchor = new GameObject("_ArenaStyleAnchor");
                 styleAnchor.AddComponent<ArenaStyleSceneAnchor>().Configure(arenaStyle);
@@ -272,162 +282,301 @@ namespace P1.Editor
         }
 
         /// <summary>
-        /// 新地图的画风/材质总装：
+        /// 「海鸥港湾」画风/材质总装：
         /// 1) 复制一份 ArenaStyle.asset 作为本图独立画风档位（不修改共享风格资产）；
-        /// 2) 在本图专属路径生成一套材质（不覆盖 Mat_* 共享材质）；
-        /// 3) 地面复用已烘焙的公共地面图集（标记层与 40×56 车道网格一致）。
+        /// 2) 烘焙港湾专属地面（木栈道 + 暖奶油混凝土 + 水床），不再复用货柜码头的冷灰地面；
+        /// 3) 在本图专属路径生成 GH_ 前缀材质（不覆盖共享 Mat_*）。
         /// </summary>
-        private static void EnsureKelpTerminalArt()
+        private static void EnsureGullHarborArt()
         {
             var baseStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
             if (baseStyle == null)
             {
-                Debug.LogError("[ProjectScaffolder] 找不到 ArenaStyle.asset，无法生成潮汐货站画风。");
+                Debug.LogError("[ProjectScaffolder] 找不到 ArenaStyle.asset，无法生成海鸥港湾画风。");
                 return;
             }
 
-            var kelpStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(KelpStylePath);
-            if (kelpStyle == null)
+            var gullStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(GullStylePath);
+            if (gullStyle == null)
             {
-                AssetDatabase.CopyAsset(ArenaStylePath, KelpStylePath);
+                AssetDatabase.CopyAsset(ArenaStylePath, GullStylePath);
                 AssetDatabase.SaveAssets();
-                kelpStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(KelpStylePath);
+                gullStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(GullStylePath);
             }
-            if (kelpStyle == null)
+            if (gullStyle == null)
             {
-                Debug.LogError("[ProjectScaffolder] 潮汐货站画风资产创建失败。");
+                Debug.LogError("[ProjectScaffolder] 海鸥港湾画风资产创建失败。");
                 return;
             }
 
-            ApplyKelpPalette(kelpStyle);
-            EditorUtility.SetDirty(kelpStyle);
+            ApplyGullHarborPalette(gullStyle);
+            EditorUtility.SetDirty(gullStyle);
             AssetDatabase.SaveAssets();
 
-            // 材质全部写到 KT_ 前缀路径；共享的 Mat_InkWall / 道具素色材质直接复用。
-            CreateOrUpdateGroundMaterial(kelpStyle, KelpGroundMatPath);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_ObstacleWall.mat", kelpStyle.concreteLight, kelpStyle.concreteDark, 0.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Container_Teal.mat", kelpStyle.containerTeal, Color.Lerp(kelpStyle.containerTeal, kelpStyle.steelDark, 0.55f), 1.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Container_Rust.mat", kelpStyle.containerRust, Color.Lerp(kelpStyle.containerRust, kelpStyle.steelDark, 0.55f), 1.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Container_Slate.mat", kelpStyle.containerSlate, Color.Lerp(kelpStyle.containerSlate, kelpStyle.steelDark, 0.55f), 1.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Container_Mustard.mat", kelpStyle.containerMustard, Color.Lerp(kelpStyle.containerMustard, kelpStyle.steelDark, 0.55f), 1.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_BoundaryWall.mat", kelpStyle.boundaryConcrete, kelpStyle.boundaryTrim, 0.0f);
-            CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_KT_Prop_Wood.mat", kelpStyle.wood, kelpStyle.woodDark, 0.0f);
+            // 港湾地面：2048 反照率 + 1024 法线/RMO（木栈道板缝、码头板缝、水床）。
+            HarborGroundTextureBaker.BakeAll(gullStyle);
 
-            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_KT_SpawnPad_TeamA.mat", kelpStyle, 1f);
-            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_KT_SpawnPad_TeamB.mat", kelpStyle, -1f);
-            CreateOrUpdateWaterMaterial(kelpStyle, $"{MatFolder}/Mat_KT_Water.mat");
-            CreateOrUpdateSkyboxMaterial(kelpStyle, $"{MatFolder}/Mat_KT_Skybox.mat");
+            // 地面材质：先按通用流程建材质，再挂港湾三张贴图。
+            var groundMat = CreateOrUpdateGroundMaterial(gullStyle, GullGroundMatPath);
+            AssignHarborGroundTextures(groundMat, gullStyle);
+            ToonStyleInstaller.ApplyGroundStyleToMaterial(groundMat, gullStyle);
+
+            // 船壳：深海军蓝（参考图 KRAKEN LINES 蓝），比"青绿桶"更像船；
+            // 客舱：接近纯白，靠深色窗带与珊瑚色腰线出对比；甲板：蓝灰钢面车甲板。
+            Color hullColor = Color.Lerp(gullStyle.containerSlate, new Color(0.25f, 0.34f, 0.47f, 1f), 0.55f);
+            Material hullMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_GH_Hull.mat",
+                hullColor, Color.Lerp(hullColor, Color.black, 0.30f), 0.0f);
+            Material cabinMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_GH_Cabin.mat",
+                Color.Lerp(gullStyle.concreteLight, Color.white, 0.62f), gullStyle.concreteMid, 0.0f);
+            Color carDeckColor = Color.Lerp(gullStyle.steel, gullStyle.containerSlate, 0.32f);
+            Material deckMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_GH_Deck.mat",
+                carDeckColor, Color.Lerp(carDeckColor, Color.black, 0.25f), 0.0f);
+            // 强调色读作"船壳白漆"：屋檐、围边、缆桩一圈奶油白，珊瑚橙只留给集装箱与浮标。
+            Color accentCream = Color.Lerp(gullStyle.concreteLight, Color.white, 0.55f);
+            Material accentMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_GH_Accent.mat",
+                accentCream, Color.Lerp(gullStyle.concreteMid, gullStyle.concreteLight, 0.5f), 0.0f);
+            Material glassMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_GH_Glass.mat",
+                gullStyle.steelDark, Color.Lerp(gullStyle.steelDark, Color.black, 0.30f), 0.0f);
+            Material boundaryMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_GH_BoundaryWall.mat",
+                gullStyle.boundaryConcrete, gullStyle.boundaryTrim, 0.0f);
+            Material propConcreteMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_GH_Prop_Concrete.mat",
+                gullStyle.concreteLight, gullStyle.concreteDark, 0.0f);
+            Material propWoodMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_GH_Prop_Wood.mat",
+                gullStyle.wood, gullStyle.woodDark, 0.0f);
+
+            // 三渲二/描边/阴影底线参数必须逐材质写入：新建材质停在 Shader 默认 0.42，
+            // 背光面会被压成脏紫（实测船甲板读作"酒红塑料"）。
+            ToonStyleInstaller.ApplyStyleToMaterial(hullMat, gullStyle);
+            ToonStyleInstaller.ApplyStyleToMaterial(cabinMat, gullStyle);
+            ToonStyleInstaller.ApplyStyleToMaterial(deckMat, gullStyle);
+            ToonStyleInstaller.ApplyStyleToMaterial(accentMat, gullStyle);
+            ToonStyleInstaller.ApplyStyleToMaterial(glassMat, gullStyle);
+            ToonStyleInstaller.ApplyStyleToMaterial(boundaryMat, gullStyle);
+            ToonStyleInstaller.ApplyStyleToMaterial(propConcreteMat, gullStyle);
+            ToonStyleInstaller.ApplyStyleToMaterial(propWoodMat, gullStyle);
+
+            // 表面细节图（法线 + RMO）：不挂 RMO 时 ObstacleDitherLit 的 AO 会被压到 0.35，
+            // 整块材质只剩三成亮度（船甲板读作"酒红塑料"的直接原因）。
+            ToonStyleInstaller.ApplySurfaceToMaterial(hullMat, ToonStyleInstaller.StyleSurfaceKind.Metal, gullStyle, 0.7f, 0.9f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(cabinMat, ToonStyleInstaller.StyleSurfaceKind.Concrete, gullStyle, 0.5f, 0.9f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(deckMat, ToonStyleInstaller.StyleSurfaceKind.Metal, gullStyle, 0.6f, 0.8f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(accentMat, ToonStyleInstaller.StyleSurfaceKind.Metal, gullStyle, 0.6f, 0.8f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(boundaryMat, ToonStyleInstaller.StyleSurfaceKind.Concrete, gullStyle, 0.4f, 1.0f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(propConcreteMat, ToonStyleInstaller.StyleSurfaceKind.Concrete, gullStyle, 0.5f, 1.0f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(propWoodMat, ToonStyleInstaller.StyleSurfaceKind.Wood, gullStyle, 0.75f, 0.75f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(glassMat, ToonStyleInstaller.StyleSurfaceKind.Metal, gullStyle, 0.8f, 0.6f);
+
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_GH_SpawnPad_TeamA.mat", gullStyle, 1f);
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_GH_SpawnPad_TeamB.mat", gullStyle, -1f);
+
+            // 远景水面：岸距对齐 48×64 的码头平台（半尺寸 24/32），白色岸沫才会落在平台沿口。
+            var waterMat = CreateOrUpdateWaterMaterial(gullStyle, $"{MatFolder}/Mat_GH_Water.mat");
+            if (waterMat != null)
+            {
+                waterMat.SetVector("_ShoreHalfExtents", new Vector4(24f, 32f, 0f, 0f));
+                waterMat.SetFloat("_ShoreDistance", 10f);
+                waterMat.SetFloat("_FoamStrength", 0.45f);
+                // 海面亮点收小：参考图是青绿水面上稀疏的浅色碎光，不是大片白斑。
+                waterMat.SetFloat("_GlitterStrength", 0.10f);
+                waterMat.SetFloat("_GlitterThreshold", 0.995f);
+                EditorUtility.SetDirty(waterMat);
+            }
+
+            // 场内浅湾：岸距框设成原点附近的一小块，水面读作深青；关闭岸沫，避免整条水线糊白。
+            // 波形与闪点都收一档：4.6m 窄水沟里大颗高光会被读成"水面浮雪"。
+            var waterInner = CreateOrUpdateWaterMaterial(gullStyle, $"{MatFolder}/Mat_GH_WaterInner.mat");
+            if (waterInner != null)
+            {
+                waterInner.SetVector("_ShoreHalfExtents", new Vector4(0.5f, 0.5f, 0f, 0f));
+                waterInner.SetFloat("_ShoreDistance", 6f);
+                waterInner.SetFloat("_FoamStrength", 0f);
+                waterInner.SetFloat("_WaveScale", 0.55f);
+                waterInner.SetFloat("_WaveStrength", 0.16f);
+                waterInner.SetFloat("_WaveNormalStrength", 0.16f);
+                waterInner.SetFloat("_GlitterStrength", 0.10f);
+                waterInner.SetFloat("_GlitterThreshold", 0.994f);
+                EditorUtility.SetDirty(waterInner);
+            }
+
+            CreateOrUpdateSkyboxMaterial(gullStyle, $"{MatFolder}/Mat_GH_Skybox.mat");
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            Debug.Log($"[ProjectScaffolder] 潮汐货站画风资产已生成：{KelpStylePath}");
+            Debug.Log($"[ProjectScaffolder] 海鸥港湾画风资产已生成：{GullStylePath}");
         }
 
         /// <summary>
-        /// 潮汐货站的画风档位（在复制自 ArenaStyle 的基础上只覆盖配色与日光/天空/水面）。
-        /// 质感参数（清漆/涂层/阴影/SSAO/对比/饱和/曝光/Neutral 色调映射）保持与 P31 完全一致。
+        /// 海鸥港湾的画风档位：明亮港湾正午（薄荷青水 × 奶油白 × 珊瑚橙 × 柚木）。
+        /// 与主图的冷灰工业码头刻意拉开；P31 质感红线保持同名同值。
         /// </summary>
-        private static void ApplyKelpPalette(ArenaStyleSO s)
+        private static void ApplyGullHarborPalette(ArenaStyleSO s)
         {
-            // 地面 / 建材：冷灰水泥 + 海风青
-            s.groundBase = new Color(0.70f, 0.71f, 0.69f, 1f);
-            s.groundSeam = new Color(0.45f, 0.47f, 0.47f, 1f);
-            s.groundCliff = new Color(0.30f, 0.33f, 0.33f, 1f);
-            s.concreteLight = new Color(0.74f, 0.76f, 0.74f, 1f);
-            s.concreteMid = new Color(0.58f, 0.61f, 0.61f, 1f);
-            s.concreteDark = new Color(0.36f, 0.39f, 0.40f, 1f);
-            s.boundaryConcrete = new Color(0.72f, 0.74f, 0.72f, 1f);
-            s.boundaryTrim = new Color(0.47f, 0.51f, 0.50f, 1f);
+            // 地面 / 建材：暖奶油码头板 + 柚木栈道（压低黄色饱和度，避免晒成"黄塑料"）
+            s.groundBase = new Color(0.63f, 0.56f, 0.44f, 1f);
+            s.groundSeam = new Color(0.36f, 0.29f, 0.20f, 1f);
+            s.groundCliff = new Color(0.24f, 0.19f, 0.14f, 1f);
+            s.concreteLight = new Color(0.82f, 0.78f, 0.68f, 1f);
+            s.concreteMid = new Color(0.66f, 0.61f, 0.51f, 1f);
+            s.concreteDark = new Color(0.40f, 0.35f, 0.29f, 1f);
+            s.boundaryConcrete = new Color(0.84f, 0.80f, 0.70f, 1f);
+            s.boundaryTrim = new Color(0.46f, 0.37f, 0.27f, 1f);
 
-            // 集装箱：深海青 / 铁锈 / 板岩蓝 / 芥末黄
-            s.containerTeal = new Color(0.14f, 0.45f, 0.46f, 1f);
-            s.containerRust = new Color(0.58f, 0.30f, 0.20f, 1f);
-            s.containerSlate = new Color(0.28f, 0.38f, 0.52f, 1f);
-            s.containerMustard = new Color(0.80f, 0.62f, 0.26f, 1f);
-            s.steel = new Color(0.44f, 0.51f, 0.54f, 1f);
-            s.steelDark = new Color(0.20f, 0.25f, 0.27f, 1f);
-            s.wood = new Color(0.60f, 0.46f, 0.31f, 1f);
-            s.woodDark = new Color(0.35f, 0.26f, 0.18f, 1f);
+            // 船体 / 强调色：深海军蓝 / 港青 / 珊瑚橙 / 柚木黄
+            s.containerSlate = new Color(0.21f, 0.28f, 0.40f, 1f);
+            s.containerTeal = new Color(0.14f, 0.50f, 0.52f, 1f);
+            s.containerRust = new Color(0.80f, 0.36f, 0.22f, 1f);
+            s.containerMustard = new Color(0.88f, 0.70f, 0.26f, 1f);
+            s.steel = new Color(0.62f, 0.66f, 0.68f, 1f);
+            s.steelDark = new Color(0.24f, 0.28f, 0.31f, 1f);
+            s.wood = new Color(0.68f, 0.50f, 0.32f, 1f);
+            s.woodDark = new Color(0.32f, 0.22f, 0.14f, 1f);
+            s.foliage = new Color(0.28f, 0.54f, 0.32f, 1f);
 
-            // 低角度黄昏侧光：长阴影 + 暖日光，冷天空形成对比
-            s.sunEuler = new Vector3(38f, -52f, 0f);
-            s.sunColor = new Color(1.00f, 0.90f, 0.76f, 1f);
-            s.sunIntensity = 1.55f;
-            s.ambientSky = new Color(0.30f, 0.42f, 0.62f, 1f);
-            s.ambientEquator = new Color(0.52f, 0.50f, 0.48f, 1f);
-            s.ambientGround = new Color(0.24f, 0.20f, 0.18f, 1f);
-            s.ambientIntensity = 0.84f;
+            // 明亮港湾正午：太阳偏高、天空通透、阴影短而软。
+            // 天光偏亮蓝：船壳/围墙的背光面靠这一档天光提亮，否则整艘渡轮会读成黑驳船。
+            // 太阳从东北方来：玩家默认从北侧出生点向中场推进时是顺光，渡轮/船员正脸有光；
+            // 原来 -34° 会在默认视角形成逆光，整艘船读成黑剪影。
+            s.sunEuler = new Vector3(48f, 146f, 0f);
+            s.sunColor = new Color(1.00f, 0.97f, 0.92f, 1f);
+            s.sunIntensity = 1.72f;
+            s.ambientSky = new Color(0.46f, 0.58f, 0.76f, 1f);
+            s.ambientEquator = new Color(0.68f, 0.65f, 0.57f, 1f);
+            s.ambientGround = new Color(0.34f, 0.30f, 0.24f, 1f);
+            s.ambientIntensity = 0.95f;
+            s.reflectionIntensity = 0.42f;
+            s.shadowStrength = 0.90f;
 
-            // 远景：冷蓝雾（不是奶白），雾距强制保持 65 / 210
-            s.fogColor = new Color(0.62f, 0.66f, 0.72f, 1f);
-            s.fogStartDistance = 65f;
-            s.fogEndDistance = 210f;
-            s.skyTop = new Color(0.10f, 0.26f, 0.52f, 1f);
-            s.skyHorizon = new Color(0.62f, 0.66f, 0.72f, 1f);
-            s.skyGround = new Color(0.36f, 0.40f, 0.44f, 1f);
-            s.sunDisc = new Color(1.00f, 0.82f, 0.55f, 1f);
-            s.cloudColor = new Color(1.00f, 0.92f, 0.84f, 1f);
-            s.cloudStrength = 0.22f;
+            s.shadowTint = new Color(0.42f, 0.50f, 0.66f, 1f);
+            s.rimColor = new Color(0.82f, 0.92f, 1f, 1f);
+            s.rimStrength = 0.22f;
+            // 港湾图的背光面很多（南向甲板/船壳正对镜头），阴影底线抬高到 0.60，
+            // 否则暖木色 × 冷阴影会读成"酒红塑料"。
+            s.shadeThreshold = 0.52f;
+            s.shadeSoftness = 0.10f;
+            s.shadowFloor = 0.60f;
+            // 降低高光尖锐度：避免金属/木质法线在镜头转动时产生针状闪烁
+            s.specStrength = 0.20f;
+            s.specSoftness = 0.08f;
+            s.envSunDiscPower = 200f;
+            s.surfaceNormalStrength = 0.35f;
+            s.surfaceAOStrength = 0.60f;
 
-            s.waterShallow = new Color(0.14f, 0.38f, 0.44f, 1f);
-            s.waterDeep = new Color(0.03f, 0.13f, 0.22f, 1f);
-            s.waterHorizon = new Color(0.46f, 0.58f, 0.66f, 1f);
+            // 远景：浅海雾 + 青蓝天空 + 暖白云
+            s.fogEnabled = true;
+            s.fogColor = new Color(0.62f, 0.76f, 0.90f, 1f);
+            s.fogStartDistance = 90f;
+            s.fogEndDistance = 260f;
+            s.skyTop = new Color(0.12f, 0.40f, 0.82f, 1f);
+            s.skyHorizon = new Color(0.70f, 0.85f, 0.96f, 1f);
+            s.skyGround = new Color(0.46f, 0.58f, 0.66f, 1f);
+            s.sunDisc = new Color(1.00f, 0.95f, 0.85f, 1f);
+            s.cloudColor = new Color(1.00f, 1.00f, 1.00f, 1f);
+            s.cloudStrength = 0.36f;
+
+            // 水面按参考图的薄荷青：最深也要保留青绿，不能压成墨蓝。
+            s.waterShallow = new Color(0.36f, 0.80f, 0.78f, 1f);
+            s.waterDeep = new Color(0.16f, 0.52f, 0.56f, 1f);
+            s.waterHorizon = new Color(0.62f, 0.82f, 0.85f, 1f);
+
+            // 后处理：高对比、饱和一点，避免暖色地板在强光下糊成一片白
+            s.tonemapMode = ArenaTonemapMode.Neutral;
+            s.bloomIntensity = 0.44f;
+            s.bloomThreshold = 1.05f;
+            s.colorSaturation = 24f;
+            s.colorContrast = 20f;
+            s.vignetteIntensity = 0.12f;
+            s.postExposure = 0.06f;
+            s.ssaoIntensity = 0.90f;
+
+            // 港湾主题：远景换成栈桥/游艇/城市；墙面不挂货运横幅。
+            s.backdropTheme = ArenaBackdropTheme.Marina;
+            s.buildWallBanners = false;
+            s.decorationDensity = 1f;
+            s.buildBackdrop = true;
 
             // P31 质感红线（显式重申，避免复制资产后续被别的流程刷掉）
             s.inkCoatStrength = 1.5f;
             s.inkCoatRoughness = 0.06f;
             s.envSpecStrength = 1.35f;
-            s.shadowStrength = 0.94f;
-            s.ssaoIntensity = 1.15f;
-            s.colorContrast = 16f;
-            s.colorSaturation = 14f;
-            s.postExposure = 0.12f;
+            s.shadowStrength = 0.90f;
+            s.colorContrast = 20f;
+            s.colorSaturation = 24f;
+            s.postExposure = 0.06f;
         }
 
-        private static ArenaMaterialSet BuildKelpMaterialSet(ArenaStyleSO style)
+        private static void AssignHarborGroundTextures(Material groundMat, ArenaStyleSO style)
+        {
+            if (groundMat == null) return;
+            var albedo = AssetDatabase.LoadAssetAtPath<Texture2D>(HarborGroundTextureBaker.AlbedoPath);
+            var normal = AssetDatabase.LoadAssetAtPath<Texture2D>(HarborGroundTextureBaker.NormalPath);
+            var rmo = AssetDatabase.LoadAssetAtPath<Texture2D>(HarborGroundTextureBaker.RmoPath);
+            if (albedo != null) groundMat.SetTexture("_GroundTex", albedo);
+            if (normal != null) groundMat.SetTexture("_GroundTexN", normal);
+            if (rmo != null) groundMat.SetTexture("_GroundTexRMO", rmo);
+            groundMat.SetFloat("_GroundTexStrength", 1f);
+            // 木栈道板缝密集，法线强度收至 0.35f，既有立体凹槽又杜绝镜头旋转时的细小高光闪烁；
+            // 同时将 _GridLineColor.a 置 0，关闭 2m 过程混凝土网格线。
+            groundMat.SetFloat("_GroundNormalStrength", 0.35f);
+            groundMat.SetFloat("_GroundAOStrength", style != null ? style.surfaceAOStrength : 0.7f);
+            groundMat.SetColor("_GridLineColor", new Color(0f, 0f, 0f, 0f));
+            EditorUtility.SetDirty(groundMat);
+        }
+
+        private static ArenaMaterialSet BuildGullHarborMaterialSet(ArenaStyleSO style)
         {
             Material Load(string file) => AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/{file}");
 
             var set = new ArenaMaterialSet
             {
-                ground = Load("Mat_KT_InkGround.mat"),
-                wall = Load("Mat_KT_ObstacleWall.mat"),
+                ground = Load("Mat_GH_InkGround.mat"),
+                wall = Load("Mat_GH_Cabin.mat"),
                 inkWall = Load("Mat_InkWall.mat"),
-                boundary = Load("Mat_KT_BoundaryWall.mat"),
-                spawnPadA = Load("Mat_KT_SpawnPad_TeamA.mat"),
-                spawnPadB = Load("Mat_KT_SpawnPad_TeamB.mat"),
-                containerTeal = Load("Mat_KT_Container_Teal.mat"),
-                containerRust = Load("Mat_KT_Container_Rust.mat"),
-                containerSlate = Load("Mat_KT_Container_Slate.mat"),
-                containerMustard = Load("Mat_KT_Container_Mustard.mat"),
+                boundary = Load("Mat_GH_BoundaryWall.mat"),
+                spawnPadA = Load("Mat_GH_SpawnPad_TeamA.mat"),
+                spawnPadB = Load("Mat_GH_SpawnPad_TeamB.mat"),
+                // 彩色集装箱复用主图材质：海鸥港湾的多色道具（集装箱/浮标/屋顶条）需要真彩色，
+                // 之前这里全部指向奶油白/木色，导致整个港湾只剩米色 + 木色，读不出港口的热闹。
+                containerTeal = Load("Mat_Container_Teal.mat") ?? Load("Mat_GH_Hull.mat"),
+                containerRust = Load("Mat_Container_Rust.mat") ?? Load("Mat_GH_Accent.mat"),
+                containerSlate = Load("Mat_GH_Hull.mat"),
+                containerMustard = Load("Mat_Container_Mustard.mat") ?? Load("Mat_GH_Deck.mat"),
                 propMatte = Load("Mat_Prop_Matte.mat"),
                 propMetal = Load("Mat_Prop_Metal.mat"),
                 propEmissive = Load("Mat_Prop_Emissive.mat"),
                 propCloth = Load("Mat_Prop_Cloth.mat"),
-                bannerAtlas = Load("Mat_BannerAtlas.mat"),
-                water = Load("Mat_KT_Water.mat"),
-                skybox = Load("Mat_KT_Skybox.mat"),
+                bannerAtlas = null,
+                water = Load("Mat_GH_Water.mat"),
+                skybox = Load("Mat_GH_Skybox.mat"),
+
+                hull = Load("Mat_GH_Hull.mat"),
+                cabin = Load("Mat_GH_Cabin.mat"),
+                deck = Load("Mat_GH_Deck.mat"),
+                accent = Load("Mat_GH_Accent.mat"),
+                glass = Load("Mat_GH_Glass.mat"),
+                waterInner = Load("Mat_GH_WaterInner.mat"),
             };
 
-            set.concrete = Load("Mat_Prop_Concrete.mat") ?? set.wall;
-            set.concreteDark = Load("Mat_Prop_ConcreteDark.mat") ?? set.concrete;
+            set.concrete = Load("Mat_GH_Prop_Concrete.mat") ?? set.wall;
+            set.concreteDark = set.concrete;
             set.steel = Load("Mat_Prop_Steel.mat") ?? set.wall;
             set.steelDark = Load("Mat_Prop_SteelDark.mat") ?? set.steel;
-            set.wood = Load("Mat_KT_Prop_Wood.mat") ?? set.wall;
+            set.wood = Load("Mat_GH_Prop_Wood.mat") ?? set.wall;
             set.woodDark = Load("Mat_Prop_WoodDark.mat") ?? set.wood;
             set.foliage = Load("Mat_Prop_Foliage.mat");
             return set;
         }
 
         /// <summary>
-        /// 视觉总装（多地图变体）：海图复用公共地面图集，不重烘焙；装饰与远景写到 kelp_ 前缀资产，
-        /// 不覆盖主场景的 arena_decor / arena_backdrop 网格。
+        /// 视觉总装（多地图变体）：港湾图的地面在 <see cref="EnsureGullHarborArt"/> 已单独烘焙，
+        /// 这里不重烘公共地面图集；装饰与远景写到 gull_ 前缀资产，不覆盖主场景网格。
         /// </summary>
-        private static void BakeArenaVisualsVariant(ArenaMaterialSet mats, ArenaStyleSO style, bool kelpTerminal)
+        private static void BakeArenaVisualsVariant(ArenaMaterialSet mats, ArenaStyleSO style, ArenaVariant variant)
         {
+            bool gullHarbor = variant == ArenaVariant.GullHarbor;
+
             if (style == null)
             {
-                style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(kelpTerminal ? KelpStylePath : ArenaStylePath);
+                style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(gullHarbor ? GullStylePath : ArenaStylePath);
             }
 
             if (style == null)
@@ -435,30 +584,65 @@ namespace P1.Editor
                 Debug.LogWarning("[ProjectScaffolder] 画风资产未找到，将使用内置默认配色并跳过氛围。");
             }
 
-            if (!kelpTerminal)
+            if (!gullHarbor)
             {
                 ArenaGroundTextureBaker.BakeAll(style);
             }
 
             // 贴图导入后重新取一次材质，避免资产重导入造成「假 null」。
-            var fresh = kelpTerminal ? BuildKelpMaterialSet(style) : BuildArenaMaterialSet(style);
-            AssignGroundTexture(fresh.ground);
-            AssignBannerAtlas(fresh.bannerAtlas);
+            var fresh = gullHarbor ? BuildGullHarborMaterialSet(style) : BuildArenaMaterialSet(style);
+            if (gullHarbor)
+            {
+                AssignHarborGroundTextures(fresh.ground, style);
+            }
+            else
+            {
+                AssignGroundTexture(fresh.ground);
+                AssignBannerAtlas(fresh.bannerAtlas);
+            }
 
             DestroyImmediateByName("Arena_Decor");
             DestroyImmediateByName("_ArenaBackdrop");
 
-            if (kelpTerminal)
+            if (gullHarbor)
             {
-                ArenaDecorationBuilder.Build(null, style, fresh, null, ArenaLayoutKelp.Props, KelpMeshPrefix, false);
-                ArenaDecorationBuilder.BuildBackdrop(null, style, fresh, KelpMeshPrefix + "_backdrop");
+                ArenaDecorationBuilder.Build(null, style, fresh, null, ArenaLayoutHarbor.Props, GullMeshPrefix, false);
+                ArenaDecorationBuilder.BuildBackdrop(null, style, fresh, GullMeshPrefix + "_backdrop");
                 ArenaAtmosphereBuilder.Apply(style, fresh);
+                TuneHarborWater(fresh.water, fresh.waterInner);
             }
             else
             {
                 ArenaDecorationBuilder.Build(null, style, fresh, null);
                 ArenaDecorationBuilder.BuildBackdrop(null, style, fresh);
                 ArenaAtmosphereBuilder.Apply(style);
+            }
+        }
+
+        /// <summary>
+        /// 港湾水面调色：室外海面沿用主图配方（只收一点闪点）；场内浅湾改成亮青，
+        /// 否则 4.6m 窄水沟在俯视角下会被读成一整条墨蓝/焦油，白色闪点又像浮雪。
+        /// </summary>
+        private static void TuneHarborWater(Material outer, Material inner)
+        {
+            if (outer != null)
+            {
+                if (outer.HasProperty("_GlitterStrength")) outer.SetFloat("_GlitterStrength", 0.22f);
+                if (outer.HasProperty("_GlitterThreshold")) outer.SetFloat("_GlitterThreshold", 0.994f);
+                if (outer.HasProperty("_WaveNormalStrength")) outer.SetFloat("_WaveNormalStrength", 0.26f);
+                EditorUtility.SetDirty(outer);
+            }
+            if (inner != null)
+            {
+                if (inner.HasProperty("_ShallowColor")) inner.SetColor("_ShallowColor", Linear(new Color(0.26f, 0.78f, 0.78f, 1f)));
+                if (inner.HasProperty("_DeepColor")) inner.SetColor("_DeepColor", Linear(new Color(0.11f, 0.54f, 0.60f, 1f)));
+                if (inner.HasProperty("_HorizonColor")) inner.SetColor("_HorizonColor", Linear(new Color(0.58f, 0.84f, 0.86f, 1f)));
+                if (inner.HasProperty("_GlitterStrength")) inner.SetFloat("_GlitterStrength", 0.12f);
+                if (inner.HasProperty("_GlitterThreshold")) inner.SetFloat("_GlitterThreshold", 0.995f);
+                if (inner.HasProperty("_WaveNormalStrength")) inner.SetFloat("_WaveNormalStrength", 0.30f);
+                if (inner.HasProperty("_WaveStrength")) inner.SetFloat("_WaveStrength", 0.22f);
+                if (inner.HasProperty("_WaveScale")) inner.SetFloat("_WaveScale", 0.72f);
+                EditorUtility.SetDirty(inner);
             }
         }
 
@@ -881,20 +1065,19 @@ namespace P1.Editor
         }
 
         /// <summary>
-        /// 新地图「潮汐货站」视觉留底 + 量化统计：俯视全景、出生点、中路、掩体近景、地标远景。
-        /// 同一机位与 <see cref="CaptureP7BVerificationShots"/> 对齐，便于与既有竞技场做性能/观感对比。
+        /// 新地图「海鸥港湾」视觉留底 + 量化统计：俯视全景、出生点、渡轮中路、登船坡道近景、地标远景。
         /// </summary>
-        [MenuItem("P1/关卡与地图/渲染潮汐货站视觉留底图", false, 33)]
-        public static void CaptureKelpVerificationShots()
+        [MenuItem("P1/关卡与地图/渲染海鸥港湾视觉留底图", false, 33)]
+        public static void CaptureGullHarborVerificationShots()
         {
             var active = EditorSceneManager.GetActiveScene();
-            if (!string.Equals(active.path, KelpScenePath, System.StringComparison.Ordinal))
+            if (!string.Equals(active.path, GullScenePath, System.StringComparison.Ordinal))
             {
                 if (active.isDirty)
                 {
                     EditorSceneManager.SaveScene(active);
                 }
-                EditorSceneManager.OpenScene(KelpScenePath, OpenSceneMode.Single);
+                EditorSceneManager.OpenScene(GullScenePath, OpenSceneMode.Single);
             }
 
             System.IO.Directory.CreateDirectory("Logs");
@@ -903,7 +1086,7 @@ namespace P1.Editor
             GameObject tempCam = null;
             if (cam == null)
             {
-                tempCam = new GameObject("TempKelpRenderCam", typeof(Camera));
+                tempCam = new GameObject("TempGullRenderCam", typeof(Camera));
                 cam = tempCam.GetComponent<Camera>();
             }
 
@@ -916,7 +1099,7 @@ namespace P1.Editor
             if (surface != null)
             {
                 surface.InitializeIfNeeded();
-                PaintKelpInk(surface);
+                PaintGullInk(surface);
                 surface.FlushTexture();
             }
 
@@ -924,56 +1107,62 @@ namespace P1.Editor
 
             cam.fieldOfView = 50f;
             cam.transform.SetPositionAndRotation(new Vector3(-62f, 46f, 0f), Quaternion.Euler(34f, 90f, 0f));
-            RenderCameraToPng(cam, "Logs/kelp_overview.png", 1920, 1080);
+            RenderCameraToPng(cam, "Logs/gull_overview.png", 1920, 1080);
 
             cam.fieldOfView = 50f;
             cam.transform.SetPositionAndRotation(new Vector3(0f, 8.5f, -32.5f), Quaternion.Euler(34f, 0f, 0f));
-            RenderCameraToPng(cam, "Logs/kelp_spawn_teamA.png", 1920, 1080);
+            RenderCameraToPng(cam, "Logs/gull_spawn_teamA.png", 1920, 1080);
 
             cam.fieldOfView = 46f;
             cam.transform.SetPositionAndRotation(new Vector3(0f, 13f, -13f), Quaternion.Euler(46f, 0f, 0f));
-            RenderCameraToPng(cam, "Logs/kelp_midfield.png", 1920, 1080);
+            RenderCameraToPng(cam, "Logs/gull_midfield.png", 1920, 1080);
 
             cam.fieldOfView = 50f;
-            cam.transform.SetPositionAndRotation(new Vector3(7.6f, 5.4f, -9.4f), Quaternion.Euler(34f, 28f, 0f));
-            RenderCameraToPng(cam, "Logs/kelp_cover_closeup.png", 1920, 1080);
+            cam.transform.SetPositionAndRotation(new Vector3(6.6f, 5.2f, -10.4f), Quaternion.Euler(32f, 20f, 0f));
+            RenderCameraToPng(cam, "Logs/gull_gangway_closeup.png", 1920, 1080);
+
+            cam.fieldOfView = 54f;
+            cam.transform.SetPositionAndRotation(new Vector3(17.5f, 6.4f, -18.5f), Quaternion.Euler(24f, -38f, 0f));
+            RenderCameraToPng(cam, "Logs/gull_boatyard.png", 1920, 1080);
 
             cam.fieldOfView = 52f;
             cam.transform.SetPositionAndRotation(new Vector3(0f, 11f, -8.0f), Quaternion.Euler(18f, 0f, 0f));
-            RenderCameraToPng(cam, "Logs/kelp_landmark_vista.png", 1920, 1080);
+            RenderCameraToPng(cam, "Logs/gull_landmark_vista.png", 1920, 1080);
 
             cam.fieldOfView = origFov;
             cam.orthographic = origOrtho;
             cam.transform.SetPositionAndRotation(origPos, origRot);
             if (tempCam != null) Object.DestroyImmediate(tempCam);
 
-            LogSceneStats("Kelp", KelpScenePath);
-            Debug.Log("[Kelp] 视觉留底已写入 Logs/kelp_*.png（俯视/出生/中路/掩体近景/地标）。");
+            LogSceneStats("GullHarbor", GullScenePath);
+            Debug.Log("[GullHarbor] 视觉留底已写入 Logs/gull_*.png（俯视/出生/中路/坡道/船坞/地标）。");
         }
 
-        private static void PaintKelpInk(InkSurfaceController surface)
+        private static void PaintGullInk(InkSurfaceController surface)
         {
-            // Team A：南侧出生区 → 低墙两侧 → 中央长条货台顶
+            // Team A：南侧出生台 → 加油亭两侧 → 登船坡道 → 渡轮甲板 → 船坞拖船
             surface.PaintCircle(new Vector3(0f, 1.2f, -25f), 4.2f, Team.TeamA);
-            surface.PaintCircle(new Vector3(-3.4f, 0f, -17f), 2.8f, Team.TeamA);
-            surface.PaintCircle(new Vector3(3.4f, 0f, -17f), 2.8f, Team.TeamA);
-            surface.PaintCircle(new Vector3(-8.1f, 0.6f, -5.5f), 2.2f, Team.TeamA);
-            surface.PaintCircle(new Vector3(8.1f, 0.9f, -5.5f), 2.2f, Team.TeamA);
-            surface.PaintCircle(new Vector3(-7.4f, 0.7f, 0f), 2.6f, Team.TeamA);
-            surface.PaintCircle(new Vector3(-2.6f, 1.1f, 0f), 2.6f, Team.TeamA);
-            surface.PaintCircle(new Vector3(-13.45f, 1.5f, -1.6f), 2.4f, Team.TeamA);
-            surface.PaintCircle(new Vector3(-16.75f, 0f, -3.2f), 2.0f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-4.2f, 0f, -18.0f), 2.8f, Team.TeamA);
+            surface.PaintCircle(new Vector3(4.2f, 0f, -18.0f), 2.8f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-4.2f, 0f, -12.0f), 2.6f, Team.TeamA);
+            surface.PaintCircle(new Vector3(4.2f, 0f, -12.0f), 2.6f, Team.TeamA);
+            surface.PaintCircle(new Vector3(0f, 0.8f, -7.2f), 2.2f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-6.5f, 1.5f, -1.5f), 2.8f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-9.5f, 1.5f, 2.5f), 2.6f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-15.6f, 1.15f, -14.2f), 2.8f, Team.TeamA);
+            surface.PaintCircle(new Vector3(-18.0f, 0f, -6.0f), 2.0f, Team.TeamA);
 
             // Team B：北侧对称推进
             surface.PaintCircle(new Vector3(0f, 1.2f, 25f), 4.2f, Team.TeamB);
-            surface.PaintCircle(new Vector3(-3.4f, 0f, 17f), 2.8f, Team.TeamB);
-            surface.PaintCircle(new Vector3(3.4f, 0f, 17f), 2.8f, Team.TeamB);
-            surface.PaintCircle(new Vector3(8.1f, 0.6f, 5.5f), 2.2f, Team.TeamB);
-            surface.PaintCircle(new Vector3(-8.1f, 0.9f, 5.5f), 2.2f, Team.TeamB);
-            surface.PaintCircle(new Vector3(7.4f, 0.7f, 0f), 2.6f, Team.TeamB);
-            surface.PaintCircle(new Vector3(2.6f, 1.1f, 0f), 2.6f, Team.TeamB);
-            surface.PaintCircle(new Vector3(13.45f, 1.5f, 1.6f), 2.4f, Team.TeamB);
-            surface.PaintCircle(new Vector3(16.75f, 0f, 3.2f), 2.0f, Team.TeamB);
+            surface.PaintCircle(new Vector3(-4.2f, 0f, 18.0f), 2.8f, Team.TeamB);
+            surface.PaintCircle(new Vector3(4.2f, 0f, 18.0f), 2.8f, Team.TeamB);
+            surface.PaintCircle(new Vector3(-4.2f, 0f, 12.0f), 2.6f, Team.TeamB);
+            surface.PaintCircle(new Vector3(4.2f, 0f, 12.0f), 2.6f, Team.TeamB);
+            surface.PaintCircle(new Vector3(0f, 0.8f, 7.2f), 2.2f, Team.TeamB);
+            surface.PaintCircle(new Vector3(6.5f, 1.5f, 1.5f), 2.8f, Team.TeamB);
+            surface.PaintCircle(new Vector3(9.5f, 1.5f, -2.5f), 2.6f, Team.TeamB);
+            surface.PaintCircle(new Vector3(15.6f, 1.15f, 14.2f), 2.8f, Team.TeamB);
+            surface.PaintCircle(new Vector3(18.0f, 0f, 6.0f), 2.0f, Team.TeamB);
         }
 
         /// <summary>在当前打开的场景上按统一俯视机位渲染一帧并输出统计，用于两图同机位性能对比。</summary>
@@ -1900,21 +2089,16 @@ namespace P1.Editor
             mgr.respawnClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/respawn_1.wav");
             mgr.countdownTickClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/countdown_tick_1.wav");
             mgr.matchStartClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/match_start_1.wav");
+            mgr.goCueClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/go_horn_1.wav");
+            mgr.oneMinuteCueClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/one_minute_1.wav");
             mgr.matchEndClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/match_end_1.wav");
             mgr.resultWinClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/result_win_1.wav");
             mgr.resultLoseClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/result_lose_1.wav");
             mgr.uiClickClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/ui_click_1.wav");
             mgr.lowInkWarningClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/low_ink_warning_1.wav");
 
-            // P5-C：播报员语音 + 双段动态 BGM + 混音调参
-            const string voiceDir = "Assets/_Project/Audio/Voice";
+            // P5-C / 无语音版：流程提示全部走音效；双段动态 BGM + 混音调参
             const string musicDir = "Assets/_Project/Audio/Music";
-            mgr.voiceCount3Clip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{voiceDir}/vo_announcer_count_3_01.wav");
-            mgr.voiceCount2Clip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{voiceDir}/vo_announcer_count_2_01.wav");
-            mgr.voiceCount1Clip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{voiceDir}/vo_announcer_count_1_01.wav");
-            mgr.voiceGoClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{voiceDir}/vo_announcer_go_01.wav");
-            mgr.voiceOneMinuteClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{voiceDir}/vo_announcer_one_minute_01.wav");
-            mgr.voiceFinishClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{voiceDir}/vo_announcer_finish_01.wav");
             mgr.bgmMainClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{musicDir}/bgm_match_main.ogg");
             mgr.bgmFinalClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{musicDir}/bgm_match_final.ogg");
             mgr.mixConfig = LoadOrCreateSO<AudioMixConfigSO>($"{SoFolder}/AudioMixConfig.asset");

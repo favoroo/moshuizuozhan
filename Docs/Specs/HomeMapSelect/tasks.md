@@ -11,7 +11,7 @@
 ## 1. 数据与服务层
 
 - [x] 新增 `Assets/_Project/Scripts/UI/MapCatalogService.cs`：
-      MapDefinition / MapSchematicBlock / MapSchematicRole；两张图数据（phase_a / kelp_terminal）；
+      MapDefinition / MapSchematicBlock / MapSchematicRole；两张图数据（phase_a / gull_harbor）；
       `SelectedId` 默认 PhaseA 不写盘；`TrySelect` 写 `PlayerPrefs("P1.Map.SelectedId")` + Save；
       `ActiveOrSelected` / `MapForScene` / `IsMapScene`；`LoadMap` 用 `SceneUtility.GetBuildIndexByScenePath` + `LoadScene(Single)`；
       `ResetRuntimeState` / `ResetForTests`。
@@ -55,11 +55,11 @@
 - [x] Unity CLI：`script.recompile_status` 干净；`console.get --level error` 无本任务报错。
 - [x] 改后首页截图：
       `Logs/verify-map-select/home_after_phase_a.png`
-      `Logs/verify-map-select/home_after_kelp.png`
+      `Logs/verify-map-select/home_after_gull.png`
       `Logs/verify-map-select/map_select_overlay.png`
 - [x] 真实对局截图：
       `Logs/verify-map-select/match_phase_a.png`
-      `Logs/verify-map-select/match_kelp.png`
+      `Logs/verify-map-select/match_gull.png`
       两张图画面差异可辨（中央方形高台 vs 中央长货台/信标）。
 - [x] 持久化验证：打印 `PlayerPrefs.GetString("P1.Map.SelectedId")`；退出 Play 再进，首页仍是选中图；切回 PhaseA 复验。
 - [x] `./tools/run_tests.sh fast` 全绿。

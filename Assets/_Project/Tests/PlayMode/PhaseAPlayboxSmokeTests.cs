@@ -190,7 +190,7 @@ namespace P1.Tests
         }
 
         [UnityTest]
-        public IEnumerator Player_ThrowBomb_IndependentOfInk_LeavesBombInFlight()
+        public IEnumerator Player_ThrowBomb_Spends55InkAndLeavesBombInFlight()
         {
             yield return LoadPlaybox();
 
@@ -199,13 +199,13 @@ namespace P1.Tests
             yield return null;
 
             var motor = player.Motor;
-            // 手雷与墨水脱钩（设计变更）：清空墨水也必须能投，投掷不扣墨，只受冷却限制
-            motor.TryConsumeInk(motor.CurrentInk);
+            // 手雷 55 墨 + 6s 冷却：满墨投出并扣墨
+            motor.RefillInkFull();
             float inkBefore = motor.CurrentInk;
 
             bool thrown = player.Weapon.TryThrowSubBomb(player.transform.position + Vector3.forward * 5f);
-            Assert.IsTrue(thrown, "手雷已与墨水脱钩：空墨也应能投掷");
-            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.5f, "投掷手雷不得消耗墨水");
+            Assert.IsTrue(thrown, "满墨应能投掷手雷");
+            Assert.AreEqual(inkBefore - 55f, motor.CurrentInk, 0.5f, "投掷手雷应消耗 55 墨");
 
             yield return new WaitForSeconds(0.4f);
         }
@@ -229,9 +229,8 @@ namespace P1.Tests
             var player = PlayerController.LocalPlayer;
             player.Health.IsInvulnerable = true; // 避免测试期间被 Bot 击杀打断
             var motor = player.Motor;
-            // 手雷与墨水脱钩（设计变更）：空墨也必须能按住瞄准并投出
-            motor.TryConsumeInk(motor.CurrentInk);
-            float inkBefore = motor.CurrentInk;
+            // 手雷 55 墨 + 6s 冷却：满墨按住瞄准，松手扣 55 墨投出
+            motor.RefillInkFull();
             int bombsBefore = InkBombPool.Instance.ActiveBombCount;
 
             // 触屏 pointer-down 注入 → 进入瞄准，不投出
@@ -243,6 +242,9 @@ namespace P1.Tests
             Assert.AreEqual(bombsBefore, InkBombPool.Instance.ActiveBombCount, "按下只进入瞄准，不得立刻投出");
             Assert.IsTrue(player.IsAimingBomb, "按住手雷键应进入瞄准态");
 
+            // 瞄准期间被动回墨会让绝对墨量有小数漂移，投掷前取基准
+            float inkBefore = motor.CurrentInk;
+
             // pointer-up 注入 → 松手投出
             player.TouchBombHeld = false;
             player.TouchBombReleased = true;
@@ -252,7 +254,7 @@ namespace P1.Tests
             Assert.AreEqual(bombsBefore + 1, InkBombPool.Instance.ActiveBombCount,
                 "松手必须投出一颗手雷");
             Assert.IsFalse(player.IsAimingBomb, "投出后退出瞄准态");
-            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.01f, "投掷不扣墨（手雷与墨水脱钩）");
+            Assert.AreEqual(inkBefore - 55f, motor.CurrentInk, 0.5f, "投掷应扣 55 墨");
         }
 
         [UnityTest]
@@ -265,8 +267,8 @@ namespace P1.Tests
             yield return null;
 
             var motor = player.Motor;
-            // 手雷与墨水脱钩（设计变更）：空墨也必须能弹道投掷且不扣墨
-            motor.TryConsumeInk(motor.CurrentInk);
+            // 手雷 55 墨 + 6s 冷却：满墨弹道投掷并扣墨
+            motor.RefillInkFull();
             float inkBefore = motor.CurrentInk;
             float coverageBefore = InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA);
 
@@ -285,8 +287,8 @@ namespace P1.Tests
             Assert.Greater(hitPoint.z, muzzle.z + 3f, "平抛落点应在出手点前方数米，而不是贴脚");
 
             bool thrown = player.Weapon.TryThrowSubBombBallistic(velocity);
-            Assert.IsTrue(thrown, "手雷已与墨水脱钩：空墨也应能弹道投掷");
-            Assert.AreEqual(inkBefore, motor.CurrentInk, 0.5f, "弹道投掷不得消耗墨水");
+            Assert.IsTrue(thrown, "满墨应能弹道投掷手雷");
+            Assert.AreEqual(inkBefore - 55f, motor.CurrentInk, 0.5f, "弹道投掷应消耗 55 墨");
 
             // 飞行（约 0.6s）+ 引信 0.95s + 余量 → 爆炸涂地
             yield return new WaitForSeconds(2.6f);

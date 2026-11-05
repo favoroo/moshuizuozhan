@@ -343,10 +343,21 @@ namespace P1.Environment
 
         public static GameObject CreateBox(Transform parent, string name, Vector3 pos, Vector3 scale, Material mat)
         {
+            return CreateBox(parent, name, pos, scale, mat, Quaternion.identity);
+        }
+
+        /// <summary>
+        /// 带旋转的盒子构建入口（多地图扩展）：**先写旋转再烘焙世界 AABB**，
+        /// 让斜置桥面/坡道的掩体边界线（ObstacleDitherLit 用 uv2~uv4）至少以真实世界包围盒为基准。
+        /// 旧无旋转签名保持原语义，内部转调本方法。
+        /// </summary>
+        public static GameObject CreateBox(Transform parent, string name, Vector3 pos, Vector3 scale, Material mat, Quaternion rotation)
+        {
             var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.name = name;
             go.transform.SetParent(parent, false);
             go.transform.localPosition = pos;
+            go.transform.localRotation = rotation;
             go.transform.localScale = scale;
             // 竞技场几何从不移动：整棵 arena 树标静态，构建期/运行期静态合批才能合并这几十个 Cube
             go.isStatic = true;
@@ -448,8 +459,10 @@ namespace P1.Environment
 
                 GameObject go = col.gameObject;
 
-                // 白名单：地板本体顶面走图集，0.5m 侧沿整圈都在界外看不到
-                if (NonPaintableArenaObjects.Contains(go.name))
+                // 白名单：地板本体顶面走图集，0.5m 侧沿整圈都在界外看不到。
+                // 多地图地面被碗池/水线切开后会有多个分块，按前缀统一跳过（旧名仍然命中）。
+                if (NonPaintableArenaObjects.Contains(go.name)
+                    || go.name.StartsWith("Ground_Main_", System.StringComparison.Ordinal))
                     continue;
 
                 // 没有任何可视表面（纯拦截体）不需要墨面

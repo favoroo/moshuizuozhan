@@ -1,0 +1,76 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Mat_SP_Container_Green
+  m_Shader: {fileID: 4800000, guid: 9046b8d53a31b4780842ac813d2dc9a7, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords:
+  - _ENABLECORRUGATION_ON
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SurfaceN:
+        m_Texture: {fileID: 2800000, guid: 644c14063807547f3abc81f507806adf, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SurfaceRMO:
+        m_Texture: {fileID: 2800000, guid: 1769910ae81064a28bf8e5efdb8ded3e, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _CorrugationDepth: 0.28
+    - _CorrugationScale: 2.5
+    - _DetailNoiseStrength: 0.04
+    - _DitherAlpha: 1
+    - _EdgeHighlight: 0.25
+    - _EdgeLineStrength: 0.85
+    - _EdgeLineWidth: 0.05
+    - _EnableCorrugation: 1
+    - _FocusMinAlpha: 0.25
+    - _FocusRadius: 2.2
+    - _FocusWeight: 0
+    - _Metallic: 0.12
+    - _PanelLineStrength: 0.35
+    - _RimPower: 3
+    - _RimStrength: 0.08
+    - _ShadeSoftness: 0.1
+    - _ShadeThreshold: 0.5
+    - _ShadowFloor: 0.44
+    - _Smoothness: 0.38
+    - _SpecSoftness: 0.07
+    - _SpecStrength: 0.22
+    - _SpecThreshold: 0.95
+    - _SurfaceAOStrength: 0.65
+    - _SurfaceNormalStrength: 0.45
+    - _SurfaceSmoothnessScale: 0.8
+    - _SurfaceTexelScale: 0.65
+    - _TopLift: 0.09
+    m_Colors:
+    - _BaseColor: {r: 0.033104762, g: 0.26327342, b: 0.046964195, a: 1}
+    - _EdgeLineColor: {r: 0.0173891, g: 0.013411746, b: 0.027211785, a: 1}
+    - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
+    - _RimColor: {r: 0.50707865, g: 0.71056664, b: 1, a: 1}
+    - _ShadowTint: {r: 0.09462964, g: 0.14731899, b: 0.34239164, a: 1}
+    - _TrimColor: {r: 0.005981059, g: 0.05497173, b: 0.011645429, a: 1}
+  m_BuildTextureStacks: []
+  m_AllowLocking: 1

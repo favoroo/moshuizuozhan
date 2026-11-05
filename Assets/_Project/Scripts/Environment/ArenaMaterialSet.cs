@@ -20,6 +20,10 @@ namespace P1.Environment
         public Material containerRust;
         public Material containerSlate;
         public Material containerMustard;
+        /// <summary>集装箱亮绿（参考图中央/东南角的草绿箱）。</summary>
+        public Material containerGreen;
+        /// <summary>集装箱亮蓝（参考图出生区与远景堆场的高饱和蓝箱）。</summary>
+        public Material containerBlue;
 
         public Material concrete;
         public Material concreteDark;
@@ -50,5 +54,15 @@ namespace P1.Environment
         public Material glass;
         /// <summary>场内浅湾水面：与远景水面同色，但关闭岸沫（12m 岸距会让整条水线糊成白带）。</summary>
         public Material waterInner;
+
+        // ---- 多地图扩展（霓虹滑板场；允许为 null，构建器有兜底）----
+        /// <summary>涂鸦喷漆：荧光粉。</summary>
+        public Material graffitiPink;
+        /// <summary>涂鸦喷漆：荧光绿。</summary>
+        public Material graffitiGreen;
+        /// <summary>涂鸦喷漆：电光青。</summary>
+        public Material graffitiCyan;
+        /// <summary>涂鸦喷漆：紫罗兰。</summary>
+        public Material graffitiPurple;
     }
 }

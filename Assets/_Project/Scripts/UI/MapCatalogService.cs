@@ -70,6 +70,7 @@ namespace P1.UI
         public const string SelectedMapPrefsKey = "P1.Map.SelectedId";
         public const string PhaseAScenePath = "Assets/_Project/Scenes/PhaseA_Playbox.unity";
         public const string GullScenePath = "Assets/_Project/Scenes/GullHarbor.unity";
+        public const string SkateparkScenePath = "Assets/_Project/Scenes/NeonSkatepark.unity";
 
         private static readonly MapDefinition PhaseAMap = new MapDefinition(
             "phase_a",
@@ -89,7 +90,16 @@ namespace P1.UI
             ComicStyle.Blue,
             GullSchematic());
 
-        private static readonly MapDefinition[] AllMaps = { PhaseAMap, GullMap };
+        private static readonly MapDefinition SkateparkMap = new MapDefinition(
+            "neon_skatepark",
+            SkateparkScenePath,
+            "霓虹滑板场",
+            "NEON SKATEPARK",
+            "下沉碗池 · 对角天桥 · 集装箱塔吊",
+            ComicStyle.Yellow,
+            SkateparkSchematic());
+
+        private static readonly MapDefinition[] AllMaps = { PhaseAMap, GullMap, SkateparkMap };
 
         private static bool _loading;
         private static AsyncOperation _loadOperation;
@@ -361,6 +371,51 @@ namespace P1.UI
                 new MapSchematicBlock(5f, 21.4f, 3f, 1.2f, MapSchematicRole.Cover),
                 new MapSchematicBlock(-18.8f, -11.6f, 2f, 2f, MapSchematicRole.Cover),
                 new MapSchematicBlock(18.8f, 11.6f, 2f, 2f, MapSchematicRole.Cover),
+            };
+        }
+
+        private static MapSchematicBlock[] SkateparkSchematic()
+        {
+            return new[]
+            {
+                // 出生台（南北）
+                new MapSchematicBlock(0f, -25.2f, 14f, 6.4f, MapSchematicRole.Spawn),
+                new MapSchematicBlock(0f, 25.2f, 14f, 6.4f, MapSchematicRole.Spawn),
+                // 中央下沉碗池（开口 + 碗底 + 中央方台）
+                new MapSchematicBlock(0f, 0f, 22f, 14f, MapSchematicRole.Terrain),
+                new MapSchematicBlock(0f, 0f, 14.8f, 6.8f, MapSchematicRole.Landmark),
+                new MapSchematicBlock(0f, 0f, 3f, 2f, MapSchematicRole.Cover),
+                // 对角天桥：70° 方向以 7 段方块逼近（俯视示意，不参与判定）
+                new MapSchematicBlock(-9.9f, -3.6f, 3.6f, 3.6f, MapSchematicRole.Cover),
+                new MapSchematicBlock(-6.6f, -2.4f, 3.6f, 3.6f, MapSchematicRole.Cover),
+                new MapSchematicBlock(-3.3f, -1.2f, 3.6f, 3.6f, MapSchematicRole.Cover),
+                new MapSchematicBlock(0f, 0f, 3.6f, 3.6f, MapSchematicRole.Cover),
+                new MapSchematicBlock(3.3f, 1.2f, 3.6f, 3.6f, MapSchematicRole.Cover),
+                new MapSchematicBlock(6.6f, 2.4f, 3.6f, 3.6f, MapSchematicRole.Cover),
+                new MapSchematicBlock(9.9f, 3.6f, 3.6f, 3.6f, MapSchematicRole.Cover),
+                // 天桥两端坡道
+                new MapSchematicBlock(-15.5f, -5.6f, 4.4f, 3.6f, MapSchematicRole.Terrain),
+                new MapSchematicBlock(15.5f, 5.6f, 4.4f, 3.6f, MapSchematicRole.Terrain),
+                // 集装箱堆（NE/SW 双层，NW/SE 单层蓝箱）
+                new MapSchematicBlock(14.8f, 10.5f, 5.5f, 4.5f, MapSchematicRole.Cover),
+                new MapSchematicBlock(-14.8f, -10.5f, 5.5f, 4.5f, MapSchematicRole.Cover),
+                new MapSchematicBlock(-14.8f, 10.5f, 4.5f, 6.2f, MapSchematicRole.Cover),
+                new MapSchematicBlock(14.8f, -10.5f, 4.5f, 6.2f, MapSchematicRole.Cover),
+                // 塔吊基座 / 挖掘机 / 集装箱办公室
+                new MapSchematicBlock(17.4f, 16.2f, 3.2f, 3.2f, MapSchematicRole.Landmark),
+                new MapSchematicBlock(-17.4f, -16.2f, 3.2f, 3.2f, MapSchematicRole.Landmark),
+                new MapSchematicBlock(-15.4f, 16.6f, 4.4f, 4.4f, MapSchematicRole.Cover),
+                new MapSchematicBlock(15.4f, -16.6f, 4.4f, 4.4f, MapSchematicRole.Cover),
+                new MapSchematicBlock(10.4f, 17.6f, 3f, 4.6f, MapSchematicRole.Cover),
+                new MapSchematicBlock(-10.4f, -17.6f, 3f, 4.6f, MapSchematicRole.Cover),
+                // 侧翼 quarter-pipe 与碗池边滑板长台
+                new MapSchematicBlock(18f, -2f, 4.2f, 3.2f, MapSchematicRole.Terrain),
+                new MapSchematicBlock(-18f, 2f, 4.2f, 3.2f, MapSchematicRole.Terrain),
+                new MapSchematicBlock(-12.9f, 0f, 2.6f, 5.2f, MapSchematicRole.Cover),
+                new MapSchematicBlock(12.9f, 0f, 2.6f, 5.2f, MapSchematicRole.Cover),
+                // 出生闸口
+                new MapSchematicBlock(0f, -21.4f, 8f, 0.7f, MapSchematicRole.Cover),
+                new MapSchematicBlock(0f, 21.4f, 8f, 0.7f, MapSchematicRole.Cover),
             };
         }
     }

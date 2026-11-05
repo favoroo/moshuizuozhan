@@ -203,6 +203,108 @@ namespace P1.Tests
             Assert.GreaterOrEqual(m.CardBadgeFont, floor, label + " 角签字号");
             Assert.GreaterOrEqual(m.CardButtonFont, floor, label + " 卡按钮字号");
             Assert.GreaterOrEqual(m.NoteFont, floor, label + " 页脚字号");
+            Assert.GreaterOrEqual(m.ScrollArrowFont, floor, label + " 滑动箭头字号");
+        }
+
+        /// <summary>
+        /// 加第 3 张地图后卡片溢出面板的回归门禁：面板要按地图数长大，
+        /// 桌面 1920 下三张卡仍是原卡宽（506）且不需要滚动。
+        /// </summary>
+        [Test]
+        public void CardLayout_DesktopFitsThreeMapsWithoutScroll()
+        {
+            Vector2 panel = MapSelectLayoutMath.ResolvePanelSize(false, 1920f, 1080f, 3);
+            MapSelectMetrics m = MapSelectLayoutMath.Metrics(false);
+            float innerWidth = panel.x - m.Padding * 2f;
+
+            MapSelectCardLayout layout = MapSelectLayoutMath.ResolveCardLayout(false, innerWidth, 3);
+
+            Assert.AreEqual(506f, layout.CardWidth, 0.5f, "三张图时桌面卡宽应保持两张图时的 506");
+            Assert.IsFalse(layout.ScrollNeeded, "桌面 1920 三张图不该溢出，也不该滚动");
+            Assert.LessOrEqual(layout.RowWidth, innerWidth + 0.5f, "卡片行溢出面板内宽");
+            Assert.AreEqual(0f, layout.SideInset, 0.01f, "三张图恰好铺满时不应有居中偏移");
+            Assert.AreEqual(0f, layout.ContentWidth - layout.RowWidth, 0.01f, "不滚动时不该留滚动余量");
+        }
+
+        [Test]
+        public void CardLayout_TwoMapsKeepOriginalGeometry()
+        {
+            Vector2 panel = MapSelectLayoutMath.ResolvePanelSize(false, 1920f, 1080f, 2);
+            MapSelectMetrics m = MapSelectLayoutMath.Metrics(false);
+
+            Assert.AreEqual(1120f, panel.x, 0.5f, "两张图的面板宽度不应因本次改动而变化");
+            MapSelectCardLayout layout = MapSelectLayoutMath.ResolveCardLayout(false, panel.x - m.Padding * 2f, 2);
+            Assert.AreEqual(506f, layout.CardWidth, 0.5f, "两张图的卡宽不应因本次改动而变化");
+            Assert.IsFalse(layout.ScrollNeeded);
+        }
+
+        /// <summary>屏宽不够时宁可横向滚动，也不能把卡片压到文字列放不下标题。</summary>
+        [Test]
+        public void CardLayout_NarrowScreenScrollsInsteadOfShrinkingCards()
+        {
+            Vector2 panel = MapSelectLayoutMath.ResolvePanelSize(false, 1280f, 720f, 3);
+            MapSelectMetrics m = MapSelectLayoutMath.Metrics(false);
+            float innerWidth = panel.x - m.Padding * 2f;
+            MapSelectCardLayout full = MapSelectLayoutMath.ResolveCardLayout(false, innerWidth, 3);
+
+            Assert.IsTrue(full.ScrollNeeded, "1280 宽放不下三张 506 的卡，应转横向滚动");
+            Assert.GreaterOrEqual(full.CardWidth, m.CardMinWidth - 0.01f, "卡宽不得低于下限");
+            Assert.AreEqual(0f, full.SideInset, 0.01f, "滚动时不留居中偏移");
+            Assert.Greater(full.ContentWidth, full.RowWidth, "滚动内容要留出右端硬影余量");
+            Assert.Greater(MapSelectLayoutMath.ClampScrollOffset(9999f, full.ContentWidth, full.ViewportWidth), 0f,
+                "放不下时滚动范围必须大于 0");
+        }
+
+        [Test]
+        public void CardLayout_AlwaysWithinWidthBounds()
+        {
+            for (float viewport = 240f; viewport <= 2600f; viewport += 40f)
+            {
+                for (int count = 1; count <= 5; count++)
+                {
+                    MapSelectCardLayout desktop = MapSelectLayoutMath.ResolveCardLayout(false, viewport, count);
+                    MapSelectCardLayout mobile = MapSelectLayoutMath.ResolveCardLayout(true, viewport, count);
+                    AssertWithinBounds(MapSelectCardLayoutBounds(false), desktop, count, viewport, "桌面");
+                    AssertWithinBounds(MapSelectCardLayoutBounds(true), mobile, count, viewport, "移动端");
+                }
+            }
+        }
+
+        private static MapSelectMetrics MapSelectCardLayoutBounds(bool mobile)
+        {
+            return MapSelectLayoutMath.Metrics(mobile);
+        }
+
+        private static void AssertWithinBounds(MapSelectMetrics m, MapSelectCardLayout layout, int count,
+            float viewport, string label)
+        {
+            Assert.GreaterOrEqual(layout.CardWidth, m.CardMinWidth - 0.01f, label + " 卡宽低于下限");
+            Assert.LessOrEqual(layout.CardWidth, m.CardMaxWidth + 0.01f, label + " 卡宽超过上限");
+            Assert.AreEqual(count, layout.CardCount, label + " 卡片数量应原样透传");
+            if (!layout.ScrollNeeded)
+            {
+                Assert.LessOrEqual(layout.RowWidth, viewport + 0.5f, label + " 不滚动却溢出行宽");
+            }
+        }
+
+        [Test]
+        public void StepScrollOffset_MovesOneCardAndClampsToBothEnds()
+        {
+            const float step = 534f;
+            const float content = 1654f;
+            const float viewport = 1120f;
+            float max = content - viewport;
+
+            Assert.AreEqual(0f, MapSelectLayoutMath.StepScrollOffset(0f, -1, step, content, viewport), 0.01f,
+                "已在最左时再按左键应停在 0");
+            Assert.AreEqual(step, MapSelectLayoutMath.StepScrollOffset(0f, 1, step, content, viewport), 0.01f);
+            Assert.AreEqual(max, MapSelectLayoutMath.StepScrollOffset(step, 1, step, content, viewport), 0.01f,
+                "一次跳一整张卡会被夹到右端");
+            Assert.AreEqual(max, MapSelectLayoutMath.StepScrollOffset(max, 1, step, content, viewport), 0.01f);
+
+            Assert.AreEqual(0f, MapSelectLayoutMath.ClampScrollOffset(-50f, content, viewport), 0.01f);
+            Assert.AreEqual(0f, MapSelectLayoutMath.ClampScrollOffset(0f, viewport - 100f, viewport), 0.01f,
+                "内容比视口窄时滚动量必须为 0");
         }
 
         [Test]

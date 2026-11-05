@@ -26,16 +26,21 @@ namespace P1.Editor
         private const string MatFolder = "Assets/_Project/Materials";
         private const string ScenePath = "Assets/_Project/Scenes/PhaseA_Playbox.unity";
         private const string GullScenePath = "Assets/_Project/Scenes/GullHarbor.unity";
+        private const string SkateparkScenePath = "Assets/_Project/Scenes/NeonSkatepark.unity";
         private const string ArenaStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle.asset";
         private const string GullStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle_GullHarbor.asset";
+        private const string SkateparkStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle_NeonSkatepark.asset";
         private const string GullMeshPrefix = "gull";
+        private const string SkateparkMeshPrefix = "skate";
         private const string GullGroundMatPath = "Assets/_Project/Materials/Mat_GH_InkGround.mat";
+        private const string SkateparkGroundMatPath = "Assets/_Project/Materials/Mat_SP_InkGround.mat";
 
-        /// <summary>场景构建变体：主图（集装箱码头）或港湾图（海鸥港湾）。</summary>
+        /// <summary>场景构建变体：主图（集装箱码头）、港湾图（海鸥港湾）或滑板场（霓虹滑板场）。</summary>
         private enum ArenaVariant
         {
             ContainerDock,
-            GullHarbor
+            GullHarbor,
+            NeonSkatepark
         }
 
         [MenuItem("P1/构建/1. 生成默认配置与材质 (SO & Materials)", false, 10)]
@@ -141,13 +146,29 @@ namespace P1.Editor
             BuildArenaScene(GullScenePath, ArenaVariant.GullHarbor);
         }
 
+        /// <summary>
+        /// 新地图「霓虹滑板场 / NEON SKATEPARK」独立构建入口（复刻 INKWAVE `boneyard` 碗池场）。
+        /// 中央下沉碗池 + 对角高架天桥 + 集装箱/塔吊工业地标，拥有独立画风档位与 SP_ 材质集，
+        /// 不覆盖主图与港湾场景。
+        /// </summary>
+        [MenuItem("P1/关卡与地图/生成新地图：霓虹滑板场 (Neon Skatepark)", false, 32)]
+        public static void BuildNeonSkateparkScene()
+        {
+            BuildArenaScene(SkateparkScenePath, ArenaVariant.NeonSkatepark);
+        }
+
         private static void BuildArenaScene(string scenePath, ArenaVariant variant)
         {
             GenerateConfigsAndMaterials();
             bool gullHarbor = variant == ArenaVariant.GullHarbor;
+            bool skatepark = variant == ArenaVariant.NeonSkatepark;
             if (gullHarbor)
             {
                 EnsureGullHarborArt();
+            }
+            else if (skatepark)
+            {
+                EnsureSkateparkArt();
             }
 
             ApplyProjectPlayerSettings();
@@ -166,8 +187,13 @@ namespace P1.Editor
             var teamAMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamA_Body.mat");
             var teamBMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_TeamB_Body.mat");
             var visorMat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/Mat_VisorDark.mat");
-            var arenaStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(gullHarbor ? GullStylePath : ArenaStylePath);
-            var arenaMats = gullHarbor ? BuildGullHarborMaterialSet(arenaStyle) : BuildArenaMaterialSet(arenaStyle);
+            var arenaStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(
+                gullHarbor ? GullStylePath : skatepark ? SkateparkStylePath : ArenaStylePath);
+            var arenaMats = gullHarbor
+                ? BuildGullHarborMaterialSet(arenaStyle)
+                : skatepark
+                    ? BuildSkateparkMaterialSet(arenaStyle)
+                    : BuildArenaMaterialSet(arenaStyle);
 
             // 1. 主光源与环境光
             var lightGo = new GameObject("Directional Light");
@@ -196,6 +222,11 @@ namespace P1.Editor
             if (gullHarbor)
             {
                 HarborGeometryBuilder.BuildArenaGeometry(
+                    arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
+            }
+            else if (skatepark)
+            {
+                SkateparkGeometryBuilder.BuildArenaGeometry(
                     arenaMats, inkCfg, arenaMats.inkWall, inkableRenderers, blockedColliders, out _);
             }
             else
@@ -268,7 +299,7 @@ namespace P1.Editor
             managersRoot.AddComponent<MobileTouchUI>();
 
             // 10.1 新地图：场景级画风锚点，让运行时全局反射/天空/涂层参数取自本图风格资产
-            if (gullHarbor)
+            if (gullHarbor || skatepark)
             {
                 var styleAnchor = new GameObject("_ArenaStyleAnchor");
                 styleAnchor.AddComponent<ArenaStyleSceneAnchor>().Configure(arenaStyle);
@@ -522,8 +553,332 @@ namespace P1.Editor
             EditorUtility.SetDirty(groundMat);
         }
 
-        private static ArenaMaterialSet BuildGullHarborMaterialSet(ArenaStyleSO style)
+        /// <summary>
+        /// 「霓虹滑板场」画风/材质总装：
+        /// 1) 复制一份 ArenaStyle.asset 作为本图独立画风档位（冷灰混凝土 × 港青 × 警示黄）；
+        /// 2) 烘焙滑板场专属地面（混凝土板缝 + 对角沥青车道 + 碗池内衬），不复用码头/港湾贴图；
+        /// 3) 在 SP_ 前缀路径生成材质，不覆盖共享 Mat_* 与 GH_*。
+        /// </summary>
+        private static void EnsureSkateparkArt()
         {
+            var baseStyle = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
+            if (baseStyle == null)
+            {
+                Debug.LogError("[ProjectScaffolder] 找不到 ArenaStyle.asset，无法生成霓虹滑板场画风。");
+                return;
+            }
+
+            var style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(SkateparkStylePath);
+            if (style == null)
+            {
+                AssetDatabase.CopyAsset(ArenaStylePath, SkateparkStylePath);
+                AssetDatabase.SaveAssets();
+                style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(SkateparkStylePath);
+            }
+            if (style == null)
+            {
+                Debug.LogError("[ProjectScaffolder] 霓虹滑板场画风资产创建失败。");
+                return;
+            }
+
+            ApplySkateparkPalette(style);
+            EditorUtility.SetDirty(style);
+            AssetDatabase.SaveAssets();
+
+            // 地面：2048 反照率 + 1024 法线/RMO（混凝土板缝、沥青骨料、碗池放射缝）。
+            SkateparkGroundTextureBaker.BakeAll(style);
+
+            var groundMat = CreateOrUpdateGroundMaterial(style, SkateparkGroundMatPath);
+            AssignSkateparkGroundTextures(groundMat, style);
+            ToonStyleInstaller.ApplyGroundStyleToMaterial(groundMat, style);
+
+            Material concreteMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Concrete.mat",
+                style.concreteLight, style.concreteDark, 0.0f);
+            Material concreteDarkMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_ConcreteDark.mat",
+                style.concreteMid, style.concreteDark, 0.0f);
+            Material steelMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Steel.mat",
+                style.steel, style.steelDark, 0.0f);
+            Material steelDarkMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_SteelDark.mat",
+                style.steelDark, Color.Lerp(style.steelDark, Color.black, 0.28f), 0.0f);
+            Material boundaryMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_BoundaryWall.mat",
+                style.boundaryConcrete, style.boundaryTrim, 0.0f);
+
+            // 集装箱：工业标准色 + 瓦楞条纹；红底绿顶那组靠 containerRust / containerTeal 两层材质。
+            Material containerTealMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Container_Teal.mat",
+                style.containerTeal, Color.Lerp(style.containerTeal, style.steelDark, 0.5f), 1.0f);
+            Material containerRustMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Container_Rust.mat",
+                style.containerRust, Color.Lerp(style.containerRust, style.steelDark, 0.45f), 1.0f);
+            Material containerSlateMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Container_Slate.mat",
+                style.containerSlate, Color.Lerp(style.containerSlate, style.steelDark, 0.5f), 1.0f);
+            Material containerMustardMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Container_Mustard.mat",
+                style.containerMustard, Color.Lerp(style.containerMustard, style.steelDark, 0.5f), 1.0f);
+            // 参考图里集装箱是高饱和色块：草绿箱与亮蓝箱各一组，避免整场只剩灰/锈/芥末三色。
+            Material containerGreenMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Container_Green.mat",
+                new Color(0.20f, 0.55f, 0.24f, 1f), new Color(0.07f, 0.26f, 0.11f, 1f), 1.0f);
+            Material containerBlueMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Container_Blue.mat",
+                new Color(0.10f, 0.42f, 0.80f, 1f), new Color(0.04f, 0.18f, 0.42f, 1f), 1.0f);
+
+            // 强调橙（坡道/防滑条/挖掘机）：不能再用 hazardYellow ——
+            // 旧值把 Mat_SP_Accent 刷成警示黄，坡道与滑板场橙色元素全部读成黄色路标。
+            // 0.95/0.45 在正午顶光下会洗成鲑鱼粉，压到 0.82/0.34 才是参考图的饱和橙。
+            Material accentMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Accent.mat",
+                new Color(0.82f, 0.34f, 0.05f, 1f), new Color(0.45f, 0.12f, 0.02f, 1f), 0.0f);
+            Material glassMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Glass.mat",
+                style.steelDark, Color.Lerp(style.steelDark, Color.black, 0.35f), 0.0f);
+            Material woodMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Wood.mat",
+                style.wood, style.woodDark, 0.0f);
+            Material woodDarkMat = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_WoodDark.mat",
+                style.woodDark, Color.Lerp(style.woodDark, Color.black, 0.3f), 0.0f);
+
+            // 涂鸦：高饱和纯色自发光弱一点，贴墙喷涂在漫画光影下仍能读出色相。
+            Material graffitiPink = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Graffiti_Pink.mat",
+                new Color(0.95f, 0.25f, 0.55f, 1f), new Color(0.55f, 0.10f, 0.30f, 1f), 0.0f);
+            Material graffitiGreen = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Graffiti_Green.mat",
+                new Color(0.20f, 0.88f, 0.36f, 1f), new Color(0.08f, 0.45f, 0.18f, 1f), 0.0f);
+            Material graffitiCyan = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Graffiti_Cyan.mat",
+                new Color(0.10f, 0.78f, 0.90f, 1f), new Color(0.05f, 0.38f, 0.48f, 1f), 0.0f);
+            Material graffitiPurple = CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_SP_Graffiti_Purple.mat",
+                new Color(0.56f, 0.22f, 0.90f, 1f), new Color(0.26f, 0.09f, 0.48f, 1f), 0.0f);
+
+            ToonStyleInstaller.ApplyStyleToMaterial(concreteMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(concreteDarkMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(steelMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(steelDarkMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(boundaryMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(containerTealMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(containerRustMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(containerSlateMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(containerMustardMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(containerGreenMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(containerBlueMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(accentMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(glassMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(woodMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(woodDarkMat, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(graffitiPink, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(graffitiGreen, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(graffitiCyan, style);
+            ToonStyleInstaller.ApplyStyleToMaterial(graffitiPurple, style);
+
+            // 表面细节（法线 + RMO）：不挂 RMO 时 ObstacleDitherLit 的 AO 会被压到 0.35。
+            ToonStyleInstaller.ApplySurfaceToMaterial(concreteMat, ToonStyleInstaller.StyleSurfaceKind.Concrete, style, 0.50f, 1.0f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(concreteDarkMat, ToonStyleInstaller.StyleSurfaceKind.Concrete, style, 0.45f, 1.0f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(steelMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.70f, 0.85f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(steelDarkMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.65f, 0.75f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(boundaryMat, ToonStyleInstaller.StyleSurfaceKind.Concrete, style, 0.40f, 1.0f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(containerTealMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.65f, 0.8f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(containerRustMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.55f, 0.7f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(containerSlateMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.65f, 0.8f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(containerMustardMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.65f, 0.8f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(containerGreenMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.65f, 0.8f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(containerBlueMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.65f, 0.8f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(accentMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.55f, 0.8f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(glassMat, ToonStyleInstaller.StyleSurfaceKind.Metal, style, 0.80f, 0.55f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(woodMat, ToonStyleInstaller.StyleSurfaceKind.Wood, style, 0.75f, 0.75f);
+            ToonStyleInstaller.ApplySurfaceToMaterial(woodDarkMat, ToonStyleInstaller.StyleSurfaceKind.Wood, style, 0.7f, 0.7f);
+
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_SP_SpawnPad_TeamA.mat", style, 1f);
+            CreateOrUpdateSpawnPadMaterial($"{MatFolder}/Mat_SP_SpawnPad_TeamB.mat", style, -1f);
+
+            // 场外海面：岸距框对齐 48×64 远景平台，岸沫收窄；闪点再收一档，
+            // 900m 水面上旧参数的白色碎光会密到像噪点。
+            var waterMat = CreateOrUpdateWaterMaterial(style, $"{MatFolder}/Mat_SP_Water.mat");
+            if (waterMat != null)
+            {
+                waterMat.SetVector("_ShoreHalfExtents", new Vector4(24f, 32f, 0f, 0f));
+                waterMat.SetFloat("_ShoreDistance", 10f);
+                waterMat.SetFloat("_FoamStrength", 0.30f);
+                waterMat.SetFloat("_GlitterStrength", 0.075f);
+                waterMat.SetFloat("_GlitterThreshold", 0.997f);
+                EditorUtility.SetDirty(waterMat);
+            }
+
+            // 场地内没有浅湾；保留一份深色水材质给远景/排水沟。
+            var waterInner = CreateOrUpdateWaterMaterial(style, $"{MatFolder}/Mat_SP_WaterInner.mat");
+            if (waterInner != null)
+            {
+                waterInner.SetVector("_ShoreHalfExtents", new Vector4(0.5f, 0.5f, 0f, 0f));
+                waterInner.SetFloat("_ShoreDistance", 6f);
+                waterInner.SetFloat("_FoamStrength", 0f);
+                waterInner.SetFloat("_GlitterStrength", 0.08f);
+                EditorUtility.SetDirty(waterInner);
+            }
+
+            CreateOrUpdateSkyboxMaterial(style, $"{MatFolder}/Mat_SP_Skybox.mat");
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log($"[ProjectScaffolder] 霓虹滑板场画风资产已生成：{SkateparkStylePath}");
+        }
+
+        /// <summary>
+        /// 霓虹滑板场的画风档位：正午工业港（冷灰混凝土 × 港青 × 警示黄 × 红锈集装箱）。
+        /// 与港湾图的暖奶油/柚木、主图的冷紫墨面刻意拉开；保留 P31 质感红线。
+        /// </summary>
+        private static void ApplySkateparkPalette(ArenaStyleSO s)
+        {
+            // 参考图是「正午高对比工业港」：混凝土中灰、沥青近黑、集装箱高饱和。
+            // 旧值整体偏亮 0.6+，在 toon 顶光下会过曝成奶白，这里统一压到中灰。
+            s.groundBase = new Color(0.50f, 0.52f, 0.52f, 1f);
+            s.groundSeam = new Color(0.24f, 0.25f, 0.26f, 1f);
+            s.groundCliff = new Color(0.14f, 0.15f, 0.16f, 1f);
+            s.groundMarking = new Color(0.84f, 0.85f, 0.82f, 1f);
+            s.groundMarkingAccent = new Color(0.96f, 0.73f, 0.10f, 1f);
+            s.concreteLight = new Color(0.72f, 0.73f, 0.72f, 1f);
+            s.concreteMid = new Color(0.52f, 0.53f, 0.53f, 1f);
+            s.concreteDark = new Color(0.32f, 0.33f, 0.34f, 1f);
+            s.boundaryConcrete = new Color(0.70f, 0.71f, 0.70f, 1f);
+            s.boundaryTrim = new Color(0.36f, 0.37f, 0.38f, 1f);
+            s.hazardYellow = new Color(0.96f, 0.73f, 0.10f, 1f);
+            s.hazardDark = new Color(0.09f, 0.09f, 0.09f, 1f);
+
+            s.containerSlate = new Color(0.10f, 0.34f, 0.62f, 1f);
+            s.containerTeal = new Color(0.05f, 0.50f, 0.44f, 1f);
+            // 锈红箱压深两档：旧值 0.86/0.30/0.14 在正午暖光 + toon 高光下整箱读作「粉色」。
+            s.containerRust = new Color(0.70f, 0.21f, 0.08f, 1f);
+            s.containerMustard = new Color(0.96f, 0.72f, 0.10f, 1f);
+            s.steel = new Color(0.46f, 0.52f, 0.58f, 1f);
+            s.steelDark = new Color(0.16f, 0.19f, 0.22f, 1f);
+            s.wood = new Color(0.70f, 0.55f, 0.38f, 1f);
+            s.woodDark = new Color(0.34f, 0.24f, 0.15f, 1f);
+            s.foliage = new Color(0.28f, 0.50f, 0.28f, 1f);
+
+            // 正午高角太阳：碗池台阶与集装箱立面靠顶光读体积，阴影短而硬。
+            s.sunEuler = new Vector3(54f, -28f, 0f);
+            s.sunColor = new Color(1.00f, 0.98f, 0.94f, 1f);
+            s.sunIntensity = 1.38f;
+            s.ambientSky = new Color(0.34f, 0.50f, 0.72f, 1f);
+            s.ambientEquator = new Color(0.58f, 0.56f, 0.50f, 1f);
+            s.ambientGround = new Color(0.24f, 0.21f, 0.18f, 1f);
+            s.ambientIntensity = 0.72f;
+            s.reflectionIntensity = 0.40f;
+            s.shadowStrength = 0.95f;
+
+            s.shadowTint = new Color(0.34f, 0.42f, 0.62f, 1f);
+            s.rimColor = new Color(0.74f, 0.86f, 1.00f, 1f);
+            s.rimStrength = 0.08f;
+            s.shadeThreshold = 0.50f;
+            s.shadeSoftness = 0.10f;
+            s.shadowFloor = 0.44f;
+            s.specStrength = 0.22f;
+            s.specSoftness = 0.07f;
+            s.envSunDiscPower = 240f;
+            s.surfaceNormalStrength = 0.45f;
+            s.surfaceAOStrength = 0.65f;
+
+            s.fogEnabled = true;
+            // 远景要"看得清"：雾拉到 130~380m，颜色偏亮蓝，不再把岸桥/货船糊成一条白带。
+            s.fogColor = new Color(0.70f, 0.84f, 0.94f, 1f);
+            s.fogStartDistance = 130f;
+            s.fogEndDistance = 380f;
+            s.skyTop = new Color(0.10f, 0.40f, 0.86f, 1f);
+            s.skyHorizon = new Color(0.68f, 0.86f, 0.98f, 1f);
+            s.skyGround = new Color(0.34f, 0.50f, 0.58f, 1f);
+            s.sunDisc = new Color(1.00f, 0.96f, 0.86f, 1f);
+            s.cloudColor = new Color(1.00f, 1.00f, 1.00f, 1f);
+            s.cloudStrength = 0.30f;
+
+            // 港池水色：旧版浅水 0.62 青度过高，在无岸沫的大面积海面上读作「塑料泳池」。
+            // 压到青绿深水 + 更柔的水平线色，远景 900m 水面铺开后才有海港的深度。
+            s.waterShallow = new Color(0.075f, 0.50f, 0.62f, 1f);
+            s.waterDeep = new Color(0.015f, 0.235f, 0.385f, 1f);
+            s.waterHorizon = new Color(0.42f, 0.68f, 0.78f, 1f);
+
+            s.tonemapMode = ArenaTonemapMode.Neutral;
+            s.bloomIntensity = 0.35f;
+            s.bloomThreshold = 1.05f;
+            s.colorSaturation = 34f;
+            s.colorContrast = 24f;
+            s.vignetteIntensity = 0.16f;
+            s.postExposure = -0.02f;
+            s.ssaoIntensity = 0.90f;
+
+            // 参考图是深色描边 + 硬阴影；旧的白描边会把混凝土边缘洗成一圈亮线。
+            s.outlineColor = new Color(0.05f, 0.06f, 0.10f, 1f);
+            s.outlineThickness = 1.15f;
+            s.outlineFadeStart = 22f;
+            s.outlineFadeEnd = 90f;
+
+            // 工业港远景：岸桥/堆场/货船；墙面不挂货运横幅（滑板场墙面留给涂鸦）。
+            s.backdropTheme = ArenaBackdropTheme.ContainerPort;
+            s.buildWallBanners = false;
+            s.decorationDensity = 1f;
+            s.buildBackdrop = true;
+
+            s.inkCoatStrength = 1.5f;
+            s.inkCoatRoughness = 0.06f;
+            s.envSpecStrength = 1.35f;
+            s.shadowStrength = 0.92f;
+        }
+
+        private static void AssignSkateparkGroundTextures(Material groundMat, ArenaStyleSO style)
+        {
+            if (groundMat == null) return;
+            var albedo = AssetDatabase.LoadAssetAtPath<Texture2D>(SkateparkGroundTextureBaker.AlbedoPath);
+            var normal = AssetDatabase.LoadAssetAtPath<Texture2D>(SkateparkGroundTextureBaker.NormalPath);
+            var rmo = AssetDatabase.LoadAssetAtPath<Texture2D>(SkateparkGroundTextureBaker.RmoPath);
+            if (albedo != null) groundMat.SetTexture("_GroundTex", albedo);
+            if (normal != null) groundMat.SetTexture("_GroundTexN", normal);
+            if (rmo != null) groundMat.SetTexture("_GroundTexRMO", rmo);
+            groundMat.SetFloat("_GroundTexStrength", 1f);
+            // 混凝土板缝比木栈道疏，法线可以给足；同时关闭 2m 过程网格线。
+            groundMat.SetFloat("_GroundNormalStrength", 0.50f);
+            groundMat.SetFloat("_GroundAOStrength", style != null ? style.surfaceAOStrength : 0.7f);
+            groundMat.SetColor("_GridLineColor", new Color(0f, 0f, 0f, 0f));
+            EditorUtility.SetDirty(groundMat);
+        }
+
+        private static ArenaMaterialSet BuildSkateparkMaterialSet(ArenaStyleSO style)
+        {
+            Material Load(string file) => AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/{file}");
+
+            var set = new ArenaMaterialSet
+            {
+                ground = Load("Mat_SP_InkGround.mat"),
+                wall = Load("Mat_SP_Concrete.mat"),
+                inkWall = Load("Mat_InkWall.mat"),
+                boundary = Load("Mat_SP_BoundaryWall.mat"),
+                spawnPadA = Load("Mat_SP_SpawnPad_TeamA.mat"),
+                spawnPadB = Load("Mat_SP_SpawnPad_TeamB.mat"),
+
+                containerTeal = Load("Mat_SP_Container_Teal.mat"),
+                containerRust = Load("Mat_SP_Container_Rust.mat"),
+                containerSlate = Load("Mat_SP_Container_Slate.mat"),
+                containerMustard = Load("Mat_SP_Container_Mustard.mat"),
+                containerGreen = Load("Mat_SP_Container_Green.mat"),
+                containerBlue = Load("Mat_SP_Container_Blue.mat"),
+                concrete = Load("Mat_SP_Concrete.mat"),
+                concreteDark = Load("Mat_SP_ConcreteDark.mat"),
+                steel = Load("Mat_SP_Steel.mat"),
+                steelDark = Load("Mat_SP_SteelDark.mat"),
+                wood = Load("Mat_SP_Wood.mat"),
+                woodDark = Load("Mat_SP_WoodDark.mat"),
+                foliage = Load("Mat_Prop_Foliage.mat"),
+                propMatte = Load("Mat_Prop_Matte.mat"),
+                propMetal = Load("Mat_Prop_Metal.mat"),
+                propEmissive = Load("Mat_Prop_Emissive.mat"),
+                propCloth = Load("Mat_Prop_Cloth.mat"),
+                bannerAtlas = null,
+                water = Load("Mat_SP_Water.mat"),
+                skybox = Load("Mat_SP_Skybox.mat"),
+
+                hull = Load("Mat_SP_Container_Slate.mat"),
+                cabin = Load("Mat_SP_Concrete.mat"),
+                deck = Load("Mat_SP_Steel.mat"),
+                accent = Load("Mat_SP_Accent.mat"),
+                glass = Load("Mat_SP_Glass.mat"),
+                waterInner = Load("Mat_SP_WaterInner.mat"),
+
+                graffitiPink = Load("Mat_SP_Graffiti_Pink.mat"),
+                graffitiGreen = Load("Mat_SP_Graffiti_Green.mat"),
+                graffitiCyan = Load("Mat_SP_Graffiti_Cyan.mat"),
+                graffitiPurple = Load("Mat_SP_Graffiti_Purple.mat"),
+            };
+
+            return set;
+        }
+
+        private static ArenaMaterialSet BuildGullHarborMaterialSet(ArenaStyleSO style)        {
             Material Load(string file) => AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/{file}");
 
             var set = new ArenaMaterialSet
@@ -573,10 +928,12 @@ namespace P1.Editor
         private static void BakeArenaVisualsVariant(ArenaMaterialSet mats, ArenaStyleSO style, ArenaVariant variant)
         {
             bool gullHarbor = variant == ArenaVariant.GullHarbor;
+            bool skatepark = variant == ArenaVariant.NeonSkatepark;
 
             if (style == null)
             {
-                style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(gullHarbor ? GullStylePath : ArenaStylePath);
+                style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(
+                    gullHarbor ? GullStylePath : skatepark ? SkateparkStylePath : ArenaStylePath);
             }
 
             if (style == null)
@@ -584,16 +941,24 @@ namespace P1.Editor
                 Debug.LogWarning("[ProjectScaffolder] 画风资产未找到，将使用内置默认配色并跳过氛围。");
             }
 
-            if (!gullHarbor)
+            if (!gullHarbor && !skatepark)
             {
                 ArenaGroundTextureBaker.BakeAll(style);
             }
 
             // 贴图导入后重新取一次材质，避免资产重导入造成「假 null」。
-            var fresh = gullHarbor ? BuildGullHarborMaterialSet(style) : BuildArenaMaterialSet(style);
+            var fresh = gullHarbor
+                ? BuildGullHarborMaterialSet(style)
+                : skatepark
+                    ? BuildSkateparkMaterialSet(style)
+                    : BuildArenaMaterialSet(style);
             if (gullHarbor)
             {
                 AssignHarborGroundTextures(fresh.ground, style);
+            }
+            else if (skatepark)
+            {
+                AssignSkateparkGroundTextures(fresh.ground, style);
             }
             else
             {
@@ -610,6 +975,13 @@ namespace P1.Editor
                 ArenaDecorationBuilder.BuildBackdrop(null, style, fresh, GullMeshPrefix + "_backdrop");
                 ArenaAtmosphereBuilder.Apply(style, fresh);
                 TuneHarborWater(fresh.water, fresh.waterInner);
+            }
+            else if (skatepark)
+            {
+                // 滑板场的场内道具由 SkateparkGeometryBuilder/SkateparkDetailBuilder 负责；
+                // 远景改走专属构建器，按参考图排布海面/堆场/岸桥/货船/城市，通用远景不参与。
+                SkateparkBackdropBuilder.Build(null, style, fresh, SkateparkMeshPrefix + "_backdrop");
+                ArenaAtmosphereBuilder.Apply(style, fresh);
             }
             else
             {
@@ -1163,6 +1535,76 @@ namespace P1.Editor
             surface.PaintCircle(new Vector3(9.5f, 1.5f, -2.5f), 2.6f, Team.TeamB);
             surface.PaintCircle(new Vector3(15.6f, 1.15f, 14.2f), 2.8f, Team.TeamB);
             surface.PaintCircle(new Vector3(18.0f, 0f, 6.0f), 2.0f, Team.TeamB);
+        }
+
+        /// <summary>
+        /// 新地图「霓虹滑板场」视觉留底 + 量化统计：俯视全景、出生点、碗池、对角天桥、集装箱塔吊、地标远景。
+        /// </summary>
+        [MenuItem("P1/关卡与地图/渲染霓虹滑板场视觉留底图", false, 35)]
+        public static void CaptureSkateparkVerificationShots()
+        {
+            var active = EditorSceneManager.GetActiveScene();
+            if (!string.Equals(active.path, SkateparkScenePath, System.StringComparison.Ordinal))
+            {
+                if (active.isDirty)
+                {
+                    EditorSceneManager.SaveScene(active);
+                }
+                EditorSceneManager.OpenScene(SkateparkScenePath, OpenSceneMode.Single);
+            }
+
+            System.IO.Directory.CreateDirectory("Logs");
+
+            Camera cam = Camera.main;
+            GameObject tempCam = null;
+            if (cam == null)
+            {
+                tempCam = new GameObject("TempSkateRenderCam", typeof(Camera));
+                cam = tempCam.GetComponent<Camera>();
+            }
+
+            Vector3 origPos = cam.transform.position;
+            Quaternion origRot = cam.transform.rotation;
+            float origFov = cam.fieldOfView;
+            bool origOrtho = cam.orthographic;
+
+            // 视觉留底不注入任何墨迹：油漆只由游玩时的喷漆机制产生，
+            // 场地本体（贴图 + 场景）保持干净，否则留底图会被误读成“场地自带涂鸦”。
+            cam.orthographic = false;
+
+            // 对齐参考图 A：西南高位 3/4 俯视，左侧海面、近处橙队出生区、中央碗池、北侧堆场/岸桥。
+            cam.fieldOfView = 42f;
+            cam.transform.SetPositionAndRotation(new Vector3(-42f, 36f, -52f), Quaternion.Euler(32f, 38f, 0f));
+            RenderCameraToPng(cam, "Logs/skate_overview.png", 1920, 1080);
+
+            // 从场内侧看橙队出生区：避免相机落在出生背景墙后面，被一整块墙挡住画面。
+            cam.fieldOfView = 55f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 7.5f, -18.5f), Quaternion.Euler(14f, 180f, 0f));
+            RenderCameraToPng(cam, "Logs/skate_spawn_teamA.png", 1920, 1080);
+
+            cam.fieldOfView = 46f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 15f, -21f), Quaternion.Euler(33f, 0f, 0f));
+            RenderCameraToPng(cam, "Logs/skate_bowl.png", 1920, 1080);
+
+            cam.fieldOfView = 46f;
+            cam.transform.SetPositionAndRotation(new Vector3(18f, 8.5f, -15f), Quaternion.Euler(20f, -45f, 0f));
+            RenderCameraToPng(cam, "Logs/skate_bridge.png", 1920, 1080);
+
+            cam.fieldOfView = 50f;
+            cam.transform.SetPositionAndRotation(new Vector3(24f, 9.5f, -22f), Quaternion.Euler(12f, -16f, 0f));
+            RenderCameraToPng(cam, "Logs/skate_containers_crane.png", 1920, 1080);
+
+            cam.fieldOfView = 52f;
+            cam.transform.SetPositionAndRotation(new Vector3(0f, 21f, -33f), Quaternion.Euler(18f, 0f, 0f));
+            RenderCameraToPng(cam, "Logs/skate_landmark_vista.png", 1920, 1080);
+
+            cam.fieldOfView = origFov;
+            cam.orthographic = origOrtho;
+            cam.transform.SetPositionAndRotation(origPos, origRot);
+            if (tempCam != null) Object.DestroyImmediate(tempCam);
+
+            LogSceneStats("NeonSkatepark", SkateparkScenePath);
+            Debug.Log("[NeonSkatepark] 视觉留底已写入 Logs/skate_*.png（俯视/出生/碗池/天桥/集装箱/地标）。");
         }
 
         /// <summary>在当前打开的场景上按统一俯视机位渲染一帧并输出统计，用于两图同机位性能对比。</summary>

@@ -8,14 +8,21 @@ namespace P1.UI
 {
     /// <summary>
     /// 首页地图选择浮层（运行时装配，不改场景 YAML）：
-    /// 两张地图的大选项卡 + 实景缩略图；点另一张 = 写存档并在浮层内就地刷新选中态，
+    /// 每张地图一张大选项卡 + 实景缩略图；点另一张 = 写存档并在浮层内就地刷新选中态，
     /// 不重载场景、也不自动关闭——真正载入发生在「开始游戏」时（先切图再自动开赛）。
     /// 静态 <see cref="IsOpen"/> / <see cref="MenuInputConsumedThisFrame"/> 给开赛快捷键、
     /// 暂停菜单与武器抽屉做同帧输入仲裁。
+    ///
+    /// 地图数量增长：面板先按「地图数 × 期望卡宽」长宽（桌面 1920 下三张卡仍是原卡宽），
+    /// 屏宽实在不够时卡片区转成横向滚动（两侧箭头 / 拖动 / 滚轮 / ← → 键），
+    /// 不把文字列压没、也不让卡片溢出面板。
     /// </summary>
     [DisallowMultipleComponent]
     public class MapSelectOverlay : MonoBehaviour
     {
+        /// <summary>箭头滑动时长（≤100ms 的 linear 硬切，符合几何风动效规范）。</summary>
+        private const float ScrollSlideSeconds = 0.1f;
+
         private static MapSelectOverlay _instance;
 
         public static bool IsOpen => _instance != null;
@@ -30,11 +37,19 @@ namespace P1.UI
 
         private readonly List<GameObject> _cardRoots = new List<GameObject>();
         private RectTransform _cardsPanel;
+        private RectTransform _cardsContent;
+        private UIHorizontalScrollRect _cardsScroll;
+        private Button _prevCardButton;
+        private Button _nextCardButton;
         private MapSelectMetrics _cardsMetrics;
+        private MapSelectCardLayout _cardsLayout;
         private bool _cardsMobile;
-        private Vector2 _cardsPanelSize;
-        private float _cardsContentTop;
+        private bool _cardsScrollNeeded;
+        private float _cardsContentWidth;
         private float _cardsContentHeight;
+        private float _scrollOffset;
+        private float _scrollTarget;
+        private bool _scrollAnimating;
         private bool _rebuildCardsQueued;
         private string _statusMessage;
         private Color _statusColor = ComicStyle.Ink;
@@ -137,6 +152,8 @@ namespace P1.UI
             if (Screen.width == _lastScreenWidth && Screen.height == _lastScreenHeight &&
                 Screen.safeArea == _lastSafeArea)
             {
+                TickCardScroll();
+                TickCarouselInput();
                 return;
             }
 
@@ -238,7 +255,7 @@ namespace P1.UI
                 safeHeight = hostHeight * Mathf.Clamp01(safe.height / Screen.height);
             }
 
-            return MapSelectLayoutMath.ResolvePanelSize(mobile, safeWidth, safeHeight);
+            return MapSelectLayoutMath.ResolvePanelSize(mobile, safeWidth, safeHeight, MapCatalogService.Maps.Count);
         }
 
         private Vector2 ResolveSafeCenter()
@@ -306,30 +323,156 @@ namespace P1.UI
             _cardsPanel = panel;
             _cardsMetrics = m;
             _cardsMobile = mobile;
-            _cardsPanelSize = panelSize;
-            _cardsContentTop = contentTop;
             _cardsContentHeight = contentHeight;
-            _cardRoots.Clear();
 
             float innerWidth = panelSize.x - m.Padding * 2f;
-            float cardWidth = (innerWidth - m.CardGap) * 0.5f;
-            // 选中态以「存档里的选择」为准，而不是当前场景：选完图浮层不重载场景，
-            // 但玩家必须立刻看到选中态已经换到另一张卡上。
-            MapDefinition active = MapCatalogService.Selected;
+            MapSelectCardLayout layout = ResolveCardArea(m, mobile, innerWidth, out float gutter);
+            // 视口恒存在（同一套结构两副模式）：放得下时关掉 RectMask2D 与 ScrollRect，
+            // 卡片保持原有硬影与满宽版式；放不下才开遮罩 + 横向滚动。
+            _cardsLayout = layout;
+            _cardsScrollNeeded = layout.ScrollNeeded;
+            _cardsContentWidth = layout.ContentWidth;
 
-            for (int i = 0; i < MapCatalogService.Maps.Count; i++)
-            {
-                MapDefinition map = MapCatalogService.Maps[i];
-                var topLeft = new Vector2(m.Padding + i * (cardWidth + m.CardGap), contentTop);
-                BuildCard(panel, m, mobile, map, map.Id == active.Id, topLeft,
-                    new Vector2(cardWidth, contentHeight));
-            }
+            var viewportGo = new GameObject("CardViewport", typeof(RectTransform), typeof(RectMask2D));
+            viewportGo.transform.SetParent(panel, false);
+            var viewport = (RectTransform)viewportGo.transform;
+            viewport.anchorMin = new Vector2(0f, 1f);
+            viewport.anchorMax = new Vector2(0f, 1f);
+            viewport.pivot = new Vector2(0f, 1f);
+            viewport.anchoredPosition = new Vector2(m.Padding + gutter, -contentTop);
+            viewport.sizeDelta = new Vector2(layout.ViewportWidth, contentHeight);
+
+            var mask = viewportGo.GetComponent<RectMask2D>();
+            // 规范：父级有 RectMask2D 时卡片不能带硬影（偏移阴影会被裁掉）。所以只有滚动模式下
+            // 才开遮罩，此时卡片也不开硬影（见 BuildCard）。
+            mask.enabled = _cardsScrollNeeded;
+
+            // 卡片之间的空隙也要能按住拖动：铺一层全透明命中面垫在卡片下面
+            // （ScrollRect 就在视口自身上，命中它可以拿到拖动/滚轮事件）。
+            var surfaceGo = new GameObject("DragSurface", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            surfaceGo.transform.SetParent(viewport, false);
+            var surface = (RectTransform)surfaceGo.transform;
+            surface.anchorMin = Vector2.zero;
+            surface.anchorMax = Vector2.one;
+            surface.offsetMin = Vector2.zero;
+            surface.offsetMax = Vector2.zero;
+            var surfaceImage = surfaceGo.GetComponent<Image>();
+            surfaceImage.color = new Color(0f, 0f, 0f, 0f);
+            surfaceImage.raycastTarget = _cardsScrollNeeded;
+
+            var contentGo = new GameObject("CardContent", typeof(RectTransform));
+            contentGo.transform.SetParent(viewport, false);
+            _cardsContent = (RectTransform)contentGo.transform;
+            _cardsContent.anchorMin = new Vector2(0f, 1f);
+            _cardsContent.anchorMax = new Vector2(0f, 1f);
+            _cardsContent.pivot = new Vector2(0f, 1f);
+            _cardsContent.anchoredPosition = Vector2.zero;
+            _cardsContent.sizeDelta = new Vector2(layout.ContentWidth, contentHeight);
+
+            _cardsScroll = viewportGo.AddComponent<UIHorizontalScrollRect>();
+            _cardsScroll.viewport = viewport;
+            _cardsScroll.content = _cardsContent;
+            _cardsScroll.horizontal = true;
+            _cardsScroll.vertical = false;
+            _cardsScroll.movementType = ScrollRect.MovementType.Clamped;
+            _cardsScroll.inertia = true;
+            // 滚轮不需额外接线：ScrollRect 在「只开横向」时会把竖直滚轮量换到横轴上。
+            _cardsScroll.scrollSensitivity = mobile ? 60f : 30f;
+            // 放得下时彻底关掉滚动：既不抢拖动，也不会把内容挪走。
+            _cardsScroll.enabled = _cardsScrollNeeded;
+
+            _scrollOffset = 0f;
+            _scrollTarget = 0f;
+            _scrollAnimating = false;
+            BuildScrollArrows(panel, m, mobile, gutter, panelSize, contentTop, contentHeight);
+            RebuildCards();
         }
 
-        /// <summary>只重建卡片区：保留遮罩、标题与页脚，避免整块浮层重播入场动画。</summary>
+        /// <summary>
+        /// 卡片区可用宽 → 实际布局。需要滚动时两侧再让出「箭头 + 间距」的 gutter
+        /// （箭头不盖卡片，可见张数可预期）；若让出后反而放得下，就退回满宽不显箭头。
+        /// </summary>
+        private static MapSelectCardLayout ResolveCardArea(MapSelectMetrics m, bool mobile, float innerWidth, out float gutter)
+        {
+            MapSelectCardLayout full = MapSelectLayoutMath.ResolveCardLayout(mobile, innerWidth, MapCatalogService.Maps.Count);
+            gutter = 0f;
+            if (!full.ScrollNeeded) return full;
+
+            float candidate = m.ScrollArrowSize.x + m.ScrollArrowGap;
+            MapSelectCardLayout inset = MapSelectLayoutMath.ResolveCardLayout(
+                mobile, innerWidth - candidate * 2f, MapCatalogService.Maps.Count);
+            if (!inset.ScrollNeeded) return full;
+
+            gutter = candidate;
+            return inset;
+        }
+
+        /// <summary>两侧滑动箭头：只在需要滚动时创建并显示，居中于 gutter。</summary>
+        private void BuildScrollArrows(RectTransform panel, MapSelectMetrics m, bool mobile, float gutter,
+            Vector2 panelSize, float contentTop, float contentHeight)
+        {
+            _prevCardButton = null;
+            _nextCardButton = null;
+            if (!_cardsScrollNeeded || gutter <= 0f) return;
+
+            float offset = (gutter - m.ScrollArrowSize.x) * 0.5f;
+            float top = contentTop + (contentHeight - m.ScrollArrowSize.y) * 0.5f;
+            // 用 ←/→（不是 ‹/›）：这两个字形已在字体账本里，不用重跑字库生成。
+            _prevCardButton = CreateScrollArrow(panel, m, "←", new Vector2(m.Padding + offset, top), -1);
+            _nextCardButton = CreateScrollArrow(panel, m, "→",
+                new Vector2(panelSize.x - m.Padding - gutter + offset, top), 1);
+        }
+
+        private Button CreateScrollArrow(RectTransform panel, MapSelectMetrics m, string glyph, Vector2 topLeft, int direction)
+        {
+            var go = new GameObject(direction < 0 ? "PrevCardButton" : "NextCardButton",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(Button));
+            go.transform.SetParent(panel, false);
+            var rect = (RectTransform)go.transform;
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 1f);
+            rect.anchoredPosition = new Vector2(topLeft.x, -topLeft.y);
+            rect.sizeDelta = m.ScrollArrowSize;
+
+            var shape = go.GetComponent<UIInkShapeGraphic>();
+            shape.Shape = UIInkShape.SharpRect;
+            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.BorderWidth = 0f;
+            shape.color = ComicStyle.Ink;
+            shape.HardShadow = false;
+            shape.Halftone = false;
+            shape.raycastTarget = true;
+            _theme.ApplyHardShadow(shape, UIHardShadowLevel.Tag);
+
+            float font = UITypography.FontSnapped(m.ScrollArrowFont);
+            TextMeshProUGUI label = CreateText(rect, "Label", glyph, font, true, ComicStyle.Paper,
+                Vector2.zero, m.ScrollArrowSize, TextAlignmentOptions.Center, 0f, FontStyles.Bold);
+            if (label != null)
+            {
+                label.rectTransform.anchorMin = Vector2.zero;
+                label.rectTransform.anchorMax = Vector2.one;
+                label.rectTransform.offsetMin = Vector2.zero;
+                label.rectTransform.offsetMax = Vector2.zero;
+            }
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = shape;
+            button.transition = Selectable.Transition.None;
+            button.onClick.AddListener(() => ScrollByCards(direction));
+
+            var jelly = go.AddComponent<UIJellyButton>();
+            jelly.Configure(_theme, button, shape);
+            if (label != null) jelly.SetPressContent(label.rectTransform);
+            jelly.EnableThemeHardShadow(UIHardShadowLevel.Tag);
+            UISoundBinder.EnsureBinder(button);
+            return button;
+        }
+
+        /// <summary>只重建卡片本体：保留视口、遮罩、箭头与滚动位置，避免整块浮层重播入场动画。</summary>
         private void RebuildCards()
         {
-            if (_cardsPanel == null)
+            if (_cardsPanel == null || _cardsContent == null)
             {
                 Rebuild();
                 return;
@@ -343,15 +486,157 @@ namespace P1.UI
                 Destroy(root);
             }
             _cardRoots.Clear();
-            BuildCards(_cardsPanel, _cardsMetrics, _cardsMobile, _cardsPanelSize, _cardsContentTop, _cardsContentHeight);
+
+            float cardHeight = _cardsContentHeight - (_cardsScrollNeeded ? _cardsMetrics.ScrollSlack : 0f);
+            float step = _cardsLayout.CardWidth + _cardsMetrics.CardGap;
+            // 选中态以「存档里的选择」为准，而不是当前场景：选完图浮层不重载场景，
+            // 但玩家必须立刻看到选中态已经换到另一张卡上。
+            MapDefinition active = MapCatalogService.Selected;
+
+            for (int i = 0; i < MapCatalogService.Maps.Count; i++)
+            {
+                MapDefinition map = MapCatalogService.Maps[i];
+                var topLeft = new Vector2(_cardsLayout.SideInset + i * step, 0f);
+                BuildCard(_cardsContent, _cardsMetrics, _cardsMobile, map, map.Id == active.Id, topLeft,
+                    new Vector2(_cardsLayout.CardWidth, cardHeight));
+            }
+
+            // 重建可能由「点了另一张卡」触发，滚动位置必须留在原地：玩家点第 3 张时不该被甩回第 1 张。
+            ApplyScrollOffset(_scrollOffset);
+            RefreshScrollArrows();
         }
 
-        private void BuildCard(RectTransform panel, MapSelectMetrics m, bool mobile, MapDefinition map,
+        // ==================== 横向滚动 ====================
+
+        private float CardScrollStep => MapSelectLayoutMath.CardStep(_cardsMetrics, _cardsLayout.CardWidth);
+
+        private float MaxScrollOffset => Mathf.Max(0f, _cardsContentWidth - _cardsLayout.ViewportWidth);
+
+        private void ApplyScrollOffset(float offset)
+        {
+            _scrollOffset = MapSelectLayoutMath.ClampScrollOffset(offset, _cardsContentWidth, _cardsLayout.ViewportWidth);
+            if (_cardsScroll != null && _cardsScroll.content != null)
+            {
+                _cardsScroll.content.anchoredPosition = new Vector2(-_scrollOffset, 0f);
+            }
+        }
+
+        private void ScrollByCards(int direction)
+        {
+            if (!_cardsScrollNeeded || _cardsScroll == null) return;
+
+            _scrollTarget = MapSelectLayoutMath.StepScrollOffset(
+                _scrollOffset, direction, CardScrollStep, _cardsContentWidth, _cardsLayout.ViewportWidth);
+            _scrollAnimating = Mathf.Abs(_scrollTarget - _scrollOffset) > 0.5f;
+            if (_scrollAnimating) _cardsScroll.StopMovement();
+            else RefreshScrollArrows();
+        }
+
+        private void TickCardScroll()
+        {
+            if (!_cardsScrollNeeded || _cardsScroll == null || _cardsScroll.content == null) return;
+
+            if (_cardsScroll.IsDragging)
+            {
+                // 手感优先：玩家一按就开始拖，立刻取消箭头动画并跟住 ScrollRect 的真实位置。
+                CancelScrollAnimation();
+                _scrollOffset = MapSelectLayoutMath.ClampScrollOffset(
+                    -_cardsScroll.content.anchoredPosition.x, _cardsContentWidth, _cardsLayout.ViewportWidth);
+                RefreshScrollArrows();
+                return;
+            }
+
+            // 滚轮交给 ScrollRect；这里只负责撤销箭头动画，别和玩家的滚轮抢内容位置。
+            if (ScrollWheelThisFrame()) CancelScrollAnimation();
+
+            if (!_scrollAnimating)
+            {
+                // 拖动/滚轮惯性结束后位置由 ScrollRect 写，同步一次用于箭头可用态。
+                _scrollOffset = MapSelectLayoutMath.ClampScrollOffset(
+                    -_cardsScroll.content.anchoredPosition.x, _cardsContentWidth, _cardsLayout.ViewportWidth);
+                _scrollTarget = _scrollOffset;
+                RefreshScrollArrows();
+                return;
+            }
+
+            float speed = Mathf.Max(1f, Mathf.Abs(_scrollTarget - _scrollOffset) / ScrollSlideSeconds);
+            float next = Mathf.MoveTowards(_scrollOffset, _scrollTarget, speed * Time.unscaledDeltaTime);
+            ApplyScrollOffset(next);
+            if (Mathf.Abs(_scrollOffset - _scrollTarget) <= 0.5f)
+            {
+                ApplyScrollOffset(_scrollTarget);
+                _scrollAnimating = false;
+                _cardsScroll.StopMovement();
+            }
+            RefreshScrollArrows();
+        }
+
+        private void CancelScrollAnimation()
+        {
+            _scrollAnimating = false;
+            _scrollTarget = _scrollOffset;
+        }
+
+        private static bool ScrollWheelThisFrame()
+        {
+            var mouse = UnityEngine.InputSystem.Mouse.current;
+            return mouse != null && Mathf.Abs(mouse.scroll.ReadValue().y) > 0.01f;
+        }
+
+        private void TickCarouselInput()
+        {
+            if (!_cardsScrollNeeded) return;
+
+            bool prev = false;
+            bool next = false;
+
+            // 只用方向键（不用 A/D）：首页浮层打开时角色移动仍可能读到 WASD，别和玩法抢键。
+            var keyboard = UnityEngine.InputSystem.Keyboard.current;
+            if (keyboard != null)
+            {
+                prev = keyboard.leftArrowKey.wasPressedThisFrame;
+                next = keyboard.rightArrowKey.wasPressedThisFrame;
+            }
+
+            var gamepad = UnityEngine.InputSystem.Gamepad.current;
+            if (gamepad != null && gamepad.dpad != null)
+            {
+                prev |= gamepad.dpad.left.wasPressedThisFrame;
+                next |= gamepad.dpad.right.wasPressedThisFrame;
+            }
+
+            if (prev) ScrollByCards(-1);
+            else if (next) ScrollByCards(1);
+        }
+
+        private void RefreshScrollArrows()
+        {
+            if (_prevCardButton != null)
+            {
+                SetArrowAvailable(_prevCardButton, _scrollOffset > 0.5f);
+            }
+            if (_nextCardButton != null)
+            {
+                SetArrowAvailable(_nextCardButton, _scrollOffset < MaxScrollOffset - 0.5f);
+            }
+        }
+
+        private static void SetArrowAvailable(Button button, bool available)
+        {
+            button.interactable = available;
+            // 过渡是 None，没有可用态视觉：不可用时自己把底色压暗（点不动就看得出来）。
+            if (button.targetGraphic is UIInkShapeGraphic shape)
+            {
+                shape.color = available ? ComicStyle.Ink : ComicStyle.WithAlpha(ComicStyle.Ink, 0.32f);
+            }
+        }
+
+        private void BuildCard(RectTransform parent, MapSelectMetrics m, bool mobile, MapDefinition map,
             bool selected, Vector2 topLeft, Vector2 size)
         {
             var go = new GameObject("Card_" + map.Id, typeof(RectTransform), typeof(CanvasRenderer),
                 typeof(UIInkShapeGraphic), typeof(Button));
-            go.transform.SetParent(panel, false);
+            go.transform.SetParent(parent, false);
             _cardRoots.Add(go);
             var card = (RectTransform)go.transform;
             card.anchorMin = new Vector2(0f, 1f);
@@ -359,6 +644,10 @@ namespace P1.UI
             card.pivot = new Vector2(0f, 1f);
             card.anchoredPosition = new Vector2(topLeft.x, -topLeft.y);
             card.sizeDelta = size;
+
+            // 滚动视口内有 RectMask2D：按规范卡片不开硬影（偏移阴影会被遮罩裁掉），
+            // 选中态仍由更粗的强调色描边表达。
+            bool cardShadow = !_cardsScrollNeeded;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
             shape.Shape = UIInkShape.SharpRect;
@@ -369,7 +658,7 @@ namespace P1.UI
             shape.GlossAlpha = 0f;
             shape.Halftone = false;
             shape.raycastTarget = true;
-            _theme.ApplyHardShadow(shape, UIHardShadowLevel.Panel);
+            if (cardShadow) _theme.ApplyHardShadow(shape, UIHardShadowLevel.Panel);
 
             var button = go.GetComponent<Button>();
             button.targetGraphic = shape;
@@ -377,7 +666,7 @@ namespace P1.UI
             button.onClick.AddListener(() => OnCardClicked(map));
             var jelly = go.AddComponent<UIJellyButton>();
             jelly.Configure(_theme, button, shape);
-            jelly.EnableThemeHardShadow(UIHardShadowLevel.Panel);
+            if (cardShadow) jelly.EnableThemeHardShadow(UIHardShadowLevel.Panel);
             UISoundBinder.EnsureBinder(button);
 
             var bandGo = new GameObject("AccentBand", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
@@ -482,7 +771,8 @@ namespace P1.UI
             shape.GlossAlpha = 0f;
             shape.Halftone = false;
             shape.raycastTarget = true;
-            _theme.ApplyHardShadow(shape, UIHardShadowLevel.Tag);
+            bool cardShadow = !_cardsScrollNeeded;
+            if (cardShadow) _theme.ApplyHardShadow(shape, UIHardShadowLevel.Tag);
 
             float font = UITypography.FontSnapped(m.CardButtonFont);
             TextMeshProUGUI text = CreateText(rect, "Label", label, font, true, labelColor,
@@ -503,7 +793,7 @@ namespace P1.UI
             var jelly = go.AddComponent<UIJellyButton>();
             jelly.Configure(_theme, button, shape);
             if (text != null) jelly.SetPressContent(text.rectTransform);
-            jelly.EnableThemeHardShadow(UIHardShadowLevel.Tag);
+            if (cardShadow) jelly.EnableThemeHardShadow(UIHardShadowLevel.Tag);
             UISoundBinder.EnsureBinder(button);
         }
 
@@ -550,8 +840,12 @@ namespace P1.UI
             float noteTop = panelSize.y - m.FooterHeight + (m.FooterHeight - noteFont * 1.5f) * 0.5f;
 
             bool hasStatus = !string.IsNullOrEmpty(_statusMessage);
+            // 需要横向滚动时默认提示改成「怎么看其它地图」，否则玩家不会知道右边还有卡。
+            string defaultNote = _cardsScrollNeeded
+                ? (mobile ? "左右拖动查看全部地图" : "← → 键 / 拖动 / 滚轮 查看全部地图")
+                : "选择即保存 · 开始游戏时载入场地";
             _footerNote = CreateText(panel, "FooterNote",
-                hasStatus ? _statusMessage : "选择即保存 · 开始游戏时载入场地",
+                hasStatus ? _statusMessage : defaultNote,
                 noteFont, false,
                 hasStatus ? _statusColor : ComicStyle.WithAlpha(ComicStyle.Ink, 0.62f),
                 new Vector2(m.Padding, noteTop),

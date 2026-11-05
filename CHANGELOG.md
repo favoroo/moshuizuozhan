@@ -6,6 +6,21 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-05 #11
+【发布 v0.1.27】含 `#01`~`#10`；APK `moshuizuozhan-v0.1.27-arm64-v8a.apk`。
+
+## 2026-11-05 #10
+【新地图「霓虹滑板场 / NEON SKATEPARK」+ 地图选择卡横向滚动】新图复用 `ArenaLayoutV2` 的 40×56 玩法常量，场内节奏重写：中央 22×14m 下沉碗池（3 圈 35° 环带 + 对角 8 级台阶，最深 2.1m）+ 24m 对角天桥（两端 6m 坡道），全部按原点 180° 点对称；入口菜单 `P1/关卡与地图/生成新地图：霓虹滑板场`。地图从 2 张加到 3 张后桌面会横向溢出，故 `MapSelectLayoutMath` 改为纯函数布局：`ResolvePanelWidth` 按「地图数 × 期望卡宽」长面板、`ResolveCardLayout` 算卡宽/是否需要滚动（卡宽夹到 `CardMinWidth` 就转横向滚动，宁可滚也不压没文字列），箭头/方向键/拖动/滚轮走 `StepScrollOffset`。涉及 `Scripts/Environment/{ArenaLayoutSkatepark,SkateparkGeometryBuilder,SkateparkDetailBuilder}.cs`、`Scripts/Editor/{ProjectScaffolder,SkateparkBackdropBuilder,SkateparkGroundTextureBaker}.cs`、`Scripts/UI/{MapCatalogService,MapSelectLayoutMath,MapSelectOverlay}.cs`、`Scripts/UI/Core/UIHorizontalScrollRect.cs`。
+
+## 2026-11-05 #09
+【Fixed: 霓虹滑板场重建在 `BuildGraffitiCluster` 抛 IndexOutOfRange 中断】根因：`Hash01` 最大值可达 1.0，`(int)(Hash01 * palette.Length)` 会取到 `Length` 越界；旧种子未触发，调低容器涂鸦密度后暴露。索引改为 `Mathf.Min(Length - 1, …)`。涉及 `Scripts/Environment/SkateparkDetailBuilder.cs`。
+
+## 2026-11-05 #08
+【霓虹滑板场整体优化：干碗池 + 出生台落地 + 假掩体清理】碗池被 240m 远景水面从 y=-1.35 灌满（池底 -2.1），俯视读作「蓝水池」；现水面在碗池开口挖 24×16m 洞并外扩 900m，池底压暗 + 贴壁 AO + 32 段环带；对角台阶改为按 35° 坡面「挖」出的 8 级踏步（0.2625m/级；旧版整组埋在环带里），补池底中央脊与对称方块；出生台后加 1.2m 岸台承托背景集装箱，南侧补低矮库仓/高杆灯/拖船，甲板背沿加不可见防越界；删除场内无碰撞的托盘/油桶/新泽西护栏/木箱/铁丝网，QP 改 4 段贴墙 bank，坡道/防滑条改橙色 accent，集装箱锈红压深。涉及 `Scripts/Environment/{ArenaLayoutSkatepark,SkateparkGeometryBuilder,SkateparkDetailBuilder}.cs`、`Scripts/Editor/{SkateparkBackdropBuilder,SkateparkGroundTextureBaker,ProjectScaffolder}.cs`、`Resources/MapPreview/neon_skatepark.png`。
+
+## 2026-11-05 #07
+【Fixed: 霓虹滑板场地面上残留「SKATE 涂鸦/油漆溅斑/墙根标签」】根因：贴图烘焙器把涂鸦、溅斑、墙根标签全画进了 2048 反照率，粗黑描边+橙色在俯视/远景里读作巨大箭头、橙色椭圆与白色光标点，与「油漆只能游玩时喷上去」的规则冲突。现删除 `BakePaintSplashes` / `BakeGraffiti` 等全部地面涂鸦生成，`ProjectScaffolder` 同步移除 `PaintSkateparkInk` 调用，碗池内衬回到中性浅灰；地面只保留混凝土/沥青/标线/警示斜纹/油污/箅子。涉及 `Scripts/Editor/{SkateparkGroundTextureBaker,ProjectScaffolder}.cs`。
+
 ## 2026-11-05 #06
 【Fixed: `WeaponReticleUI_OutOfInk_ShowsWarningAndEmptyToast` 单条跑绿、全量跑红】根因是**测试顺序污染**而非空墨逻辑：该用例不加载场景，但准星 `LateUpdate` 受 `MatchManager.InputAllowed` 门控，前序加载场景的用例（`MobileBombTouchPlayTests` 等）会留下停在 `Ready` 的 `MatchManager` → `InputAllowed=false` → 准星整帧早退、`_isOutOfInk` 永不更新。现用例开头调 `EnsureMatchInputAllowed()` 把残留实例推进到 `Playing`（无实例时直接返回）。涉及 `Tests/PlayMode/ReticlePlayModeTests.cs`。
 

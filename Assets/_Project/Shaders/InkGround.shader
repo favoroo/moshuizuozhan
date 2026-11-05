@@ -285,7 +285,15 @@ Shader "P1/InkGround"
                 }
 
                 float2 mapOrigin = _GlobalInkMapOriginXZ.xy;
-                float2 mapSize = max(float2(0.001, 0.001), _GlobalInkMapOriginXZ.zw);
+                float2 mapSize = _GlobalInkMapOriginXZ.zw;
+                // 编辑模式（未进 Play）下 InkSurfaceController 尚未写入全局 uniform，
+                // 此时回退到地面烘焙图的世界坐标框，保证 Scene 视图也能看到地面涂装，
+                // 而不是整片地面采样到图集角落的纯色。
+                if (mapSize.x < 0.01 || mapSize.y < 0.01)
+                {
+                    mapOrigin = float2(-20.0, -28.0);
+                    mapSize = float2(40.0, 56.0);
+                }
                 float2 inkUV = saturate((input.positionWS.xz - mapOrigin) / mapSize);
 
                 // 计分场地之外不显墨：地面盒体外侧等片元的世界 XZ 落在图集外，

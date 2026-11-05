@@ -10,6 +10,8 @@ namespace P1.UI
     public struct MapSelectMetrics
     {
         public float PanelMaxWidth;
+        /// <summary>地图变多时允许的宽面板上限（让每张卡都保住 CardPreferredWidth，不掉到横向滚动）。</summary>
+        public float PanelWideMaxWidth;
         public float PanelMaxHeight;
         public float PanelWidthRatio;
         public float PanelHeightRatio;
@@ -39,6 +41,37 @@ namespace P1.UI
         public float CardButtonHeight;
         public float CardButtonFont;
         public float NoteFont;
+
+        /// <summary>卡片行放不下时希望的卡宽（面板宽度按它随地图数量增长）。</summary>
+        public float CardPreferredWidth;
+        /// <summary>卡宽下限：再窄标题列就放不下 5 个汉字，宁可横向滚动。</summary>
+        public float CardMinWidth;
+        public float CardMaxWidth;
+
+        public Vector2 ScrollArrowSize;
+        public float ScrollArrowFont;
+        /// <summary>箭头与卡片区之间的留白（两侧箭头各占 ScrollArrowSize.x + 本值）。</summary>
+        public float ScrollArrowGap;
+        /// <summary>滚动内容右/下给卡片硬影留的余量；视口有 RectMask2D，硬影必须留在遮罩内。</summary>
+        public float ScrollSlack;
+    }
+
+    /// <summary>
+    /// 卡片行布局结果：运行时按它摆卡片、决定是否开滚动。
+    /// 纯数据，EditMode 可直接断言「3 张图在桌面 1920 不溢出」这类回归。
+    /// </summary>
+    public struct MapSelectCardLayout
+    {
+        public float CardWidth;
+        /// <summary>卡片 + 间距的总宽（不含滚动余量）。</summary>
+        public float RowWidth;
+        /// <summary>滚动内容宽：滚动时 = RowWidth + 右端硬影余量。</summary>
+        public float ContentWidth;
+        public float ViewportWidth;
+        /// <summary>行不满视口时的居中偏移（地图很少时不留半屏空白）。</summary>
+        public float SideInset;
+        public int CardCount;
+        public bool ScrollNeeded;
     }
 
     public static class MapSelectLayoutMath
@@ -50,6 +83,7 @@ namespace P1.UI
                 return new MapSelectMetrics
                 {
                     PanelMaxWidth = 1120f,
+                    PanelWideMaxWidth = 1720f,
                     PanelMaxHeight = 820f,
                     PanelWidthRatio = 0.92f,
                     PanelHeightRatio = 0.90f,
@@ -79,12 +113,22 @@ namespace P1.UI
                     CardButtonHeight = 64f,
                     CardButtonFont = 22f,
                     NoteFont = 18f,
+
+                    CardPreferredWidth = 506f,
+                    CardMinWidth = 480f,
+                    CardMaxWidth = 620f,
+
+                    ScrollArrowSize = new Vector2(56f, 56f),
+                    ScrollArrowFont = 30f,
+                    ScrollArrowGap = 10f,
+                    ScrollSlack = 10f,
                 };
             }
 
             return new MapSelectMetrics
             {
                 PanelMaxWidth = 2200f,
+                PanelWideMaxWidth = 2400f,
                 PanelMaxHeight = 1000f,
                 PanelWidthRatio = 0.92f,
                 PanelHeightRatio = 0.90f,
@@ -114,19 +158,26 @@ namespace P1.UI
                 CardButtonHeight = 84f,
                 CardButtonFont = 28f,
                 NoteFont = 23f,
+
+                CardPreferredWidth = 680f,
+                CardMinWidth = 660f,
+                CardMaxWidth = 1100f,
+
+                ScrollArrowSize = new Vector2(76f, 76f),
+                ScrollArrowFont = 38f,
+                ScrollArrowGap = 12f,
+                ScrollSlack = 12f,
             };
         }
 
-        public static Vector2 ResolvePanelSize(bool mobile, float safeWidth, float safeHeight)
+        public static Vector2 ResolvePanelSize(bool mobile, float safeWidth, float safeHeight, int cardCount = 2)
         {
             if (safeWidth < 1f) safeWidth = MenuLayoutMath.RefWidth;
             if (safeHeight < 1f) safeHeight = MenuLayoutMath.RefHeight;
 
             MapSelectMetrics m = Metrics(mobile);
             float inset = m.Padding * 2f;
-            float width = mobile
-                ? Mathf.Min(m.PanelMaxWidth, safeWidth * m.PanelWidthRatio)
-                : Mathf.Min(m.PanelMaxWidth, safeWidth - inset);
+            float width = ResolvePanelWidth(mobile, safeWidth, cardCount);
             float height = mobile
                 ? Mathf.Min(m.PanelMaxHeight, safeHeight * m.PanelHeightRatio)
                 : Mathf.Min(m.PanelMaxHeight, safeHeight - inset);
@@ -134,6 +185,72 @@ namespace P1.UI
             return new Vector2(
                 Mathf.Max(320f, Mathf.Min(width, safeWidth)),
                 Mathf.Max(320f, Mathf.Min(height, safeHeight)));
+        }
+
+        /// <summary>
+        /// 面板宽度：先按「地图数 × 期望卡宽」算需求，再与原有档位取大，
+        /// 最后夹到当前屏宽能给的份额内。地图从 2 张加到 3 张时面板会长大
+        /// （桌面 1920 下三张卡仍是原有卡宽），屏宽不够才交给卡片区的横向滚动。
+        /// </summary>
+        public static float ResolvePanelWidth(bool mobile, float safeWidth, int cardCount)
+        {
+            MapSelectMetrics m = Metrics(mobile);
+            if (cardCount < 1) cardCount = 1;
+
+            float inset = m.Padding * 2f;
+            float baseWidth = Mathf.Min(m.PanelMaxWidth, mobile ? safeWidth * m.PanelWidthRatio : safeWidth - inset);
+            float wideCap = Mathf.Min(m.PanelWideMaxWidth, mobile ? safeWidth * m.PanelWidthRatio : safeWidth - inset);
+            float needed = inset + cardCount * m.CardPreferredWidth + (cardCount - 1) * m.CardGap;
+
+            float cap = Mathf.Max(wideCap, baseWidth);
+            return Mathf.Clamp(Mathf.Max(baseWidth, needed), Mathf.Min(320f, cap), cap);
+        }
+
+        /// <summary>
+        /// 卡片行布局。<paramref name="viewportWidth"/> 是卡片区可用宽（已扣掉面板内边距与两侧箭头）。
+        /// 卡宽先按「平分视口」算，再夹到 [CardMinWidth, CardMaxWidth]：
+        /// 夹到下限说明视口真的放不下，返回 ScrollNeeded = true（宁可滚动，不把文字列压没）。
+        /// </summary>
+        public static MapSelectCardLayout ResolveCardLayout(bool mobile, float viewportWidth, int cardCount)
+        {
+            MapSelectMetrics m = Metrics(mobile);
+            if (cardCount < 1) cardCount = 1;
+            if (viewportWidth < 1f) viewportWidth = 1f;
+
+            float gaps = m.CardGap * (cardCount - 1);
+            float cardWidth = Mathf.Clamp((viewportWidth - gaps) / cardCount, m.CardMinWidth, m.CardMaxWidth);
+            float rowWidth = cardCount * cardWidth + gaps;
+            bool scroll = rowWidth > viewportWidth + 0.5f;
+
+            return new MapSelectCardLayout
+            {
+                CardWidth = cardWidth,
+                RowWidth = rowWidth,
+                ContentWidth = rowWidth + (scroll ? m.ScrollSlack : 0f),
+                ViewportWidth = viewportWidth,
+                SideInset = scroll ? 0f : Mathf.Max(0f, (viewportWidth - rowWidth) * 0.5f),
+                CardCount = cardCount,
+                ScrollNeeded = scroll,
+            };
+        }
+
+        /// <summary>两次箭头/方向键之间的滑动步长：一整张卡 + 一个间距。</summary>
+        public static float CardStep(MapSelectMetrics m, float cardWidth)
+        {
+            return cardWidth + m.CardGap;
+        }
+
+        /// <summary>滚动量（px，向右为正）夹到 [0, 内容宽 − 视口宽]；放得下时恒为 0。</summary>
+        public static float ClampScrollOffset(float offset, float contentWidth, float viewportWidth)
+        {
+            return Mathf.Clamp(offset, 0f, Mathf.Max(0f, contentWidth - viewportWidth));
+        }
+
+        /// <summary>按下一次箭头/方向键后的目标滚动量（已夹到两端）。</summary>
+        public static float StepScrollOffset(float offset, int direction, float step, float contentWidth, float viewportWidth)
+        {
+            int sign = direction < 0 ? -1 : 1;
+            return ClampScrollOffset(offset + sign * Mathf.Max(1f, step), contentWidth, viewportWidth);
         }
 
         /// <summary>

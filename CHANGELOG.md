@@ -6,6 +6,9 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-07 #01
+【角色观感 P39】实机审角色后四项调整：前臂/短袖/拳头加粗一档（旧 0.064 与灯笼裤量级脱节，读成火柴棍）、嘴稍放大、头发弹簧摆幅钳制收紧（欠阻尼+鞭梢增益在急停节点"美杜莎"炸开）、墨罐可读性重做。`Fixed:` 墨罐液面满罐也读成"奶粉罐"是两层根因：白 rim(0.35) 铺满细圆柱整个侧面 + 透明 GlassChamber 叠加后比任何单一组分都亮（alpha 0.25/0.45 均无效）→ 删玻璃筒直接露液面（空罐=深色背板），TeamLiquid rim→0.08、emission→0.15。陷阱①重踩：后台编辑器改 .cs 不自动 Refresh，必须先 `script.recompile` 再验证，否则测试/截图全跑旧 DLL（本轮前几次"改了没效果"皆因此）；重装配走 `P1/角色与武器/升级场景中所有角色模型`（保存当前活动场景 NeonSkatepark）。文件：CharacterVisualAssembler.cs、CharacterVisualController.cs(UpdateHairSway 钳制)。
+
 ## 2026-11-05 #15
 【发布 v0.1.28】含 `#12`~`#14`；APK `moshuizuozhan-v0.1.28-arm64-v8a.apk`。陷阱：本轮 GUI 编辑器是用 `-logFile Logs/editor_ink.log` 启动的，而 `release.py build` 的 Pipeline 通道只盯 `Logs/Editor.log`（该文件停在 06:31），构建其实 54s 就成功了脚本却看不见完成标记、一路空等——编辑器日志名不是 `Logs/Editor.log` 时，构建成功后直接重跑一次 `build --version X` 复用已通过 aapt2 校验的 `Builds/Android/InkTurf.apk` 即可收尾。
 

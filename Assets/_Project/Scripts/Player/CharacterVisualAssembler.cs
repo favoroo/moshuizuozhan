@@ -259,7 +259,6 @@ namespace P1.Player
             public Material Metal;
             /// <summary>墨罐罐盖专用哑光金属：不用枪械金属的紧凑高光，防止阳光角度对上时罐顶闪白。</summary>
             public Material TankMetal;
-            public Material Glass;
             public Material Blush;
         }
 
@@ -295,7 +294,10 @@ namespace P1.Player
             // 触须发采用柔和胶质卡通参数（smoothness 0.45、rim 0.22），杜绝极硬高光与强边缘光在曲面微晃时产生的闪烁。
             p.TeamHair = CreateCharacterMat("Mat_TeamHair", teamCol, 0.45f, 0.22f, shadeSoftness: 0.06f);
             p.InkDecal = CreateCharacterMat("Mat_TeamInkDecal", teamCol, 0.18f, 0.12f, shadeSoftness: 0.06f);
-            p.TeamLiquid = CreateCharacterMat("Mat_TeamLiquid", teamCol, 0.50f, 0.35f, emission: teamCol * 0.20f);
+            // P39 液面可读性：rim 0.35→0.08、emission 0.20→0.15。细圆柱液面几乎整个侧面都处于
+            // 掠射角，白 rim 会铺满整个可见面把队伍橙洗成奶油色（叠加玻璃后读成"奶粉罐"，
+            // 满罐/半罐完全无法分辨墨量）；rim 是为大面积曲面设计的，小圆柱只留极低值。
+            p.TeamLiquid = CreateCharacterMat("Mat_TeamLiquid", teamCol, 0.50f, 0.08f, emission: teamCol * 0.15f);
             p.SquidBody = CreateCharacterMat("Mat_SquidBody", teamCol, 0.65f, 0.35f);
 
             p.Skin = CreateCharacterMat("Mat_KidSkin", new Color(0.96f, 0.73f, 0.61f), 0.25f, 0.12f);
@@ -305,12 +307,8 @@ namespace P1.Player
             p.TankMetal = CreateCharacterMat("Mat_TankMetal", new Color(0.55f, 0.58f, 0.65f), 0.22f, 0.25f);
             p.Blush = CreateCharacterMat("Mat_Blush", new Color(0.98f, 0.62f, 0.60f), 0.20f, 0.15f);
 
-            // 墨罐玻璃必须保留 URP Lit 透明表面材质：卡通 Shader 不支持透明通道，否则墨罐外壳会变为不透明阻挡内部液面。
-            // 但不能沿用 0.95 的镜面级光滑度：近白基色 + 紧凑 GGX 高光/天空反射在阳光下会被 Bloom 烧成一团白光，
-            // 角色转身时偶尔对上角度就闪一下（表现为"后背墨罐上闪白光"）。基色/alpha 保持原值以复用同名材质资产，
-            // 只把光滑度压哑并关掉镜面高光与环境反射。
-            p.Glass = CreateLitMat("Mat_TankGlass", new Color(0.85f, 0.92f, 1.0f, 0.45f), TankGlassSmoothness, 0f);
-            DisableTankGlassGlint(p.Glass);
+            // P39 玻璃材质随 GlassChamber 一并移除（透明玻璃会洗白液面，见 BuildKidHierarchy 注释）；
+            // ToonStyleInstaller 里按 "Mat_TankGlass" 前缀扫描的旧逻辑随之自然失效，无需改动。
 
             return p;
         }
@@ -397,88 +395,8 @@ namespace P1.Player
 
             // P12-D：角色合并网格跨角色共享，开启材质 instancing 后同一
             // (mesh, material) 组合可由 GPU instancing / GRD 一次提交。
-            // 仅用于不透明 CharacterToon 材质；墨罐玻璃走 CreateLitMat，不在此处。
+            // 仅用于不透明 CharacterToon 材质；透明 Lit 材质（旧墨罐玻璃）已随 P39 移除。
             mat.enableInstancing = true;
-        }
-
-        private static Material CreateLitMat(string name, Color baseCol, float smoothness, float metallic, Color? emission = null)
-        {
-            Shader sh = Shader.Find("Universal Render Pipeline/Lit");
-            if (sh == null) sh = Shader.Find("Standard");
-            if (sh == null) sh = Shader.Find("Diffuse");
-
-#if UNITY_EDITOR
-            if (!Application.isPlaying)
-            {
-                const string folder = "Assets/_Project/Materials/Characters";
-                if (!UnityEditor.AssetDatabase.IsValidFolder(folder))
-                {
-                    if (!UnityEditor.AssetDatabase.IsValidFolder("Assets/_Project/Materials"))
-                        UnityEditor.AssetDatabase.CreateFolder("Assets/_Project", "Materials");
-                    UnityEditor.AssetDatabase.CreateFolder("Assets/_Project/Materials", "Characters");
-                }
-
-                string fileName = name + "_" + ColorUtility.ToHtmlStringRGBA(baseCol);
-                string path = folder + "/" + fileName + ".mat";
-                var asset = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>(path);
-                if (asset != null)
-                {
-                    ApplyLitMatSettings(asset, baseCol, smoothness, metallic, emission);
-                    UnityEditor.EditorUtility.SetDirty(asset);
-                    return asset;
-                }
-
-                var created = new Material(sh) { name = fileName };
-                ApplyLitMatSettings(created, baseCol, smoothness, metallic, emission);
-                UnityEditor.AssetDatabase.CreateAsset(created, path);
-                return created;
-            }
-#endif
-            var mat = new Material(sh) { name = name };
-            ApplyLitMatSettings(mat, baseCol, smoothness, metallic, emission);
-            return mat;
-        }
-
-        private static void ApplyLitMatSettings(Material mat, Color baseCol, float smoothness, float metallic, Color? emission)
-        {
-            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", baseCol);
-            if (mat.HasProperty("_Color")) mat.SetColor("_Color", baseCol);
-            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", smoothness);
-            if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", metallic);
-
-            if (baseCol.a < 0.999f)
-            {
-                mat.SetFloat("_Surface", 1f);
-                mat.SetFloat("_Blend", 0f);
-                mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                mat.SetFloat("_ZWrite", 0f);
-                mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-                mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-            }
-
-            if (emission.HasValue && emission.Value != Color.black)
-            {
-                mat.EnableKeyword("_EMISSION");
-                if (mat.HasProperty("_EmissionColor")) mat.SetColor("_EmissionColor", emission.Value);
-            }
-        }
-
-        /// <summary>墨罐玻璃粗糙度：保留玻璃质感，但不产生会被 Bloom 放大的紧凑 HDR 高光。</summary>
-        private const float TankGlassSmoothness = 0.20f;
-
-        /// <summary>
-        /// 墨罐玻璃关掉镜面高光与环境反射（URP Lit 用局部关键词控制）。
-        /// 只调 smoothness 不够：阳光角度对上时 GGX 高光峰值仍会远超 Bloom 阈值，在角色后背烧出一团白光。
-        /// </summary>
-        private static void DisableTankGlassGlint(Material mat)
-        {
-            if (mat == null) return;
-
-            if (mat.HasProperty("_SpecularHighlights")) mat.SetFloat("_SpecularHighlights", 0f);
-            if (mat.HasProperty("_EnvironmentReflections")) mat.SetFloat("_EnvironmentReflections", 0f);
-            mat.EnableKeyword("_SPECULARHIGHLIGHTS_OFF");
-            mat.EnableKeyword("_ENVIRONMENTREFLECTIONS_OFF");
         }
 
         #endregion
@@ -1373,10 +1291,11 @@ namespace P1.Player
                 ear.transform.localRotation = Quaternion.Euler(0f, 0f, s * 10f);
             }
 
-            // 小嘴：中线、颊线下方（chin 收坡上，不落在下巴尖）
+            // 小嘴：中线、颊线下方（chin 收坡上，不落在下巴尖）。
+            // P39 稍微放大（旧 0.044×0.014 在中远景读成一颗痣）；仍是闭合嘴形，不另做表情系统。
             var mouthDir = new Vector3(0f, -0.26f, 0.96f).normalized;
             var mouth = CreateSphere(face, "Mouth",
-                SampleMochiHeadPoint(mouthDir, 0.006f), new Vector3(0.044f, 0.014f, 0.012f), p.Dark);
+                SampleMochiHeadPoint(mouthDir, 0.006f), new Vector3(0.054f, 0.018f, 0.012f), p.Dark);
             mouth.transform.localRotation = Quaternion.identity;
 
             // 2.7 胸前队伍色墨点 ×2：T 恤前片（超椭圆脸近似平面）上的小贴点，保留队伍识别。
@@ -1449,7 +1368,11 @@ namespace P1.Player
             backpackGo.transform.localRotation = Quaternion.Euler(-6f, 0f, 0f);
 
             CreateBox(backpackGo.transform, "MountPlate", new Vector3(0f, 0f, 0.048f), new Vector3(0.10f, 0.20f, 0.014f), p.Dark);
-            CreateCylinder(backpackGo.transform, "GlassChamber", Vector3.zero, new Vector3(0.112f, 0.078f, 0.112f), p.Glass);
+
+            // P39 移除 GlassChamber 玻璃筒：实测透明玻璃无论 alpha（0.25~0.45）都会把液面
+            // "提亮洗白"（叠加后比任何单一组分都亮，bloom/高光路径），满罐也读成"奶粉罐"。
+            // 直接露出液面后：满罐=饱和队伍橙、空罐=深色 MountPlate 背板，墨量一眼可辨
+            // （A/B 消融截图 Logs/ab_A_noglass vs t_alpha012）；罐盖/阀钮/背板保留罐体剪影。
 
             var fillGo = CreateCylinder(backpackGo.transform, "LiquidFill", Vector3.zero, new Vector3(0.094f, 0.066f, 0.094f), p.TeamLiquid);
             tankFill = fillGo.transform;
@@ -1555,15 +1478,17 @@ namespace P1.Player
 
             // 肩球：只保留埋进 T 恤里的一小段三角肌过渡，不外凸成"护肩球"。
             // 肩枢轴已经落在衣身最宽处内侧，袖子上半段会被衣服自然盖住，形成肩线。
+            // P39 手臂加粗一档：与灯笼短裤的小腿(0.078)/大腿(0.096)保持同一胖瘦档，
+            // 旧 0.064 前臂在实机读成"火柴棍手臂"，与厚底鞋/灯笼裤的量级脱节。
             CreateSphere(shoulder, "ShoulderCap",
                 new Vector3(side * 0.004f, -0.006f, 0f),
-                new Vector3(0.082f, 0.070f, 0.082f), p.Sleeve);
+                new Vector3(0.088f, 0.074f, 0.088f), p.Sleeve);
 
             // 短袖：覆盖上臂上段（drop-shoulder 短款，袖口在肘上方收边）
             // 顶端落在肩枢轴高度（不再冒出肩线），内侧半段埋进衣身、外侧形成圆润肩头。
             CreateCapsule(shoulder, "Sleeve",
                 new Vector3(0f, -0.068f, 0f),
-                new Vector3(0.090f, 0.066f, 0.090f), p.Sleeve);
+                new Vector3(0.096f, 0.070f, 0.096f), p.Sleeve);
 
             // 肘枢轴：authored 屈肘 35°（负 X = 小臂向前卷）
             var elbowGo = new GameObject("Elbow");
@@ -1573,20 +1498,20 @@ namespace P1.Player
             Transform elbowT = elbowGo.transform;
 
             // 队伍色袖口：盖住短袖与前臂的接缝（绕肘枢轴旋转时遮住断缝）
-            CreateCylinder(elbowT, "Cuff", Vector3.zero, new Vector3(0.080f, 0.010f, 0.080f), p.TeamHair);
+            CreateCylinder(elbowT, "Cuff", Vector3.zero, new Vector3(0.088f, 0.010f, 0.088f), p.TeamHair);
 
             // 肤色前臂
             CreateCapsule(elbowT, "Forearm",
                 new Vector3(0f, -foreLen * 0.5f, 0f),
-                new Vector3(0.064f, foreLen * 0.5f + 0.012f, 0.064f), p.Skin);
+                new Vector3(0.072f, foreLen * 0.5f + 0.012f, 0.072f), p.Skin);
 
             // 握拳（握把位）：沿骨轴略拉长，读起来是"拳"而不是一颗球
             var hand = CreateSphere(elbowT, "Hand", new Vector3(0f, -foreLen, 0f),
-                new Vector3(0.078f, 0.090f, 0.078f), p.Skin);
+                new Vector3(0.086f, 0.096f, 0.086f), p.Skin);
             // 拇指：贴握把内侧的小凸起（右手在 -X 侧、左手在 +X 侧）
             CreateSphere(hand.transform, "Thumb",
                 new Vector3(-side * 0.026f, 0.006f, 0.030f),
-                new Vector3(0.036f, 0.040f, 0.036f), p.Skin);
+                new Vector3(0.040f, 0.044f, 0.040f), p.Skin);
 
             elbowPivot = elbowT;
         }

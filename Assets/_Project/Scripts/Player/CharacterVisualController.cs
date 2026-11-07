@@ -2718,8 +2718,11 @@ namespace P1.Player
 
                     _hairRootPitchSprings[i].Step(pitchTarget + idleWave, omegaRoot, cfg.hairRootZeta, dt);
                     _hairRootRollSprings[i].Step(rollTarget, omegaRoot, cfg.hairRootZeta, dt);
-                    float rp = Mathf.Clamp(_hairRootPitchSprings[i].Value + _flingHairPitchDeg, -34f, 28f);
-                    float rr = Mathf.Clamp(_hairRootRollSprings[i].Value + _flingHairRollDeg, -28f, 28f);
+                    // P39 摆幅钳制收紧：欠阻尼弹簧 + 梢段 1.35 鞭梢增益在急停/开火节点会过冲出
+                    // "发丝向四面炸开"的美杜莎帧（实机 gait 采样确认）。前后向各收 4~8°，
+                    // 侧向 roll 收 6°：跑动拖尾（前后向主分量）基本不动，散射极值被压平。
+                    float rp = Mathf.Clamp(_hairRootPitchSprings[i].Value + _flingHairPitchDeg, -30f, 26f);
+                    float rr = Mathf.Clamp(_hairRootRollSprings[i].Value + _flingHairRollDeg, -22f, 22f);
                     root.localRotation = kidHairRootBaseRots[i]
                         * Quaternion.Euler(rp, 0f, rr);
 
@@ -2731,8 +2734,8 @@ namespace P1.Player
                     {
                         _hairMidPitchSprings[i].Step(rp * cfg.hairMidWhip, omegaTip, cfg.hairMidZeta, dt);
                         _hairMidRollSprings[i].Step(rr * cfg.hairMidWhip, omegaTip, cfg.hairMidZeta, dt);
-                        float mp = Mathf.Clamp(_hairMidPitchSprings[i].Value, -42f, 34f);
-                        float mr = Mathf.Clamp(_hairMidRollSprings[i].Value, -32f, 32f);
+                        float mp = Mathf.Clamp(_hairMidPitchSprings[i].Value, -36f, 30f);
+                        float mr = Mathf.Clamp(_hairMidRollSprings[i].Value, -26f, 26f);
                         kidHairMidPivots[i].localRotation = kidHairMidBaseRots[i]
                             * Quaternion.Euler(mp, 0f, mr);
                     }

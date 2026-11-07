@@ -173,6 +173,20 @@ namespace P1.Player
 
         private Vector3 _tankFillBasePos = Vector3.zero;
         private Vector3 _tankFillBaseScale = Vector3.one;
+
+        // 储液罐液面动画（INKWAVE character.js _updateTank L3339-3351 三弹簧配方 + P1 扩展）
+        private Transform _tankBombLine;                 // 副武器墨量线（BindTankExtras 注入）
+        private AnimSpring1D _tankLevelBobSpring;        // 液面上下 bob：跳跃/落地/急停/扣墨事件冲量
+        private AnimSpring1D _tankSloshSpringX;          // 左右晃：局部横向加速度驱动
+        private AnimSpring1D _tankSloshSpringZ;          // 前后晃：局部纵向加速度驱动
+        private float _inkDisplay = 1f;                  // 显示墨量（指数平滑，INKWAVE damp rate 8）
+        private float _tankPrevInk01 = 1f;               // 上一帧真实墨量（扣墨下降沿检测）
+        private bool _tankPrevGrounded = true;           // 上一帧着地（跳跃/落地冲量检测）
+        private bool _tankBrakeLatch;                    // 急停冲量闩锁（持续减速只踢一次）
+        private bool _tankLowInkActive;                  // 低墨呼吸迟滞状态
+        private float _tankAnimTime;                     // 呼吸脉动相位时钟
+        private float _tankFillSpanCached = -1f;         // 液面网格实尺高度（懒缓存，炸弹线定位用）
+        private float _tankBombLineFracCached = -1f;     // 炸弹线当前高度比例（变化才重定位）
         private Vector3 _weaponRootBasePos = Vector3.zero;
         private bool _weaponEventsBound;
 
@@ -517,6 +531,16 @@ namespace P1.Player
             rightEyeTransform = rightEye;
 
             CacheDefaultTransforms();
+        }
+
+        /// <summary>
+        /// 绑定储液罐动态件（副武器墨量线）。与 BindHierarchy 分离的增量接口：
+        /// 不改动既有绑定签名，旧装配路径（未建炸弹线的场景角色）传 null 即可。
+        /// </summary>
+        public void BindTankExtras(Transform tankBombLine)
+        {
+            _tankBombLine = tankBombLine;
+            _tankBombLineFracCached = -1f; // 强制首次定位
         }
 
         /// <summary>
@@ -889,6 +913,7 @@ namespace P1.Player
                 RightEye = rightEyeTransform,
                 Backpack = chestTransform != null ? chestTransform.Find("InkTankBackpack") : null,
                 TankFill = tankLiquidFill,
+                TankBombLine = _tankBombLine,
                 LeftArm = leftArmTransform,
                 RightArm = rightArmTransform,
                 LeftElbow = leftElbowPivot,
@@ -1574,7 +1599,7 @@ namespace P1.Player
                 UpdateBodyPose(dt);
                 UpdateHairSway(dt);
                 UpdateRecoilKick(dt);
-                UpdateTankFill();
+                UpdateTankFill(dt);
             }
             else
             {
@@ -2964,19 +2989,140 @@ namespace P1.Player
         }
 
         /// <summary>
-        /// 墨水储罐背包液面动态升降
+        /// 墨水储罐液面动态（INKWAVE character.js _updateTank L3339-3351 配方移植）：
+        /// 1. 显示墨量先指数平滑（L1272 damp rate 8），扣墨缓降不瞬跳；
+        /// 2. 液面 bob 弹簧（2.4Hz ζ0.18）吃事件冲量：跳跃/落地/急停（L1009/2100/1656）
+        ///    + P1 扩展的开枪扣墨下沉（−Δ墨×增益）；
+        /// 3. 前后/左右晃动双弹簧（1.6Hz ζ0.14）由局部加速度驱动，液面倾斜 ±0.06rad、径向挤压保体积；
+        /// 4. 低墨呼吸脉动（迟滞）与空罐隐藏（L3350）。
+        /// 液面网格为实尺烘焙（底部原点），写回只需 scale=(挤压, 液位, 挤压)，无位置补偿。
+        /// 全程 Transform 数学：CombatantHealth 白闪会占 MPB（SetPropertyBlock 会踢出 GPU instancing），液面禁碰材质。
         /// </summary>
-        private void UpdateTankFill()
+        private void UpdateTankFill(float dt)
         {
             if (tankLiquidFill == null || _motor == null) return;
+            CharacterAnimConfigSO cfg = AnimConfig;
 
             float ink01 = _motor.Ink01;
-            // 墨水高度与位置随墨水量比例线性收缩，底部吸附在底盖
-            float sy = Mathf.Clamp(_tankFillBaseScale.y * ink01, _tankFillBaseScale.y * 0.05f, _tankFillBaseScale.y);
-            tankLiquidFill.localScale = new Vector3(_tankFillBaseScale.x, sy, _tankFillBaseScale.z);
+            _tankAnimTime += dt;
 
-            float deltaY = (sy - _tankFillBaseScale.y) * 0.5f;
-            tankLiquidFill.localPosition = _tankFillBasePos + new Vector3(0f, deltaY, 0f);
+            // 1. 扣墨下降沿 → 液面下沉冲量（P1 扩展；回墨交给指数平滑缓升，不加冲量）
+            float inkDelta = ink01 - _tankPrevInk01;
+            if (inkDelta < -0.0005f)
+            {
+                _tankLevelBobSpring.Kick(TankFillMath.ConsumeKick(inkDelta, cfg.tankConsumeKickGain));
+            }
+            _tankPrevInk01 = ink01;
+
+            // 2. 跳跃/落地冲量（着地沿检测）与急停冲量（闩锁防持续减速连踢）
+            if (_groundedNow && !_tankPrevGrounded)
+            {
+                _tankLevelBobSpring.Kick(cfg.tankEventKickLand);
+            }
+            else if (!_groundedNow && _tankPrevGrounded)
+            {
+                _tankLevelBobSpring.Kick(cfg.tankEventKickJump);
+            }
+            _tankPrevGrounded = _groundedNow;
+            if (_localAccel.z < -cfg.tankBrakeAccelMin && !_tankBrakeLatch)
+            {
+                _tankLevelBobSpring.Kick(cfg.tankEventKickBrake);
+                _tankBrakeLatch = true;
+            }
+            else if (_localAccel.z > -cfg.tankBrakeAccelMin * 0.5f)
+            {
+                _tankBrakeLatch = false;
+            }
+
+            // 3. 三弹簧推进（INKWAVE L3342-3344；AnimSpring1D 为原位更新，值在 .Value）
+            _tankLevelBobSpring.Step(0f, cfg.tankLevelBobOmega, cfg.tankLevelBobZeta, dt);
+            float sloshTargetX = TankFillMath.SloshTarget(_localAccel.x, cfg.tankSloshAccelGain, cfg.tankSloshTargetMax);
+            float sloshTargetZ = TankFillMath.SloshTarget(-_localAccel.z, cfg.tankSloshAccelGain, cfg.tankSloshTargetMax);
+            _tankSloshSpringX.Step(sloshTargetX, cfg.tankSloshOmega, cfg.tankSloshZeta, dt);
+            _tankSloshSpringZ.Step(sloshTargetZ, cfg.tankSloshOmega, cfg.tankSloshZeta, dt);
+            float sloshX = _tankSloshSpringX.Value;
+            float sloshZ = _tankSloshSpringZ.Value;
+
+            // 4. 显示墨量：瞬变（复活/传送/乌贼浮出后基准失效）直接吸附，否则指数平滑追赶
+            if (TankFillMath.NeedsSnap(_inkDisplay, ink01))
+            {
+                _inkDisplay = ink01;
+            }
+            else
+            {
+                _inkDisplay = TankFillMath.ExpDamp(_inkDisplay, ink01, cfg.tankInkChaseRate, dt);
+            }
+
+            // 5. 液位合成：平滑墨量 ×(1 + bob + 低墨呼吸)，下限保护（INKWAVE L3348）
+            _tankLowInkActive = TankFillMath.LowInkHysteresis(_tankLowInkActive, ink01, cfg.tankLowInkFraction, cfg.tankLowInkExitFraction);
+            float bobFactor = TankFillMath.LevelBob(_tankLevelBobSpring.Value, cfg.tankLevelBobGain, cfg.tankLevelBobMax);
+            float pulseFactor = _tankLowInkActive
+                ? TankFillMath.LowInkPulse(_tankAnimTime, cfg.tankLowInkPulseHz, cfg.tankLowInkPulseAmp)
+                : 0f;
+            float level = TankFillMath.DisplayLevel(_inkDisplay, bobFactor, pulseFactor, cfg.tankLevelFloor);
+
+            // 6. 写回：底部锚定缩放 + 弯月面倾斜（x←Z弹簧 / z←X弹簧，L3345）+ 径向挤压（L3349）
+            float squeeze = TankFillMath.RadialSqueeze(sloshX, sloshZ, cfg.tankSloshSqueeze);
+            float tiltXDeg = TankFillMath.Tilt(sloshZ, cfg.tankTiltMaxRad) * Mathf.Rad2Deg;
+            float tiltZDeg = TankFillMath.Tilt(sloshX, cfg.tankTiltMaxRad) * Mathf.Rad2Deg;
+            tankLiquidFill.localScale = new Vector3(
+                _tankFillBaseScale.x * squeeze,
+                _tankFillBaseScale.y * level,
+                _tankFillBaseScale.z * squeeze);
+            tankLiquidFill.localPosition = _tankFillBasePos;
+            tankLiquidFill.localRotation = Quaternion.Euler(tiltXDeg, 0f, tiltZDeg);
+            tankLiquidFill.gameObject.SetActive(ink01 > cfg.tankEmptyHideAt);
+
+            UpdateTankBombLine();
+        }
+
+        /// <summary>
+        /// 副武器墨量线：白色细环标到 BombInkCost/MaxInk 高度（HUD 阈值线同步到 3D）。
+        /// 轮询 + 戳记（项目惯例，避免事件生命周期悬挂）：成本比例变化才重定位；无武器/零成本隐藏。
+        /// </summary>
+        private void UpdateTankBombLine()
+        {
+            if (_tankBombLine == null) return;
+
+            float frac = -1f;
+            if (_weaponController != null && _weaponController.Config != null && _motor != null)
+            {
+                float bombCost = _weaponController.BombInkCost;
+                float maxInk = _motor.MaxInk;
+                if (bombCost > 0.01f && maxInk > 0.5f)
+                {
+                    frac = Mathf.Clamp01(bombCost / maxInk);
+                }
+            }
+
+            if (frac < 0f)
+            {
+                if (_tankBombLine.gameObject.activeSelf)
+                {
+                    _tankBombLine.gameObject.SetActive(false);
+                }
+                return;
+            }
+
+            if (!_tankBombLine.gameObject.activeSelf)
+            {
+                _tankBombLine.gameObject.SetActive(true);
+            }
+            if (Mathf.Abs(frac - _tankBombLineFracCached) > 0.0005f)
+            {
+                if (_tankFillSpanCached < 0f)
+                {
+                    var fillFilter = tankLiquidFill != null ? tankLiquidFill.GetComponent<MeshFilter>() : null;
+                    float meshHeight = fillFilter != null && fillFilter.sharedMesh != null
+                        ? fillFilter.sharedMesh.bounds.size.y
+                        : 0.132f;
+                    _tankFillSpanCached = meshHeight * _tankFillBaseScale.y;
+                }
+                Vector3 pos = _tankBombLine.localPosition;
+                pos.y = _tankFillBasePos.y + frac * _tankFillSpanCached;
+                _tankBombLine.localPosition = pos;
+                _tankBombLineFracCached = frac;
+            }
         }
 
         /// <summary>

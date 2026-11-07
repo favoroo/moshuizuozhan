@@ -158,5 +158,26 @@ namespace P1.Player
         public float aimPoseChestPitchWeight = 0.18f;
         [Tooltip("瞄准姿态平滑时间（秒）：太小会跟手但抖，太大会有延迟感")]
         public float aimPoseSmoothTime = 0.07f;
+
+        [Header("潜墨游动尾迹 (Swim Wake, A6)")]
+        [Tooltip("是否启用潜墨游动尾迹（V 形后掠水花 + 队色墨雾）。关闭后不再创建任何尾迹粒子系统")]
+        public bool wakeEnabled = true;
+        [Tooltip("触发尾迹的最低实际水平速度 (m/s)：低于该速度或脱离己方墨面立即停止发射（已发射粒子自然消散）")]
+        public float wakeMinSpeed = 3.5f;
+        [Tooltip("潜墨满速时水花流的发射率（颗/秒，左右两侧合计）。峰值粒子数由系统 32 上限强制约束")]
+        public float wakeMaxEmissionRate = 46f;
+        [Tooltip("V 形尾波的后掠角（度）：0 = 正后方，45 = 明显向两侧张开。建议 30~45")]
+        [Range(10f, 60f)]
+        public float wakeSpreadAngle = 38f;
+        [Tooltip("水花粒子的不透明度 (0~1)：加法混合下即亮度权重，过高会过曝")]
+        [Range(0f, 1f)]
+        public float wakeColorAlpha = 0.55f;
+        [Tooltip("潜墨满速时水花的初速 (m/s)：低速时按速度比例回落到约 0.9 m/s")]
+        public float wakeMaxSpraySpeed = 3.2f;
+        [Tooltip("低频队色墨雾的发射率（颗/秒）：负责把两侧水花黏成整体尾波，0 = 只保留四散水花")]
+        public float wakeMistEmissionRate = 5f;
+        [Tooltip("墨雾的不透明度 (0~1)：雾团不抢水花的可读性，建议 0.10~0.22")]
+        [Range(0f, 1f)]
+        public float wakeMistAlpha = 0.16f;
     }
 }

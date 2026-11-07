@@ -146,5 +146,96 @@ namespace P1.Tests
 
             Object.DestroyImmediate(config);
         }
+
+        [Test]
+        public void ComputeStatBars_NullConfig_AllBarsInRangeForAllSevenWeapons()
+        {
+            for (int i = 0; i < WeaponSelectMath.WeaponCount; i++)
+            {
+                WeaponKind kind = WeaponSelectMath.IndexToKind(i);
+                WeaponSelectMath.WeaponStatBars bars = WeaponSelectMath.ComputeStatBars(null, kind);
+
+                Assert.GreaterOrEqual(bars.DamageDensity01, 0f, $"{kind} 伤害条下界");
+                Assert.LessOrEqual(bars.DamageDensity01, 1f, $"{kind} 伤害条上界");
+                Assert.GreaterOrEqual(bars.TurfEfficiency01, 0f, $"{kind} 涂地块下界");
+                Assert.LessOrEqual(bars.TurfEfficiency01, 1f, $"{kind} 涂地块上界");
+                Assert.GreaterOrEqual(bars.RangeMobility01, 0f, $"{kind} 机动条下界");
+                Assert.LessOrEqual(bars.RangeMobility01, 1f, $"{kind} 机动条上界");
+            }
+        }
+
+        [Test]
+        public void ComputeStatBars_SevenWeapons_FillDifferentBarTops()
+        {
+            // 每条横条的「第一名」必须符合手感认知，这是横条存在的意义：
+            // 伤害密度 → 加特林弹幕；涂地效率 → 推地滚筒；射程机动 → 满蓄狙。
+            var dpsByKind = new System.Collections.Generic.Dictionary<WeaponKind, float>();
+            var turfByKind = new System.Collections.Generic.Dictionary<WeaponKind, float>();
+            var rangeByKind = new System.Collections.Generic.Dictionary<WeaponKind, float>();
+
+            for (int i = 0; i < WeaponSelectMath.WeaponCount; i++)
+            {
+                WeaponKind kind = WeaponSelectMath.IndexToKind(i);
+                WeaponSelectMath.WeaponStatBars bars = WeaponSelectMath.ComputeStatBars(null, kind);
+                dpsByKind[kind] = bars.DamageDensity01;
+                turfByKind[kind] = bars.TurfEfficiency01;
+                rangeByKind[kind] = bars.RangeMobility01;
+            }
+
+            Assert.AreEqual(WeaponKind.Splatling, ArgMax(dpsByKind), "持续伤害密度最高应是加特林");
+            Assert.AreEqual(WeaponKind.Roller, ArgMax(turfByKind), "涂地效率最高应是推地滚筒");
+            Assert.AreEqual(WeaponKind.Charger, ArgMax(rangeByKind), "射程机动最高应是满蓄狙");
+
+            // 佐证排序方向：爆破枪/泼桶/蓄力狙是「重拳但低速」，伤害密度必须低于连发系
+            Assert.Less(turfByKind[WeaponKind.Charger], 0.15f, "蓄力狙每点墨铺地最少");
+            Assert.Less(dpsByKind[WeaponKind.Blaster], dpsByKind[WeaponKind.Shooter], "爆破枪单发重但持续密度低");
+            Assert.Less(dpsByKind[WeaponKind.Slosher], dpsByKind[WeaponKind.Shooter], "泼桶持续密度低于小枪");
+        }
+
+        [Test]
+        public void ComputeStatBars_InstantiatedConfig_TracksTuningAndClamps()
+        {
+            var config = ScriptableObject.CreateInstance<WeaponConfigSO>();
+
+            WeaponSelectMath.WeaponStatBars baseline =
+                WeaponSelectMath.ComputeStatBars(config, WeaponKind.Shooter);
+            float expectedDps01 = Mathf.Clamp01((config.damage / config.fireInterval) / 430f);
+            Assert.AreEqual(expectedDps01, baseline.DamageDensity01, 0.02f, "伤害条应按 直击伤害/开火间隔 换算");
+
+            // 调配置 → 横条跟着动：伤害翻倍条变长，耗墨翻倍涂地块变短
+            config.damage *= 2f;
+            WeaponSelectMath.WeaponStatBars buffed =
+                WeaponSelectMath.ComputeStatBars(config, WeaponKind.Shooter);
+            Assert.Greater(buffed.DamageDensity01, baseline.DamageDensity01, "伤害提升应拉长伤害条");
+
+            config.inkCostPerShot *= 4f;
+            WeaponSelectMath.WeaponStatBars thirsty =
+                WeaponSelectMath.ComputeStatBars(config, WeaponKind.Shooter);
+            Assert.Less(thirsty.TurfEfficiency01, baseline.TurfEfficiency01, "单发耗墨大增应压短涂地块");
+
+            // 极端数值钳制到 1
+            config.damage = 9999f;
+            config.fireInterval = 0.02f;
+            WeaponSelectMath.WeaponStatBars capped =
+                WeaponSelectMath.ComputeStatBars(config, WeaponKind.Shooter);
+            Assert.AreEqual(1f, capped.DamageDensity01, 0.001f, "超锚点数值必须钳到满条");
+
+            Object.DestroyImmediate(config);
+        }
+
+        private static WeaponKind ArgMax(System.Collections.Generic.Dictionary<WeaponKind, float> values)
+        {
+            WeaponKind best = WeaponKind.Shooter;
+            float bestValue = float.NegativeInfinity;
+            foreach (var kv in values)
+            {
+                if (kv.Value > bestValue)
+                {
+                    bestValue = kv.Value;
+                    best = kv.Key;
+                }
+            }
+            return best;
+        }
     }
 }

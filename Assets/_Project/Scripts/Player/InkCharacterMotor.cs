@@ -55,6 +55,9 @@ namespace P1.Player
         // 高速潜墨涟漪触发计时
         private float _swimRippleTimer;
 
+        // A6 潜墨游动尾迹：自包含粒子组件（初始化时挂载，仅在潜墨且实际速度达标时驱动）
+        private CharacterSwimWake _swimWake;
+
         // 超速惯性滑行（INKWAVE swim-exit glide）与高速急转弯甩墨状态
         private float _glideSpeed;
         private float _prevYaw;
@@ -186,6 +189,9 @@ namespace P1.Player
             _enemyInkRecoveryRatePerSec = config != null ? config.enemyInkRecoveryRatePerSec : 2.0f;
 
             _health.OnRespawned += HandleRespawned;
+            _health.OnKilled += HandleKilled;
+
+            EnsureSwimWake();
 
             _prevYaw = transform.eulerAngles.y;
             EffectiveMoveSpeed = config != null ? config.normalMoveSpeed : 6.0f;
@@ -197,6 +203,7 @@ namespace P1.Player
             if (_health != null)
             {
                 _health.OnRespawned -= HandleRespawned;
+                _health.OnKilled -= HandleKilled;
             }
 
             if (_ghostMatCache != null && _ghostMatCache.Count > 0)
@@ -221,6 +228,7 @@ namespace P1.Player
             }
             _currentInk = MaxInk;
             _enemyInkRecoveryRatePerSec = config != null ? config.enemyInkRecoveryRatePerSec : 2.0f;
+            EnsureSwimWake();
         }
 
         private void HandleRespawned(CombatantHealth h)
@@ -251,6 +259,7 @@ namespace P1.Player
             IsStealthed = false;
             _enemyInkGrip01 = 0f;
             _swimRippleTimer = 0f;
+            if (_swimWake != null) _swimWake.ResetWake();
             _appliedVisualKind = -1;
             _glideSpeed = 0f;
             EffectiveMoveSpeed = 0f;
@@ -260,6 +269,15 @@ namespace P1.Player
 
             if (visualRoot != null) visualRoot.localScale = Vector3.one;
             if (weaponVisual != null) weaponVisual.SetActive(true);
+        }
+
+        /// <summary>
+        /// 阵亡瞬间清空潜墨尾迹（A6）：死亡后 Update 不再驱动发射，这里把残留粒子一并收掉，
+        /// 避免尸体位置挂着一团还在飘的队色墨雾。
+        /// </summary>
+        private void HandleKilled(CombatantHealth h, Team killerTeam)
+        {
+            if (_swimWake != null) _swimWake.ResetWake();
         }
 
         /// <summary>
@@ -329,6 +347,17 @@ namespace P1.Player
         }
 
         /// <summary>
+        /// 一次性奖励回墨（击杀奖励等）：在当前墨量上叠加并钳制到罐上限。
+        /// 与 <see cref="RefillInkFull"/>（大招释放回满）分开：奖励只回一小截，是「继续交火」的补给
+        /// 而不是「重整旗鼓」的重置，因此也不重置开枪后的回墨延迟计时。
+        /// </summary>
+        public void RefillInk(float amount)
+        {
+            if (amount <= 0f) return;
+            _currentInk = Mathf.Min(MaxInk, _currentInk + amount);
+        }
+
+        /// <summary>
         /// 瞬移至指定位置（越界回收与防坠落使用）。
         /// 临时禁用 CharacterController 以确保位置立即生效，并可选择重置垂直与水平滑行动量。
         /// </summary>
@@ -369,6 +398,7 @@ namespace P1.Player
             IsWallClimbing = false;
             _wallSurface = null;
             _wallClimbCooldown = 0f;
+            if (_swimWake != null) _swimWake.ResetWake();
         }
 
         /// <summary>
@@ -806,6 +836,9 @@ namespace P1.Player
             // 6. 潜行与人形视觉过渡（压扁贴地 vs 标准胶囊）
             UpdateSwimVisuals(dt);
 
+            // 6.5 潜墨游动尾迹（A6）：在位移与朝向都结算完之后驱动，纯表现、不参与移动解算
+            UpdateSwimWake(dt);
+
             // 7. 潜墨隐匿（Stealth）：己方墨水中静止/极慢移动时对敌方隐形，己方半透明
             UpdateStealthState();
         }
@@ -921,6 +954,59 @@ namespace P1.Player
             }
 
             ApplyStealthVisuals();
+        }
+
+        // ==================== 潜墨游动尾迹（Swim Wake, A6） ====================
+
+        /// <summary>
+        /// 初始化潜墨尾迹组件（只挂载一次；无配置或配置关闭时直接跳过，不产生任何粒子系统）。
+        /// 由 Awake / Configure 调用，运行时若配置被重新赋值也会在此重新绑定。
+        /// </summary>
+        private void EnsureSwimWake()
+        {
+            if (config == null || !config.wakeEnabled) return;
+
+            if (_swimWake == null)
+            {
+                _swimWake = GetComponent<CharacterSwimWake>();
+                if (_swimWake == null)
+                {
+                    _swimWake = gameObject.AddComponent<CharacterSwimWake>();
+                }
+            }
+
+            _swimWake.Bind(config);
+        }
+
+        /// <summary>
+        /// 潜墨尾迹驱动（纯表现，读取现有状态，不参与移动/潜行/回血语义）：
+        /// 只有「己方墨里高速潜行、且未攀墙」时发射；速度阈值与强度全部走 <see cref="PlayerConfigSO"/>。
+        /// 速度用 <see cref="ActualPlanarSpeed"/>（顶墙卡住时为 0，不会原地喷水花），
+        /// 方向用 <see cref="PlanarVelocity"/>（实际移动方向，含惯性滑行）。
+        /// </summary>
+        private void UpdateSwimWake(float dt)
+        {
+            if (_swimWake == null)
+            {
+                if (config != null && config.wakeEnabled) EnsureSwimWake();
+                if (_swimWake == null) return;
+            }
+
+            float minSpeed = config != null ? Mathf.Max(0f, config.wakeMinSpeed) : 3.5f;
+            bool emitting = IsSwimming && !IsWallClimbing && ActualPlanarSpeed >= minSpeed;
+
+            float refSpeed = config != null ? Mathf.Max(minSpeed + 0.5f, config.swimMoveSpeed) : 11.8f;
+            float speed01 = emitting
+                ? Mathf.Clamp01((ActualPlanarSpeed - minSpeed) / Mathf.Max(0.5f, refSpeed - minSpeed))
+                : 0f;
+
+            Color wakeColor = Color.white;
+            if (emitting && InkSurfaceController.Instance != null)
+            {
+                wakeColor = InkSurfaceController.Instance.GetTeamColor(Team);
+            }
+
+            _swimWake.Tick(dt, emitting, _planarVelocity, speed01, wakeColor);
         }
 
         /// <summary>

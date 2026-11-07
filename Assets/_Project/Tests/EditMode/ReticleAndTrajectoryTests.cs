@@ -186,7 +186,7 @@ namespace P1.Tests
         }
 
         /// <summary>
-        /// 回归：手雷冷却徽标的三块文字都必须放进自己的框里。
+        /// 回归：手雷冷却徽标的两块文字都必须放进自己的框里，且不再有「就绪」提示节点。
         /// 旧版 220×36 胶囊 + 60px 标签框，"BOMB" 在 18 号已溢出 2.5px，移动端 24 号会压进进度条。
         /// 左侧后来改成手雷图标（取不到图标才退回中文「手雷」），所以标签可能是 Icon 也可能是 Text，
         /// 两种形态都要保证不压到进度条。
@@ -206,9 +206,9 @@ namespace P1.Tests
             Assert.IsNotNull(badge, "SubAimBadge container should exist");
 
             var time = badge.Find("TimeText").GetComponent<TMPro.TMP_Text>();
-            var ready = badge.Find("ReadyText").GetComponent<TMPro.TMP_Text>();
             Assert.IsNotNull(time);
-            Assert.IsNotNull(ready);
+            // 冷却徽标只剩「冷却中」一态：就绪不再弹提示，ReadyText 节点已随该提示一并删除。
+            Assert.IsNull(badge.Find("ReadyText"), "就绪提示已移除，不应再有 ReadyText 节点");
 
             // 左侧标签二选一：手雷图标（Icon）或中文文字（Text）。
             var icon = badge.Find("Icon") as RectTransform;
@@ -224,11 +224,6 @@ namespace P1.Tests
 
             Assert.LessOrEqual(time.preferredWidth, time.rectTransform.rect.width + 0.5f,
                 "右侧倒计时必须放在自己的框内");
-
-            ready.gameObject.SetActive(true);
-            Canvas.ForceUpdateCanvases();
-            Assert.LessOrEqual(ready.preferredWidth, ready.rectTransform.rect.width + 0.5f,
-                "就绪文案必须放在胶囊内");
 
             // 进度条右缘不得越过右侧倒计时框的左缘。
             // 进度条锚在左边（pivot 0），倒计时锚在右边（pivot 1），先统一到徽标局部坐标再比。

@@ -23,6 +23,7 @@ namespace P1.UI.WeaponSelect
         private const string EditorThemePath = "Assets/_Project/ScriptableObjects/UITheme.asset";
 
         private WeaponSelectView _view;
+        private RespawnLoadoutView _respawnView;
         private UIThemeSO _theme;
         private readonly WeaponConfigSO[] _configs = new WeaponConfigSO[WeaponSelectMath.WeaponCount];
         private readonly Sprite[] _icons = new Sprite[WeaponSelectMath.WeaponCount];
@@ -31,6 +32,15 @@ namespace P1.UI.WeaponSelect
         private MatchManager _currentMatch;
         private bool _hasExplicitSelection;
         private bool _weaponAppliedExternally;
+
+        /// <summary>当前绑定的本地玩家生命（换实例时重绑，避免拿上一局的引用判存活）。</summary>
+        private CombatantHealth _respawnHealth;
+
+        /// <summary>上一帧本地玩家是否存活：用于识别「本帧刚复活」这一唯一换枪时机。</summary>
+        private bool _wasAlive = true;
+
+        /// <summary>阵亡整备挂起的选择下标；-1 = 没有挂起。离开 Playing 时作废。</summary>
+        private int _pendingRespawnLoadoutIndex = -1;
 
         /// <summary>本局是否明确选过武器；没有选过时不覆盖场景默认武器，避免测试/新号被无意义换装。</summary>
         private bool HasSelection =>
@@ -60,12 +70,16 @@ namespace P1.UI.WeaponSelect
         private void Update()
         {
             // 比赛管理器晚于本组件就绪时，每 0.5s 重试一次，直到接管为止。
-            if (_currentMatch != null) return;
+            if (_currentMatch == null)
+            {
+                _retryTimer += Time.unscaledDeltaTime;
+                if (_retryTimer < 0.5f) return;
+                _retryTimer = 0f;
+                SetupSystem();
+                return;
+            }
 
-            _retryTimer += Time.unscaledDeltaTime;
-            if (_retryTimer < 0.5f) return;
-            _retryTimer = 0f;
-            SetupSystem();
+            UpdateRespawnLoadout();
         }
 
         private void Awake()
@@ -95,6 +109,11 @@ namespace P1.UI.WeaponSelect
                 SceneManager.sceneLoaded -= OnSceneLoaded;
             }
 
+            if (_respawnView != null)
+            {
+                _respawnView.OnWeaponSelected -= HandleRespawnWeaponSelected;
+            }
+
             UnsubscribeMatch();
         }
 
@@ -111,6 +130,10 @@ namespace P1.UI.WeaponSelect
                 if (_view != null)
                 {
                     _view.SetVisible(false);
+                }
+                if (_respawnView != null)
+                {
+                    _respawnView.SetVisible(false);
                 }
                 return;
             }
@@ -215,6 +238,27 @@ namespace P1.UI.WeaponSelect
 
             _view.OnWeaponSelected -= HandleWeaponSelected;
             _view.OnWeaponSelected += HandleWeaponSelected;
+
+            EnsureRespawnView();
+        }
+
+        private void EnsureRespawnView()
+        {
+            if (_respawnView == null)
+            {
+                _respawnView = Object.FindAnyObjectByType<RespawnLoadoutView>();
+            }
+
+            if (_respawnView == null)
+            {
+                var canvasGo = new GameObject("RespawnLoadout_Canvas");
+                DontDestroyOnLoad(canvasGo);
+                _respawnView = canvasGo.AddComponent<RespawnLoadoutView>();
+            }
+
+            _respawnView.Configure(_theme, _configs, _icons);
+            _respawnView.OnWeaponSelected -= HandleRespawnWeaponSelected;
+            _respawnView.OnWeaponSelected += HandleRespawnWeaponSelected;
         }
 
         private void SubscribeMatch(MatchManager match)
@@ -243,6 +287,18 @@ namespace P1.UI.WeaponSelect
 
         private void HandlePhaseChanged(MatchManager.Phase phase)
         {
+            // 离开对局（结算 / 重开 / 回到 Ready）立即收起整备条并作废挂起选择：
+            // 否则上一局阵亡时点的枪会跨局带进新局，玩家会莫名其妙多换一次枪、少一格大招。
+            if (phase != MatchManager.Phase.Playing)
+            {
+                _pendingRespawnLoadoutIndex = -1;
+                _wasAlive = true;
+                if (_respawnView != null)
+                {
+                    _respawnView.SetVisible(false);
+                }
+            }
+
             if (_view == null) return;
 
             if (phase == MatchManager.Phase.Ready)
@@ -281,7 +337,121 @@ namespace P1.UI.WeaponSelect
             }
         }
 
+        private void HandleRespawnWeaponSelected(int index, WeaponConfigSO config)
+        {
+            SelectRespawnLoadout(index);
+        }
+
+        /// <summary>
+        /// 阵亡整备选枪：立刻写回存档并挂起，复活那一帧才真正换装（并清空大招充能）。
+        /// 为什么不在点击瞬间换装：死亡时武器视觉已隐藏，立刻换只会让「复活后手里是什么枪」依赖
+        /// 点击顺序；统一在复活瞬间结算，存档与画面永远一致。
+        /// </summary>
+        public void SelectRespawnLoadout(int index)
+        {
+            int clamped = RespawnLoadoutMath.ClampIndex(index);
+            _pendingRespawnLoadoutIndex = clamped;
+            _hasExplicitSelection = true;
+            WeaponSelectMath.SaveSelectedWeaponIndex(clamped);
+        }
+
+        /// <summary>
+        /// 结算挂起的阵亡整备选择：返回是否真的换了枪（没有挂起 / 资产缺失返回 false）。
+        /// 清空大招充能是换枪的代价，见 <see cref="Weapons.WeaponController.EquipWeapon(WeaponConfigSO, bool)"/>。
+        /// </summary>
+        public bool ApplyPendingRespawnLoadout()
+        {
+            int index = _pendingRespawnLoadoutIndex;
+            _pendingRespawnLoadoutIndex = -1;
+            if (index < 0 || index >= _configs.Length)
+            {
+                return false;
+            }
+
+            WeaponConfigSO config = _configs[index];
+            if (config == null)
+            {
+                return false;
+            }
+
+            ApplyWeaponToLocalPlayer(config, resetSpecialCharge: true);
+            return true;
+        }
+
+        /// <summary>
+        /// 死亡/复活编排：只在 Playing 且本地玩家阵亡时弹出整备条，复活那一帧结算挂起选择。
+        /// 用轮询而不是 OnKilled/OnRespawned 事件，是因为 PlayerController.LocalPlayer 会随场景重建换实例，
+        /// 轮询天然跟着新实例走，不需要维护「旧身体的事件订阅」这类跨场景泄漏点。
+        /// </summary>
+        private void UpdateRespawnLoadout()
+        {
+            if (_respawnView == null) return;
+
+            PlayerController local = PlayerController.LocalPlayer;
+            CombatantHealth health = local != null ? local.Health : null;
+            bool playing = _currentMatch.CurrentPhase == MatchManager.Phase.Playing;
+
+            if (health == null)
+            {
+                _respawnHealth = null;
+                _wasAlive = true;
+                _respawnView.SetVisible(false);
+                if (!playing)
+                {
+                    _pendingRespawnLoadoutIndex = -1;
+                }
+                return;
+            }
+
+            if (_respawnHealth != health)
+            {
+                // 换了一具身体（重开 / 换地图）：以新实例的存活状态为基线，不结算上一局的挂起选择。
+                _respawnHealth = health;
+                _wasAlive = health.IsAlive;
+            }
+
+            bool alive = health.IsAlive;
+            if (!_wasAlive && RespawnLoadoutMath.ShouldApplyPending(
+                    _currentMatch.CurrentPhase, _pendingRespawnLoadoutIndex >= 0, alive))
+            {
+                ApplyPendingRespawnLoadout();
+            }
+            _wasAlive = alive;
+
+            bool show = RespawnLoadoutMath.ShouldShow(_currentMatch.CurrentPhase, true, alive);
+            if (show && !_respawnView.IsVisible)
+            {
+                // 第一次弹出时以「死亡瞬间手里的枪」为初始选项，而不是存档里的——
+                // 玩家可能是用上一局存档的枪进场的，两者可能不同。
+                _respawnView.SetSelectedIndex(ResolveEquippedIndex(local));
+            }
+
+            _respawnView.SetVisible(show);
+            if (show)
+            {
+                _respawnView.SetCountdown(health.RespawnRemaining);
+            }
+
+            if (!playing)
+            {
+                _pendingRespawnLoadoutIndex = -1;
+            }
+        }
+
+        private int ResolveEquippedIndex(PlayerController local)
+        {
+            WeaponController weapon = local != null ? local.Weapon : null;
+            WeaponKind kind = weapon != null && weapon.Config != null ? weapon.Config.weaponKind : WeaponKind.Shooter;
+            return RespawnLoadoutMath.ClampIndex(WeaponSelectMath.KindToIndex(kind));
+        }
+
         public void ApplyWeaponToLocalPlayer(WeaponConfigSO config)
+        {
+            ApplyWeaponToLocalPlayer(config, resetSpecialCharge: false);
+        }
+
+        /// <summary>应用武器；<paramref name="resetSpecialCharge"/> 为 true 时清空大招充能（阵亡整备换枪）。</summary>
+        public void ApplyWeaponToLocalPlayer(WeaponConfigSO config, bool resetSpecialCharge)
         {
             if (config == null) return;
 
@@ -296,15 +466,15 @@ namespace P1.UI.WeaponSelect
 
             if (PlayerController.LocalPlayer != null && PlayerController.LocalPlayer.Weapon != null)
             {
-                PlayerController.LocalPlayer.Weapon.EquipWeapon(config);
+                PlayerController.LocalPlayer.Weapon.EquipWeapon(config, resetSpecialCharge);
             }
             else
             {
-                _equipRetryCoroutine = StartCoroutine(RetryEquipRoutine(config));
+                _equipRetryCoroutine = StartCoroutine(RetryEquipRoutine(config, resetSpecialCharge));
             }
         }
 
-        private IEnumerator RetryEquipRoutine(WeaponConfigSO config)
+        private IEnumerator RetryEquipRoutine(WeaponConfigSO config, bool resetSpecialCharge)
         {
             const int maxFrames = 30;
             int frames = 0;
@@ -316,7 +486,7 @@ namespace P1.UI.WeaponSelect
 
                 if (PlayerController.LocalPlayer != null && PlayerController.LocalPlayer.Weapon != null)
                 {
-                    PlayerController.LocalPlayer.Weapon.EquipWeapon(config);
+                    PlayerController.LocalPlayer.Weapon.EquipWeapon(config, resetSpecialCharge);
                     yield break;
                 }
             }

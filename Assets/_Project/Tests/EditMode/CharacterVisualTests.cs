@@ -207,6 +207,33 @@ namespace P1.Tests
         }
 
         [Test]
+        public void InkTank_FillTicksBombLineGauge_ExistAndFillMeshHasMeniscus()
+        {
+            Transform chest = _controller.KidRoot.transform.Find("Hips/BodySquash/Spine/Chest");
+            Assert.IsNotNull(chest, "Chest 必须存在");
+            Transform backpack = chest.Find("InkTankBackpack");
+            Assert.IsNotNull(backpack, "墨罐背包必须存在");
+
+            // 墨量读数三件套：25/50/75% 刻度块、副武器墨量线、罐顶压力表
+            Assert.IsNotNull(backpack.Find("FillTicks"), "液位刻度块容器必须存在");
+            Assert.IsNotNull(backpack.Find("FillTicks/FillTick_25_L"), "25% 刻度块必须存在");
+            Assert.IsNotNull(backpack.Find("FillTicks/FillTick_75_R"), "75% 刻度块必须存在");
+            Assert.IsNotNull(backpack.Find("BombLine"), "副武器墨量线必须存在");
+            Assert.IsNotNull(backpack.Find("TankGauge/GaugeFace"), "罐顶压力表盘必须存在");
+            Assert.IsNotNull(backpack.Find("TankGauge/GaugeNeedle"), "压力表指针必须存在");
+
+            // 液面网格：实尺弯月面旋转体（INKWAVE tankGlass fill 移植）——底部锚定原点、顶缘外翻高于满位线
+            Transform fill = backpack.Find("LiquidFill");
+            var filter = fill != null ? fill.GetComponent<MeshFilter>() : null;
+            Assert.IsNotNull(filter, "液面必须挂程序化弯月面网格");
+            Assert.AreSame(CharacterVisualAssembler.CreateTankFillMesh(), filter.sharedMesh, "液面网格必须共享静态缓存实例");
+            Assert.AreEqual(0f, filter.sharedMesh.bounds.min.y, 0.002f, "液面网格底部必须锚定在原点");
+            Assert.Greater(filter.sharedMesh.bounds.max.y, 0.131f, "液面网格必须带弯月面外翻（高于满位线）");
+            Assert.Less(filter.sharedMesh.bounds.max.y, 0.134f, "弯月面外翻量必须受控");
+            Assert.AreEqual(-0.066f, fill.localPosition.y, 0.001f, "液面底部必须与满位底（−0.066）对齐");
+        }
+
+        [Test]
         public void KidCostume_ShadowCastingRules()
         {
             Transform kid = _controller.KidRoot.transform;

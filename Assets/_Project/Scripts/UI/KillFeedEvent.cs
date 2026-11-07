@@ -170,6 +170,15 @@ namespace P1.UI
             if (isLocal) return "你";
             if (ch == null) return "未知";
 
+            // 本局差异化：BotLoadoutService 抽过卡的 Bot 显示随机昵称（INKWAVE 式），
+            // 按阵营决定「我方/敌方」前缀；未抽卡（训练场/旧存档场景）回退 GameObject 名规则。
+            var bot = ch.GetComponent<P1.AI.BotController>();
+            if (bot != null && !string.IsNullOrEmpty(bot.DisplayName))
+            {
+                string side = ch.Team == KillFeedEvent.PlayerLocalTeam ? "我方 " : "敌方 ";
+                return side + bot.DisplayName;
+            }
+
             string raw = ch.gameObject.name;
             if (raw.StartsWith("BotA_")) return "我方 " + raw.Substring(5);
             if (raw.StartsWith("BotB_")) return "敌方 " + raw.Substring(5);

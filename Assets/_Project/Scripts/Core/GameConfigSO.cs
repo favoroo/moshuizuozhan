@@ -19,6 +19,15 @@ namespace P1.Core
         public float matchDurationSeconds = 120f;
         public float finalWarningSeconds = 30f;
 
+        [Header("击杀奖励（把交火接进主循环）")]
+        [Tooltip("击杀敌方时击杀者立刻获得的大招能量点：70 ≈ 1/3 个大招（各武器门槛 170~195）。≤0 回退规范默认，见 KillRewardMath")]
+        public float killRewardSpecialPoints = 70f;
+        [Tooltip("被击杀方因阵亡损失的大招能量比例（与 WeaponController 阵亡减半同口径）；损失部分全额转给击杀者，0 = 关闭转移")]
+        [Range(0f, 1f)]
+        public float killRewardEnergyTransferFraction = 0.5f;
+        [Tooltip("击杀敌方时击杀者立刻回复的墨水量（满罐 100）。≤0 回退规范默认，见 KillRewardMath")]
+        public float killRewardInk = 25f;
+
         [Header("第三人称相机 (TPS, P9)")]
         [Tooltip("人形状态下相机枢轴相对脚底的高度（米）。按 1.25m 蛋形角色设定为 1.45m，略高于头顶，准星不被自己挡住")]
         public float tpsPivotHeight = 1.45f;

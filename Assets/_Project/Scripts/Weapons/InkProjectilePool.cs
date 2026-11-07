@@ -58,6 +58,17 @@ namespace P1.Weapons
             public float VisualWidth;
             public float RippleScale;
             public float TrailVisualScale;
+
+            /// <summary>下一团拖尾墨雾的触发距离（累计飞行距离，随池化 spawn 重置）。</summary>
+            public float NextTrailPuffDistance;
+            /// <summary>拖尾墨雾间距（米，来自 WeaponFeelProfile）。</summary>
+            public float TrailPuffIntervalMeters;
+            /// <summary>拖尾墨雾同时甩出小卫星墨珠的概率（0~1）。</summary>
+            public float TrailSatelliteChance;
+            /// <summary>单团拖尾墨雾存活时间（秒）。</summary>
+            public float TrailPuffLifetime;
+            /// <summary>拖尾墨雾尺寸倍率。</summary>
+            public float TrailPuffScale;
             public bool IsLocalOwner;
         }
 
@@ -66,6 +77,9 @@ namespace P1.Weapons
         // 弹丸每帧要做命中过滤：collider→角色缓存把每弹每帧的 GetComponentInParent 降为一次性。
         private readonly Dictionary<Collider, CombatantHealth> _combatantCache = new Dictionary<Collider, CombatantHealth>(64);
         private const int PrewarmCount = 96;
+
+        /// <summary>全场景每帧最多生成的拖尾墨雾团数（8 人混战 + 加特林弹雨时的硬上限）。</summary>
+        private const int TrailPuffsPerFrame = 4;
         private Material _sharedMat;
         private MaterialPropertyBlock _propBlock;
         private readonly RaycastHit[] _hitBuffer = new RaycastHit[8];
@@ -99,14 +113,28 @@ namespace P1.Weapons
             Instance = this;
             _propBlock = new MaterialPropertyBlock();
 
-            Shader sh = Shader.Find("P1/InkBody");
+            // P30-A5 弹丸菲涅尔边缘提亮：复用 Resources 下已有的 P1/InkVfx（不在 Resources 下的 shader
+            // 会在 Player 包里被剔除，见 VfxAdditive.shader 注释）。P1/InkBod 的菲涅尔是乘算压暗
+            // （_FresnelDarkEdge 只往 0.38 倍压），无法通过材质属性改成「边缘亮」；
+            // InkVfx 已实现「外缘按队色提亮 + 队色染色高光 + 逐实例 _BaseColor + GPU instancing」，
+            // 因此不改任何 shader 文件即可拿到队色边缘亮边的液体感。
+            Shader sh = Shader.Find("P1/InkVfx");
+            if (sh == null)
+                sh = Shader.Find("P1/InkBody");
             if (sh == null)
             {
-                Debug.LogWarning("[InkProjectilePool] 未找到 Shader 'P1/InkBody'，回退到 Unlit 材质。");
+                Debug.LogWarning("[InkProjectilePool] 未找到 Shader 'P1/InkVfx'，回退到 Unlit 材质。");
                 sh = Shader.Find("Universal Render Pipeline/Unlit");
                 if (sh == null) sh = Shader.Find("Sprites/Default");
             }
             _sharedMat = new Material(sh) { name = "InkProjectileMat" };
+            // 边缘提亮依赖 InkVfx 的菲涅尔项；同时把湿润高光推到最高，让彗星读作「液体」而不是塑料球。
+            if (_sharedMat.HasProperty("_Smoothness"))
+                _sharedMat.SetFloat("_Smoothness", 0.92f);
+            if (_sharedMat.HasProperty("_EmissionStrength"))
+                _sharedMat.SetFloat("_EmissionStrength", 0.18f);
+            if (_sharedMat.HasProperty(BaseColorProp))
+                _sharedMat.SetColor(BaseColorProp, Color.white);
             // P12-D：同池弹丸共享 mesh/material，队伍色已改为 shader 的逐实例属性；
             // 开启 instancing 后多枚弹丸一次提交（移动端 SRP Batcher 关闭时生效）。
             _sharedMat.enableInstancing = true;
@@ -276,6 +304,13 @@ namespace P1.Weapons
                 VisualWidth = visualWidth,
                 RippleScale = feel.ImpactRippleScale,
                 TrailVisualScale = feel.TrailVisualScale,
+                // P30-A2：拖尾墨雾的累计距离从「间距」开始算，池化结构体在这里每个字段都显式赋值，
+                // 复用节点/复用结构体都不会残留上一发的墨雾计时器。
+                NextTrailPuffDistance = Mathf.Max(0.1f, feel.TrailPuffIntervalMeters),
+                TrailPuffIntervalMeters = feel.TrailPuffIntervalMeters,
+                TrailSatelliteChance = feel.TrailSatelliteChance,
+                TrailPuffLifetime = feel.TrailPuffLifetime,
+                TrailPuffScale = feel.TrailPuffScale,
                 IsLocalOwner = isLocalOwner
             };
 
@@ -289,6 +324,8 @@ namespace P1.Weapons
 
             // 终场哨响后：已发射的墨滴仍继续飞行（表现不中断），但不再沿途滴墨、撞击结算伤害/涂地。
             bool settleAllowed = MatchManager.CombatSettlementAllowed;
+            // 拖尾墨雾是全场景共享的每帧预算，用完本帧不再生成（距离阈值照常推进，不会攒着补发）。
+            int trailPuffBudget = TrailPuffsPerFrame;
 
             for (int i = _active.Count - 1; i >= 0; i--)
             {
@@ -340,6 +377,12 @@ namespace P1.Weapons
                 if (!p.Dropping && settleAllowed)
                 {
                     UpdateTrailDrips(ref p, previousPosition, moveVec, stepDist);
+                }
+
+                // 2b. P30-A2 弹丸飞行拖尾墨雾：纯表现（不落墨、不计覆盖率），终场后仍保留以读出弹道。
+                if (!p.Dropping)
+                {
+                    UpdateTrailPuffs(ref p, previousPosition, moveVec, stepDist, ref trailPuffBudget);
                 }
 
                 // 3. 射程判定
@@ -413,6 +456,8 @@ namespace P1.Weapons
             Vector3 impactPos = hit.point;
             Vector3 impactNormal = hit.normal.sqrMagnitude > 0.0001f ? hit.normal : Vector3.up;
             float splatRadius = UnityEngine.Random.Range(p.EndSplatRadiusMin, p.EndSplatRadiusMax);
+            // P30 方向性墨斑：水平速度归一化给图集做拉伸（撞击瞬间的速度，含重力的竖直分量不参与）
+            float horizontalSpeed = new Vector2(p.Velocity.x, p.Velocity.z).magnitude;
 
             // 终场哨响后不再结算伤害 / 涂地 / 统计，只保留一下撞击表现。
             if (!settleAllowed)
@@ -420,7 +465,7 @@ namespace P1.Weapons
                 if (VfxPool.Instance != null)
                 {
                     VfxPool.Instance.SpawnInkImpact(
-                        impactPos, impactNormal, p.Color, splatRadius, 3, incomingDir, p.IsLocalOwner);
+                        impactPos, impactNormal, p.Color, splatRadius, 3, incomingDir, p.IsLocalOwner, p.Team);
                 }
                 return;
             }
@@ -489,7 +534,7 @@ namespace P1.Weapons
                     hitCombatant.TakeDamage(damage, p.Team, impactPos, attacker);
                 }
                 Vector3 belowPoint = ProjectToGround(hitCombatant.transform.position, out Vector3 belowNormal);
-                PaintStretchBlob(belowPoint, belowNormal, incomingDir, splatRadius * 0.85f, p.EndSplatStretch, Mathf.Max(2, p.EndSplatRayCount / 2), p.Team, p.OnCellsPainted, p.RippleScale);
+                PaintStretchBlob(belowPoint, belowNormal, incomingDir, splatRadius * 0.85f, p.EndSplatStretch, Mathf.Max(2, p.EndSplatRayCount / 2), p.Team, p.OnCellsPainted, p.RippleScale, horizontalSpeed);
             }
             else
             {
@@ -506,7 +551,7 @@ namespace P1.Weapons
                 }
                 else
                 {
-                    PaintStretchBlob(impactPos, impactNormal, incomingDir, splatRadius, p.EndSplatStretch, p.EndSplatRayCount, p.Team, p.OnCellsPainted, p.RippleScale);
+                    PaintStretchBlob(impactPos, impactNormal, incomingDir, splatRadius, p.EndSplatStretch, p.EndSplatRayCount, p.Team, p.OnCellsPainted, p.RippleScale, horizontalSpeed);
                 }
 
                 if (AudioManager.Instance != null)
@@ -518,7 +563,7 @@ namespace P1.Weapons
             if (VfxPool.Instance != null)
             {
                 VfxPool.Instance.SpawnInkImpact(
-                    impactPos, impactNormal, p.Color, splatRadius, 4, incomingDir, p.IsLocalOwner);
+                    impactPos, impactNormal, p.Color, splatRadius, 4, incomingDir, p.IsLocalOwner, p.Team);
             }
         }
 
@@ -592,7 +637,7 @@ namespace P1.Weapons
             if (VfxPool.Instance != null)
             {
                 VfxPool.Instance.SpawnInkImpact(
-                    impactPos, impactNormal, p.Color, radius, 3, incomingDir, p.IsLocalOwner);
+                    impactPos, impactNormal, p.Color, radius, 3, incomingDir, p.IsLocalOwner, p.Team);
             }
         }
 
@@ -647,6 +692,49 @@ namespace P1.Weapons
             }
         }
 
+        /// <summary>
+        /// P30-A2：按飞行距离在弹道后方留下低透明度队色墨雾，按武器预设的概率同时甩出一颗
+        /// 沿速度反方向的小卫星墨珠。阈值按本帧位移精确插值，高速弹的雾团不会偏到错误位置。
+        /// 每帧全场景预算由调用方传入（耗尽后仍推进阈值，避免下帧补发一串）。
+        /// </summary>
+        private static void UpdateTrailPuffs(
+            ref ActiveProjectile p,
+            Vector3 previousPosition,
+            Vector3 moveVec,
+            float stepDist,
+            ref int budget)
+        {
+            float interval = p.TrailPuffIntervalMeters;
+            if (interval <= 0.01f || stepDist <= 0.00001f)
+                return;
+
+            int guard = 0;
+            while (p.DistanceTraveled >= p.NextTrailPuffDistance && guard++ < 8)
+            {
+                float distanceIntoSegment = p.NextTrailPuffDistance - (p.DistanceTraveled - stepDist);
+                distanceIntoSegment = Mathf.Clamp(distanceIntoSegment, 0f, stepDist);
+                Vector3 puffPos = previousPosition + moveVec * (distanceIntoSegment / stepDist);
+
+                if (budget > 0 && VfxPool.Instance != null)
+                {
+                    budget--;
+                    Vector3 velocityDir = p.Velocity.sqrMagnitude > 0.0001f
+                        ? p.Velocity.normalized
+                        : Vector3.forward;
+                    VfxPool.Instance.SpawnTrailPuff(
+                        puffPos, velocityDir, p.Color, p.TrailPuffScale, p.TrailPuffLifetime);
+
+                    if (p.TrailSatelliteChance > 0f && UnityEngine.Random.value < p.TrailSatelliteChance)
+                    {
+                        VfxPool.Instance.SpawnTrailSatellite(
+                            puffPos, velocityDir, p.Color, p.Team, p.TrailPuffScale);
+                    }
+                }
+
+                p.NextTrailPuffDistance += interval;
+            }
+        }
+
         /// <summary>沿地面把两点之间补成连续墨道（圆与圆按半径的 0.9 倍步距重叠）。只铺平滑主体、不刷涟漪。</summary>
         private static void PaintGroundStreak(
             Vector3 from,
@@ -689,7 +777,8 @@ namespace P1.Weapons
             int rayCount,
             Team team,
             Action<int> onCellsPainted,
-            float rippleScale)
+            float rippleScale,
+            float horizontalSpeed = 0f)
         {
             if (InkSurfaceController.Instance == null || radius <= 0f)
                 return;
@@ -702,8 +791,20 @@ namespace P1.Weapons
                 tangent = Vector3.forward;
             tangent.Normalize();
 
-            // 主瓣：完整有机装饰，是这一发墨斑的视觉主体
-            PaintGroundCircle(point - tangent * (radius * 0.38f), radius * 0.52f, team, onCellsPainted, true);
+            // 主瓣：完整有机装饰，是这一发墨斑的视觉主体。
+            // P30：把「世界 XZ 拉伸方向 + 速度拉伸强度」透传给图集（视觉拉伸由 Ink 域实现，玩法网格仍为正圆）。
+            Vector2 directionXZ = new Vector2(tangent.x, tangent.z);
+            float stretch01 = Mathf.Clamp01(horizontalSpeed / 25f);
+            PaintGroundCircle(
+                point - tangent * (radius * 0.38f),
+                radius * 0.52f,
+                team,
+                onCellsPainted,
+                true,
+                false,
+                1f,
+                directionXZ,
+                stretch01);
 
             // 拖尾链：只铺平滑主体，构成被拉长的椭圆主瓣
             for (int i = 0; i < GroundStretchOffsets.Length; i++)
@@ -813,13 +914,15 @@ namespace P1.Weapons
             Action<int> onCellsPainted,
             bool decorated = false,
             bool emitRipple = false,
-            float visualScale = 1f)
+            float visualScale = 1f,
+            Vector2 directionXZ = default,
+            float stretch01 = 0f)
         {
             if (InkSurfaceController.Instance == null)
                 return;
 
             int changed = InkSurfaceController.Instance.PaintCircle(
-                pos, radius, team, emitRipple, decorated, visualScale);
+                pos, radius, team, emitRipple, decorated, visualScale, directionXZ, stretch01);
             if (changed > 0)
             {
                 onCellsPainted?.Invoke(changed);
@@ -894,6 +997,14 @@ namespace P1.Weapons
 
             var vertices = new Vector3[ringCount * radialSegments];
             var uvs = new Vector2[vertices.Length];
+            // P30-A5：InkVfx 的顶点色乘了逐实例队色；彗星网格没有顶点色时必须显式补白色，
+            // 否则不同图形 API 下缺失的 COLOR 流可能被读成 0，弹丸会整颗发黑。
+            var colors = new Color32[vertices.Length];
+            for (int i = 0; i < colors.Length; i++)
+            {
+                colors[i] = new Color32(255, 255, 255, 255);
+            }
+
             for (int i = 0; i < ringCount; i++)
             {
                 for (int s = 0; s < radialSegments; s++)
@@ -937,6 +1048,7 @@ namespace P1.Weapons
             };
             mesh.vertices = vertices;
             mesh.uv = uvs;
+            mesh.colors32 = colors;
             mesh.triangles = triangles;
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();

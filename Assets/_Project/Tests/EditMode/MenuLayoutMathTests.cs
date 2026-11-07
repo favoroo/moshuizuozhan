@@ -80,8 +80,9 @@ namespace P1.Tests
                     Assert.IsFalse(box.Overlaps(hero) || box.Overlaps(grid), tag + " 角签压到卡片");
                 }
 
-                // 移动端为「武器整备」整备卡预留的左下角签必须是空的
-                Assert.AreEqual(mobile, m.FooterTag.IsEmpty, tag + " 左下角签仅在桌面显示");
+                // 左下角签两平台都必须为空：移动端让位给「武器整备」整备卡，
+                // 桌面端的「游戏共创 · 单机 4V4」角签也已下线。
+                Assert.IsTrue(m.FooterTag.IsEmpty, tag + " 左下角签已下线（两平台都不显示）");
             }
         }
 

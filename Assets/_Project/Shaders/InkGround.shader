@@ -221,6 +221,9 @@ Shader "P1/InkGround"
             float _InkGrowSeconds;       // splatGrowSeconds：生长动画时长（0 = 无生长动画）
             float _InkGrowShrinkMeters;  // 生长侵蚀最大回缩距离（米）
             float _InkGrowActive;        // 1 = 本帧存在生长窗口内的墨斑（仅作快速剔除，正确性由纹素年龄保证）
+            // 边缘先干偏置（InkGridConfigSO.inkEdgeDryBias，由 InkSurfaceController 每帧 SetGlobal 推送）：
+            // 0 = 关闭（整片均匀干燥）；覆盖率低（墨迹外缘 / 薄边）处按它先失去湿润与缎面余晖。
+            float _InkEdgeDryBias;
 
             Varyings vert(Attributes input)
             {
@@ -341,6 +344,19 @@ Shader "P1/InkGround"
                 float2 wetSheen = P1InkWetProfile(inkAgeSec, _InkWetDryingSeconds, _InkSheenSeconds);
                 float wet = saturate(wetSheen.x * _WetnessFactor);
                 float sheen = saturate(wetSheen.y * _WetnessFactor);
+
+                // 边缘先干（B1）：墨迹外缘（覆盖率低 = 墨层薄）先失去湿润与缎面余晖，干燥锋从外缘向内推进。
+                // **只改着色读数**：图集 R/G/B/A、时间戳、两队交界缝（用 R/G 通道）与生长侵蚀都按原值计算。
+                // 墨层厚度 / 唇缘与交界缝的几何（thick）继续用干燥前的 wetRaw/sheenRaw —— 即
+                // 凸起高度与接缝法线逐位不变，避免"外缘变干"顺手改掉缝的口径。
+                // _InkEdgeDryBias = 0 时 edgeDryMul 恒等于 1 → 与旧行为逐位一致。
+                // 用未侵蚀的 amt 而不是 amtEff：生长期间 amtEff 会被回缩成"整枚都是边缘"，导致新墨一开始就干。
+                float wetRaw = wet;
+                float sheenRaw = sheen;
+                float edgeDryT = 1.0 - smoothstep(0.35, 0.95, amt);
+                float edgeDryMul = 1.0 - 0.85 * saturate(_InkEdgeDryBias) * edgeDryT;
+                wet *= edgeDryMul;
+                sheen *= edgeDryMul;
 
                 // 队伍交界：用 R 通道（队伍占比）做 1 像素锐利过渡，绝不出现浑浊混色带
                 float wT = clamp(fwidth(tRaw) * 0.75, 0.012, 0.25);
@@ -468,7 +484,8 @@ Shader "P1/InkGround"
                 float s = saturate((amtEff - 0.5) * _LipSoftness);
                 float hs = 1.0 - (1.0 - s) * (1.0 - s);
                 float lipSlope = 2.0 * (1.0 - s) * _LipSoftness;
-                float thick = 1.0 + 0.5 * max(wet, sheen * 0.7);
+                // 墨层厚度用"干燥前"的湿润读数：边缘先干只改光泽，不改唇缘高度与交界缝几何（逐位不变）
+                float thick = 1.0 + 0.5 * max(wetRaw, sheenRaw * 0.7);
                 float2 lipNormalOffsetXZ = -gradAmt * lipSlope * _LipHeight * thick;
 
                 // -------------------------------------------------------------
@@ -1025,7 +1042,13 @@ Shader "P1/InkGround"
             {
                 P1InkAtlasVaryings o;
                 float2 quad = v.positionOS.xy;
+                // 基础半幅 = 半径 × 覆盖倍数；方向性拉伸时再乘椭圆包络放大面片，
+                // 否则拉长的主体 / 前向锥里的装饰件会被面片裁掉。无拉伸时 env = (1,1)，
+                // offsetMeters 与旧版表达式逐位一致。
                 float2 offsetMeters = quad * v.splatA.z * v.splatB.w;
+                float2 stretchEnv = P1InkSplatQuadEnvelope(v.splatDir);
+                if (stretchEnv.x > 1.0 || stretchEnv.y > 1.0)
+                    offsetMeters *= stretchEnv;
                 float2 uv = v.splatA.xy + offsetMeters / max(_InkMapSize.xy, float2(0.001, 0.001));
                 float2 clipPos = uv * 2.0 - 1.0;
                 // 渲染目标原点在左上时（D3D / Metal / Vulkan），clip Y 与纹理 V 反向
@@ -1034,6 +1057,7 @@ Shader "P1/InkGround"
                 o.local = offsetMeters;
                 o.splatA = v.splatA;
                 o.splatB = v.splatB;
+                o.splatDir = v.splatDir;
                 return o;
             }
 
@@ -1042,7 +1066,12 @@ Shader "P1/InkGround"
                 float radius = input.splatA.z;
                 if (radius <= 0.0) discard;
 
-                float sd = P1InkSplatDistance(input.local, radius, input.splatB.x, input.splatB.y, _InkTexelMeters);
+                // 方向性拉伸：解包 (单位方向 × 强度)，strength = 0 时 SDF 与旧实现逐位一致
+                float2 stretchDir;
+                float stretch01;
+                P1InkSplatDecodeStretch(input.splatDir, stretchDir, stretch01);
+                float sd = P1InkSplatDistanceDir(input.local, radius, input.splatB.x, input.splatB.y,
+                                                 _InkTexelMeters, stretchDir, stretch01);
                 float a = P1InkSplatCoverage(sd, _InkTexelMeters);
                 if (a <= 0.003) discard;
 
@@ -1120,7 +1149,13 @@ Shader "P1/InkGround"
             {
                 P1InkAtlasVaryings o;
                 float2 quad = v.positionOS.xy;
+                // 基础半幅 = 半径 × 覆盖倍数；方向性拉伸时再乘椭圆包络放大面片，
+                // 否则拉长的主体 / 前向锥里的装饰件会被面片裁掉。无拉伸时 env = (1,1)，
+                // offsetMeters 与旧版表达式逐位一致。
                 float2 offsetMeters = quad * v.splatA.z * v.splatB.w;
+                float2 stretchEnv = P1InkSplatQuadEnvelope(v.splatDir);
+                if (stretchEnv.x > 1.0 || stretchEnv.y > 1.0)
+                    offsetMeters *= stretchEnv;
                 float2 uv = v.splatA.xy + offsetMeters / max(_InkMapSize.xy, float2(0.001, 0.001));
                 float2 clipPos = uv * 2.0 - 1.0;
                 // 渲染目标原点在左上时（D3D / Metal / Vulkan），clip Y 与纹理 V 反向
@@ -1129,6 +1164,7 @@ Shader "P1/InkGround"
                 o.local = offsetMeters;
                 o.splatA = v.splatA;
                 o.splatB = v.splatB;
+                o.splatDir = v.splatDir;
                 return o;
             }
 
@@ -1139,7 +1175,11 @@ Shader "P1/InkGround"
 
                 // 与 InkAtlasPaint 逐位相同的 SDF/覆盖率 → 两个 Pass 足迹严格一致，
                 // 时间戳只会写进真正有墨覆盖的纹素。
-                float sd = P1InkSplatDistance(input.local, radius, input.splatB.x, input.splatB.y, _InkTexelMeters);
+                float2 stretchDir;
+                float stretch01;
+                P1InkSplatDecodeStretch(input.splatDir, stretchDir, stretch01);
+                float sd = P1InkSplatDistanceDir(input.local, radius, input.splatB.x, input.splatB.y,
+                                                 _InkTexelMeters, stretchDir, stretch01);
                 float a = P1InkSplatCoverage(sd, _InkTexelMeters);
                 if (a <= 0.003) discard;
 

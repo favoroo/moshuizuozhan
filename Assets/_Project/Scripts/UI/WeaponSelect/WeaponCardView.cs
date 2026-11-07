@@ -20,6 +20,8 @@ namespace P1.UI.WeaponSelect
     /// - 右侧 7 段直角属性条：移动端 28px 方块（桌面 18px），段内填充队伍色；
     /// - 快捷键方块 [1]~[7] 只在桌面显示（手机没有数字键，占地方且误导）；
     /// - 图标为空时隐藏 Image，绝不出现白块。
+    /// - 中下部三条带标签的对比横条（伤害 / 涂地 / 机动，0~1，口径见 WeaponSelectMath.ComputeStatBars）：
+    ///   替代旧「7 段无解释总评块」——换枪决策需要的是分项对比，不是一条定档读数。
     ///
     /// 注意：卡片挂在 ScrollRect 里，硬影会被视口 RectMask2D 裁掉超出部分，
     /// 因此卡片间距必须 ≥10px（桌面 10 / 移动端 16），底部内边距 ≥5px。
@@ -65,8 +67,14 @@ namespace P1.UI.WeaponSelect
         private TextMeshProUGUI _statsText;
         private TextMeshProUGUI _specialText;
 
-        private readonly UIInkShapeGraphic[] _statSegments = new UIInkShapeGraphic[7];
-        private int _weaponRating = 4;
+        /// <summary>三条对比横条的固定标签（2 字，窄卡放得下；全称口径见 WeaponSelectMath.WeaponStatBars）。</summary>
+        private static readonly string[] StatBarLabels = { "伤害", "涂地", "机动" };
+
+        private readonly TextMeshProUGUI[] _barLabels = new TextMeshProUGUI[3];
+        private readonly UIInkShapeGraphic[] _barFills = new UIInkShapeGraphic[3];
+        private WeaponSelectMath.WeaponStatBars _statBars;
+        private float _barFillMaxWidth = 10f;
+        private float _barFillHeight = 7f;
 
         private GameObject _equippedBadge;
         private ComicBadge _comicBadge;
@@ -93,27 +101,11 @@ namespace P1.UI.WeaponSelect
             _theme = UIThemeSO.Resolve(themeAsset);
             _team = team;
             _onSelect = onSelect;
-            _weaponRating = GetWeaponRating7(kind);
             _mobile = UITypography.IsMobileLike;
 
             BuildUIHierarchy();
             ApplyData(icon);
             SetSelected(false, animate: false);
-        }
-
-        private static int GetWeaponRating7(WeaponKind kind)
-        {
-            switch (kind)
-            {
-                case WeaponKind.Shooter: return 4;
-                case WeaponKind.Roller: return 5;
-                case WeaponKind.Charger: return 7;
-                case WeaponKind.Dualies: return 4;
-                case WeaponKind.Slosher: return 5;
-                case WeaponKind.Blaster: return 6;
-                case WeaponKind.Splatling: return 7;
-                default: return 4;
-            }
         }
 
         // ==================== 武器身份色（P19 波次3b） ====================
@@ -143,7 +135,7 @@ namespace P1.UI.WeaponSelect
         {
             _team = team;
             RefreshIconPlate();
-            RefreshStatSegments();
+            RefreshStatBars();
             if (_isSelected)
             {
                 RefreshSelectedVisuals();
@@ -178,7 +170,7 @@ namespace P1.UI.WeaponSelect
                 }
             }
 
-            RefreshStatSegments();
+            RefreshStatBars();
         }
 
         /// <summary>
@@ -241,9 +233,15 @@ namespace P1.UI.WeaponSelect
             float titleH = _mobile ? 50f : 34f;
             float enH = _mobile ? 30f : 22f;
             float statsH = _mobile ? 34f : 26f;
-            float bottomRowH = _mobile ? 36f : 30f;
             float bottomPad = _mobile ? 18f : 10f;
-            float statsBottom = bottomPad + bottomRowH + (_mobile ? 16f : 8f);
+            // 自底向上三段：大招信息行 → 三条对比横条 → 属性数字行；标题/英文名仍从顶部排。
+            float specialH = _mobile ? 36f : 26f;
+            float barH = _mobile ? 18f : 13f;
+            float barGap = _mobile ? 5f : 4f;
+            float barsH = 3 * barH + 2 * barGap;
+            float specialBottom = bottomPad;
+            float barsBottom = specialBottom + specialH + (_mobile ? 6f : 4f);
+            float statsBottom = barsBottom + barsH + (_mobile ? 6f : 4f);
 
             _rectTransform = GetComponent<RectTransform>();
             _rectTransform.sizeDelta = new Vector2(_mobile ? 759f : 580f, m.CardHeight);
@@ -486,60 +484,96 @@ namespace P1.UI.WeaponSelect
             _statsText.overflowMode = TextOverflowModes.Overflow;
             _statsText.raycastTarget = false;
 
-            // 6.4 底部行：7 段直角方块 + 大招信息
-            var bottomRow = new GameObject("StatBarRow", typeof(RectTransform));
-            bottomRow.transform.SetParent(infoGo.transform, false);
-            var bottomRowRt = bottomRow.GetComponent<RectTransform>();
-            bottomRowRt.anchorMin = new Vector2(0f, 0f);
-            bottomRowRt.anchorMax = new Vector2(1f, 0f);
-            bottomRowRt.pivot = new Vector2(0f, 0f);
-            bottomRowRt.anchoredPosition = new Vector2(0f, bottomPad);
-            bottomRowRt.sizeDelta = new Vector2(0f, bottomRowH);
+            // 6.4 三条对比横条（伤害密度 / 涂地效率 / 射程机动）：数值口径见 WeaponSelectMath.ComputeStatBars。
+            // 旧 7 段总评块是一条没有解释的定档读数，换成三条分项条才支撑「换枪」决策。
+            var barsGo = new GameObject("StatBars", typeof(RectTransform));
+            barsGo.transform.SetParent(infoGo.transform, false);
+            var barsRt = barsGo.GetComponent<RectTransform>();
+            barsRt.anchorMin = new Vector2(0f, 0f);
+            barsRt.anchorMax = new Vector2(1f, 0f);
+            barsRt.pivot = new Vector2(0f, 0f);
+            barsRt.anchoredPosition = new Vector2(0f, barsBottom);
+            barsRt.sizeDelta = new Vector2(0f, barsH);
 
-            float block = m.StatBlockSize;
-            float gap = m.StatBlockGap;
-            float blocksWidth = block * 7f + gap * 6f;
+            float labelW = _mobile ? 64f : 46f;
+            float cardW = _mobile ? 759f : 580f;
+            float infoW = cardW - infoLeft - equippedReserve;
+            _barFillMaxWidth = Mathf.Max(12f, infoW - labelW - 10f);
+            _barFillHeight = Mathf.Max(3f, barH - 6f);
 
-            var blocksGo = new GameObject("ChunkyBlocks7", typeof(RectTransform));
-            blocksGo.transform.SetParent(bottomRow.transform, false);
-            var blocksRt = blocksGo.GetComponent<RectTransform>();
-            blocksRt.anchorMin = new Vector2(0f, 0.5f);
-            blocksRt.anchorMax = new Vector2(0f, 0.5f);
-            blocksRt.pivot = new Vector2(0f, 0.5f);
-            blocksRt.anchoredPosition = Vector2.zero;
-            blocksRt.sizeDelta = new Vector2(blocksWidth, block);
-
-            for (int b = 0; b < 7; b++)
+            for (int b = 0; b < 3; b++)
             {
-                var blockGo = new GameObject($"Block_{b}", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-                blockGo.transform.SetParent(blocksGo.transform, false);
-                var brt = blockGo.GetComponent<RectTransform>();
-                brt.anchorMin = new Vector2(0f, 0.5f);
-                brt.anchorMax = new Vector2(0f, 0.5f);
-                brt.pivot = new Vector2(0f, 0.5f);
-                brt.anchoredPosition = new Vector2(b * (block + gap), 0f);
-                brt.sizeDelta = new Vector2(block, block);
+                // 自上而下：伤害 / 涂地 / 机动（barsRt 底边为 0，行号越大越靠下）
+                var rowGo = new GameObject($"StatBar_{b}", typeof(RectTransform));
+                rowGo.transform.SetParent(barsGo.transform, false);
+                var rowRt = rowGo.GetComponent<RectTransform>();
+                rowRt.anchorMin = new Vector2(0f, 0f);
+                rowRt.anchorMax = new Vector2(1f, 0f);
+                rowRt.pivot = new Vector2(0f, 0f);
+                rowRt.anchoredPosition = new Vector2(0f, (2 - b) * (barH + barGap));
+                rowRt.sizeDelta = new Vector2(0f, barH);
 
-                var bshape = blockGo.GetComponent<UIInkShapeGraphic>();
-                bshape.Shape = UIInkShape.SharpRect;
-                bshape.CornerRadius = ComicStyle.CornerSharp;
-                bshape.BorderWidth = 2f;
-                bshape.BorderColor = ComicStyle.Ink;
-                bshape.color = ComicStyle.PaperAlt;
-                bshape.HardShadow = false;
-                bshape.Halftone = false;
-                bshape.raycastTarget = false;
+                var labelGo = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+                labelGo.transform.SetParent(rowGo.transform, false);
+                var labelRt = labelGo.GetComponent<RectTransform>();
+                labelRt.anchorMin = new Vector2(0f, 0f);
+                labelRt.anchorMax = new Vector2(0f, 1f);
+                labelRt.pivot = new Vector2(0f, 0.5f);
+                labelRt.anchoredPosition = Vector2.zero;
+                labelRt.sizeDelta = new Vector2(labelW, 0f);
+                _barLabels[b] = labelGo.GetComponent<TextMeshProUGUI>();
+                _barLabels[b].font = _theme.ResolveFont(false, StatBarLabels[b]);
+                _barLabels[b].text = StatBarLabels[b];
+                _barLabels[b].fontSize = UITypography.FontSnapped(_mobile ? 18f : 14f);
+                _barLabels[b].fontStyle = FontStyles.Bold;
+                _barLabels[b].alignment = TextAlignmentOptions.MidlineLeft;
+                _barLabels[b].color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.8f);
+                _barLabels[b].textWrappingMode = TextWrappingModes.NoWrap;
+                _barLabels[b].raycastTarget = false;
 
-                _statSegments[b] = bshape;
+                var trackGo = new GameObject("Track", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                trackGo.transform.SetParent(rowGo.transform, false);
+                var trackRt = trackGo.GetComponent<RectTransform>();
+                trackRt.anchorMin = new Vector2(0f, 0f);
+                trackRt.anchorMax = new Vector2(1f, 1f);
+                trackRt.offsetMin = new Vector2(labelW + 6f, 0f);
+                trackRt.offsetMax = new Vector2(-2f, 0f);
+                var track = trackGo.GetComponent<UIInkShapeGraphic>();
+                track.Shape = UIInkShape.SharpRect;
+                track.CornerRadius = ComicStyle.CornerSharp;
+                track.BorderWidth = 2f;
+                track.BorderColor = ComicStyle.Ink;
+                track.color = ComicStyle.PaperAlt;
+                track.HardShadow = false;
+                track.Halftone = false;
+                track.raycastTarget = false;
+
+                var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+                fillGo.transform.SetParent(trackGo.transform, false);
+                var fillRt = fillGo.GetComponent<RectTransform>();
+                fillRt.anchorMin = new Vector2(0f, 0.5f);
+                fillRt.anchorMax = new Vector2(0f, 0.5f);
+                fillRt.pivot = new Vector2(0f, 0.5f);
+                fillRt.anchoredPosition = new Vector2(2f, 0f);
+                fillRt.sizeDelta = new Vector2(4f, _barFillHeight);
+                _barFills[b] = fillGo.GetComponent<UIInkShapeGraphic>();
+                _barFills[b].Shape = UIInkShape.SharpRect;
+                _barFills[b].CornerRadius = ComicStyle.CornerSharp;
+                _barFills[b].BorderWidth = 0f;
+                _barFills[b].HardShadow = false;
+                _barFills[b].Halftone = false;
+                _barFills[b].raycastTarget = false;
             }
 
+            // 6.5 大招信息行（独占底部整行）
             var specialGo = new GameObject("SpecialText", typeof(RectTransform), typeof(TextMeshProUGUI));
-            specialGo.transform.SetParent(bottomRow.transform, false);
+            specialGo.transform.SetParent(infoGo.transform, false);
             var spr = specialGo.GetComponent<RectTransform>();
             spr.anchorMin = new Vector2(0f, 0f);
-            spr.anchorMax = new Vector2(1f, 1f);
-            spr.offsetMin = new Vector2(blocksWidth + 14f, 0f);
-            spr.offsetMax = Vector2.zero;
+            spr.anchorMax = new Vector2(1f, 0f);
+            spr.pivot = new Vector2(0f, 0f);
+            spr.anchoredPosition = new Vector2(0f, specialBottom);
+            spr.sizeDelta = new Vector2(0f, specialH);
             _specialText = specialGo.GetComponent<TextMeshProUGUI>();
             _specialText.fontSize = UITypography.FontSnapped(m.SpecialFont);
             _specialText.fontStyle = FontStyles.Normal;
@@ -663,7 +697,8 @@ namespace P1.UI.WeaponSelect
                 _specialText.text = text;
             }
 
-            RefreshStatSegments();
+            _statBars = WeaponSelectMath.ComputeStatBars(_config, _kind);
+            RefreshStatBars();
         }
 
         /// <summary>移动端卡片较窄，频率去掉多余小数（10.0/s → 10/s）。</summary>
@@ -692,16 +727,23 @@ namespace P1.UI.WeaponSelect
             _iconPlate.Refresh();
         }
 
-        private void RefreshStatSegments()
+        /// <summary>按 <see cref="WeaponSelectMath.ComputeStatBars"/> 的读数刷新三条横条（填充宽度 0~1，队色）。</summary>
+        private void RefreshStatBars()
         {
             Color teamColor = _theme.GetTeamColor(_team);
-            for (int b = 0; b < _statSegments.Length; b++)
+            float[] values =
             {
-                if (_statSegments[b] == null) continue;
-                bool filled = b < _weaponRating;
-                // 纸白卡面上空槽统一 PaperAlt（选中不再翻深灰，选中只靠色带/墨框表达）
-                _statSegments[b].color = filled ? teamColor : ComicStyle.PaperAlt;
-                _statSegments[b].Refresh();
+                _statBars.DamageDensity01,
+                _statBars.TurfEfficiency01,
+                _statBars.RangeMobility01,
+            };
+            for (int b = 0; b < _barFills.Length; b++)
+            {
+                if (_barFills[b] == null) continue;
+                _barFills[b].color = teamColor;
+                float width = Mathf.Clamp01(values[b]) * _barFillMaxWidth;
+                _barFills[b].rectTransform.sizeDelta = new Vector2(Mathf.Max(3f, width), _barFillHeight);
+                _barFills[b].Refresh();
             }
         }
 

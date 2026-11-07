@@ -1,10 +1,13 @@
 using System.Collections.Generic;
+using P1.Ink;
 using UnityEngine;
 
 namespace P1.Core
 {
     /// <summary>
     /// 零 GC 视觉反馈池：负责墨水落点溅射粒子、手雷/大招冲击波环以及地面延时预警圈。
+    /// P30 起还承载弹丸拖尾墨雾、枪口方向性水珠锥、桌面端单盏枪口点光，
+    /// 以及命中卫星墨珠落地后的纯装饰补涂。
     /// </summary>
     public class VfxPool : MonoBehaviour
     {
@@ -25,6 +28,32 @@ namespace P1.Core
         private Mesh _discMesh;
         private Mesh _dropletMesh;
 
+        // P30-A2：弹丸拖尾墨雾（单个 PS 承载全场景拖尾雾，1 draw call）
+        private Material _puffMat;
+        private ParticleSystem _trailPuffPs;
+
+        // P30-A4：桌面端单盏池化枪口点光（全场景同时最多 1 盏，0.08s 内衰减到 0）
+        private Light _muzzleLight;
+        private float _muzzleLightRemaining;
+        private float _muzzleLightDuration;
+        private float _muzzleLightPeakIntensity;
+
+        // P30-A3：卫星墨珠落地补涂的每帧预算（含涟漪），超出直接丢弃
+        private const int MaxSpeckPaintsPerFrame = 3;
+        private const float LargeSpeckRippleRadius = 0.09f;
+        private int _speckBudgetFrame = -1;
+        private int _speckPaintedThisFrame;
+
+        // 墨珠池保留额度：拖尾卫星珠 / 枪口水珠不能把「命中溅射珠」挤空（命中反馈优先级最高）
+        private const int DropletReserveForImpacts = 12;
+        private const int DropletReserveForMuzzle = 4;
+        private const int DropletReserveForRain = 6;
+
+        /// <summary>枪口点光默认峰值强度 / 半径 / 衰减时长（桌面端 in 编辑器可见的可调常量）。</summary>
+        private const float MuzzleLightPeakIntensity = 2.6f;
+        private const float MuzzleLightRange = 3.4f;
+        private const float MuzzleLightDecaySeconds = 0.08f;
+
         private struct SatelliteDroplet
         {
             public Transform Transform;
@@ -36,6 +65,12 @@ namespace P1.Core
             public float Lifetime;
             public float BaseScale;
             public float StretchY;
+            /// <summary>落地补涂归属队伍；Neutral = 只做视觉飞行，不落地补涂。</summary>
+            public Team Team;
+            /// <summary>该墨珠是否需要在撞地时补一枚装饰墨点（命中溅射珠子开启，墨魂/雨滴关闭）。</summary>
+            public bool PaintsOnLand;
+            /// <summary>本生命周期是否已经落地结算过：池复用必须重置，防止重复回调。</summary>
+            public bool Landed;
         }
 
         private struct PendingRing
@@ -86,8 +121,15 @@ namespace P1.Core
             DestroyObject(_flashTex);
             _flashTex = null;
 
+            DestroyObject(_puffMat);
+            _puffMat = null;
+
             DestroyObject(_discMesh);
             _discMesh = null;
+
+            // 拖尾雾 PS / 枪口点光都是本组件的子物体，随 GameObject 一起销毁，这里只清引用。
+            _trailPuffPs = null;
+            _muzzleLight = null;
         }
 
         private static void DestroyObject(UnityEngine.Object obj)
@@ -152,6 +194,22 @@ namespace P1.Core
             _dropletMesh = Resources.GetBuiltinResource<Mesh>("Sphere.fbx");
             _shotFlashPs = CreateShotFlashSystem();
 
+            // P30-A2：拖尾墨雾是 alpha 混合的软圆盘（不是加法混合），复用同一张程序化软边贴图。
+            Shader puffShader = Shader.Find("Sprites/Default");
+            if (puffShader != null)
+            {
+                _puffMat = new Material(puffShader) { name = "VfxTrailPuffMat" };
+                if (_puffMat.HasProperty("_MainTex"))
+                    _puffMat.SetTexture("_MainTex", _flashTex);
+                if (_puffMat.HasProperty("_Color"))
+                    _puffMat.SetColor("_Color", Color.white);
+            }
+            _trailPuffPs = CreateTrailPuffSystem();
+
+            // P30-A4：枪口点光只在桌面端创建；移动端连对象都不建，避免多一盏实时光的开销。
+            if (!Application.isMobilePlatform)
+                _muzzleLight = CreateMuzzleLight();
+
             for (int i = 0; i < 20; i++)
             {
                 _splatParticles.Enqueue(CreateSplatParticleSystem(i));
@@ -189,8 +247,15 @@ namespace P1.Core
         /// 命中身体的定向墨花（P6-B，对齐 Inkwave hitSplash）：一小片墨幕从受击者胸口沿弹道方向撕开，
         /// 约 2/3 液滴顺着弹道贯穿方向飞出、1/3 逆着弹道回溅向射击者，再叠一枚短促高光让远处也读得出命中。
         /// damage01 = 伤害 / 基准（Inkwave 为 amount/60，夹在 0.3~1.5）；击杀走 <see cref="SpawnKillBurst"/>，不经此入口。
+        /// <paramref name="paintTeam"/> 非 Neutral 时，甩出的卫星墨珠落地会补装饰墨点。
         /// </summary>
-        public void SpawnHitSplash(Vector3 worldPos, Vector3 shotDirection, Color color, float damage01, bool highlight = false)
+        public void SpawnHitSplash(
+            Vector3 worldPos,
+            Vector3 shotDirection,
+            Color color,
+            float damage01,
+            bool highlight = false,
+            Team paintTeam = Team.Neutral)
         {
             float k = Mathf.Clamp(damage01, 0.3f, 1.5f);
             Vector3 dir = shotDirection;
@@ -208,9 +273,9 @@ namespace P1.Core
             SpawnInkSplatAligned(worldPos, -dir, color, radius * 0.7f, back);
 
             // 绕弹道轴的甩出墨珠 + 短促高光（0.08s，命中在远处也能一眼读出）
-            SpawnSatelliteDroplets(worldPos, dir, color, radius, Mathf.RoundToInt(2f + 2f * k), dir);
-            // 高光只给本地玩家相关的命中：全员命中都放时，每个角色胸口都会是一团
-            // 加法混合的白盘，被 Bloom 放大后整屏幕乱闪白光，也读不出"这一下是我打的"。
+            SpawnSatelliteDroplets(worldPos, dir, color, radius, Mathf.RoundToInt(2f + 2f * k), dir, paintTeam);
+            // P30-C2：高光仍只给「本地玩家打中 / 本地玩家被打中」，但 SpawnImpactFlash 已把队色压到
+            // 55%、alpha 收到 0.22，加法混合的白盘不会再被 Bloom 放大成整块胸口过曝。
             if (highlight)
                 SpawnImpactFlash(worldPos, dir, color, radius * 1.1f);
         }
@@ -220,7 +285,7 @@ namespace P1.Core
         /// 在 Die 已有的全方位爆墨与首层冲击环之上，补方向性贯穿爆散、延迟第二层冲击环，
         /// 以及缓缓升起消散的「墨魂」墨珠。
         /// </summary>
-        public void SpawnKillBurst(Vector3 worldPos, Vector3 shotDirection, Color color, float splatRadius)
+        public void SpawnKillBurst(Vector3 worldPos, Vector3 shotDirection, Color color, float splatRadius, Team paintTeam = Team.Neutral)
         {
             Vector3 dir = shotDirection;
             dir.y = 0f;
@@ -230,7 +295,7 @@ namespace P1.Core
             Vector3 burstCenter = worldPos + Vector3.up * 0.5f;
             SpawnInkSplatAligned(burstCenter, dir, color, radius, 16);
             SpawnInkSplatAligned(burstCenter, -dir, color, radius * 0.7f, 6);
-            SpawnSatelliteDroplets(worldPos + Vector3.up * 0.9f, dir, color, radius, 6, dir);
+            SpawnSatelliteDroplets(worldPos + Vector3.up * 0.9f, dir, color, radius, 6, dir, paintTeam);
 
             // 第二层冲击波延迟追上主波，制造「余波」层次
             SpawnDelayedShockwaveRing(0.10f, worldPos, color, 0.4f, radius * 1.45f, 0.32f);
@@ -260,6 +325,10 @@ namespace P1.Core
                 droplet.Lifetime = Random.Range(0.8f, 1.15f);
                 droplet.BaseScale = Random.Range(0.06f, 0.10f);
                 droplet.StretchY = 1.15f;
+                // 墨魂只飘不落地补涂：池复用必须把落地状态显式清零
+                droplet.Team = Team.Neutral;
+                droplet.PaintsOnLand = false;
+                droplet.Landed = false;
                 droplet.Transform.rotation = Quaternion.LookRotation(droplet.Velocity);
                 droplet.Transform.localScale = Vector3.one * droplet.BaseScale;
 
@@ -284,6 +353,7 @@ namespace P1.Core
         /// 带入射方向的撞击反馈（P16）：溅射液滴朝「弹丸来向」偏置，读得出这一发是从哪边打来的；
         /// <paramref name="highlight"/> 为 true 时（本地玩家自己的命中）额外叠一枚短促高光，
         /// 让玩家在 8 人混战里一眼确认「这一下是我打的」。
+        /// <paramref name="paintTeam"/> 只用于「卫星墨珠落地补涂」：Neutral 表示不补涂（纯视觉）。
         /// </summary>
         public void SpawnInkImpact(
             Vector3 worldPos,
@@ -292,14 +362,51 @@ namespace P1.Core
             float radius,
             int satelliteCount,
             Vector3 incomingDirection,
-            bool highlight)
+            bool highlight,
+            Team paintTeam = Team.Neutral)
         {
             int burstCount = Mathf.Clamp(Mathf.RoundToInt(6f + radius * 5f), 6, 20);
             SpawnInkSplatAligned(worldPos, normal, color, radius, burstCount);
-            SpawnSatelliteDroplets(worldPos, normal, color, radius, satelliteCount, incomingDirection);
+
+            // 光束 / 爆破 / 手雷 / 大招等旧调用方只传颜色：颜色恰好是队色时补上落地补涂归属，
+            // 这样不必改那些系统也能让它们的卫星墨珠落地补涂（匹配不上则保持 Neutral，不补涂）。
+            if (paintTeam == Team.Neutral)
+                paintTeam = ResolvePaintTeamFromColor(color);
+
+            SpawnSatelliteDroplets(worldPos, normal, color, radius, satelliteCount, incomingDirection, paintTeam);
 
             if (highlight)
                 SpawnImpactFlash(worldPos, normal, color, radius);
+        }
+
+        /// <summary>
+        /// 从溅射颜色反查队伍（只给落地补涂用）：容差 0.045，匹配不上返回 Neutral。
+        /// 纯表现用途，颜色不精确时宁可少补几个墨点，也不能把敌方墨点画成己方色。
+        /// </summary>
+        private static Team ResolvePaintTeamFromColor(Color color)
+        {
+            InkSurfaceController surface = InkSurfaceController.Instance;
+            if (surface == null)
+                return Team.Neutral;
+
+            const float tolerance = 0.045f;
+            float toleranceSqr = tolerance * tolerance;
+
+            Color teamA = surface.GetTeamColor(Team.TeamA);
+            float dr = teamA.r - color.r;
+            float dg = teamA.g - color.g;
+            float db = teamA.b - color.b;
+            if (dr * dr + dg * dg + db * db <= toleranceSqr)
+                return Team.TeamA;
+
+            Color teamB = surface.GetTeamColor(Team.TeamB);
+            dr = teamB.r - color.r;
+            dg = teamB.g - color.g;
+            db = teamB.b - color.b;
+            if (dr * dr + dg * dg + db * db <= toleranceSqr)
+                return Team.TeamB;
+
+            return Team.Neutral;
         }
 
         /// <summary>
@@ -335,26 +442,201 @@ namespace P1.Core
             _shotFlashPs.Emit(emit, 1);
         }
 
-        /// <summary>落点高光：短暂加法混合的软圆盘，只给本地玩家的命中用，避免全屏闪光污染。</summary>
+        /// <summary>
+        /// 落点高光：短暂加法混合的软圆盘，只给本地玩家相关的命中用，避免全屏闪光污染。
+        /// P30-C2 过曝修复：加法混合 + Bloom 下，队色（尤其橙红）仍会把角色胸口烧成一块白盘，
+        /// 因此把颜色整体压到 55%、alpha 收到 0.22，并把最大尺寸从 1.5m 收到 1.15m。
+        /// 高光保留（确认「这一下是我打的」），但只泛一下，不再过曝。
+        /// </summary>
         public void SpawnImpactFlash(Vector3 worldPos, Vector3 normal, Color color, float radius)
         {
             if (_shotFlashPs == null)
                 return;
 
             Vector3 up = normal.sqrMagnitude > 0.0001f ? normal.normalized : Vector3.up;
+            // 乘 0.55 而不是 lerp 到白：保留队色，同时让加法项远离 Bloom threshold。
+            Color flashColor = color * 0.55f;
+            flashColor.a = 0.22f;
+
             var emit = new ParticleSystem.EmitParams
             {
                 position = worldPos + up * 0.04f,
                 velocity = Vector3.zero,
-                // 亮度/尺寸都收紧：加法混合的白盘一旦超过 Bloom threshold 就会被放大成
-                // 一大片白光（角色胸口整块发白）。高光只用来"确认这一下是我打的"，
-                // 不需要覆盖整个角色，因此上限从 3.2m/0.55 收到 1.5m/0.32。
-                startColor = new Color(color.r, color.g, color.b, 0.32f),
-                startSize = Mathf.Clamp(radius * 1.4f, 0.35f, 1.5f),
+                startColor = flashColor,
+                startSize = Mathf.Clamp(radius * 1.3f, 0.32f, 1.15f),
                 startLifetime = 0.08f,
                 rotation = Random.Range(0f, 360f)
             };
             _shotFlashPs.Emit(emit, 1);
+        }
+
+        /// <summary>
+        /// P30-C2：被 0.05s 节流合并掉的命中只放「最小化墨花」——单颗小墨珠、无卫星珠、无高光，
+        /// 走同一个溅射粒子池但不触发完整 SpawnHitSplash 路径，避免连射时粒子峰值翻倍。
+        /// </summary>
+        public void SpawnHitSpeck(Vector3 worldPos, Vector3 shotDirection, Color color, float scale = 1f)
+        {
+            if (_splatParticles.Count == 0)
+                return;
+
+            ParticleSystem ps = _splatParticles.Dequeue();
+            _splatParticles.Enqueue(ps);
+
+            Vector3 dir = shotDirection;
+            dir.y *= 0.4f;
+            dir = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.up;
+            ps.transform.position = worldPos + Vector3.up * 0.05f;
+            ps.transform.rotation = Quaternion.LookRotation(dir);
+
+            var main = ps.main;
+            main.startColor = color;
+            main.startSize = new ParticleSystem.MinMaxCurve(0.05f * scale, 0.09f * scale);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.6f * scale, 1.4f * scale);
+
+            ps.Emit(1);
+        }
+
+        /// <summary>
+        /// P30-A2：弹丸飞行拖尾墨雾。全场景所有弹丸共享一个 ParticleSystem（1 draw call），
+        /// 低透明度队色 + 存活期内轻微膨胀淡出，读作「墨滴甩在空气里的雾」。
+        /// 每帧生成数量由调用方（InkProjectilePool）做全场景节流。
+        /// </summary>
+        public void SpawnTrailPuff(Vector3 worldPos, Vector3 direction, Color color, float scale = 1f, float lifetime = 0.30f)
+        {
+            if (_trailPuffPs == null)
+                return;
+
+            Vector3 dir = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.forward;
+            var emit = new ParticleSystem.EmitParams
+            {
+                // 略微沿弹道反方向 + 随机偏移：雾团不能像第二颗弹丸一样黏在弹丸中心
+                position = worldPos - dir * Random.Range(0.04f, 0.16f) + Random.insideUnitSphere * 0.05f,
+                velocity = -dir * 0.22f + Vector3.up * 0.10f,
+                startColor = new Color(color.r, color.g, color.b, 0.30f),
+                startSize = Mathf.Clamp(0.38f * Mathf.Max(0.1f, scale), 0.08f, 1.6f),
+                startLifetime = Mathf.Clamp(lifetime, 0.08f, 1.2f),
+                rotation = Random.Range(0f, 360f)
+            };
+            _trailPuffPs.Emit(emit, 1);
+        }
+
+        /// <summary>
+        /// P30-A2：拖尾墨雾偶尔甩出的一颗小卫星墨珠（沿速度反方向 + 少量横向散开）。
+        /// 复用命中卫星珠的对象池与落地补涂逻辑；珠子很小，落地补涂受每帧预算约束。
+        /// </summary>
+        public void SpawnTrailSatellite(Vector3 worldPos, Vector3 direction, Color color, Team paintTeam, float scale = 1f)
+        {
+            // 保留池底：命中溅射珠永远优先，拖尾珠只在富余额度里生成
+            if (_dropletPool.Count <= DropletReserveForImpacts)
+                return;
+
+            Vector3 dir = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.forward;
+            SatelliteDroplet droplet = _dropletPool.Dequeue();
+            droplet.Transform.gameObject.SetActive(true);
+            droplet.Transform.position = worldPos;
+
+            Vector3 back = -dir;
+            if (back.y > 0.15f)
+                back.y = 0.15f; // 反方向不能把珠子甩得「往上飞」太多
+            Vector3 velocity = back * Random.Range(1.4f, 2.8f)
+                               + Random.insideUnitSphere * 0.55f
+                               + Vector3.up * Random.Range(0.15f, 0.7f);
+
+            droplet.Velocity = velocity;
+            droplet.Gravity = Random.Range(12f, 18f);
+            droplet.Elapsed = 0f;
+            droplet.Lifetime = Random.Range(0.32f, 0.55f);
+            droplet.BaseScale = Random.Range(0.030f, 0.055f) * Mathf.Clamp(scale, 0.5f, 1.6f);
+            droplet.StretchY = 1f;
+            // 池复用重置：队伍 / 落地标记必须重新写入
+            droplet.Team = paintTeam;
+            droplet.PaintsOnLand = paintTeam != Team.Neutral;
+            droplet.Landed = false;
+            droplet.Transform.rotation = Quaternion.LookRotation(velocity);
+            droplet.Transform.localScale = Vector3.one * droplet.BaseScale;
+
+            droplet.PropBlock.SetColor(BaseColorProp, color);
+            droplet.PropBlock.SetColor(ColorProp, color);
+            droplet.Renderer.SetPropertyBlock(droplet.PropBlock);
+
+            _activeDroplets.Add(droplet);
+        }
+
+        /// <summary>
+        /// P30-A4：枪口方向性水珠锥——从枪口沿射向喷 3~5 颗短命小水珠（锥角约 12°），
+        /// 复用卫星墨珠池（网格珠 + 速度拉伸），只在开火节流窗口内由 WeaponController 调用。
+        /// </summary>
+        public void SpawnMuzzleDroplets(
+            Vector3 origin,
+            Vector3 direction,
+            Color color,
+            int count,
+            float coneDegrees = 12f,
+            float scale = 1f)
+        {
+            if (count <= 0 || _dropletPool.Count <= DropletReserveForMuzzle)
+                return;
+
+            Vector3 dir = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.forward;
+            Vector3 right = Vector3.Cross(Vector3.up, dir);
+            if (right.sqrMagnitude < 0.0001f)
+                right = Vector3.Cross(Vector3.forward, dir);
+            right.Normalize();
+            Vector3 up = Vector3.Cross(dir, right).normalized;
+
+            float coneTan = Mathf.Tan(Mathf.Clamp(coneDegrees, 1f, 45f) * Mathf.Deg2Rad);
+            float sizeScale = Mathf.Clamp(scale, 0.4f, 2f);
+
+            for (int i = 0; i < count && _dropletPool.Count > DropletReserveForMuzzle; i++)
+            {
+                SatelliteDroplet droplet = _dropletPool.Dequeue();
+                droplet.Transform.gameObject.SetActive(true);
+                droplet.Transform.position = origin;
+
+                // 锥形散布：sqrt 让水滴在锥面上均匀分布，不会挤在中心
+                float spread = coneTan * Mathf.Sqrt(Random.value);
+                float angle = Random.value * Mathf.PI * 2f;
+                Vector3 launchDir = (dir + (right * Mathf.Cos(angle) + up * Mathf.Sin(angle)) * spread).normalized;
+
+                droplet.Velocity = launchDir * Random.Range(4.5f, 8.0f) * sizeScale;
+                droplet.Gravity = Random.Range(10f, 16f);
+                droplet.Elapsed = 0f;
+                // 短命：0.05~0.11s 内消失，读作枪口「喷出去的水线」，不会飞成第二发子弹
+                droplet.Lifetime = Random.Range(0.05f, 0.11f);
+                droplet.BaseScale = Random.Range(0.020f, 0.042f) * sizeScale;
+                droplet.StretchY = 1f;
+                // 枪口水珠落地前就消失了，不需要落地补涂；仍显式重置池复用状态
+                droplet.Team = Team.Neutral;
+                droplet.PaintsOnLand = false;
+                droplet.Landed = false;
+                droplet.Transform.rotation = Quaternion.LookRotation(launchDir);
+                droplet.Transform.localScale = Vector3.one * droplet.BaseScale;
+
+                droplet.PropBlock.SetColor(BaseColorProp, color);
+                droplet.PropBlock.SetColor(ColorProp, color);
+                droplet.Renderer.SetPropertyBlock(droplet.PropBlock);
+
+                _activeDroplets.Add(droplet);
+            }
+        }
+
+        /// <summary>
+        /// P30-A4：池化枪口点光（全场景同时最多 1 盏）。只在桌面端由 WeaponController 为本地玩家开火调用；
+        /// 峰值强度后 0.08s 内平方衰减到 0，range 只有 3.4m，不会照亮半个战场。
+        /// </summary>
+        public void SpawnMuzzleLight(Vector3 worldPos, Color color, float intensityScale = 1f)
+        {
+            if (_muzzleLight == null || Application.isMobilePlatform)
+                return;
+
+            _muzzleLight.transform.position = worldPos;
+            _muzzleLight.color = new Color(color.r, color.g, color.b, 1f);
+            _muzzleLight.range = MuzzleLightRange;
+            _muzzleLightPeakIntensity = MuzzleLightPeakIntensity * Mathf.Clamp(intensityScale, 0.5f, 2f);
+            _muzzleLightDuration = MuzzleLightDecaySeconds;
+            _muzzleLightRemaining = MuzzleLightDecaySeconds;
+            _muzzleLight.intensity = _muzzleLightPeakIntensity;
+            _muzzleLight.enabled = true;
         }
 
         private void SpawnInkSplatAligned(Vector3 worldPos, Vector3 normal, Color color, float radius, int burstCount)
@@ -380,12 +662,13 @@ namespace P1.Core
 
         private void SpawnSatelliteDroplets(Vector3 worldPos, Vector3 normal, Color color, float radius, int count)
         {
-            SpawnSatelliteDroplets(worldPos, normal, color, radius, count, Vector3.zero);
+            SpawnSatelliteDroplets(worldPos, normal, color, radius, count, Vector3.zero, Team.Neutral);
         }
 
         /// <summary>
         /// 卫星墨珠：除绕法线的径向扩散外，还会朝弹丸水平来向偏置。
         /// 打在斜坡/墙面上时，液滴会沿来向继续「甩」出去，而不是均匀八爪鱼式乱喷。
+        /// <paramref name="paintTeam"/> 非 Neutral 时，珠子撞地会补一枚装饰墨点（纯视觉，不计覆盖率）。
         /// </summary>
         private void SpawnSatelliteDroplets(
             Vector3 worldPos,
@@ -393,7 +676,8 @@ namespace P1.Core
             Color color,
             float radius,
             int count,
-            Vector3 incomingDirection)
+            Vector3 incomingDirection,
+            Team paintTeam)
         {
             if (count <= 0)
                 return;
@@ -411,6 +695,7 @@ namespace P1.Core
                 forward.Normalize();
 
             float sizeScale = Mathf.Clamp(radius * 1.2f, 0.7f, 1.6f);
+            bool paintsOnLand = paintTeam != Team.Neutral;
 
             for (int i = 0; i < count && _dropletPool.Count > 0; i++)
             {
@@ -429,6 +714,10 @@ namespace P1.Core
                 droplet.Lifetime = Random.Range(0.32f, 0.62f);
                 droplet.BaseScale = Random.Range(0.045f, 0.085f) * sizeScale;
                 droplet.StretchY = 1f;
+                // 池复用重置：上一条珠子的队伍 / 落地标记绝不能残留（否则会重复回调补涂）
+                droplet.Team = paintTeam;
+                droplet.PaintsOnLand = paintsOnLand;
+                droplet.Landed = false;
                 droplet.Transform.rotation = Quaternion.LookRotation(launchDir);
                 droplet.Transform.localScale = Vector3.one * droplet.BaseScale;
 
@@ -486,7 +775,8 @@ namespace P1.Core
                 return;
 
             float safeRadius = Mathf.Max(0.1f, radius);
-            for (int i = 0; i < count && _dropletPool.Count > 0; i++)
+            // 风暴雨滴是环境表现：池底留 6 颗给命中溅射珠，别让大招把战斗反馈的墨珠挤空
+            for (int i = 0; i < count && _dropletPool.Count > DropletReserveForRain; i++)
             {
                 SatelliteDroplet droplet = _dropletPool.Dequeue();
                 float angle = Random.value * Mathf.PI * 2f;
@@ -503,6 +793,10 @@ namespace P1.Core
                 droplet.Lifetime = Random.Range(0.20f, 0.34f);
                 droplet.BaseScale = Random.Range(0.030f, 0.055f);
                 droplet.StretchY = Random.Range(2.2f, 3.2f);
+                // 风暴雨滴是环境表现，不做落地补涂（避免抢占战斗命中的每帧墨点预算）
+                droplet.Team = Team.Neutral;
+                droplet.PaintsOnLand = false;
+                droplet.Landed = false;
                 droplet.Transform.localScale = new Vector3(
                     droplet.BaseScale * 0.7f, droplet.BaseScale * droplet.StretchY, droplet.BaseScale * 0.7f);
 
@@ -552,6 +846,26 @@ namespace P1.Core
             }
 
             UpdateSatelliteDroplets(dt);
+            UpdateMuzzleLight(dt);
+        }
+
+        /// <summary>枪口点光峰值后平方衰减：0.08s 内从峰值落到 0，随后关闭组件（不销毁 GameObject）。</summary>
+        private void UpdateMuzzleLight(float dt)
+        {
+            if (_muzzleLight == null || _muzzleLightRemaining <= 0f)
+                return;
+
+            _muzzleLightRemaining -= dt;
+            if (_muzzleLightRemaining <= 0f)
+            {
+                _muzzleLightRemaining = 0f;
+                _muzzleLight.intensity = 0f;
+                _muzzleLight.enabled = false;
+                return;
+            }
+
+            float k = _muzzleLightRemaining / Mathf.Max(0.0001f, _muzzleLightDuration);
+            _muzzleLight.intensity = _muzzleLightPeakIntensity * k * k;
         }
 
         private void UpdateSatelliteDroplets(float dt)
@@ -569,8 +883,36 @@ namespace P1.Core
                     continue;
                 }
 
+                Vector3 previousPosition = droplet.Transform.position;
                 droplet.Velocity.y -= droplet.Gravity * dt;
-                droplet.Transform.position += droplet.Velocity * dt;
+                Vector3 nextPosition = previousPosition + droplet.Velocity * dt;
+                droplet.Transform.position = nextPosition;
+
+                // P30-A3：命中卫星墨珠撞地 → 补一枚纯装饰墨点（不写玩法网格 / 不计覆盖率）。
+                // 只在向下飞行时做一次线段射线，避免每一帧每颗珠子都做物理查询。
+                if (droplet.PaintsOnLand && !droplet.Landed && droplet.Velocity.y < 0f)
+                {
+                    Vector3 segment = nextPosition - previousPosition;
+                    float segmentLength = segment.magnitude;
+                    if (segmentLength > 0.0001f &&
+                        Physics.Raycast(
+                            previousPosition,
+                            segment / segmentLength,
+                            out RaycastHit landHit,
+                            segmentLength + 0.03f,
+                            GameLayers.WorldMask,
+                            QueryTriggerInteraction.Ignore))
+                    {
+                        // 标记 + 立即回收：同一颗珠子绝不会二次结算（池复用 spawn 时显式重置）
+                        droplet.Landed = true;
+                        HandleDropletLanding(landHit.point, landHit.normal, droplet.Team, droplet.BaseScale);
+
+                        droplet.Transform.gameObject.SetActive(false);
+                        _dropletPool.Enqueue(droplet);
+                        _activeDroplets.RemoveAt(i);
+                        continue;
+                    }
+                }
 
                 // 墨珠沿速度方向拉伸：高速飞行的滴墨读作「水线」，落地前再整体收缩，
                 // 而不是一颗颗匀速平移的小球（那是弹球，不是墨水）。
@@ -589,6 +931,45 @@ namespace P1.Core
             }
         }
 
+        /// <summary>
+        /// P30-A3：卫星墨珠落地补涂。全局每帧最多 3 枚（超出直接丢弃，不再排队），
+        /// 只有接近水平的落点才写地面图集（墙面/立面走不到 PaintSpeckVisualOnly 的 2D 图集）；
+        /// 半径 ≥ 0.09m 的大颗珠额外补一条轻微涟漪。
+        /// </summary>
+        private void HandleDropletLanding(Vector3 point, Vector3 normal, Team team, float baseScale)
+        {
+            if (team == Team.Neutral)
+                return;
+
+            // 只有落在地面/顶面才补涂：PaintSpeckVisualOnly 是 XZ 平面图集，打在墙面上会画错位置
+            if (normal.y < 0.55f)
+                return;
+
+            if (InkSurfaceController.Instance == null)
+                return;
+
+            // 终场后不再留下新墨迹（与弹丸沿途滴墨的规则一致），但珠子本身已正常回收
+            if (!MatchManager.CombatSettlementAllowed)
+                return;
+
+            if (_speckBudgetFrame != Time.frameCount)
+            {
+                _speckBudgetFrame = Time.frameCount;
+                _speckPaintedThisFrame = 0;
+            }
+            if (_speckPaintedThisFrame >= MaxSpeckPaintsPerFrame)
+                return;
+            _speckPaintedThisFrame++;
+
+            float radius = Mathf.Clamp(baseScale * 1.35f, 0.06f, 0.12f);
+            InkSurfaceController.Instance.PaintSpeckVisualOnly(point, radius, team, true);
+
+            if (radius >= LargeSpeckRippleRadius)
+            {
+                InkSurfaceController.Instance.TriggerRipple(point, 0.02f, 0.3f, 3.0f, 0.6f);
+            }
+        }
+
         private void UpdateRingVisual(ExpandingRing ring, float t)
         {
             float eased = 1f - (1f - t) * (1f - t);
@@ -600,6 +981,83 @@ namespace P1.Core
             ring.PropBlock.SetColor(BaseColorProp, c);
             ring.PropBlock.SetColor(ColorProp, c);
             ring.Renderer.SetPropertyBlock(ring.PropBlock);
+        }
+
+        /// <summary>
+        /// P30-A2 拖尾墨雾系统：单个 Billboard ParticleSystem 承载全场景弹丸拖尾雾（1 draw call）。
+        /// alpha 混合 + 软边圆盘，粒子在生命周期内轻微膨胀并淡出；发射器关闭，全部靠 Emit 手动发射。
+        /// </summary>
+        private ParticleSystem CreateTrailPuffSystem()
+        {
+            if (_puffMat == null)
+                return null;
+
+            var go = new GameObject("TrailPuffPS");
+            go.transform.SetParent(transform, false);
+
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+            var main = ps.main;
+            main.playOnAwake = false;
+            main.loop = false;
+            main.duration = 1f;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.startLifetime = 0.30f;
+            main.startSpeed = 0f;
+            main.startSize = 0.38f;
+            main.startColor = Color.white;
+            main.gravityModifier = -0.02f; // 极轻微上浮：雾团不会像石子一样坠地
+            main.maxParticles = 128;
+
+            var emission = ps.emission;
+            emission.enabled = false;
+
+            var shape = ps.shape;
+            shape.enabled = false;
+
+            // 出生略不透明 → 死亡完全透明：低透明度墨雾不能抢弹丸本体的可读性
+            var colorOverLifetime = ps.colorOverLifetime;
+            colorOverLifetime.enabled = true;
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+                new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(0f, 1f) });
+            colorOverLifetime.color = new ParticleSystem.MinMaxGradient(gradient);
+
+            var sizeOverLifetime = ps.sizeOverLifetime;
+            sizeOverLifetime.enabled = true;
+            sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.75f, 1f, 1.5f));
+
+            var psr = go.GetComponent<ParticleSystemRenderer>();
+            psr.renderMode = ParticleSystemRenderMode.Billboard;
+            psr.sharedMaterial = _puffMat;
+            psr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            psr.receiveShadows = false;
+
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            return ps;
+        }
+
+        /// <summary>
+        /// P30-A4 单盏枪口点光：桌面端全场景唯一一盏，常驻但默认 disabled，
+        /// 开火时把位置/队色/强度推上去，由 <see cref="UpdateMuzzleLight"/> 在 0.08s 内衰减回 0。
+        /// </summary>
+        private Light CreateMuzzleLight()
+        {
+            var go = new GameObject("MuzzleLight");
+            go.transform.SetParent(transform, false);
+
+            var light = go.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.color = Color.white;
+            light.range = MuzzleLightRange;
+            light.intensity = 0f;
+            light.shadows = LightShadows.None;
+            light.renderMode = LightRenderMode.Auto;
+            light.enabled = false;
+
+            return light;
         }
 
         /// <summary>

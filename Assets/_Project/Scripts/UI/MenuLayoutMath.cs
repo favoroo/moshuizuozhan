@@ -175,8 +175,12 @@ namespace P1.UI
         public float DurationTagGap;
         public float DurationRowGap;
 
-        /// <summary>左下 / 右下黑底角签（宽或高为 0 表示该平台不显示）。</summary>
+        /// <summary>
+        /// 左下黑底角签盒（宽或高为 0 表示该平台不显示）。当前两平台都置零：
+        /// 桌面原本的「游戏共创 · 单机 4V4」角签已下线，移动端则是给整备卡让位。
+        /// </summary>
         public Vector2 FooterTagSize;
+        /// <summary>底部角签字号（当前只剩右下版本号 / 检查更新角签在用）。</summary>
         public float FooterTagFont;
         public Vector2 VersionTagSize;
         public float FooterInset;
@@ -296,7 +300,11 @@ namespace P1.UI
                 SecondarySize.x,
                 SecondarySize.y);
 
-        /// <summary>左下黑底角签（社区位）；移动端让位给整备卡，返回空盒。</summary>
+        /// <summary>
+        /// 左下黑底角签槽（社区位）。原为「游戏共创 · 单机 4V4」只读角签，现已下线：
+        /// 角签既不可点也不承载信息（模式/时长/难度都在 Hero 卡里），却在一屏角落占掉一条黑底条。
+        /// 现在两平台都返回空盒（<see cref="FooterTagSize"/> 置零），调用方不再建节点。
+        /// </summary>
         public HomeBox FooterTag => new HomeBox(
             Margin,
             MenuLayoutMath.RefHeight - FooterInset - FooterTagSize.y,
@@ -492,7 +500,8 @@ namespace P1.UI
                     DurationMinSegmentWidth = 60f,
                     DurationFont = 20f,
                     DurationRowGap = 14f,
-                    FooterTagSize = new Vector2(320f, 36f),
+                    // 左下「游戏共创」角签已下线：桌面同样不再显示，槽位置空。
+                    FooterTagSize = Vector2.zero,
                     FooterTagFont = 18f,
                     VersionTagSize = new Vector2(300f, 36f),
                     FooterInset = 18f,
@@ -553,7 +562,8 @@ namespace P1.UI
                 DurationMinSegmentWidth = 72f,
                 DurationFont = 20f,
                 DurationRowGap = 10f,
-                // 移动端左下是「武器整备」整备卡的地盘，社区角签不显示（返回空盒）。
+                // 左下角签两平台都不显示：移动端是「武器整备」整备卡的地盘，
+                // 桌面端则是「游戏共创 · 单机 4V4」只读角签已下线（返回空盒）。
                 FooterTagSize = Vector2.zero,
                 FooterTagFont = 18f,
                 VersionTagSize = new Vector2(360f, 44f),
@@ -599,7 +609,8 @@ namespace P1.UI
                 {
                     // 桌面抽屉也走双列网格（与移动端同构）：1204 = 580（WeaponCardView 桌面卡宽）×2
                     // + 16 列间距 + 14×2 左右内缩，单元宽与卡片硬编码宽度严格一致；
-                    // 7 张卡 4 行在参考画布一屏放下，无需滚动。
+                    // 卡高 200 容纳「标题/英文名 + 属性数字 + 三条对比横条 + 大招行」，
+                    // 7 张卡 4 行在参考画布仍一屏放下（内容 870 ≤ 视口 922），无需滚动。
                     Width = 1204f,
                     HeaderHeight = 88f,
                     HeaderTitleFont = 28f,
@@ -607,7 +618,7 @@ namespace P1.UI
                     CloseSize = new Vector2(88f, 48f),
                     CloseFont = 20f,
                     FooterFont = 18f,
-                    CardHeight = 164f,
+                    CardHeight = 200f,
                     CardIconDiameter = 84f,
                     IndexSize = new Vector2(44f, 40f),
                     IndexFont = 20f,
@@ -636,7 +647,8 @@ namespace P1.UI
                 CloseSize = new Vector2(150f, 84f),
                 CloseFont = 24f,
                 FooterFont = 22f,
-                CardHeight = 236f,
+                // 288：桌面 200 的同构放大，容纳三条对比横条（18px 行高 ×3）+ 大招行 + 属性行
+                CardHeight = 288f,
                 CardIconDiameter = 132f,
                 IndexSize = new Vector2(68f, 60f),
                 IndexFont = 30f,

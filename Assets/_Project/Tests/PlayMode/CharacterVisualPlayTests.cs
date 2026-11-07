@@ -223,5 +223,68 @@ namespace P1.Tests
             Assert.GreaterOrEqual(contactsPerMeter, 1.0f,
                 $"每米触地 {contactsPerMeter:F2} 次应 ≥1.0（P33 长腿真实跑姿）");
         }
+
+        [UnityTest]
+        public IEnumerator InkTank_FillSmoothlyTracksInk_BombLineTracksWeapon_EmptyHides()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            var motor = player.Motor;
+            var weapon = player.Weapon;
+            Assert.IsNotNull(motor);
+
+            // 场景烘焙的角色可能仍是旧版装配（无罐体新件）：运行时按 P1/构建/2 同款管线重装配一次，
+            // 保证被测对象总是带最新罐体结构（弯月面液面/刻度块/炸弹线/压力表）。
+            Transform visualRoot = player.GetComponentInChildren<CharacterVisualController>().transform;
+            Assert.IsNotNull(visualRoot, "玩家应挂载 CharacterVisualController");
+            var visual = CharacterVisualAssembler.Assemble(
+                visualRoot, Team.TeamA, null, null, weapon != null ? weapon.Config : null);
+            motor.Configure(motor.Config, visualRoot, visual.WeaponRoot != null ? visual.WeaponRoot.gameObject : null);
+            if (weapon != null)
+            {
+                weapon.Configure(weapon.Config, visual.ActiveMuzzle, visualRoot);
+            }
+            visual.Initialize(motor, weapon, Team.TeamA);
+            yield return null;
+
+            Transform backpack = visual.KidRoot.transform.Find("Hips/BodySquash/Spine/Chest/InkTankBackpack");
+            Assert.IsNotNull(backpack, "墨罐背包应存在");
+            Transform fill = backpack.Find("LiquidFill");
+            Transform bombLine = backpack.Find("BombLine");
+            Assert.IsNotNull(fill, "液面节点应存在");
+            Assert.IsNotNull(bombLine, "副武器墨量线应存在");
+
+            // 满墨基准：等指数平滑/弹簧收敛后液面应接近满位、径向无挤压
+            motor.RefillInkFull();
+            yield return new WaitForSeconds(0.4f);
+            Assert.Greater(fill.localScale.y, 0.9f, "满墨液面应接近满位");
+            Assert.Greater(fill.localScale.x, 0.9f, "静止时径向不应被挤压");
+
+            // 消耗 30%：首帧只走平滑的一小段（非瞬跳），随后液面收敛到 ~70%
+            float before = fill.localScale.y;
+            Assert.IsTrue(motor.TryConsumeInk(motor.MaxInk * 0.3f), "满墨时消耗 30% 应成功");
+            yield return null;
+            float firstFrameDrop = before - fill.localScale.y;
+            Assert.Greater(firstFrameDrop, 0.005f, "扣墨后液面应开始下降");
+            Assert.Less(firstFrameDrop, 0.15f, "首帧下降必须远小于消耗量（指数平滑而非瞬跳）");
+            yield return new WaitForSeconds(0.8f);
+            Assert.AreEqual(0.7f, fill.localScale.y, 0.06f, "液面应收敛到 70%（含微弱被动回墨余量）");
+
+            // 副武器墨量线：跟随当前武器 BombInkCost 定位（HUD 阈值线同步到 3D）
+            var fillFilter = fill.GetComponent<MeshFilter>();
+            Assert.IsNotNull(fillFilter, "液面必须是程序化弯月面网格");
+            Assert.IsNotNull(fillFilter.sharedMesh, "液面网格不能为空");
+            float span = fillFilter.sharedMesh.bounds.size.y;
+            float expectedY = -0.066f + Mathf.Clamp01(player.Weapon.BombInkCost / motor.MaxInk) * span;
+            Assert.IsTrue(bombLine.gameObject.activeSelf, "默认武器有雷成本时墨量线应显示");
+            Assert.AreEqual(expectedY, bombLine.localPosition.y, 0.01f, "墨量线高度必须等于炸弹成本比例");
+
+            // 清空墨：液面隐藏（INKWAVE L3350 空罐行为），墨量线属于罐体结构保持显示
+            Assert.IsTrue(motor.TryConsumeInk(motor.CurrentInk), "清空剩余墨应成功");
+            yield return null;
+            Assert.IsFalse(fill.gameObject.activeSelf, "空罐液面应隐藏");
+            Assert.IsTrue(bombLine.gameObject.activeSelf, "墨量线不随液面隐藏");
+        }
     }
 }

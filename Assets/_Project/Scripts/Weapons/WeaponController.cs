@@ -110,6 +110,9 @@ namespace P1.Weapons
         private const float MuzzleFlashMinInterval = 0.045f;
         private float _lastMuzzleFlashTime = -99f;
 
+        /// <summary>P30-A4 枪口水珠锥的锥角（度）：12° 的小锥，读作「枪口喷出去的墨」，不会糊成一片。</summary>
+        private const float MuzzleDropletConeDegrees = 12f;
+
         // 镜头冲击独立闸门（P28）：与闪光解耦，同帧齐射只推一次，单发武器每发都推
         private int _lastCameraPunchFrame = -1;
 
@@ -345,8 +348,23 @@ namespace P1.Weapons
         /// <summary>运行时换装（P3 武器库/复活点切换复用同一入口）。</summary>
         public void EquipWeapon(WeaponConfigSO weaponConfig)
         {
+            EquipWeapon(weaponConfig, false);
+        }
+
+        /// <summary>
+        /// 运行时换装（P36 阵亡整备）：<paramref name="resetSpecialCharge"/> 为 true 时清空大招充能——
+        /// 阵亡整备换枪的代价。必须在 <see cref="RebuildStrategy"/> 之前清零：OnWeaponEquipped 的订阅方
+        /// （HUD 充能条 / 液体球）在重建时立刻读 SpecialCharge01，顺序反了会闪一帧旧充能。
+        /// </summary>
+        public void EquipWeapon(WeaponConfigSO weaponConfig, bool resetSpecialCharge)
+        {
             if (weaponConfig == null)
                 return;
+
+            if (resetSpecialCharge)
+            {
+                ResetSpecialCharge();
+            }
 
             config = weaponConfig;
             _lastCameraPunchFrame = -1;
@@ -354,6 +372,13 @@ namespace P1.Weapons
             // RebuildStrategy 内部已经 invoke 过一次 OnWeaponEquipped，这里不再重复派发
             // （旧实现每次换装触发两次，视觉/音效订阅方会做两遍换装动作）。
             RebuildStrategy();
+        }
+
+        /// <summary>清空大招充能（阵亡整备换枪 / 重开一局的统一入口）。</summary>
+        public void ResetSpecialCharge()
+        {
+            _specialPoints = 0f;
+            _wasSpecialReady = false;
         }
 
         /// <summary>配置多武器 loadout；startIndex 为初始装备下标。</summary>
@@ -448,8 +473,13 @@ namespace P1.Weapons
         private void HandleKilled(CombatantHealth victim, Team killerTeam)
         {
             CancelSpecialImmediate();
-            // 被击杀损失一半当前未满的大招能量
-            _specialPoints *= 0.5f;
+            // 被击杀损失一部分当前未满的大招能量；损失比例与 KillRewardService 的「损失转移」共享
+            // 同一配置口径（GameConfigSO.killRewardEnergyTransferFraction），保证
+            // 「受害者失去的 = 击杀者得到的」。GameConfigSO 不可用时回退 KillRewardMath 规范默认（0.5）。
+            GameConfigSO gameConfig = MatchManager.Instance != null ? MatchManager.Instance.Config : null;
+            float lossFraction = KillRewardMath.ResolveEnergyTransferFraction(
+                gameConfig != null ? gameConfig.killRewardEnergyTransferFraction : -1f);
+            _specialPoints *= 1f - lossFraction;
             _wasSpecialReady = false;
         }
 
@@ -1525,8 +1555,25 @@ namespace P1.Weapons
 
                 if (VfxPool.Instance != null)
                 {
-                    VfxPool.Instance.SpawnShotFlash(
-                        origin, direction, teamColor, feel.MuzzleFlashScale * extraScale);
+                    float flashScale = feel.MuzzleFlashScale * extraScale;
+                    VfxPool.Instance.SpawnShotFlash(origin, direction, teamColor, flashScale);
+
+                    // P30-A4：枪口方向性水珠锥——从真实枪口（被掩体挡住时 ResolveMuzzlePosition 会从胸口补正）
+                    // 沿射向喷 3~5 颗短命小水珠；蓄力/重武器（extraScale 大）给到 5 颗。
+                    Vector3 muzzle = muzzleTransform != null ? ResolveMuzzlePosition() : origin;
+                    int dropletCount = Mathf.Clamp(
+                        Mathf.RoundToInt(3f + 2f * Mathf.Clamp01(extraScale - 0.75f)),
+                        3,
+                        5);
+                    VfxPool.Instance.SpawnMuzzleDroplets(
+                        muzzle, direction, teamColor, dropletCount, MuzzleDropletConeDegrees, flashScale);
+
+                    // P30-A4：单盏池化枪口点光只属于本地玩家（Bot 开火不点亮全场），
+                    // 且内部只允许桌面端；全场景同时最多 1 盏，0.08s 内衰减到 0。
+                    if (_playerController != null)
+                    {
+                        VfxPool.Instance.SpawnMuzzleLight(muzzle, teamColor, feel.MuzzleFlashScale);
+                    }
                 }
             }
 

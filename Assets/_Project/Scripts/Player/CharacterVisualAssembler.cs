@@ -32,6 +32,7 @@ namespace P1.Player
         private static Mesh _hairSeg1Mesh;
         private static Mesh _hairSeg2Mesh;
         private static Mesh _squidMesh;
+        private static Mesh _tankFillMesh;
 
         /// <summary>清空静态缓存的程序化网格与材质，供编辑器刷新与参数重载。</summary>
         public static void ClearCaches()
@@ -45,6 +46,7 @@ namespace P1.Player
             _hairSeg1Mesh = null;
             _hairSeg2Mesh = null;
             _squidMesh = null;
+            _tankFillMesh = null;
             _mergedMeshCache.Clear();
             _mergedBodyMeshCache.Clear();
         }
@@ -90,9 +92,10 @@ namespace P1.Player
             Transform leftElbow, rightElbow;
             Transform spine, neck;
             Transform[] hairRootPivots, hairMidPivots;
+            Transform tankBombLine;
             BuildKidHierarchy(kidGo.transform, palette,
                 out hips, out chest, out head,
-                out leftHair, out rightHair, out leftArm, out rightArm, out tankFill,
+                out leftHair, out rightHair, out leftArm, out rightArm, out tankFill, out tankBombLine,
                 out bodySquash, out leftEye, out rightEye, out face,
                 out leftLegRoot, out rightLegRoot, out leftKnee, out rightKnee, out leftAnkle, out rightAnkle,
                 out leftElbow, out rightElbow,
@@ -171,6 +174,7 @@ namespace P1.Player
                         RightEye = rightEye,
                         Backpack = backpack,
                         TankFill = tankFill,
+                        TankBombLine = tankBombLine,
                         LeftArm = leftArm,
                         RightArm = rightArm,
                         LeftElbow = leftElbow,
@@ -206,6 +210,9 @@ namespace P1.Player
             // 6.1 注入真骨骼步态与头部稳定绑定。P33：Face 容器直接由装配出参传入（旧版靠路径 Find
             //     "Chest/BodySquash/Torso/Face"，骨骼树重建后该路径不再成立）。
             controller.BindEggRig(bodySquash, face, leftEye, rightEye);
+
+            // 6.0b 储液罐动态件绑定（副武器墨量线）：不并入 BindHierarchy 签名，增量扩展。
+            controller.BindTankExtras(tankBombLine);
 
             // 6.1.1 绑定双腿两骨链（髋→膝→踝）：步态摆腿 / 滞空收腿 / 落地屈膝吸收
             controller.BindLegRig(hips, leftLegRoot, rightLegRoot, leftKnee, rightKnee, leftAnkle, rightAnkle);
@@ -496,6 +503,9 @@ namespace P1.Player
                 partName == "ValveKnob" ||
                 partName == "BottomCap" ||
                 partName == "MountPlate" ||
+                partName.StartsWith("FillTick_") ||
+                partName == "BombLine" ||
+                partName.StartsWith("Gauge") ||
                 partName == "Cuff" ||
                 partName == "Hand" ||
                 partName.Contains("Grip") ||
@@ -649,6 +659,87 @@ namespace P1.Player
             mesh.SetNormals(computedNormals);
             mesh.RecalculateBounds();
             _mochiHeadMesh = mesh;
+            return mesh;
+        }
+
+        /// <summary>
+        /// 墨罐液面网格（对齐 INKWAVE character-outfit.js tankGlass 的 fill：单位截面旋转体，
+        /// 底部原点、顶部弯月面卷边）。这里按 P1 罐径实尺烘焙：高 0.132m（与旧圆柱满位等高）、
+        /// 半径 0.047m（= Inkwave fill 0.0614×0.765 收比），运行时 <c>localScale = (挤压, 液位01, 挤压)</c>
+        /// 底部锚定缩放，任意液位都带弧形液面线，不再需要位置补偿。全角色共享一份静态缓存。
+        /// </summary>
+        public static Mesh CreateTankFillMesh()
+        {
+            if (_tankFillMesh != null) return _tankFillMesh;
+
+            // 断面轮廓（y 米, 半径 米）：底心 → 底盘 → 沿壁上行 → 顶缘外翻 → 弯月面内卷回落（Inkwave L1319 收比移植）
+            const float FillHeight = 0.132f;
+            const float WallRadius = 0.047f;
+            var profile = new (float y, float r)[]
+            {
+                (0.0000f, 0.0000f),
+                (0.0000f, 0.0383f),
+                (0.0008f, 0.0458f),
+                (0.0040f, WallRadius),
+                (0.1283f, WallRadius),
+                (0.1315f, 0.0472f),
+                (0.1325f, 0.0463f),
+                (0.1309f, 0.0413f),
+                (0.1302f, 0.0276f),
+                (0.1300f, 0.0000f),
+            };
+
+            const int segs = 16;
+            int rows = profile.Length;
+            var verts = new List<Vector3>(rows * (segs + 1));
+            var uvs = new List<Vector2>(rows * (segs + 1));
+            var tris = new List<int>((rows - 1) * segs * 6);
+
+            for (int r = 0; r < rows; r++)
+            {
+                for (int s = 0; s <= segs; s++)
+                {
+                    float phi = 2f * Mathf.PI * s / segs;
+                    verts.Add(new Vector3(Mathf.Sin(phi) * profile[r].r, profile[r].y, Mathf.Cos(phi) * profile[r].r));
+                    uvs.Add(new Vector2((float)s / segs, (float)r / (rows - 1)));
+                }
+            }
+
+            int row = segs + 1;
+            for (int r = 0; r < rows - 1; r++)
+            {
+                for (int s = 0; s < segs; s++)
+                {
+                    int i0 = r * row + s;
+                    int i1 = (r + 1) * row + s;
+                    tris.Add(i0); tris.Add(i0 + 1); tris.Add(i1);
+                    tris.Add(i0 + 1); tris.Add(i1 + 1); tris.Add(i1);
+                }
+            }
+
+            var mesh = new Mesh { name = "TankFillMesh" };
+            mesh.SetVertices(verts);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateNormals();
+
+            // 朝向自检：外壁任一顶点法线若指向轴心（绕向反了），整体翻转三角形后重算法线
+            var normals = mesh.normals;
+            int wallIndex = 4 * row + segs / 2; // 第 5 行（外壁直线段）任意方位角
+            Vector3 wallVert = verts[wallIndex];
+            Vector3 radialOut = new Vector3(wallVert.x, 0f, wallVert.z).normalized;
+            if (Vector3.Dot(normals[wallIndex], radialOut) < 0f)
+            {
+                for (int i = 0; i < tris.Count; i += 3)
+                {
+                    (tris[i], tris[i + 2]) = (tris[i + 2], tris[i]);
+                }
+                mesh.SetTriangles(tris, 0);
+                mesh.RecalculateNormals();
+            }
+
+            mesh.RecalculateBounds();
+            _tankFillMesh = mesh;
             return mesh;
         }
 
@@ -1128,6 +1219,7 @@ namespace P1.Player
             out Transform leftArm,
             out Transform rightArm,
             out Transform tankFill,
+            out Transform tankBombLine,
             out Transform bodySquash,
             out Transform leftEye,
             out Transform rightEye,
@@ -1374,12 +1466,52 @@ namespace P1.Player
             // 直接露出液面后：满罐=饱和队伍橙、空罐=深色 MountPlate 背板，墨量一眼可辨
             // （A/B 消融截图 Logs/ab_A_noglass vs t_alpha012）；罐盖/阀钮/背板保留罐体剪影。
 
-            var fillGo = CreateCylinder(backpackGo.transform, "LiquidFill", Vector3.zero, new Vector3(0.094f, 0.066f, 0.094f), p.TeamLiquid);
+            // 液面 = 弯月面旋转体网格（INKWAVE tankGlass fill 移植）：实尺烘焙（高 0.132m、半径 0.047m）、
+            // 底部原点，节点 localScale=(挤压, 液位01, 挤压) 即完成液位动画，不再需要位置补偿。
+            // 底部 −0.066 与旧圆柱满位底对齐，液位刻度块（见下）高度基准不变。
+            var fillGo = new GameObject("LiquidFill");
+            fillGo.transform.SetParent(backpackGo.transform, false);
+            fillGo.transform.localPosition = new Vector3(0f, -0.066f, 0f);
+            fillGo.AddComponent<MeshFilter>().sharedMesh = CreateTankFillMesh();
+            fillGo.AddComponent<MeshRenderer>().sharedMaterial = p.TeamLiquid;
             tankFill = fillGo.transform;
 
             CreateCylinder(backpackGo.transform, "TopCap", new Vector3(0f, 0.080f, 0f), new Vector3(0.120f, 0.008f, 0.120f), p.TankMetal);
             CreateCylinder(backpackGo.transform, "ValveKnob", new Vector3(0f, 0.093f, 0f), new Vector3(0.028f, 0.010f, 0.028f), p.Dark);
             CreateCylinder(backpackGo.transform, "BottomCap", new Vector3(0f, -0.080f, 0f), new Vector3(0.120f, 0.008f, 0.120f), p.TankMetal);
+
+            // 2.9.1 液位刻度块（25/50/75%）：±X 侧凸出液面剪影的小方齿，读数有参照刻度。
+            //     液面 span = ±0.066（与液面网格实尺一致）；凸缘内缘 0.052 > 液面最大鼓径 0.0498 不穿模。
+            //     静态件随背包合并（p.Dark 组），零额外 DrawCall。
+            var ticksGo = new GameObject("FillTicks");
+            ticksGo.transform.SetParent(backpackGo.transform, false);
+            for (int t = 0; t < 3; t++)
+            {
+                float tickY = -0.066f + 0.132f * (t + 1) / 4f; // 25/50/75%
+                CreateBox(ticksGo.transform, $"FillTick_{25 * (t + 1)}_L",
+                    new Vector3(-0.058f, tickY, 0f), new Vector3(0.012f, 0.010f, 0.014f), p.Dark);
+                CreateBox(ticksGo.transform, $"FillTick_{25 * (t + 1)}_R",
+                    new Vector3(0.058f, tickY, 0f), new Vector3(0.012f, 0.010f, 0.014f), p.Dark);
+            }
+
+            // 2.9.2 副武器墨量线（BombLine）：白色细环标出"还能不能扔雷"的墨量高度（HUD 阈值线同步到 3D），
+            //     高度由控制器按当前武器 BombInkCost 轮询重定位（动态件，不参与静态合并）。
+            var bombLineGo = CreateCylinder(backpackGo.transform, "BombLine", new Vector3(0f, 0.0066f, 0f), new Vector3(0.104f, 0.003f, 0.104f), p.White);
+            tankBombLine = bombLineGo.transform;
+
+            // 2.9.3 罐顶压力表（INKWAVE addTank gauge 简化移植，静态装饰）：暗壳 + 白盘 + 深色指针，
+            //     表盘朝后上（法线 ≈ (0, 0.62, -0.785)，即俯仰 -51.7°），从背后上方相机可读。
+            //     指针固定角度（Inkwave 亦为静态装饰，墨量读数由液面+刻度承担）。
+            var gaugeGo = new GameObject("TankGauge");
+            gaugeGo.transform.SetParent(backpackGo.transform, false);
+            gaugeGo.transform.localPosition = new Vector3(0f, 0.083f, -0.026f);
+            gaugeGo.transform.localRotation = Quaternion.Euler(-51.7f, 0f, 0f);
+            var gaugeHousing = CreateCylinder(gaugeGo.transform, "GaugeHousing", new Vector3(0f, 0f, 0.002f), new Vector3(0.030f, 0.0035f, 0.030f), p.Dark);
+            gaugeHousing.transform.localRotation = Quaternion.Euler(90f, 0f, 0f); // 圆柱轴 +Y → 表盘法线 +Z
+            var gaugeFace = CreateCylinder(gaugeGo.transform, "GaugeFace", new Vector3(0f, 0f, 0.005f), new Vector3(0.024f, 0.001f, 0.024f), p.White);
+            gaugeFace.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            var gaugeNeedle = CreateBox(gaugeGo.transform, "GaugeNeedle", new Vector3(0.001f, 0.0035f, 0.0062f), new Vector3(0.0015f, 0.009f, 0.0008f), p.Dark);
+            gaugeNeedle.transform.localRotation = Quaternion.Euler(0f, 0f, -50f);
 
             // 3. 两骨手臂 (LeftArm / RightArm)：肩枢轴挂胸腔骨（测试路径 Chest/LeftArm 保持）。
             //    这里的 authored 旋转只是"装配期占位"：真正的持握姿态在武器建好后由
@@ -2373,6 +2505,7 @@ namespace P1.Player
             public Transform RightEye;
             public Transform Backpack;
             public Transform TankFill;
+            public Transform TankBombLine;
             public Transform LeftArm;
             public Transform RightArm;
             public Transform LeftElbow;
@@ -2440,7 +2573,7 @@ namespace P1.Player
             MergeBodyRoot("Kid/Eye_R", refs.RightEye, null, true, result);
 
             // 背包：罐盖/阀钮/底板/玻璃腔；液面随墨水余量缩放，跳过
-            MergeBodyRoot("Kid/Backpack", refs.Backpack, Skips(refs.TankFill), false, result);
+            MergeBodyRoot("Kid/Backpack", refs.Backpack, Skips(refs.TankFill, refs.TankBombLine), false, result);
 
             // 手臂：肩球+短袖；肘枢轴（前臂/手/拇指/袖口）单独合并
             MergeBodyRoot("Kid/Arm_L", refs.LeftArm, Skips(refs.LeftElbow), false, result);

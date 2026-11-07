@@ -16,7 +16,8 @@ namespace P1.Tests
     /// <summary>
     /// [P8] 战前武器选择与换装运行时测试（PlayMode）：
     /// 1. Ready→Countdown 时本地玩家装备被准确替换；
-    /// 2. Bot 的武器配置完全不受玩家换装影响；
+    /// 2. Bot 的武器不受玩家换装影响（Bot 自己的武器由 BotLoadoutService 只在每局
+    ///    Countdown 抽一次卡，玩家中途换枪绝不能连带改动 Bot；见用例 2 的新语义）；
     /// 3. 非法索引（负数/超范围）安全回落为合法武器（默认 Shooter）。
     /// </summary>
     [Category("UI")]

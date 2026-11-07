@@ -36,6 +36,11 @@ namespace P1.Ink
         [Range(0f, 120f)]
         public float inkSheenSeconds = 22f;
 
+        [Tooltip("边缘先干偏置（着色读数，不改图集数据）：0 = 关闭（整片均匀干燥），" +
+                 "1 = 薄边缘（覆盖率低处，即墨迹外缘）显著更快失去湿润高光，读作墨迹从外缘向内收干")]
+        [Range(0f, 1f)]
+        public float inkEdgeDryBias = 0.5f;
+
         [Tooltip("单个墨斑铺开动画时长（秒）；0 = 立即出现。" +
                  "注意图集 G 通道时间戳只有 8bit（周期/256 ≈ 0.125s/级），动画时长接近或短于量化步长时" +
                  "时间戳误差会吃掉大半动画，读起来就是「落地后隔一下才看到墨」，所以保持 ≤0.1s")]
@@ -58,6 +63,12 @@ namespace P1.Ink
         [Tooltip("每个墨斑的色调微差强度：0 = 完全纯色，1 = 参考实现默认")]
         [Range(0f, 2f)]
         public float splatToneStrength = 1f;
+
+        [Tooltip("墨斑方向性拉伸的全局倍率：0 = 关闭（墨斑恒为圆盘+wobble），1 = 完全按 PaintCircle 传入的" +
+                 " directionXZ/stretch01 逐墨斑拉伸（主体沿喷射方向拉长、射线向前偏置）。" +
+                 "玩法网格判定不受影响，仍是正圆")]
+        [Range(0f, 2f)]
+        public float splatDirectionalStretch = 1f;
 
         [Tooltip("每帧最多绘制（含重绘）的墨斑数，超出者直接以完成态补画")]
         [Range(32, 384)]
@@ -91,6 +102,19 @@ namespace P1.Ink
         [Tooltip("墙面墨迹贴图上传频率（Hz）；0 = 每帧上传")]
         [Range(0f, 60f)]
         public float wallFlushHz = 30f;
+
+        [Header("墙面墨迹观感")]
+        [Tooltip("墙面墨迹色调微差强度（着色器程序化 hash，0 = 纯色，与地面 splatToneStrength 呼应）")]
+        [Range(0f, 2f)]
+        public float wallToneJitter = 1f;
+
+        [Tooltip("墙面湿润墨迹向下垂流的可见强度（0 = 关闭；湿墨下方拉出向下渐隐的细流）")]
+        [Range(0f, 2f)]
+        public float wallDripIntensity = 1f;
+
+        [Tooltip("墙面墨迹软边强度：0 = 保留格间硬边，1 = 与地面同级的 fwidth 软边")]
+        [Range(0f, 1f)]
+        public float wallEdgeSoftness = 1f;
 
         [Header("队伍与地面配色")]
         public Color neutralGroundColor = new Color(0.22f, 0.24f, 0.28f, 0.0f);

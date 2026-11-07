@@ -36,6 +36,12 @@ namespace P1.AI
         /// <summary>已经应用的难度档位（int.MinValue 表示尚未应用）。</summary>
         private int _appliedDifficulty = int.MinValue;
 
+        /// <summary>
+        /// 本局风格个性倍率（由 <see cref="BotLoadoutService"/> 每局抽取）。
+        /// 默认恒等：没有抽卡（训练场 / 测试沙盒）时行为与旧版完全一致。
+        /// </summary>
+        private BotPersonality _personality = BotPersonality.Identity;
+
         private InkCharacterMotor _motor;
         private WeaponController _weapon;
         private CombatantHealth _health;
@@ -118,6 +124,18 @@ namespace P1.AI
 
         public BotState State { get; private set; } = BotState.Paint;
         public string DebugTargetName => _targetEnemy != null ? _targetEnemy.name : "-";
+
+        /// <summary>
+        /// 本局昵称（INKWAVE 式：每局从名单洗牌发放）。
+        /// 未分配时为空，击杀播报回退到 GameObject 名（BotA_xx / BotB_xx）。
+        /// </summary>
+        public string DisplayName { get; private set; }
+
+        /// <summary>本局生效的风格个性倍率（调试/测试读取）。</summary>
+        public BotPersonality DebugPersonality => _personality;
+
+        /// <summary>场景序列化的原始 BotConfigSO（测试/工具用来区分「共享资产 vs 运行时克隆」）。</summary>
+        public BotConfigSO DebugBaseConfig => _baseConfig;
         public bool HasPath => _path.Count > 0;
         public float DebugAimYaw => _aim.AngleDegrees;
 
@@ -177,8 +195,9 @@ namespace P1.AI
         }
 
         /// <summary>
-        /// 按难度重建生效配置。普通档直接指向原始资产（零分配），
-        /// 其余档位克隆一份并按 <see cref="BotDifficultyMath"/> 的倍率缩放。
+        /// 按难度与个性重建生效配置。普通难度 + 恒等个性直接指向原始资产（零分配），
+        /// 其余档位克隆一份并按 <see cref="BotDifficultyMath"/> 的倍率缩放，
+        /// 再叠加本局 <see cref="BotPersonality"/> 的风格倍率（两层乘算都钳回合法区间）。
         /// 幂等：同一档位重复调用只做一次工作。
         /// </summary>
         private void ApplyDifficulty(int level)
@@ -192,6 +211,21 @@ namespace P1.AI
             BotConfigSO source = _baseConfig != null ? _baseConfig : config;
             _scaledConfig = BotDifficultyMath.CreateRuntimeConfig(source, normalized);
             config = _scaledConfig != null ? _scaledConfig : source;
+
+            if (!_personality.IsIdentity())
+            {
+                // 陷阱：普通难度下 CreateRuntimeConfig 原样返回共享 BotConfig.asset，
+                // 直接在它身上乘个性会永久污染全部 Bot（含后续对局）。非恒等个性必须落在私有克隆上。
+                if (_scaledConfig == null || _scaledConfig == _baseConfig)
+                {
+                    _scaledConfig = Object.Instantiate(source);
+                    _scaledConfig.name = source != null ? source.name + " (个性)" : "BotConfig (个性)";
+                    _scaledConfig.hideFlags = HideFlags.DontSave;
+                    config = _scaledConfig;
+                }
+
+                BotPersonalityMath.ApplyTo(config, _personality);
+            }
         }
 
         private void DestroyScaledConfig()
@@ -228,6 +262,33 @@ namespace P1.AI
                 ApplyDifficulty(GameSettingsService.BotDifficulty);
 
             RefreshPathWeights();
+        }
+
+        /// <summary>
+        /// 本局差异化武装（INKWAVE 式每局重抽）：换主武器、叠风格个性、发昵称。
+        /// 武器经 <see cref="WeaponController.EquipWeapon"/> 走 OnWeaponEquipped，
+        /// 角色外观（握持模型）与音频订阅方自动跟随；战术由 BotTactics 按 WeaponKind 自适应。
+        /// 复活不换枪：只有 <see cref="BotLoadoutService"/> 在每局 Countdown 时调用。
+        /// </summary>
+        /// <param name="weaponConfig">目标武器；null 时保留现装（例如资源缺失的兜底）。</param>
+        /// <param name="personality">风格个性倍率；恒等时行为与旧版一致。</param>
+        /// <param name="displayName">本局昵称；空串时保留旧值。</param>
+        public void AssignMatchLoadout(WeaponConfigSO weaponConfig, BotPersonality personality, string displayName)
+        {
+            if (!string.IsNullOrEmpty(displayName))
+                DisplayName = displayName;
+
+            if (weaponConfig != null && _weapon != null && _weapon.Config != weaponConfig)
+                _weapon.EquipWeapon(weaponConfig);
+
+            _personality = personality;
+
+            if (Application.isPlaying)
+            {
+                // 强制重建生效配置：难度克隆之外再叠个性层（ApplyDifficulty 内组合）。
+                _appliedDifficulty = int.MinValue;
+                ApplyDifficulty(GameSettingsService.BotDifficulty);
+            }
         }
 
         private void RefreshPathWeights()

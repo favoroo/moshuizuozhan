@@ -49,6 +49,14 @@ namespace P1.Tests
             yield return null;
         }
 
+        [UnityTearDown]
+        public IEnumerator RestoreLoadoutAutomation()
+        {
+            // 本类验证的是状态机本身；个别用例会临时关掉每局抽卡换取确定性，这里统一复位。
+            BotLoadoutService.AutoDraftEnabled = true;
+            yield return null;
+        }
+
         [UnityTest]
         public IEnumerator Bots_MoveSmoothly_AndKeepAimFinite()
         {
@@ -89,6 +97,9 @@ namespace P1.Tests
         [UnityTest]
         public IEnumerator LowHealthBot_EntersRetreat_AndBacksAwayFromThreat()
         {
+            // 本用例验撤退状态机：关掉每局抽卡保持全员同枪，避免蓄力狙等高伤武器
+            // 在开局交火里先把受害者打残（残血再吃 70 伤害会被直接击杀，与测试意图无关）。
+            BotLoadoutService.AutoDraftEnabled = false;
             yield return LoadAndStartMatch();
 
             BotController victim = null;
@@ -138,7 +149,8 @@ namespace P1.Tests
             yield return null;
             yield return null;
 
-            // 打到 30 HP：低于 40 的撤退阈值
+            // 先把受害者回满（开局交火可能有零星掉血），再打到 30 HP：低于 40 的撤退阈值
+            victimHealth.Heal(victimHealth.MaxHealth);
             bool killed = victimHealth.TakeDamage(70f, threatHealth.Team, threatPos);
             Assert.IsFalse(killed, "70 点伤害不应直接击杀满血 Bot");
             Assert.Less(victimHealth.CurrentHealth, 40f);

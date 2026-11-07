@@ -36,12 +36,15 @@ namespace P1.Player
         private bool _motorQueried;
         private float _lastHitSplashTime = -999f;
 
-        // P6-B 命中墨花门控：同一单位 50ms 内多次命中只炸一片（霰弹/连发聚合），
-        // 距相机 40m 外的战斗不炸（Inkwave _near(victim.pos, 40) 的同款取舍）
+        // P6-B 命中墨花门控：同一单位 50ms 内多次命中只炸一片（霰弹/连发聚合）。
+        // P30-C2：距离门控从 40m 放宽到 60m——竞技场对角线约 68m，旧值把中远距离交火的命中反馈全吞掉了；
+        // 被节流合并掉的命中改为「最小化墨花」，不再静默丢弃。
         private const float HitSplashMinInterval = 0.05f;
-        private const float HitSplashMaxDistanceSqr = 1600f;
+        private const float HitSplashMaxDistanceSqr = 3600f;
         private const float HitSplashChestHeight = 0.9f;
         private const float HitSplashDamageRefFallback = 60f;
+        /// <summary>被节流合并时的最小化墨花强度（单颗小粒子，约为完整墨花的 0.8 倍尺寸基准）。</summary>
+        private const float HitSplashMinimalScale = 0.8f;
 
         private static readonly int BaseColorProp = Shader.PropertyToID("_BaseColor");
 
@@ -398,18 +401,15 @@ namespace P1.Player
 
         /// <summary>
         /// P6-B 命中墨花（对齐 Inkwave hitSplash）：从受击者胸口沿弹道方向炸开一小片墨水，
-        /// 强度随伤害缩放；0.05s 节流 + 40m 距离门控，避免 8 人混战刷爆粒子池。
+        /// 强度随伤害缩放；0.05s 节流 + 60m 距离门控，避免 8 人混战刷爆粒子池。
+        /// P30-C2：距离门控放宽到 60m；被节流吞掉的命中降级为「最小化墨花」（单颗小粒子），
+        /// 连射时每一下仍有落点读数，但不会把完整特效路径（主喷 + 回溅 + 卫星珠 + 高光）刷成峰值。
         /// hitPoint 被丢弃的旧问题顺带修正：无 attacker 时用「受击点 → 身体中心」的反向近似弹道。
         /// </summary>
         private void SpawnHitSplashFeedback(float damage, Team attackerTeam, CombatantHealth attacker, Vector3 hitPoint)
         {
             if (VfxPool.Instance == null)
                 return;
-
-            float now = Time.time;
-            if (now - _lastHitSplashTime < HitSplashMinInterval)
-                return;
-            _lastHitSplashTime = now;
 
             Vector3 origin = transform.position + Vector3.up * HitSplashChestHeight;
             if (TopDownCameraFollow.Instance != null &&
@@ -428,16 +428,26 @@ namespace P1.Player
                 ? InkSurfaceController.Instance.GetTeamColor(attackerTeam)
                 : Color.white;
 
+            // P30-C2：先判断是否被 0.05s 节流合并；被合并的命中不再静默丢弃，而是补一颗最小墨花。
+            float now = Time.time;
+            if (now - _lastHitSplashTime < HitSplashMinInterval)
+            {
+                VfxPool.Instance.SpawnHitSpeck(origin, shotDir, color, HitSplashMinimalScale);
+                return;
+            }
+            _lastHitSplashTime = now;
+
             float damageRef = config != null && config.hitSplashDamageRef > 1f
                 ? config.hitSplashDamageRef
                 : HitSplashDamageRefFallback;
 
             // 白热高光只保留给「本地玩家打中」或「本地玩家被打中」：
-            // SpawnImpactFlash 是加法混合的米级软圆盘，8 人混战里全员命中都放的话，
+            // SpawnImpactFlash 是加法混合的软圆盘，8 人混战里全员命中都放的话，
             // 每个角色胸口都会烧成一团白光（再被 Bloom 放大成整片白），
             // 与 VfxPool.SpawnImpactFlash 注释里「只给本地玩家的命中用，避免全屏闪光污染」一致。
+            // P30-C2 起该高光的队色/alpha 已压暗，保留特效但不再过曝。
             bool highlight = IsLocalPlayer(this) || (attacker != null && IsLocalPlayer(attacker));
-            VfxPool.Instance.SpawnHitSplash(origin, shotDir, color, damage / damageRef, highlight);
+            VfxPool.Instance.SpawnHitSplash(origin, shotDir, color, damage / damageRef, highlight, attackerTeam);
         }
 
         private void Die(Team killerTeam)
@@ -466,7 +476,7 @@ namespace P1.Player
                         : Vector3.forward;
                     killDir.y = 0f;
                     killDir = killDir.sqrMagnitude > 0.0001f ? killDir.normalized : Vector3.forward;
-                    VfxPool.Instance.SpawnKillBurst(transform.position, killDir, c, deathSplatRadius);
+                    VfxPool.Instance.SpawnKillBurst(transform.position, killDir, c, deathSplatRadius, splatTeam);
                 }
             }
 
@@ -498,8 +508,22 @@ namespace P1.Player
 
             ClearHitFlash();
             SetVisualsAndCollidersActive(false);
+
+            // 击杀奖励的转移量必须在 OnKilled 之前捕获：订阅方的 WeaponController.HandleKilled 会把
+            // 未满大招能量减半，减半前的值才是「本次阵亡损失、应转给击杀者」的完整口径（KillRewardMath）。
+            float victimPreDeathSpecialPoints = 0f;
+            P1.Weapons.WeaponController victimWeapon = GetComponent<P1.Weapons.WeaponController>();
+            if (victimWeapon != null)
+            {
+                victimPreDeathSpecialPoints = victimWeapon.SpecialPoints;
+            }
+
             OnKilled?.Invoke(this, splatTeam);
             KillFeedEventHub.ReportCombatantDeath(this, splatTeam, _lastAttacker, _lastWeaponCause);
+
+            // 击杀奖励（固定能量 + 损失转移 + 一次性回墨）：环境死亡等无攻击者情形由服务内部跳过。
+            KillRewardService.AwardKill(_lastAttacker, this, victimPreDeathSpecialPoints);
+
             _lastAttacker = null;
             _lastWeaponCause = null;
         }

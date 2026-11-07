@@ -89,6 +89,11 @@ namespace P1.Ink
         private static readonly int GrowShrinkMetersProp = Shader.PropertyToID("_InkGrowShrinkMeters");
         private static readonly int GrowActiveProp = Shader.PropertyToID("_InkGrowActive");
 
+        // 边缘先干偏置（InkGround ForwardLit 湿润现算区读取）与墨斑方向性拉伸全局倍率（图集写入 Pass 读取）。
+        // 两者都是非 UnityPerMaterial 的全局 uniform（与 _InkWetDryingSeconds 等同一套传法）。
+        private static readonly int EdgeDryBiasProp = Shader.PropertyToID("_InkEdgeDryBias");
+        private static readonly int SplatDirStretchProp = Shader.PropertyToID("_InkSplatDirStretch");
+
         // 全局专供顶面采样（防止材质本身的 _InkTex 属性遮蔽全局贴图）
         private static readonly int GlobalInkAtlasTexProp = Shader.PropertyToID("_GlobalInkAtlasTex");
         private static readonly int GlobalInkMapOriginProp = Shader.PropertyToID("_GlobalInkMapOriginXZ");
@@ -276,7 +281,9 @@ namespace P1.Ink
 
             _atlas = new InkSplatAtlas(atlasSize, atlasOrigin, atlasRes, mipmaps, growSeconds, dryingSeconds,
                 wetClockPeriod: wetClockPeriod,
-                mipIntervalSeconds: config != null ? config.atlasMipIntervalSeconds : 0.5f);
+                mipIntervalSeconds: config != null ? config.atlasMipIntervalSeconds : 0.5f,
+                // 单帧绘制预算取 config.maxSplatsPerFrame（未配置 / 无 config 时回退 InkSplatAtlas.MaxQuads = 384）
+                maxSplatsPerFrame: config != null ? config.maxSplatsPerFrame : InkSplatAtlas.MaxQuads);
 
             // 图集内容不进序列化：重建后立刻清空一次，避免首帧读到未初始化显存
             _atlas.Clear();
@@ -408,7 +415,10 @@ namespace P1.Ink
         /// 由调用方在撞击点单独触发一条合并后的涟漪；
         /// <paramref name="decorated"/> = false 让图集只画平滑主体（不叠射线/卫星），
         /// 避免连续弹幕把地面涂成一团带刺的噪点；
-        /// <paramref name="visualRadiusScale"/> 只放大图集里的视觉墨斑，玩法网格半径保持不变（不改覆盖率）。
+        /// <paramref name="visualRadiusScale"/> 只放大图集里的视觉墨斑，玩法网格半径保持不变（不改覆盖率）；
+        /// <paramref name="directionXZ"/> = 墨斑沿地面拉伸方向（世界 XZ 平面，无需归一化，零向量 = 不拉伸）；
+        /// <paramref name="stretch01"/> = 该墨斑的拉伸强度建议值 0-1（随弹速提高），实际拉伸量还受
+        /// <see cref="InkGridConfigSO.splatDirectionalStretch"/> 全局倍率约束。玩法网格不受方向影响，仍是正圆。
         /// </summary>
         public int PaintCircle(
             Vector3 worldPos,
@@ -416,7 +426,9 @@ namespace P1.Ink
             Team team,
             bool emitRipple,
             bool decorated,
-            float visualRadiusScale = 1f)
+            float visualRadiusScale = 1f,
+            Vector2 directionXZ = default,
+            float stretch01 = 0f)
         {
             InitializeIfNeeded();
             int changed = _grid.PaintCircle(worldPos, radius, team);
@@ -425,7 +437,16 @@ namespace P1.Ink
             if (_atlas != null && team != Team.Neutral && radius > 0f)
             {
                 float visualRadius = radius * Mathf.Max(0.05f, visualRadiusScale);
-                _atlas.AddSplat(new Vector2(worldPos.x, worldPos.z), visualRadius, team, decorated);
+                // 方向性拉伸（A1）：方向/强度只进视觉图集（顶点 TEXCOORD2），
+                // 由 InkSurfaceOverlay 的 SDF 拉伸主体并把射线/卫星收进前向锥；
+                // 全局倍率见 InkGridConfigSO.splatDirectionalStretch，玩法网格与覆盖率完全不受影响。
+                _atlas.AddSplat(
+                    new Vector2(worldPos.x, worldPos.z),
+                    visualRadius,
+                    team,
+                    decorated,
+                    directionXZ,
+                    stretch01);
                 if (!Application.isPlaying)
                 {
                     // 编辑模式（Scaffolder 预览图）没有 LateUpdate，立刻出图
@@ -446,6 +467,24 @@ namespace P1.Ink
                 OnInkPainted?.Invoke(worldPos, radius, team, changed);
             }
             return changed;
+        }
+
+        /// <summary>
+        /// 装饰性小墨点：只写高分辨率视觉图集，**不写玩法网格、不计覆盖率、不进统计、不触发涟漪与充能**
+        /// （供「飞溅水珠落地补涂」等纯表现用途；调用方必须自行做每帧节流，避免挤占正式墨斑的图集配额）。
+        /// </summary>
+        public void PaintSpeckVisualOnly(Vector3 worldPos, float radius, Team team, bool decorated = false)
+        {
+            InitializeIfNeeded();
+            if (_atlas == null || team == Team.Neutral || radius <= 0f)
+            {
+                return;
+            }
+            _atlas.AddSplat(new Vector2(worldPos.x, worldPos.z), radius, team, decorated);
+            if (!Application.isPlaying)
+            {
+                _atlas.FlushImmediate();
+            }
         }
 
         /// <summary>
@@ -613,6 +652,11 @@ namespace P1.Ink
             Shader.SetGlobalFloat(GrowSecondsProp, config != null ? config.splatGrowSeconds : 0.08f);
             Shader.SetGlobalFloat(GrowShrinkMetersProp, config != null ? config.atlasGrowShrinkMeters : 0.18f);
             Shader.SetGlobalFloat(GrowActiveProp, _atlas != null && _atlas.HasGrowingSplats() ? 1f : 0f);
+            // 边缘先干偏置（0 = 关闭）与墨斑方向性拉伸全局倍率：只影响着色 / 图集绘制读数，
+            // 不参与玩法网格判定与覆盖率。两项都在这里每帧推送，改 config 立刻生效（无需重建图集）。
+            Shader.SetGlobalFloat(EdgeDryBiasProp, config != null ? Mathf.Clamp01(config.inkEdgeDryBias) : 0f);
+            Shader.SetGlobalFloat(SplatDirStretchProp,
+                config != null ? Mathf.Clamp(config.splatDirectionalStretch, 0f, 2f) : 1f);
         }
 
         private void UpdateDynamicMaterialProperties()

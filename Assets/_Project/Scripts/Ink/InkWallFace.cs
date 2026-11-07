@@ -48,7 +48,21 @@ namespace P1.Ink
         public Color32[] PixelBuffer => _pixels;
         public string Name { get; }
 
+        /// <summary>卫星墨点概率倍率：InkWallSurface 用 config.wallEdgeSoftness × 该值作为每发落墨的卫星概率。</summary>
+        public const float SatelliteChanceScale = 0.4f;
+
+        /// <summary>卫星墨点 alpha 上限：必须低于 InkWall.shader 的 0.5 墨迹核心阈值，只读作半透明湿墨点。</summary>
+        private const float SatelliteMaxAlpha = 0.46f;
+
+        /// <summary>
+        /// 落墨时补画 1~3 个卫星小墨点的概率（0 = 关闭，逐区域有机化形状）。
+        /// 卫星盘只写 Neutral 格的像素 alpha，绝不修改 _owners，
+        /// 因此 <see cref="InkAt"/> / 潜墨爬墙判定完全不受影响（可爬区域不会凭空扩大）。
+        /// </summary>
+        public float SatelliteChance { get; set; }
+
         private bool _hasInk;
+        private uint _satelliteRng;
         private readonly byte[] _owners;
         private readonly Color32[] _pixels;
         private readonly Color32 _neutralColor;
@@ -74,6 +88,10 @@ namespace P1.Ink
                 throw new ArgumentOutOfRangeException(nameof(cellSize), "墙面格边长必须为正");
 
             Name = name;
+            // 卫星墨点 RNG：按面名扰动种子（xorshift32，零 GC、不碰 UnityEngine.Random 全局状态）
+            _satelliteRng = 0x9E3779B9u ^ (uint)(name != null ? name.GetHashCode() : 0);
+            if (_satelliteRng == 0u)
+                _satelliteRng = 0x9E3779B9u;
             OriginWorld = originWorld;
             UAxis = uAxis.normalized;
             VAxis = vAxis.normalized;
@@ -226,6 +244,14 @@ namespace P1.Ink
             {
                 _hasInk = true;
                 IsDirty = true;
+
+                // B2-5 有机墨斑：按概率在主圆盘外补 1~3 个卫星小墨点（纯视觉层）。
+                // 硬预算 = 主圆盘新增归属格数的 20%：墙面脏格数与上传量不会因卫星盘显著上涨。
+                int satelliteBudget = Mathf.FloorToInt(changed * 0.2f);
+                if (satelliteBudget > 0 && SatelliteChance > 0f)
+                {
+                    PaintSatellites(centerFacePoint, radiusMeters, baseColor, satelliteBudget);
+                }
             }
 
             return changed;
@@ -235,6 +261,111 @@ namespace P1.Ink
         public int PaintCircleWorld(Vector3 worldPoint, float radiusMeters, Team team)
         {
             return PaintCircle(WorldToFace(worldPoint), radiusMeters, team);
+        }
+
+        /// <summary>
+        /// B2-5：按概率补画 1~3 个卫星小墨点。只写视觉像素（Neutral 格），不改归属；
+        /// budget = 本次落墨允许新增的脏格上限（主圆盘 changed 的 20%）。
+        /// </summary>
+        private void PaintSatellites(Vector2 center, float radius, Color32 baseColor, int budget)
+        {
+            if (budget <= 0 || SatelliteChance <= 0f)
+                return;
+
+            if (NextSatelliteRandom() > SatelliteChance)
+                return;
+
+            int count = 1 + (int)(NextSatelliteRandom() * 2.999f); // 1~3 个
+            int written = 0;
+            for (int i = 0; i < count && written < budget; i++)
+            {
+                float angle = NextSatelliteRandom() * Mathf.PI * 2f;
+                // 偏移贴外缘（0.72R~0.80R，仍满足 ≤0.8R 上限）且半径取 0.34R~0.50R：
+                // 卫星盘最容易越过主圆盘的边缘过渡环，真正改写轮廓而不是被主圆盘吞掉
+                float offset = radius * (0.72f + NextSatelliteRandom() * 0.08f);
+                float satRadius = radius * (0.34f + NextSatelliteRandom() * 0.16f);
+
+                // 卫星盘半径不足 1/3 格时连格心都盖不到，直接跳过（省扫描）
+                if (satRadius < CellSize * 0.3f)
+                    continue;
+
+                Vector2 satCenter = new Vector2(
+                    center.x + Mathf.Cos(angle) * offset,
+                    center.y + Mathf.Sin(angle) * offset);
+
+                written += PaintSatelliteDisc(satCenter, satRadius, baseColor, budget - written);
+            }
+        }
+
+        /// <summary>
+        /// 画一个纯视觉卫星墨点：只碰 owner=Neutral 的格子，alpha 上限 SatelliteMaxAlpha
+        /// （低于 shader 的 0.5 墨迹核心阈值）。返回实际提升 alpha 的格子数。
+        /// </summary>
+        private int PaintSatelliteDisc(Vector2 center, float radius, Color32 baseColor, int budget)
+        {
+            if (budget <= 0 || radius <= 0f)
+                return 0;
+
+            if (center.x + radius < 0f || center.x - radius > WorldWidth ||
+                center.y + radius < 0f || center.y - radius > WorldHeight)
+            {
+                return 0;
+            }
+
+            int minX = Mathf.Max(0, Mathf.FloorToInt((center.x - radius) / CellWidth) - 1);
+            int maxX = Mathf.Min(Width - 1, Mathf.FloorToInt((center.x + radius) / CellWidth) + 1);
+            int minY = Mathf.Max(0, Mathf.FloorToInt((center.y - radius) / CellHeight) - 1);
+            int maxY = Mathf.Min(Height - 1, Mathf.FloorToInt((center.y + radius) / CellHeight) + 1);
+
+            float rSq = radius * radius;
+            float halfDiag = 0.5f * Mathf.Sqrt(CellWidth * CellWidth + CellHeight * CellHeight);
+            float invFade = 1f / Mathf.Max(0.0001f, 2f * halfDiag);
+            int written = 0;
+
+            for (int y = minY; y <= maxY; y++)
+            {
+                float cy = (y + 0.5f) * CellHeight;
+                float dy = cy - center.y;
+                int rowOffset = y * Width;
+
+                for (int x = minX; x <= maxX; x++)
+                {
+                    if (written >= budget)
+                        return written;
+
+                    int idx = rowOffset + x;
+
+                    // 玩法判定层（_owners）不参与：已归属的格子（无论敌我）像素一律不动
+                    if (_owners[idx] != (byte)Team.Neutral)
+                        continue;
+
+                    float cx = (x + 0.5f) * CellWidth;
+                    float dx = cx - center.x;
+                    float distSq = dx * dx + dy * dy;
+                    if (distSq > rSq)
+                        continue;
+
+                    float coverage = Mathf.Clamp01((radius - Mathf.Sqrt(distSq)) * invFade + 0.5f) * SatelliteMaxAlpha;
+                    byte a = (byte)Mathf.Clamp(Mathf.RoundToInt(coverage * 255f), 0, 255);
+                    if (a <= _pixels[idx].a)
+                        continue;
+
+                    _pixels[idx] = WithAlpha(baseColor, coverage);
+                    IsDirty = true;
+                    written++;
+                }
+            }
+
+            return written;
+        }
+
+        /// <summary>xorshift32 → [0,1]；零 GC，同一面同一调用序列可复现。</summary>
+        private float NextSatelliteRandom()
+        {
+            _satelliteRng ^= _satelliteRng << 13;
+            _satelliteRng ^= _satelliteRng >> 17;
+            _satelliteRng ^= _satelliteRng << 5;
+            return (_satelliteRng & 0x00FFFFFFu) / 16777215f;
         }
 
         /// <summary>墙面米制坐标处的墨水归属。</summary>

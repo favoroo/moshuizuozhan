@@ -99,14 +99,58 @@ float4 P1InkSplatKindShape(float k)
     return float4(10.0, 12.0, 14.0, 0.0);              // 兜底
 }
 
+// ---- 方向性拉伸（A1）：逐墨斑沿喷射方向做各向异性塑形 ----
+// 全局倍率（InkGridConfigSO.splatDirectionalStretch，由 InkSurfaceController 每帧 SetGlobalFloat 推送）。
+// 逐墨斑强度先乘它再 saturate 到 0..1：0 = 关闭（所有墨斑恒为圆盘 + wobble，与旧版逐位一致）。
+float _InkSplatDirStretch;
+
+#define P1_INK_STRETCH_LONG_FWD  0.60   // 前沿（喷射方向）拉长比例：满强度 +60%
+#define P1_INK_STRETCH_LONG_BACK 0.15   // 后沿拉长比例：只轻微拖尾，避免读成"前后对称的椭圆"
+#define P1_INK_STRETCH_LAT_COMP  0.15   // 横向压扁比例：满强度 -15%，让拉长读作"被喷出去"而不是整体放大
+#define P1_INK_STRETCH_CONE      2.5    // 满强度时装饰件收进 ±1.25rad（≈±72°）的前向锥
+
+// 把「距墨斑中心的世界 XZ 米制偏移」映射进拉伸后的 SDF 空间：
+// 沿 dir 的分量除以拉长系数、垂直分量除以横向压扁系数 → 在该空间求值得到的等值面
+// 就是「沿 dir 拉长、横向压扁」的墨斑（与 INKWAVE paint.js 的 smear 同构：前沿拉得多、后沿拉得少）。
+float2 P1InkSplatStretchLocal(float2 p0, float2 dir, float stretch01)
+{
+    float along = dot(p0, dir);
+    float2 perp = p0 - dir * along;
+    float sLong = along >= 0.0
+        ? 1.0 + P1_INK_STRETCH_LONG_FWD * stretch01
+        : 1.0 + P1_INK_STRETCH_LONG_BACK * stretch01;
+    float sLat = 1.0 - P1_INK_STRETCH_LAT_COMP * stretch01;
+    return dir * (along / sLong) + perp / sLat;
+}
+
 // 墨斑最终形态的 SDF（等价旧实现 tn=1.6 饱和态：主体满半径、射线全长、卫星全落、细雾全出）
 // inkTexelMeters = 图集纹素边长（米），由调用方从 UnityPerMaterial._InkTexelMeters 传入。
-float P1InkSplatDistance(float2 p0, float radius, float seed, float kind, float inkTexelMeters)
+// stretchDir = 单位拉伸方向（世界 XZ），stretch01 = 0..1 拉伸强度（已乘全局倍率并 clamp）。
+//   stretch01 = 0 时 p 原样使用、射线/卫星/细雾角度沿用旧公式 → 与旧实现逐位一致（回归安全）。
+float P1InkSplatDistanceDir(float2 p0, float radius, float seed, float kind, float inkTexelMeters,
+                            float2 stretchDir, float stretch01)
 {
     float r = radius;
     float4 ks = P1InkSplatKindShape(kind);
     bool big = kind > 2.5;
-    float sd = length(p0) - r * P1InkSplatWob(atan2(p0.y, p0.x), seed);
+    bool stretched = stretch01 > 0.0001;
+
+    // 主体与所有装饰件都在拉伸后的局部空间求值：一次坐标变换就把整枚墨斑拉长压扁
+    //（decorated = false 的平滑尾迹同样走这里，所以主体也会拉伸）。
+    float2 p = p0;
+    if (stretched)
+        p = P1InkSplatStretchLocal(p0, stretchDir, stretch01);
+
+    // 拉伸时装饰件不再整圈均匀铺开，而是收进以喷射方向为轴的前向锥（读作"顺着弹道溅出去"）。
+    float dirAngle = 0.0;
+    float spread = 6.2831853;
+    if (stretched)
+    {
+        dirAngle = atan2(stretchDir.y, stretchDir.x);
+        spread = lerp(6.2831853, P1_INK_STRETCH_CONE, saturate(stretch01 * 1.2));
+    }
+
+    float sd = length(p) - r * P1InkSplatWob(atan2(p.y, p.x), seed);
 
     // ---- 射线：短锥形墨刺，末端收成一颗小墨珠（全长）----
     [loop]
@@ -117,15 +161,17 @@ float P1InkSplatDistance(float2 p0, float radius, float seed, float kind, float 
         float h1 = P1InkSplatHsh(seed * 7.31 + fi * 1.93);
         float h2 = P1InkSplatHsh(seed * 3.17 + fi * 5.71);
         float h3 = P1InkSplatHsh(seed * 11.3 + fi * 2.39);
-        float a = (fi + 0.35 + 0.6 * h1) / ks.x * 6.2831 + seed * 6.2831;
+        float a = stretched
+            ? dirAngle + (h1 - 0.5) * spread
+            : (fi + 0.35 + 0.6 * h1) / ks.x * 6.2831 + seed * 6.2831;
         float2 u = float2(cos(a), sin(a));
         float edge = r * P1InkSplatWob(a, seed);
         float len = r * (0.07 + (big ? 0.5 : 0.34) * h2 * h2 * h2);
         float wB = r * (0.055 + 0.06 * h3);
         float tipR = max(r * (0.012 + 0.012 * h3), inkTexelMeters * 0.45);
         float2 tip = u * (edge + len) + float2(-u.y, u.x) * len * 0.18 * (h1 - 0.5);
-        float ray = min(P1InkSplatSdRay(p0, u * edge * 0.72, tip, wB, tipR),
-                        length(p0 - tip) - tipR * (1.6 + 1.4 * h2));
+        float ray = min(P1InkSplatSdRay(p, u * edge * 0.72, tip, wB, tipR),
+                        length(p - tip) - tipR * (1.6 + 1.4 * h2));
         sd = P1InkSplatSmin(sd, ray, r * 0.06);
     }
 
@@ -138,11 +184,18 @@ float P1InkSplatDistance(float2 p0, float radius, float seed, float kind, float 
         float h1 = P1InkSplatHsh(seed * 13.1 + fj * 7.7);
         float h2 = P1InkSplatHsh(seed * 5.3 + fj * 3.1);
         float h3 = P1InkSplatHsh(seed * 9.9 + fj * 1.7);
-        float a2 = h1 * 6.2831;
+        // 拉伸时卫星滴与前向锥对齐（不再绕整圈），并沿各自飞行线拉成短 streak
+        float a2 = stretched ? dirAngle + (h1 - 0.5) * spread : h1 * 6.2831;
         float2 u = float2(cos(a2), sin(a2));
         float dist = r * (1.1 + (big ? 1.05 : 0.8) * h2 * h2);
         float rad = r * (0.028 + 0.085 * h3) * (1.0 - 0.4 * h2) * (big ? 0.8 : 1.0);
-        float2 q = p0 - u * dist;
+        float2 q = p - u * dist;
+        if (stretched)
+        {
+            // 距离不变，只把墨滴本体沿 u 拉长（1/el 压缩 q 的 u 分量 = 形状沿 u 放大 el 倍）
+            float el = 1.0 + (0.5 + 1.6 * stretch01) * h2;
+            q -= u * dot(q, u) * (1.0 - 1.0 / el);
+        }
         sd = P1InkSplatSmin(sd, length(q) - rad, rad * 0.8);
     }
 
@@ -155,12 +208,18 @@ float P1InkSplatDistance(float2 p0, float radius, float seed, float kind, float 
         float h1 = P1InkSplatHsh(seed * 17.9 + fk * 4.13);
         float h2 = P1InkSplatHsh(seed * 2.71 + fk * 8.09);
         float h3 = P1InkSplatHsh(seed * 6.47 + fk * 3.37);
-        float a3 = h1 * 6.2831;
+        float a3 = stretched ? dirAngle + (h1 - 0.5) * spread * 1.15 : h1 * 6.2831;
         float2 u = float2(cos(a3), sin(a3));
         float rad = max(r * (0.011 + 0.02 * h3), inkTexelMeters * 0.9);
-        sd = min(sd, length(p0 - u * r * (1.3 + 1.2 * h2)) - rad);
+        sd = min(sd, length(p - u * r * (1.3 + 1.2 * h2)) - rad);
     }
     return sd;
+}
+
+// 旧签名（无方向性拉伸）：等价于 stretch = 0 的新实现，内部走与旧版完全相同的算术路径。
+float P1InkSplatDistance(float2 p0, float radius, float seed, float kind, float inkTexelMeters)
+{
+    return P1InkSplatDistanceDir(p0, radius, seed, kind, inkTexelMeters, float2(1.0, 0.0), 0.0);
 }
 
 // 与旧实现一致的低 alpha 剔除阈值 + 至少 1.5 texel 的柔和边缘。
@@ -184,6 +243,7 @@ struct P1InkAtlasAttributes
     float4 positionOS : POSITION;   // 单位四边面片 [-1,1]^2
     float4 splatA     : TEXCOORD0;  // xy = 中心图集 UV, z = 半径(米), w = 队伍(0/1)
     float4 splatB     : TEXCOORD1;  // x = 随机种子, y = 种类, z = 归一化落墨时间戳, w = 四边面覆盖倍数
+    float2 splatDir   : TEXCOORD2;  // 单位拉伸方向 × 强度（世界 XZ，长度 0 = 不拉伸；见 P1InkSplatDistanceDir）
 };
 
 struct P1InkAtlasVaryings
@@ -192,7 +252,41 @@ struct P1InkAtlasVaryings
     float2 local      : TEXCOORD0;  // 距 splat 中心的米制偏移
     float4 splatA     : TEXCOORD1;
     float4 splatB     : TEXCOORD2;
+    float2 splatDir   : TEXCOORD3;  // 同 P1InkAtlasAttributes.splatDir（四顶点同值，插值恒等）
 };
+
+// 解包顶点携带的 (方向 × 强度)：返回单位方向 + 已乘全局倍率并 clamp 到 0..1 的强度。
+// 零向量（不拉伸）时方向回退 (1,0)、强度 0，调用方据此走无拉伸分支。
+void P1InkSplatDecodeStretch(float2 packedStretch, out float2 dir, out float stretch01)
+{
+    float len = length(packedStretch);
+    stretch01 = saturate(min(len, 1.0) * max(0.0, _InkSplatDirStretch));
+    dir = len > 1e-5 ? packedStretch / len : float2(1.0, 0.0);
+}
+
+// 方向性拉伸的四边形包络（A1）：把单位面片 [-1,1]^2 的半幅扩到能包住拉长后的主体与装饰件。
+// 返回 (1,1) 表示无需扩面片 —— 调用方此时必须保持旧的 offsetMeters 表达式不变（逐位回归安全）。
+// 用椭圆支撑函数 sqrt((sLong·dir)² + (sLat·perp)²) 求世界 X/Z 轴上的最大投影，再 clamp ≥ 1：
+// 只放大不缩小，避免极端方向下把卫星滴/射线裁在面片外。
+float2 P1InkSplatQuadEnvelope(float2 packedStretch)
+{
+    float2 env = float2(1.0, 1.0);
+    float2 dir;
+    float stretch01;
+    P1InkSplatDecodeStretch(packedStretch, dir, stretch01);
+    if (stretch01 <= 0.0001)
+        return env;
+
+    float sLong = 1.0 + P1_INK_STRETCH_LONG_FWD * stretch01;
+    float sLat = 1.0 - P1_INK_STRETCH_LAT_COMP * stretch01;
+    float alongX = sLong * dir.x;
+    float alongY = sLong * dir.y;
+    float latX = sLat * dir.y;   // perp = (-dir.y, dir.x)
+    float latY = sLat * dir.x;
+    env.x = sqrt(alongX * alongX + latX * latX);
+    env.y = sqrt(alongY * alongY + latY * latY);
+    return max(env, float2(1.0, 1.0));
+}
 
 static float _P1TopInkContactShadowTerm = 0.0;
 

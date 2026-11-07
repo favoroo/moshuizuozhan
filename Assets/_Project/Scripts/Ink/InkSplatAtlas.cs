@@ -26,14 +26,17 @@ namespace P1.Ink
     public sealed class InkSplatAtlas : IDisposable
     {
         /// <summary>
-        /// 单帧最多绘制的墨斑数量（顶点/索引缓冲与网格容量上限）。
-        /// 超出部分不再丢弃：留在待绘制队列里由后续帧继续画（<see cref="Advance"/>）。
+        /// 顶点/索引缓冲与网格的容量下限（同时也是缺省单帧绘制预算）。
+        /// 实际每帧预算见 <see cref="PerFrameBudget"/>（取 <see cref="InkGridConfigSO.maxSplatsPerFrame"/>）；
+        /// 超出预算的墨斑不再丢弃：留在待绘制队列里由后续帧继续画（<see cref="Advance"/>）。
         /// </summary>
         public const int MaxQuads = 384;
 
         /// <summary>
-        /// 待绘制队列容量上限。因为每帧都会消费最多 <see cref="MaxQuads"/> 枚，正常节奏下装不下；
-        /// 只有同一帧内瞬间落墨超过此数（超大范围必杀 / 清场）才会触发丢最旧策略。
+        /// 待绘制队列的**缺省**容量（两帧预算）。实例容量见构造时定死的 <see cref="_pendingCapacity"/>
+        /// （= max(<see cref="InkGridConfigSO.maxSplatsPerFrame"/>, MaxQuads) × 2），此常量只在预算取缺省值时相等。
+        /// 因为每帧都会消费最多一帧预算枚，正常节奏下装不下；
+        /// 只有同一帧内瞬间落墨超过容量（超大范围必杀 / 清场）才会触发丢最旧策略。
         /// </summary>
         public const int PendingCapacity = MaxQuads * 2;
 
@@ -54,6 +57,13 @@ namespace P1.Ink
             public float Kind;
             public float Reach;
             public float BirthTime;   // Time.time 时基，与片元 _InkWetClockNorm 一致（暂停时湿度同步冻结）
+
+            /// <summary>
+            /// 方向性拉伸：单位拉伸方向 × 强度（世界 XZ；长度 0~1 即强度，零向量 = 不拉伸）。
+            /// 打包成两个 float 直接进顶点 TEXCOORD2，着色器无需反解三角函数；
+            /// 只影响视觉图集，玩法网格（<see cref="InkGrid"/>）判定仍是正圆。
+            /// </summary>
+            public Vector2 Stretch;
         }
 
         private static readonly float[] KindReach = { 1.9f, 2.3f, 2.5f, 2.7f, 2.75f };
@@ -84,10 +94,20 @@ namespace P1.Ink
         // 仅作 ActiveSplatCount 诊断计数用：只记录「已真正提交绘制」且在生长窗口内的墨斑
         private readonly List<Splat> _active = new List<Splat>(256);
 
-        private readonly List<Vector3> _verts = new List<Vector3>(MaxQuads * QuadVerts);
-        private readonly List<Vector4> _uv0 = new List<Vector4>(MaxQuads * QuadVerts);
-        private readonly List<Vector4> _uv1 = new List<Vector4>(MaxQuads * QuadVerts);
-        private readonly int[] _indices = new int[MaxQuads * 6];
+        private readonly List<Vector3> _verts;
+        private readonly List<Vector4> _uv0;
+        private readonly List<Vector4> _uv1;
+        // TEXCOORD2 = 方向性拉伸（单位方向 × 强度）。与 splatA/splatB 分开一个通道，
+        // 避免改动既有通道的位宽与语义（stretch = 0 时整条链路逐位退化为旧行为）。
+        private readonly List<Vector2> _uv2;
+        private readonly int[] _indices;
+
+        // ---- 单帧绘制预算与缓冲容量（config.maxSplatsPerFrame 接线）----
+        // 容量在构造时取 max(配置值, MaxQuads) 后**定死**：_indices/_uv* 一次性分配，
+        // 不支持运行时改容量（改 config.maxSplatsPerFrame 只影响每帧预算，容量变化需重建 InkSplatAtlas）。
+        private readonly int _quadCapacity;
+        private readonly int _perFrameBudget;
+        private readonly int _pendingCapacity;
 
         private readonly Vector2 _mapSize;
         private readonly Vector2 _originXZ;
@@ -120,6 +140,12 @@ namespace P1.Ink
 
         /// <summary>当前仍在等待绘制（尚未提交进图集）的墨斑数：单帧预算排不下时会跨帧积压。</summary>
         public int PendingSplatCount => _pending.Count - _pendingHead;
+
+        /// <summary>单帧绘制预算（构造时由 `config.maxSplatsPerFrame` 定死；未配置回退 <see cref="MaxQuads"/>）。</summary>
+        public int PerFrameBudget => _perFrameBudget;
+
+        /// <summary>顶点/索引缓冲容量 = max(单帧预算, <see cref="MaxQuads"/>)，构造后不可变。</summary>
+        public int QuadCapacity => _quadCapacity;
 
         /// <summary>
         /// 单帧绘制预算规划：给定待绘制数量与单帧上限，给出本帧应绘制数量与剩余数量。
@@ -163,6 +189,10 @@ namespace P1.Ink
         /// <param name="dryHz">兼容保留：旧「按 dryHz 定时全屏烘干」已删除，湿润度由片元现算，此参数不再使用。</param>
         /// <param name="dryingSeconds">兼容保留：烘干时长只被地面片元消费（全局 _InkWetDryingSeconds），此处不再使用。</param>
         /// <param name="wetClockPeriod">湿润时间戳回绕周期（秒），需与 InkSurfaceController 推送的 _InkWetClockPeriod 一致。</param>
+        /// <param name="maxSplatsPerFrame">
+        /// 每帧绘制预算（<see cref="InkGridConfigSO.maxSplatsPerFrame"/>）；≤0 回退 <see cref="MaxQuads"/>。
+        /// 缓冲容量取 max(此值, <see cref="MaxQuads"/>) 并在构造时定死：不支持运行时扩容（需重建图集）。
+        /// </param>
         public InkSplatAtlas(
             Vector2 mapSize,
             Vector2 originXZ,
@@ -172,13 +202,26 @@ namespace P1.Ink
             float dryingSeconds,
             float dryHz = 15f,
             float wetClockPeriod = DefaultWetClockPeriod,
-            float mipIntervalSeconds = 0.25f)
+            float mipIntervalSeconds = 0.25f,
+            int maxSplatsPerFrame = 0)
         {
             _mapSize = new Vector2(Mathf.Max(0.01f, mapSize.x), Mathf.Max(0.01f, mapSize.y));
             _originXZ = originXZ;
             _growSeconds = Mathf.Max(0f, growSeconds);
             _wetClockPeriod = Mathf.Clamp(wetClockPeriod, 4f, 600f);
             _mipIntervalSeconds = Mathf.Clamp(mipIntervalSeconds, 0.1f, 5f);
+
+            // 预算与容量：预算决定每帧真正画几枚（超出者留队列跨帧补画）；
+            // 容量是顶点/索引缓冲的物理上限，取 max(预算, MaxQuads) 后定死。
+            _perFrameBudget = maxSplatsPerFrame > 0 ? maxSplatsPerFrame : MaxQuads;
+            _quadCapacity = Mathf.Max(_perFrameBudget, MaxQuads);
+            _pendingCapacity = _quadCapacity * 2;
+
+            _verts = new List<Vector3>(_quadCapacity * QuadVerts);
+            _uv0 = new List<Vector4>(_quadCapacity * QuadVerts);
+            _uv1 = new List<Vector4>(_quadCapacity * QuadVerts);
+            _uv2 = new List<Vector2>(_quadCapacity * QuadVerts);
+            _indices = new int[_quadCapacity * 6];
 
             int size = Mathf.Clamp(resolution, 128, 8192);
 
@@ -269,7 +312,7 @@ namespace P1.Ink
             _quadMesh = BuildQuadMesh();
             _instantQuadMesh = BuildQuadMesh();
 
-            for (int q = 0; q < MaxQuads; q++)
+            for (int q = 0; q < _quadCapacity; q++)
             {
                 int v = q * QuadVerts;
                 int i = q * 6;
@@ -344,6 +387,24 @@ namespace P1.Ink
         /// </summary>
         public void AddSplat(Vector2 centerXZ, float radius, Team team, bool decorated)
         {
+            AddSplat(centerXZ, radius, team, decorated, default, 0f);
+        }
+
+        /// <summary>
+        /// 记录一次落墨，并带上「方向性拉伸」数据（视觉层专有，玩法网格判定仍是正圆）。
+        /// <paramref name="directionXZ"/> = 世界 XZ 平面的拉伸方向（无需归一化，零向量 = 不拉伸）；
+        /// <paramref name="stretch01"/> = 该墨斑的拉伸强度 0~1（随弹速提高），最终拉伸量还要乘
+        /// <see cref="InkGridConfigSO.splatDirectionalStretch"/> 全局倍率（着色器侧读取）。
+        /// 主体沿方向拉长、横向略压扁，射线 / 卫星滴收进前向锥并沿飞行线拉成短 streak。
+        /// </summary>
+        public void AddSplat(
+            Vector2 centerXZ,
+            float radius,
+            Team team,
+            bool decorated,
+            Vector2 directionXZ,
+            float stretch01)
+        {
             if (_disposed || !_shaderReady || radius <= 0.001f || team == Team.Neutral)
                 return;
 
@@ -358,10 +419,11 @@ namespace P1.Ink
                 Seed = MakeSeed(centerXZ, radius),
                 Kind = kind,
                 Reach = reach,
-                BirthTime = birth
+                BirthTime = birth,
+                Stretch = PackStretch(directionXZ, stretch01)
             };
 
-            int drop = PendingOverflowDropCount(PendingSplatCount + 1, PendingCapacity);
+            int drop = PendingOverflowDropCount(PendingSplatCount + 1, _pendingCapacity);
             if (drop > 0)
             {
                 // 队列满：丢最旧的若干枚（保证最新的涂地一定能显示）。
@@ -377,6 +439,23 @@ namespace P1.Ink
         }
 
         /// <summary>
+        /// 方向 + 强度 → 顶点携带的「单位方向 × 强度」（长度 0~1，零向量 = 不拉伸）。
+        /// 输入方向无需归一化；NaN / 零向量 / 非正强度一律返回零向量（着色器完全跳过拉伸分支）。
+        /// </summary>
+        private static Vector2 PackStretch(Vector2 directionXZ, float stretch01)
+        {
+            float strength = Mathf.Clamp01(stretch01);
+            if (strength <= 0.0001f)
+                return Vector2.zero;
+
+            float len = directionXZ.magnitude;
+            if (len <= 1e-4f || float.IsNaN(len))
+                return Vector2.zero;
+
+            return directionXZ * (strength / len);
+        }
+
+        /// <summary>
         /// 是否仍有墨斑处于生长窗口（growSeconds × 1.6）内。
         /// InkSurfaceController 据此开启地面片元的生长侵蚀；窗口结束或 growSeconds=0 时恒为 false。
         /// </summary>
@@ -389,7 +468,7 @@ namespace P1.Ink
         /// <summary>
         /// 每帧调用一次（LateUpdate）：仅当本帧有新落墨（或需要清屏 / 内容变化后重建 mip）时才提交绘制。
         /// 烘干与生长动画都在地面片元里按时间戳现算，空闲帧零 GPU 提交、零命令缓冲构建。
-        /// 单帧最多消费 <see cref="MaxQuads"/> 枚待绘制墨斑，剩余的留到后续帧继续画（不丢墨）。
+        /// 单帧最多消费 <see cref="PerFrameBudget"/> 枚待绘制墨斑，剩余的留到后续帧继续画（不丢墨）。
         /// </summary>
         public void Advance()
         {
@@ -398,10 +477,10 @@ namespace P1.Ink
 
             float now = Time.time;
 
-            // 单帧预算：BuildMesh / _indices 只装得下 MaxQuads 个 quad。
+            // 单帧预算 = config.maxSplatsPerFrame（构造时定死）；BuildMesh / _indices 只装得下 _quadCapacity 个 quad。
             // 旧版把 _pending 一次性搬进 _active 再 Clear，超出的墨斑既不绘制也不再排队 → 永久丢墨
             // （玩法网格与覆盖率已经算上，玩家读作「涂了不显示」）。现在改为分批消费：剩余留到下一帧。
-            PlanDrawBatch(PendingSplatCount, MaxQuads, out int drawCount, out _);
+            PlanDrawBatch(PendingSplatCount, _perFrameBudget, out int drawCount, out _);
             bool hasDraw = drawCount > 0;
 
             // 只把「本帧真正提交绘制」的墨斑计入诊断队列（生长动画由片元按时间戳驱动，这里不重绘）
@@ -481,7 +560,7 @@ namespace P1.Ink
 
         /// <summary>
         /// 编辑模式 / 立即出图：把待绘制墨斑以最终形态画进图集（时间戳预老化 → 片元不做生长侵蚀）。
-        /// 同样受单帧 <see cref="MaxQuads"/> 上限约束，超出的留在队列里等下一次调用，不静默丢弃。
+        /// 同样受单帧 <see cref="PerFrameBudget"/> 上限约束，超出的留在队列里等下一次调用，不静默丢弃。
         /// </summary>
         public void FlushImmediate()
         {
@@ -499,7 +578,7 @@ namespace P1.Ink
                 did = true;
             }
 
-            PlanDrawBatch(PendingSplatCount, MaxQuads, out int drawCount, out _);
+            PlanDrawBatch(PendingSplatCount, _perFrameBudget, out int drawCount, out _);
             if (drawCount > 0)
             {
                 // 预老化一个生长周期：编辑模式预览没有持续运行的片元时钟，直接呈现完成态
@@ -532,6 +611,7 @@ namespace P1.Ink
             _verts.Clear();
             _uv0.Clear();
             _uv1.Clear();
+            _uv2.Clear();
 
             int end = Mathf.Clamp(start + count, start, splats.Count);
             for (int i = start; i < end; i++)
@@ -542,13 +622,15 @@ namespace P1.Ink
 
             // 必须先 Clear：上一帧的索引缓冲可能引用比本帧更多的顶点，直接 SetVertices 会报
             // "Mesh.vertices is too small"，并且在测试里会被判为运行时错误。
-            // 同时限制 quadCount：_indices 只为 MaxQuads 个 quad 预留，超出会索引越界
-            //（调用方已按 MaxQuads 分批，这里的 clamp 只是防御）。
-            int quadCount = Mathf.Min(_verts.Count / QuadVerts, MaxQuads);
+            // 同时限制 quadCount：_indices 只为 _quadCapacity 个 quad 预留，超出会索引越界
+            //（调用方已按 _perFrameBudget ≤ _quadCapacity 分批，这里的 clamp 只是防御）。
+            int quadCount = Mathf.Min(_verts.Count / QuadVerts, _quadCapacity);
             targetMesh.Clear();
             targetMesh.SetVertices(_verts);
             targetMesh.SetUVs(0, _uv0);
             targetMesh.SetUVs(1, _uv1);
+            // TEXCOORD2 = 方向性拉伸（单位方向 × 强度）。缺省全零 → 着色器走无拉伸路径。
+            targetMesh.SetUVs(2, _uv2);
             targetMesh.SetIndices(_indices, 0, quadCount * 6, MeshTopology.Triangles, 0, false);
         }
 
@@ -563,13 +645,16 @@ namespace P1.Ink
             _verts.Add(new Vector3(1f, 1f, 0f));
             _verts.Add(new Vector3(-1f, 1f, 0f));
 
-            // splatA = (中心UV, 半径, 队伍)；splatB = (种子, 种类, 归一化落墨时间戳, 覆盖倍数)
+            // splatA = (中心UV, 半径, 队伍)；splatB = (种子, 种类, 归一化落墨时间戳, 覆盖倍数)；
+            // splatDir = 单位拉伸方向 × 强度（世界 XZ，长度 0 = 不拉伸，见 InkSurfaceOverlay.P1InkSplatDistanceDir）
             var a = new Vector4(uvX, uvY, s.Radius, s.Team);
             var b = new Vector4(s.Seed, s.Kind, birthTs01, s.Reach);
+            Vector2 dir = s.Stretch;
             for (int i = 0; i < QuadVerts; i++)
             {
                 _uv0.Add(a);
                 _uv1.Add(b);
+                _uv2.Add(dir);
             }
         }
 

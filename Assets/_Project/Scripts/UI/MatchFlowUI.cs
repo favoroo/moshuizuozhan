@@ -487,6 +487,8 @@ namespace P1.UI
             {
                 Transform child = _menuSafeArea.GetChild(i);
                 string childName = child.name;
+                // HomeFooterTag 是已下线的「游戏共创 · 单机 4V4」角签：保留清理分支，
+                // 让旧场景 / 旧运行时缓存里残留的那颗节点在重建时被一并收掉，不会挂在安全区当孤儿。
                 bool built = childName.StartsWith("HomeTile_") || childName == "HomeHeroCard" ||
                              childName == "HomeFooterTag" || childName == "HomeVersionTag";
                 if (built)
@@ -1213,16 +1215,18 @@ namespace P1.UI
             if (legacy != null && legacy.gameObject.activeSelf) legacy.gameObject.SetActive(false);
         }
 
-        /// <summary>左下 / 右下角签：左「游戏共创」只读、右「检查更新」可点，落在卡片区之外（移动端左下设让给整备卡）。</summary>
+        /// <summary>
+        /// 右下角签：可点「检查更新」小按钮，落在卡片区之外。
+        ///
+        /// 左下角的「游戏共创 · 单机 4V4」只读角签已下线：它只是把项目模式写在角落，
+        /// 既不是可点入口、也不承载任何信息（模式/时长/难度都在 Hero 卡里），
+        /// 却在一屏最显眼的位置占掉 320×36 的黑底条。留着只会让人误以为那里能点什么。
+        /// 版面表里 <see cref="MenuLayoutMath.HomeMenuMetrics.FooterTag"/> 已置空（两平台都空），
+        /// 这里不再建节点；要恢复请改回版面表 + 本方法。
+        /// </summary>
+        /// <param name="mobile">保留给旧调用签名；左下角签下线后本方法已无平台分支。</param>
         private void BuildHomeCornerTags(UIThemeSO theme, HomeMenuMetrics m, bool mobile)
         {
-            HomeBox footer = m.FooterTag;
-            if (!footer.IsEmpty)
-            {
-                CreateFooterTag("HomeFooterTag", footer, "游戏共创 · 单机 4V4", theme,
-                    ComicStyle.Ink, ComicStyle.Paper, m.FooterTagFont);
-            }
-
             // 右下角角签不再是只读版本号：改成 t-1 同款的「检查更新」小按钮
             // （版本号仍可在启动页与更新弹窗里看到）。
             // TapTap 上架变体（P1_OFFLINE）没有联网能力：这里退回只读版本号签，

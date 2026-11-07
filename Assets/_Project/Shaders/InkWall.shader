@@ -29,6 +29,13 @@ Shader "P1/InkWall"
         _DampHaloStrength ("Damp Halo", Range(0.0, 1.0)) = 0.5
         _WallDripStrength ("Wall Drip", Range(0.0, 1.0)) = 0.4
         _WallEnvSpec ("Wall Env Spec", Range(0.0, 3.0)) = 0.8
+
+        [Header(Geometric Organic)]
+        // B2：由 InkWallSurface 从 InkGridConfigSO 三个新字段写入（与 _WallWetness 同一条传值路径）。
+        // 三个值全为 0 时片元逻辑退化为旧实现（硬边 / 纯色 / 无垂流 / 整面均匀湿润）。
+        _WallEdgeSoftness ("Wall Edge Softness", Range(0.0, 1.0)) = 1.0
+        _WallToneJitter ("Wall Tone Jitter", Range(0.0, 2.0)) = 1.0
+        _WallDripIntensity ("Wall Drip Intensity", Range(0.0, 2.0)) = 1.0
     }
 
     SubShader
@@ -70,6 +77,7 @@ Shader "P1/InkWall"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "ToonLighting.hlsl"
             #include "InkWetShading.hlsl"
+            #include "InkWallStyle.hlsl"
 
             struct Attributes
             {
@@ -112,6 +120,9 @@ Shader "P1/InkWall"
                 float _DampHaloStrength;
                 float _WallDripStrength;
                 float _WallEnvSpec;
+                float _WallEdgeSoftness;
+                float _WallToneJitter;
+                float _WallDripIntensity;
             CBUFFER_END
 
             // 全局胶质内发光（InkSurfaceController 每帧 SetGlobalFloat），与地面/顶面墨共用，
@@ -158,8 +169,8 @@ Shader "P1/InkWall"
                 }
 
                 float2 sampleUV = input.uv;
-                #if defined(P1_INK_HIGH)
                 float2 meterPos = input.uv * input.uv2;
+                #if defined(P1_INK_HIGH)
                 if (_WallDripStrength > 0.001 && input.uv2.y > 0.05 && _WallWetness > 0.01)
                 {
                     float colSize = 0.38;
@@ -189,13 +200,83 @@ Shader "P1/InkWall"
 
                 // 墨格 alpha：0 = 未涂；贴图侧已写入亚格子覆盖率，这里再用屏幕空间导数收一层 AA，
                 // 避免墙面墨迹出现 10cm 方块的锯齿边。
+                // B2-1 软边：wallEdgeSoftness 加宽 fwidth smoothstep 带，并给 alpha 读数叠加低频
+                // 噪声扰动，打断 10cm 格子的直线阶梯；soft=0 时 edgeW=fwA、alpha 原样返回，
+                // 与原式 smoothstep(0.5 ± fwA, inkSample.a) 逐项一致（硬边）。
+                float soft = saturate(_WallEdgeSoftness);
                 float fwA = max(fwidth(inkSample.a), 0.004);
-                half coreMask = smoothstep(0.5 - fwA, 0.5 + fwA, inkSample.a);
+                float edgeW = fwA * (1.0 + 1.25 * soft) + soft * 0.03;
+                half coreMask = smoothstep(0.5 - edgeW, 0.5 + edgeW,
+                                           P1WallSoftEdgeAlpha(inkSample.a, fwA, soft, meterPos, input.positionWS));
 
                 // 浸润暗 halo（damp halo）：墨缘向外一圈渗透暗痕（对齐竞品 32% 肌理透出）
                 half haloMask = smoothstep(0.12, 0.5, inkSample.a) * (1.0 - coreMask);
                 half haloAlpha = haloMask * (half)(0.42 * _DampHaloStrength);
                 half effectiveMask = coreMask + haloAlpha;
+
+                // B2-3 垂流：湿墨下方拉出向下渐隐的细流。
+                // 用两次上采样测得「最近的湿墨上缘距离 d」，再乘列噪声、湿润度与格 alpha。
+                // 纯着色层（alpha/color），不写回图集，也不参与任何 CPU 判定。
+                // _WallDripIntensity=0 时整块跳过，dripMask 恒为 0，输出与旧实现一致。
+                half dripMask = 0.0h;
+                half3 dripColor = half3(0.0, 0.0, 0.0);
+                float dripGate = saturate(_WallDripIntensity);
+                if (dripGate > 0.001 && _WallWetness > 0.01 && coreMask < 0.98)
+                {
+                    float faceH = max(0.10, input.uv2.y);
+                    float nearDist = 0.05; // 米：近层上采样，保证贴着墨缘的细流一定取到颜色
+                    #if defined(P1_INK_HIGH)
+                    float farDist = 0.18;
+                    half4 upFar = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, input.uv + float2(0.0, farDist / faceH));
+                    #else
+                    float farDist = nearDist;
+                    half4 upFar = half4(0.0, 0.0, 0.0, 0.0);
+                    #endif
+                    half4 upNear = SAMPLE_TEXTURE2D(_InkTex, sampler_InkTex, input.uv + float2(0.0, nearDist / faceH));
+
+                    half aNear = upNear.a;
+                    half aFar = upFar.a;
+                    half upMax = max(aNear, aFar);
+                    if (upMax > 0.5)
+                    {
+                        // 两层采样的 alpha 线性插值出连续的墨缘距离：d 越大，细流越靠尾端
+                        float d;
+                        half3 upColor;
+                        if (aNear > 0.5)
+                        {
+                            d = nearDist * (0.5 / max((float)aNear, 0.5));
+                            upColor = upNear.rgb;
+                        }
+                        else
+                        {
+                            float t = saturate((0.5 - (float)aNear) / max(1e-3, (float)aFar - (float)aNear));
+                            d = lerp(nearDist, farDist, t);
+                            upColor = upFar.rgb;
+                        }
+
+                        // 竖直细流：按墙面横向米制坐标量化成 ~3.5cm 列（与立面 U 轴对齐、等宽；
+                        // 叠加法线 hash 让相邻立面的列图案不共形），列内再取一根细窄中心，
+                        // 形成细长墨流而不是整片墨帘
+                        float colCoord = meterPos.x / 0.035
+                                       + dot(input.normalWS, float3(13.7, 7.1, 29.3));
+                        float col = floor(colCoord);
+                        float colRnd = P1WallHash21(float2(col, 3.7));
+                        float colRnd2 = P1WallHash21(float2(col + 11.0, 8.1));
+                        float colCenter = 0.5 + (colRnd2 - 0.5) * 0.55;
+                        float distCol = abs(frac(colCoord) - colCenter) * 0.035;
+                        float halfW = lerp(0.004, 0.011, colRnd2);
+                        float thin = 1.0 - smoothstep(halfW, halfW * 2.2, distCol);
+
+                        // 世界 Y 向下梯度：d / 该列细流长度，越往下越淡（二次衰减）
+                        float len = lerp(0.07, 0.26, colRnd) * (0.55 + 0.65 * _WallWetness) * _WallDripIntensity;
+                        float fade = saturate(1.0 - d / max(0.001, len));
+                        fade *= fade;
+
+                        dripMask = (half)(thin * fade * saturate(_WallWetness) * upMax * 0.72);
+                        dripColor = upColor;
+                    }
+                }
+                effectiveMask = max(effectiveMask, dripMask);
                 if (effectiveMask < 0.01)
                     discard;
 
@@ -244,6 +325,10 @@ Shader "P1/InkWall"
                 half diffuseLight = lerp(0.72, 1.0, band * shadowTerm);
                 half3 coreInkColor = inkSample.rgb * _Tint.rgb * diffuseLight;
 
+                // B2-2 逐区域色调微差：世界坐标 hash/值噪声驱动的亮度抖动（jitter=0 → 恒等 1.0），
+                // 呼应地面 splatToneStrength 的观感；只乘墨色，不改图集数据。
+                coreInkColor *= (half)P1WallToneMul(input.positionWS, meterPos, _WallToneJitter);
+
                 // 浸润暗痕：渗进墙面的半透明暗痕，颜色更暗且带有泥渗感
                 half3 haloColor = coreInkColor * 0.32;
                 half3 inkColor = lerp(haloColor, coreInkColor, coreMask);
@@ -262,9 +347,22 @@ Shader "P1/InkWall"
                 float NdotV = saturate(dot(N, V));
                 float NdotL = saturate(dot(N, L));
 
-                float wet = _WallWetness;
-                float sheen = _WallWetness * 0.5;
-                float rough = saturate(1.0 - (_WallWetness * 0.6 + 0.2));
+                // B2-4 非均匀湿润：整面标量湿润度 × (世界Y + 噪声 + 格 alpha) 分布因子。
+                // wallDripIntensity=0 时 P1WallWetMul 返回恒等 1.0，wet 与旧实现完全一致（整面均匀）。
+                float wetMul = P1WallWetMul(meterPos, input.positionWS.y, input.uv.y, inkSample.a, _WallDripIntensity);
+                float wet = saturate(_WallWetness * wetMul);
+                float sheen = wet * 0.5;
+
+                // B2-3 垂流合成：颜色取上游湿墨 + 同一套 toon 漫反射（非预乘，alpha 走 effectiveMask）。
+                // 与主体墨重叠时按 coreMask/halo 权重让回主体色，只有墨外区域整段读作细流色。
+                if (dripMask > 0.001h)
+                {
+                    half3 dripLit = dripColor * _Tint.rgb * diffuseLight;
+                    dripLit *= (half)(1.0 + _GlobalInkGlow * 0.6 + 0.10 * wet);
+                    half inkWeight = saturate(coreMask + haloAlpha * 2.0h);
+                    inkColor = lerp(dripLit, inkColor, inkWeight);
+                }
+                float rough = saturate(1.0 - (wet * 0.6 + 0.2));
                 rough = clamp(rough + roughPerturb, 0.04, 0.95);
                 float smoothVal = saturate(1.0 - rough);
 
@@ -297,8 +395,9 @@ Shader "P1/InkWall"
                 half3 specTint = lerp(half3(1.0, 1.0, 1.0), coreInkColor, 0.25);
                 half3 finalSpec = envSpec * specTint * lerp(0.45, 1.0, grazeDamp);
 
-                // 环境镜面高光叠加（随 _WallWetness 强度调制）
-                inkColor += finalSpec * coreMask * (half)(_WallWetness * 0.7 + 0.3);
+                // 环境镜面高光叠加（随湿润度强度调制；B2 后 wet 含非均匀分布，
+                // wallDripIntensity=0 时 wet 恒等于 _WallWetness）
+                inkColor += finalSpec * coreMask * (half)(wet * 0.7 + 0.3);
 
                 // 掩体立面边界线（P17-A）：UV1 = (面宽, 面高) 米，到 quad 四条边的米距离取 min。
                 // 无 UV1 数据（旧网格，均 ≤ 0）时退化为不画线；无墨处 alpha=0 露出基面边线，两者自然拼接。

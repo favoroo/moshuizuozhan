@@ -24,6 +24,30 @@ namespace P1.Weapons
         /// <summary>镜头冲击热积累衰减率（/s）：越小持续连发时视轴后拉越明显。</summary>
         public readonly float CameraKickDecayRate;
 
+        /// <summary>
+        /// 飞行拖尾墨雾间距（米）：弹丸每飞这么远在弹道后方留下一团低透明度队色墨雾。
+        /// ≤ 0 关闭拖尾墨雾（撞击墨花 / 沿途滴墨不受影响）。
+        /// </summary>
+        [Tooltip("飞行拖尾墨雾间距（米）：每隔这么远留下一团低透明度队色墨雾；≤0 关闭拖尾雾")]
+        public readonly float TrailPuffIntervalMeters;
+
+        /// <summary>每团拖尾墨雾同时甩出一颗小卫星墨珠的概率（0~1，沿速度反方向）。</summary>
+        [Tooltip("每团拖尾墨雾同时甩出一颗小卫星墨珠的概率（0~1，沿速度反方向）")]
+        public readonly float TrailSatelliteChance;
+
+        /// <summary>单团拖尾墨雾的存活时间（秒）：越短越像「喷溅」，越长越像「烟」。建议 0.18~0.45。</summary>
+        [Tooltip("单团拖尾墨雾的存活时间（秒）：越短越像喷溅，越长越像烟雾")]
+        public readonly float TrailPuffLifetime;
+
+        /// <summary>拖尾墨雾尺寸倍率：1 = 标准（约 0.38m），重武器可放大到 1.3+。</summary>
+        [Tooltip("拖尾墨雾尺寸倍率：1 = 标准（约 0.38m），重武器可放大到 1.3+")]
+        public readonly float TrailPuffScale;
+
+        private const float DefaultTrailPuffIntervalMeters = 2.5f;
+        private const float DefaultTrailSatelliteChance = 0.25f;
+        private const float DefaultTrailPuffLifetime = 0.30f;
+        private const float DefaultTrailPuffScale = 1f;
+
         /// <summary>旧 9 参构造保留（跨系统调用方/测试无需迁移），弹簧参数回落小枪预设。</summary>
         public WeaponFeelParams(
             float recoilKickMeters,
@@ -65,6 +89,42 @@ namespace P1.Weapons
             float impactRippleScale,
             float springOmega,
             float cameraKickDecayRate)
+            : this(
+                recoilKickMeters,
+                recoilPitchDegrees,
+                cameraKickMeters,
+                cameraKickRollDegrees,
+                cameraKickFovDegrees,
+                muzzleFlashScale,
+                projectileVisualScale,
+                trailVisualScale,
+                impactRippleScale,
+                springOmega,
+                cameraKickDecayRate,
+                DefaultTrailPuffIntervalMeters,
+                DefaultTrailSatelliteChance,
+                DefaultTrailPuffLifetime,
+                DefaultTrailPuffScale)
+        {
+        }
+
+        /// <summary>完整构造（含 P30 弹丸拖尾参数）：类别预设与配置解析都走这里。</summary>
+        public WeaponFeelParams(
+            float recoilKickMeters,
+            float recoilPitchDegrees,
+            float cameraKickMeters,
+            float cameraKickRollDegrees,
+            float cameraKickFovDegrees,
+            float muzzleFlashScale,
+            float projectileVisualScale,
+            float trailVisualScale,
+            float impactRippleScale,
+            float springOmega,
+            float cameraKickDecayRate,
+            float trailPuffIntervalMeters,
+            float trailSatelliteChance,
+            float trailPuffLifetime,
+            float trailPuffScale)
         {
             RecoilKickMeters = recoilKickMeters;
             RecoilPitchDegrees = recoilPitchDegrees;
@@ -77,6 +137,36 @@ namespace P1.Weapons
             ImpactRippleScale = impactRippleScale;
             SpringOmega = springOmega;
             CameraKickDecayRate = cameraKickDecayRate;
+            TrailPuffIntervalMeters = Mathf.Max(0f, trailPuffIntervalMeters);
+            TrailSatelliteChance = Mathf.Clamp01(trailSatelliteChance);
+            TrailPuffLifetime = Mathf.Clamp(trailPuffLifetime, 0.05f, 1.2f);
+            TrailPuffScale = Mathf.Clamp(trailPuffScale, 0.2f, 3f);
+        }
+
+        /// <summary>只替换拖尾参数（预设里逐个武器微调用，避免重复抄 11 个字段）。</summary>
+        internal WeaponFeelParams(
+            WeaponFeelParams source,
+            float trailPuffIntervalMeters,
+            float trailSatelliteChance,
+            float trailPuffLifetime,
+            float trailPuffScale)
+            : this(
+                source.RecoilKickMeters,
+                source.RecoilPitchDegrees,
+                source.CameraKickMeters,
+                source.CameraKickRollDegrees,
+                source.CameraKickFovDegrees,
+                source.MuzzleFlashScale,
+                source.ProjectileVisualScale,
+                source.TrailVisualScale,
+                source.ImpactRippleScale,
+                source.SpringOmega,
+                source.CameraKickDecayRate,
+                trailPuffIntervalMeters,
+                trailSatelliteChance,
+                trailPuffLifetime,
+                trailPuffScale)
+        {
         }
     }
 
@@ -96,32 +186,54 @@ namespace P1.Weapons
             switch (kind)
             {
                 case WeaponKind.Roller:
-                    // 挥击是单次大动作：武器模型明显下沉，镜头推一下
-                    return new WeaponFeelParams(0.075f, 5.6f, 0.050f, 0.30f, 0.90f, 1.15f, 1.15f, 1.10f, 1.25f, 21f, 8.0f);
+                    // 挥击是单次大动作：武器模型明显下沉，镜头推一下。
+                    // 一次挥击会甩出 9 颗墨滴，拖尾雾间距拉大 + 卫星珠概率压低，避免扇面糊成一团。
+                    return Trail(new WeaponFeelParams(0.075f, 5.6f, 0.050f, 0.30f, 0.90f, 1.15f, 1.15f, 1.10f, 1.25f, 21f, 8.0f),
+                        3.2f, 0.12f, 0.26f, 0.85f);
 
                 case WeaponKind.Charger:
-                    // 一枪定生死：最重的镜头冲击 + 最长枪口火光（实际幅度按蓄力刻度缩放）
-                    return new WeaponFeelParams(0.105f, 8.5f, 0.090f, 0.55f, 1.60f, 1.45f, 1.20f, 1.15f, 1.35f, 19f, 6.5f);
+                    // 一枪定生死：最重的镜头冲击 + 最长枪口火光（实际幅度按蓄力刻度缩放）。
+                    // 单发重墨：拖尾最稀疏但每团最大、卫星珠概率最高，读作「一道粗墨柱」。
+                    return Trail(new WeaponFeelParams(0.105f, 8.5f, 0.090f, 0.55f, 1.60f, 1.45f, 1.20f, 1.15f, 1.35f, 19f, 6.5f),
+                        3.4f, 0.50f, 0.40f, 1.35f);
 
                 case WeaponKind.Dualies:
-                    // 12~15 发/秒：单发冲击小、弹簧频率高，连发读作「震」而不是「漂」
-                    return new WeaponFeelParams(0.032f, 3.0f, 0.025f, 0.12f, 0.40f, 0.85f, 0.90f, 0.90f, 0.90f, 39f, 9.0f);
+                    // 12~15 发/秒：单发冲击小、弹簧频率高，连发读作「震」而不是「漂」。
+                    // 高射速下拖尾雾间距略拉大，避免同屏弹丸叠出一串雾球。
+                    return Trail(new WeaponFeelParams(0.032f, 3.0f, 0.025f, 0.12f, 0.40f, 0.85f, 0.90f, 0.90f, 0.90f, 39f, 9.0f),
+                        3.0f, 0.18f, 0.26f, 0.85f);
 
                 case WeaponKind.Slosher:
-                    return new WeaponFeelParams(0.060f, 5.0f, 0.040f, 0.22f, 0.70f, 1.10f, 1.25f, 1.15f, 1.15f, 28f, 7.5f);
+                    return Trail(new WeaponFeelParams(0.060f, 5.0f, 0.040f, 0.22f, 0.70f, 1.10f, 1.25f, 1.15f, 1.15f, 28f, 7.5f),
+                        2.8f, 0.20f, 0.28f, 0.90f);
 
                 case WeaponKind.Blaster:
-                    // 慢速重弹：后坐与镜头冲击最接近「炮」
-                    return new WeaponFeelParams(0.095f, 7.5f, 0.085f, 0.50f, 1.50f, 1.40f, 1.35f, 1.20f, 1.40f, 20f, 7.0f);
+                    // 慢速重弹：后坐与镜头冲击最接近「炮」，拖尾雾也最浓。
+                    return Trail(new WeaponFeelParams(0.095f, 7.5f, 0.085f, 0.50f, 1.50f, 1.40f, 1.35f, 1.20f, 1.40f, 20f, 7.0f),
+                        2.2f, 0.35f, 0.35f, 1.20f);
 
                 case WeaponKind.Splatling:
-                    // 15 发/秒弹雨：单发幅度仍然低，但弹簧够快 + 镜头热积累，读作「持续压制」
-                    return new WeaponFeelParams(0.022f, 2.2f, 0.018f, 0.07f, 0.22f, 0.80f, 0.85f, 0.95f, 0.75f, 40f, 9.0f);
+                    // 15 发/秒弹雨：单发幅度仍然低，但弹簧够快 + 镜头热积累，读作「持续压制」。
+                    // 弹雨太密，拖尾雾压到最稀最小，只保留一层薄薄的墨雾感。
+                    return Trail(new WeaponFeelParams(0.022f, 2.2f, 0.018f, 0.07f, 0.22f, 0.80f, 0.85f, 0.95f, 0.75f, 40f, 9.0f),
+                        3.0f, 0.15f, 0.24f, 0.80f);
 
                 default:
                     // Spritzer：10 发/秒的基准手感
-                    return new WeaponFeelParams(0.045f, 3.8f, 0.035f, 0.16f, 0.55f, 1.00f, 1.00f, 1.00f, 1.00f, 30f, 8.5f);
+                    return Trail(new WeaponFeelParams(0.045f, 3.8f, 0.035f, 0.16f, 0.55f, 1.00f, 1.00f, 1.00f, 1.00f, 30f, 8.5f),
+                        2.5f, 0.25f, 0.30f, 1.00f);
             }
+        }
+
+        /// <summary>给 11 参预设补上拖尾参数（只改表现层，不动后坐/镜头/涂地）。</summary>
+        private static WeaponFeelParams Trail(
+            WeaponFeelParams preset,
+            float intervalMeters,
+            float satelliteChance,
+            float puffLifetime,
+            float puffScale)
+        {
+            return new WeaponFeelParams(preset, intervalMeters, satelliteChance, puffLifetime, puffScale);
         }
 
         /// <summary>
@@ -145,7 +257,12 @@ namespace P1.Weapons
                 Pick(config.trailVisualScale, preset.TrailVisualScale),
                 Pick(config.impactRippleScale, preset.ImpactRippleScale),
                 Pick(config.feelSpringOmega, preset.SpringOmega),
-                Pick(config.cameraKickDecayRate, preset.CameraKickDecayRate));
+                Pick(config.cameraKickDecayRate, preset.CameraKickDecayRate),
+                // 拖尾雾参数没有对应的配置字段（P30 新增，旧资产无需迁移），始终跟随类别预设
+                preset.TrailPuffIntervalMeters,
+                preset.TrailSatelliteChance,
+                preset.TrailPuffLifetime,
+                preset.TrailPuffScale);
         }
 
         private static float Pick(float overrideValue, float presetValue)

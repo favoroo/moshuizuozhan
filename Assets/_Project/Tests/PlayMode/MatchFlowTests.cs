@@ -143,5 +143,29 @@ namespace P1.Tests
             Assert.AreEqual(120f, match.RemainingSeconds, 1f, "返回主菜单应重置计时");
             Assert.AreEqual(0f, InkSurfaceController.Instance.GetCoveragePercent(Team.TeamA), 0.01f, "返回主菜单应清空墨水");
         }
+
+        /// <summary>
+        /// 首页左下角签回归：原「游戏共创 · 单机 4V4」只读角签已下线，
+        /// Ready 阶段不应再出现这颗节点。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Home_LeftFooterCreatorTag_IsNotBuilt()
+        {
+            yield return LoadScene();
+            yield return null;
+
+            var footer = FindByName("HomeFooterTag");
+            Assert.IsNull(footer, "首页左下「游戏共创 · 单机 4V4」角签已下线，不应再建节点");
+        }
+
+        private static Transform FindByName(string objectName)
+        {
+            var all = Object.FindObjectsByType<Transform>(FindObjectsInactive.Include);
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i].name == objectName) return all[i];
+            }
+            return null;
+        }
     }
 }

@@ -59,6 +59,11 @@ namespace P1.Ink
 
         private static readonly int InkTexProp = Shader.PropertyToID("_InkTex");
         private static readonly int WallWetnessProp = Shader.PropertyToID("_WallWetness");
+        // B2 墙面观感三个新 config 字段的 shader 属性（与 _WallWetness 同一条传值路径：
+        // InkWallSurface 每表面一个材质实例，Init 时 SetFloat，走 SRP Batcher 的 UnityPerMaterial）
+        private static readonly int WallEdgeSoftnessProp = Shader.PropertyToID("_WallEdgeSoftness");
+        private static readonly int WallToneJitterProp = Shader.PropertyToID("_WallToneJitter");
+        private static readonly int WallDripIntensityProp = Shader.PropertyToID("_WallDripIntensity");
 
         public Bounds WorldBounds => _worldBounds;
 
@@ -169,6 +174,8 @@ namespace P1.Ink
             {
                 ColliderLookup[collider] = this;
             }
+            // 运行中重新 Configure 时材质可能已经建好：同步刷新 B2 观感参数（材质未建时为空操作）
+            ApplyWallLookConfig();
         }
 
         public void Configure(Collider collider, Material material, InkGridConfigSO gridConfig, bool allowClimb = true)
@@ -182,6 +189,8 @@ namespace P1.Ink
             {
                 ColliderLookup[collider] = this;
             }
+            // 运行中重新 Configure 时材质可能已经建好：同步刷新 B2 观感参数（材质未建时为空操作）
+            ApplyWallLookConfig();
         }
 
         /// <summary>
@@ -216,6 +225,8 @@ namespace P1.Ink
             {
                 ColliderLookup[collider] = this;
             }
+            // 运行中重新 Configure 时材质可能已经建好：同步刷新 B2 观感参数（材质未建时为空操作）
+            ApplyWallLookConfig();
         }
 
         public bool InitializeIfNeeded(bool force = false)
@@ -341,6 +352,13 @@ namespace P1.Ink
                 $"{name}_{faceName}");
 
             _faces.Add(face);
+
+            // B2-5 有机墨斑：卫星墨点概率由 wallEdgeSoftness 开启（0 = 旧硬边观感，完全不补卫星盘）。
+            // 卫星盘只写视觉像素、不改归属，见 InkWallFace.PaintSatellites。
+            if (config != null && config.wallEdgeSoftness > 0.0001f)
+            {
+                face.SatelliteChance = Mathf.Clamp01(config.wallEdgeSoftness) * InkWallFace.SatelliteChanceScale;
+            }
             // 视觉不再逐面构建：所有立面加完后由 BuildMergedWallVisual 统一合并
             // （1 网格 + 1 图集 + 1 渲染器），见该方法的性能注释。
         }
@@ -512,6 +530,7 @@ namespace P1.Ink
             {
                 _wallMaterial.SetTexture(InkTexProp, _inkAtlas);
                 _wallMaterial.SetFloat(WallWetnessProp, 0f);
+                ApplyWallLookConfig();
             }
             mr.sharedMaterial = _wallMaterial;
 
@@ -540,6 +559,22 @@ namespace P1.Ink
             {
                 _inkAtlas.Apply(false, false);
             }
+        }
+
+        /// <summary>
+        /// B2 墙面观感：把 InkGridConfigSO 的 wallEdgeSoftness / wallToneJitter / wallDripIntensity
+        /// 写进本表面的材质实例。材质每表面一份（BuildMergedWallVisual 的 new Material），
+        /// 因此不会污染共享的 Mat_InkWall.mat；传值路径与 _WallWetness 完全一致。
+        /// config 为空时保留材质资产自身数值（旧场景兜底）。
+        /// </summary>
+        private void ApplyWallLookConfig()
+        {
+            if (_wallMaterial == null || config == null)
+                return;
+
+            _wallMaterial.SetFloat(WallEdgeSoftnessProp, Mathf.Clamp01(config.wallEdgeSoftness));
+            _wallMaterial.SetFloat(WallToneJitterProp, Mathf.Max(0f, config.wallToneJitter));
+            _wallMaterial.SetFloat(WallDripIntensityProp, Mathf.Max(0f, config.wallDripIntensity));
         }
 
         private bool HasAnyInk()

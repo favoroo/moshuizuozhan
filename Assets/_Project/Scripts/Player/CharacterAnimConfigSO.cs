@@ -500,6 +500,55 @@ namespace P1.Player
         [Tooltip("小枪持续射击枪身回拉（米）")]
         public float shooterFirePullbackMeters = 0.01f;
 
+        [Header("储液罐 (Tank Fill，对齐 INKWAVE character.js _updateTank L3339-3351 / damp L1272 / 事件冲量 L1009/2100/1656)")]
+        [Tooltip("显示墨量向真实墨量的指数平滑速率（1/s）：INKWAVE damp rate 8 ≈ 125ms 时间常数，扣墨后液面缓降不瞬跳")]
+        public float tankInkChaseRate = 8f;
+        [Tooltip("液面 bob 弹簧固有频率（rad/s）：INKWAVE 2.4Hz×2π≈15.1，跳跃/落地/扣墨时液面上下晃")]
+        public float tankLevelBobOmega = 15.1f;
+        [Tooltip("液面 bob 弹簧阻尼比：INKWAVE 0.18，欠阻尼让液面回摆 1~2 次")]
+        [Range(0.05f, 1.5f)]
+        public float tankLevelBobZeta = 0.18f;
+        [Tooltip("bob 弹簧值→液位百分比的增益（INKWAVE tl×0.06）")]
+        public float tankLevelBobGain = 0.06f;
+        [Tooltip("液位 bob 占满位的上限（比例，INKWAVE ±0.08）")]
+        [Range(0f, 0.3f)]
+        public float tankLevelBobMax = 0.08f;
+        [Tooltip("晃动倾斜弹簧固有频率（rad/s）：INKWAVE 1.6Hz×2π≈10.05，急加速/急停/转向时液面朝反侧倾")]
+        public float tankSloshOmega = 10.05f;
+        [Tooltip("晃动倾斜弹簧阻尼比：INKWAVE 0.14，最欠阻尼的一组，液面持续荡漾")]
+        [Range(0.05f, 1.5f)]
+        public float tankSloshZeta = 0.14f;
+        [Tooltip("局部加速度→晃动目标角的增益（rad/(m/s²)，INKWAVE 0.004）")]
+        public float tankSloshAccelGain = 0.004f;
+        [Tooltip("晃动目标角钳制上限（rad，INKWAVE ±0.1）")]
+        public float tankSloshTargetMax = 0.1f;
+        [Tooltip("液面倾斜渲染钳制上限（rad，INKWAVE ±0.06 ≈ 3.4°，受罐盖净空约束）")]
+        public float tankTiltMaxRad = 0.06f;
+        [Tooltip("晃动时液面径向挤压系数（INKWAVE slosh×0.03，保体积感）")]
+        public float tankSloshSqueeze = 0.03f;
+        [Tooltip("扣墨瞬间液面下沉冲量增益（冲量 = −Δ墨量×该值）：100 时扣 20% 墨液位下沉约 7%，肉眼可辨的「咕咚」")]
+        public float tankConsumeKickGain = 100f;
+        [Tooltip("起跳液面 bob 冲量（INKWAVE +2.0，character.js L1009）")]
+        public float tankEventKickJump = 2f;
+        [Tooltip("落地液面 bob 冲量（INKWAVE +2.2，character.js L2100）")]
+        public float tankEventKickLand = 2.2f;
+        [Tooltip("急停液面 bob 冲量（INKWAVE 急刹 +1.8，character.js L1656）")]
+        public float tankEventKickBrake = 1.8f;
+        [Tooltip("急停判定阈值（前向减速度 m/s²，低于该值不算急停）")]
+        public float tankBrakeAccelMin = 14f;
+        [Tooltip("低墨告警触发阈值（墨量比例，<该值液面开始呼吸脉动）")]
+        public float tankLowInkFraction = 0.15f;
+        [Tooltip("低墨告警解除阈值（>该值停止，与触发值构成迟滞防边界闪烁）")]
+        public float tankLowInkExitFraction = 0.2f;
+        [Tooltip("低墨呼吸脉动频率（Hz）：与 bob 弹簧同频，视觉语言统一")]
+        public float tankLowInkPulseHz = 2.4f;
+        [Tooltip("低墨呼吸脉动幅度（液位比例 ±）")]
+        public float tankLowInkPulseAmp = 0.03f;
+        [Tooltip("液位显示下限（比例，INKWAVE 0.004）")]
+        public float tankLevelFloor = 0.004f;
+        [Tooltip("液面隐藏阈值：墨量低于该比例直接隐藏液面（INKWAVE 0.005，空罐读作深色背板）")]
+        public float tankEmptyHideAt = 0.005f;
+
         /// <summary>运行时实际使用的速度归一化分母：优先玩家配置的潜墨速度。</summary>
         public float ResolveSwimRefSpeed(PlayerConfigSO playerConfig)
         {

@@ -643,6 +643,13 @@ def _f_land(buf, v, n):
     noise(buf, dur=0.07, peak=0.12, ftype="lowpass", f0=900 * k, q=0.9)
 
 
+def _f_dodge_roll(buf, v, n):
+    """双枪战术翻滚（P40）：快速下扫的「唰」+ 低频体感闷响，0.4s 内不抢射击声。"""
+    k = _vpitch(v, n, 0.06)
+    noise(buf, dur=0.22, peak=0.16, ftype="bandpass", f0=2400 * k, f1=500 * k, q=0.8)
+    tone(buf, wtype="sine", f0=180 * k, f1=70 * k, dur=0.16, peak=0.14, a1=0.01)
+
+
 # ---------------- 战斗反馈补充（P6-A 打击反馈） ----------------
 
 def _f_hit_marker(buf, v, n):
@@ -866,6 +873,7 @@ SFX = {
     "ink_drip":       (3, _f_ink_drip,       0.22),
     "jump":           (1, _f_jump,           0.24),
     "land":           (1, _f_land,           0.26),
+    "dodge_roll":     (2, _f_dodge_roll,     0.28),
     # 战斗反馈
     "hit_enemy":      (2, _f_hit_enemy,      0.30),
     "hit_marker":     (2, _f_hit_marker,     0.30),
@@ -921,7 +929,7 @@ GROUPS = {
     "武器操作":     ["roller_flick", "charger_charge", "charger_full", "charger_shot",
                      "blaster_shot", "blaster_boom", "slosh_throw", "slosh_land"],
     "移动与潜墨":   ["squid_in", "squid_out", "swim_splash", "step_ink_bubble",
-                     "step_dry", "step_enemy", "ink_drip", "jump", "land"],
+                     "step_dry", "step_enemy", "ink_drip", "jump", "land", "dodge_roll"],
     "战斗反馈":     ["hit_enemy", "hit_marker", "hurt", "kill", "death", "respawn"],
     "墨水资源":     ["ink_empty", "ink_refill", "refill_full", "low_ink_warning"],
     "副武器与大招": ["bomb_throw", "bomb_beep", "bomb_explode", "ult_ready", "ult_cast",

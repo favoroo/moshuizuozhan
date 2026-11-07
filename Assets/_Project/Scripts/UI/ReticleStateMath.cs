@@ -20,11 +20,35 @@ namespace P1.UI
     }
 
     /// <summary>
+    /// 枪形（<see cref="ReticleShape.Shooter"/>）内部的武器身份层：
+    /// 5 把弹丸武器共用「中心点 + 散布刻度」这套读数语言，但各自换一个外形壳，
+    /// 让玩家不读 HUD 也能从准星轮廓认出当前武器（对齐 INKWAVE 的 iw-ret--* 分类）。
+    /// 与 <see cref="WeaponKind"/> 是一对一（滚筒/蓄力狙有独立容器，不参与本层）。
+    /// </summary>
+    public enum ReticleStyle
+    {
+        /// <summary>小枪：细主环 + 4 向散布刻度。</summary>
+        Basic = 0,
+
+        /// <summary>双枪：左右两枚小环 + 4 向刻度，架枪时叠一枚菱形锁定框。</summary>
+        Twin = 1,
+
+        /// <summary>泼桶：上方拱形 + 下方落点斗（泼出去的弧线与落点宽度）。</summary>
+        Lob = 2,
+
+        /// <summary>爆破枪：外环（爆炸半径）+ 内环（直击核心），不画刻度。</summary>
+        Blast = 3,
+
+        /// <summary>加特林：8 段旋转蓄力环 + 上下两枚刻度。</summary>
+        Spin = 4
+    }
+
+    /// <summary>
     /// 准星状态纯逻辑（可 EditMode 测试）：
     /// 1. 瞄准点超出武器有效射程 → 变暗 + 虚线（对齐 INKWAVE 的 is-far）；
     /// 2. 准星压在存活敌人身上且射程内 → 放大 + 染红（对齐 INKWAVE 的 is-target）；
     /// 3. 滚筒的准星表达推地宽度而不是远处落点，不参与超距变暗；
-    /// 4. 武器类型 → 准星形状的映射必须覆盖全部 <see cref="WeaponKind"/>。
+    /// 4. 武器类型 → 准星形状（容器族）与武器身份（外形壳）的映射必须覆盖全部 <see cref="WeaponKind"/>。
     /// </summary>
     public static class ReticleStateMath
     {
@@ -33,6 +57,21 @@ namespace P1.UI
 
         /// <summary>静止散布下限（度）：0 散布武器（泼桶 / 双枪架枪）也保留最小刻度间距。</summary>
         public const float MinSpreadDegrees = 1.2f;
+
+        /// <summary>枪形主环直径（参考像素）：比旧版 60 更克制，给刻度留出外扩空间。</summary>
+        public const float ShooterRingDiameter = 44f;
+
+        /// <summary>散布刻度中心距的下限（px）：静止时贴在主环内侧，与中心点不粘连。</summary>
+        public const float TickBaseOffset = 15f;
+
+        /// <summary>每多 1° 散布，刻度中心额外外扩的像素数。</summary>
+        public const float TickPixelsPerDegree = 4f;
+
+        /// <summary>单发开火时刻度额外外扩的像素上限。</summary>
+        public const float TickShotPunchPixels = 5f;
+
+        /// <summary>空墨拒射时刻度反向收拢的像素数（与击发外扩形成相反手感）。</summary>
+        public const float TickEmptyPunchPixels = 4f;
 
         /// <summary>超距时的整体透明度（INKWAVE 为 0.42）。</summary>
         public const float FarAlpha = 0.42f;
@@ -141,6 +180,43 @@ namespace P1.UI
                     // Shooter / Dualies / Slosher / Blaster / Splatling 以及未来新增的弹丸类武器
                     return ReticleShape.Shooter;
             }
+        }
+
+        /// <summary>
+        /// 武器类型 → 枪形内部的身份外形（唯一映射源，屏幕准星据此切换外形壳）。
+        /// 滚筒 / 蓄力狙各自有独立容器，这里回落到 <see cref="ReticleStyle.Basic"/> 只作占位。
+        /// 新增 <see cref="WeaponKind"/> 时在这里补一行，否则新武器会退回小枪外形（不会消失，但认不出来）。
+        /// </summary>
+        public static ReticleStyle StyleFor(WeaponKind kind)
+        {
+            switch (kind)
+            {
+                case WeaponKind.Dualies: return ReticleStyle.Twin;
+                case WeaponKind.Slosher: return ReticleStyle.Lob;
+                case WeaponKind.Blaster: return ReticleStyle.Blast;
+                case WeaponKind.Splatling: return ReticleStyle.Spin;
+                default:
+                    // Shooter 以及滚筒/蓄力狙（它们不使用枪形容器）
+                    return ReticleStyle.Basic;
+            }
+        }
+
+        /// <summary>
+        /// 散布刻度中心距（px）：静止贴着主环内侧，随散布/开火外扩、空墨拒射反向收拢。
+        /// 抽成纯函数是为了让 EditMode 能钉住「静止时不会压到中心点、也不会盖回主环」这条几何约束。
+        /// </summary>
+        /// <param name="spreadDegrees">当前散布角（度，已可经 <see cref="ClampSpread"/> 夹住下限）。</param>
+        /// <param name="shotPunch01">单发开火冲击 0~1。</param>
+        /// <param name="emptyPunch01">空墨拒射冲击 0~1。</param>
+        public static float TickOffset(float spreadDegrees, float shotPunch01 = 0f, float emptyPunch01 = 0f)
+        {
+            float spread = Mathf.Max(MinSpreadDegrees, spreadDegrees);
+            float offset = TickBaseOffset
+                           + (spread - MinSpreadDegrees) * TickPixelsPerDegree
+                           + Mathf.Clamp01(shotPunch01) * TickShotPunchPixels
+                           - Mathf.Clamp01(emptyPunch01) * TickEmptyPunchPixels;
+            // 下限 10px：再往里就盖住中心点；上限 64px：留在 1080p 视野的舒适读数区内。
+            return Mathf.Clamp(offset, 10f, 64f);
         }
 
         /// <summary>

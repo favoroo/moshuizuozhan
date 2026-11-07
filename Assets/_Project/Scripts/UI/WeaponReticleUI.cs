@@ -13,13 +13,18 @@ namespace P1.UI
     /// 武器专属屏幕准星控制器（Screen-space Reticle UI）：
     /// P9 第三人称起准星固定在屏幕正中心（相机中心射线即瞄准方向），不再随世界落点漂移。
     /// 借鉴 Inkwave hud.css (.iw-ret & .iw-subaim) 潮流设计：
-    /// 1. 枪形（小枪 / 双枪 / 泼桶 / 爆破枪）：中心点 + 扩散圆环 + 4个随 Bloom 散布角度动态扩张/收缩的刻度角；
-    /// 2. 滚筒：宽屏扇面横向指示条；
-    /// 3. 蓄力环（蓄力狙 / 加特林）：同心圆 + 左右收紧瞄准线 + 360° 动态蓄力进度环 (Charge01) + 满蓄力过冲脉冲；
+    /// 1. 枪形（小枪 / 双枪 / 泼桶 / 爆破枪 / 加特林）：共享「中心点 + 4 向散布刻度」读数语言，
+    ///    外壳按武器身份切换（P40，对齐 iw-ret--*）：小枪细环 / 双枪双小环 + 架枪菱形 /
+    ///    泼桶拱形 + 落点斗 / 爆破枪内外双环 / 加特林 8 段蓄力环；
+    /// 2. 滚筒：左右括号 + 底部落点弧线（表达推地宽度，不再是一根像 HUD 进度条的胶囊）；
+    /// 3. 蓄力狙：同心圆 + 左右收紧瞄准线 + 360° 蓄力进度环 + 满蓄一次性闪光；
     /// 4. 副武器冷却微胶囊：手雷投出后显示倒计时与充能条，冷却结束即收起（不弹「手雷就绪」提示）。
-    /// 武器类型到形状的映射统一走 <see cref="ReticleStateMath.ShapeFor"/>，新增武器类型不必改本文件。
+    /// 武器类型到容器形状 / 身份外形的映射分别走 <see cref="ReticleStateMath.ShapeFor"/> 与
+    /// <see cref="ReticleStateMath.StyleFor"/>，新增武器类型不必改本文件的装配结构。
     /// P30 可读性重做：对齐 Inkwave 的「白芯 + 墨色硬描边」对比策略（旧版墨芯白边在亮地面只剩发丝线）；
     /// 刻度静止时收在环带内侧，开火随 Bloom 越过环带外扫，不再与环带重叠糊成一团。
+    /// P40 克制化：主环 60→44、圆环不再随散布缩放（同一个信息只画一遍）、墨边 1.5→1.2、
+    /// 满蓄改一次性闪光（几何风禁止循环脉冲）、移动端整体 ×1.28 与字号同源。
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     public class WeaponReticleUI : MonoBehaviour
@@ -39,14 +44,48 @@ namespace P1.UI
 
         // 小枪组件（刻度为白芯 + 墨边双层条，见 OutlinedBar）
         private readonly OutlinedBar[] _shooterBars = new OutlinedBar[4];
-        private Image _shooterRing;
         private Image _shooterCenterDot;
         /// <summary>枪形上的蓄力环：只给「蓄力后扫射」的武器（加特林）显示，其它武器常隐。</summary>
         private Image _shooterChargeRing;
 
-        // 滚筒组件
-        private RectTransform _rollerBarRect;
-        private Image _rollerBarImage;
+        // 枪形身份外形壳（P40：5 把弹丸武器各一套，同一时刻只亮一套）
+        private RectTransform _basicStyleRoot;
+        private RectTransform _twinStyleRoot;
+        private RectTransform _lobStyleRoot;
+        private RectTransform _blastStyleRoot;
+        private RectTransform _spinStyleRoot;
+        private ReticleStyle _shooterStyle = (ReticleStyle)(-1);
+
+        /// <summary>小枪细主环（Basic 壳）；超距时换虚线贴图。</summary>
+        private Image _shooterRing;
+
+        /// <summary>双枪两枚小环（左右各一）与架枪时的菱形锁定框。</summary>
+        private Image _twinRingLeft;
+        private Image _twinRingRight;
+        private readonly OutlinedBar[] _twinLockBars = new OutlinedBar[4];
+        private float _twinLockWeight;
+
+        /// <summary>泼桶：拱形 3 根 + 落点斗 3 根（几何风用直条拼曲线）。</summary>
+        private readonly OutlinedBar[] _lobBars = new OutlinedBar[6];
+        /// <summary>拱形 / 落点斗各自一个子根：前摇时整组位移，不用逐根改坐标。</summary>
+        private RectTransform _lobArchRoot;
+        private RectTransform _lobBucketRoot;
+
+        /// <summary>爆破枪：外环 = 爆炸半径，内环 = 直击核心。</summary>
+        private Image _blastOuterRing;
+        private Image _blastInnerRing;
+
+        /// <summary>加特林：8 段旋转蓄力刻度（蓄满后整圈提亮）。</summary>
+        private readonly OutlinedBar[] _spinSegments = new OutlinedBar[8];
+        /// <summary>加特林的暗主环：给 8 段刻度做参照，否则整组读成一朵六角星。</summary>
+        private Image _spinRing;
+
+        // 滚筒组件（P40：括号 + 落点弧线，替代像 HUD 进度条的胶囊横条）
+        private readonly OutlinedBar[] _rollerBracketBars = new OutlinedBar[6];
+        private readonly OutlinedBar[] _rollerArcBars = new OutlinedBar[3];
+        private RectTransform _rollerArcRoot;
+        private Image _rollerNotch;
+        private float _rollerHalfWidth = 70f;
 
         // 蓄力狙组件
         private Image _chargerCenterDot;
@@ -62,17 +101,33 @@ namespace P1.UI
         private RectTransform _subAimBarBg;
         private TMP_Text _subAimTimeText;
         private bool _subAimMobile;
+        private float _subAimBadgeCanvasHeight = -1f;
+
+        /// <summary>
+        /// 手雷冷却徽标落位（徽标中心距画布底边，参考像素）：钉在底部三卡正上方，
+        /// 不再悬在屏幕正中挡瞄准视野。桌面 = 三卡顶边 144 + 14 间距 + 徽标半高 20；
+        /// 移动端三卡顶边 118 + 14 + 半高 24。
+        /// </summary>
+        private const float BombBadgeBottomOffsetDesktop = 178f;
+        private const float BombBadgeBottomOffsetMobile = 156f;
         private int _lastBombCooldownTenths = int.MinValue;
 
         // 程序化生成的 UI 贴图与 Sprite
         private Sprite _dotSprite;
+        /// <summary>128px 基准环：蓄力狙轨道环 / 蓄力进度环 / 命中环（按显示尺寸缩小后仍够厚）。</summary>
         private Sprite _ringSprite;
         private Sprite _ringDashedSprite;
-        private Sprite _pillSprite;
+        /// <summary>44px 细环：小枪主环、爆破枪外环（超距时换 44px 虚线版）。</summary>
+        private Sprite _ringSlimSprite;
+        private Sprite _ringSlimDashedSprite;
+        /// <summary>30px 小环：双枪左右两枚。</summary>
+        private Sprite _ringTwinSprite;
+        /// <summary>20px 极细环：爆破枪直击核心。</summary>
+        private Sprite _ringCoreSprite;
         private Sprite _arcSprite;
 
-        /// <summary>白芯刻度条四周的墨边厚度（像素，单侧）。</summary>
-        private const float BarOutline = 1.5f;
+        /// <summary>白芯刻度条四周的墨边厚度（像素，单侧）：1.2px 是「亮暗地面都读得清」的下限，再厚会糊成黑框。</summary>
+        private const float BarOutline = 1.2f;
 
         // 打击标记（Hit Marker, P6-A）
         private RectTransform _hitMarkerRoot;
@@ -210,11 +265,24 @@ namespace P1.UI
         /// <summary>空打震颤最大像素位移。</summary>
         private const float EmptyShakeAmplitude = 5f;
 
+        /// <summary>满蓄一次性闪光的时长（秒）与最大放大比例（几何风禁止循环脉冲）。</summary>
+        private const float ChargeFlashDuration = 0.35f;
+        private const float ChargeFlashScale = 0.14f;
+
+        /// <summary>
+        /// 移动端准星整体放大（与 UITypography 字号同源 ×1.28）：
+        /// 44px 主环在 1920 参考画布上约 4mm，缩到 6.5 寸屏只剩 3mm，不放大读不清。
+        /// </summary>
+        private float _baseScale = 1f;
+
+        /// <summary>当前「刚好蓄满」的起始时刻；-1 = 未满。反复调用幂等，蓄力环与蓄力狙共用。</summary>
+        private float _fullChargeSince = -1f;
+
         /// <summary>「弹药耗尽」toast 总时长（秒）：很短，扣扳机才出现。</summary>
         private const float EmptyToastDuration = 0.9f;
 
-        /// <summary>toast 距离画布底边的高度（参考像素）：落在底部三卡（顶边约 144）之上，不挡准星视野。</summary>
-        private const float EmptyToastBottomOffset = 176f;
+        /// <summary>toast 距离画布底边的高度（参考像素）：落在手雷冷却徽标带（上缘约 198）之上，两者同显时互不叠压。</summary>
+        private const float EmptyToastBottomOffset = 218f;
 
         private void Awake()
         {
@@ -254,6 +322,8 @@ namespace P1.UI
 
             _canvasGroup = gameObject.GetComponent<CanvasGroup>();
             if (_canvasGroup == null) _canvasGroup = gameObject.AddComponent<CanvasGroup>();
+
+            _baseScale = UITypography.IsMobileLike ? ComicStyle.MobileFontBoost : 1f;
 
             _parentCanvas = rootCanvas;
             if (_parentCanvas != null)
@@ -302,7 +372,10 @@ namespace P1.UI
             DestroySpriteAndTexture(ref _dotSprite);
             DestroySpriteAndTexture(ref _ringSprite);
             DestroySpriteAndTexture(ref _ringDashedSprite);
-            DestroySpriteAndTexture(ref _pillSprite);
+            DestroySpriteAndTexture(ref _ringSlimSprite);
+            DestroySpriteAndTexture(ref _ringSlimDashedSprite);
+            DestroySpriteAndTexture(ref _ringTwinSprite);
+            DestroySpriteAndTexture(ref _ringCoreSprite);
             DestroySpriteAndTexture(ref _arcSprite);
         }
 
@@ -350,107 +423,68 @@ namespace P1.UI
             dotTex.Apply();
             _dotSprite = Sprite.Create(dotTex, new Rect(0, 0, 64, 64), new Vector2(0.5f, 0.5f));
 
-            // 2. 圆环 Sprite (128x128)：白芯环带 + 墨色双侧硬描边（几何风纯色硬边，无柔光）
-            Texture2D ringTex = new Texture2D(128, 128, TextureFormat.RGBA32, false) { name = "ReticleRingTex" };
-            Color[] ringCols = new Color[128 * 128];
-            for (int y = 0; y < 128; y++)
-            {
-                for (int x = 0; x < 128; x++)
-                {
-                    float dist = Vector2.Distance(new Vector2(x, y), new Vector2(63.5f, 63.5f));
-                    float ringDiff = Mathf.Abs(dist - 56f);
-                    if (ringDiff <= 3f)
-                    {
-                        ringCols[y * 128 + x] = Color.white;
-                    }
-                    else if (ringDiff <= 5.5f)
-                    {
-                        ringCols[y * 128 + x] = ComicStyle.Ink;
-                    }
-                    else
-                    {
-                        ringCols[y * 128 + x] = Color.clear;
-                    }
-                }
-            }
-            ringTex.SetPixels(ringCols);
-            ringTex.Apply();
-            _ringSprite = Sprite.Create(ringTex, new Rect(0, 0, 128, 128), new Vector2(0.5f, 0.5f));
-            _ringDashedSprite = GenerateDashedRingSprite();
+            // 2. 圆环 Sprite：参数化生成（P40）。旧实现只有一张 128px 环，缩到 60px 显示后
+            //    环带只剩 2.8px、边缘发虚；命中环缩到 30px 更是只剩 1.4px 线（等于看不见）。
+            //    现在每种用途按显示尺寸定做，环宽就是设计值。
+            _ringSprite = MakeRingSprite("ReticleRingTex", 128f, 6.4f, 3.2f);
+            _ringDashedSprite = MakeRingSprite("ReticleDashedRingTex", 128f, 6.4f, 3.2f, dashed: true, segments: 18);
+            _ringSlimSprite = MakeRingSprite("ReticleRingSlimTex", ReticleStateMath.ShooterRingDiameter, 2.4f, 1.2f);
+            _ringSlimDashedSprite = MakeRingSprite("ReticleRingSlimDashedTex",
+                ReticleStateMath.ShooterRingDiameter, 2.4f, 1.2f, dashed: true, segments: 14);
+            _ringTwinSprite = MakeRingSprite("ReticleRingTwinTex", 30f, 2.2f, 1.1f);
+            _ringCoreSprite = MakeRingSprite("ReticleRingCoreTex", 20f, 2.2f, 1.1f);
 
-            // 3. 纯色胶囊贴图 (64x32)：白芯 + 墨色硬描边（几何风纯色硬边，无柔光）
-            Texture2D pillTex = new Texture2D(64, 32, TextureFormat.RGBA32, false) { name = "ReticlePillTex" };
-            Color[] pillCols = new Color[64 * 32];
-            for (int y = 0; y < 32; y++)
-            {
-                for (int x = 0; x < 64; x++)
-                {
-                    float dx = x < 16 ? (16 - x) : (x > 47 ? (x - 47) : 0);
-                    float dy = Mathf.Abs(y - 15.5f);
-                    float dist = Mathf.Sqrt(dx * dx + dy * dy);
-                    if (dist <= 11f)
-                    {
-                        pillCols[y * 64 + x] = Color.white;
-                    }
-                    else if (dist <= 15.5f)
-                    {
-                        pillCols[y * 64 + x] = ComicStyle.Ink;
-                    }
-                    else
-                    {
-                        pillCols[y * 64 + x] = Color.clear;
-                    }
-                }
-            }
-            pillTex.SetPixels(pillCols);
-            pillTex.Apply();
-            _pillSprite = Sprite.Create(pillTex, new Rect(0, 0, 64, 32), new Vector2(0.5f, 0.5f));
-
-            // 4. 受击方向弧贴图 (256x256)：纯色几何硬边扇面
+            // 3. 受击方向弧贴图 (256x256)：纯色几何硬边扇面
             _arcSprite = GenerateArcSprite();
         }
 
         /// <summary>
-        /// 超距状态用的虚线圆环：与实心环同半径/同描边，按 18 段 55% 实、45% 空切开。
+        /// 参数化圆环贴图：按「显示直径 / 白芯宽度 / 单侧墨边」直接生成，厚度不靠缩放凑。
+        /// 贴图取显示尺寸的 2 倍（超采样），绘制时缩到 displayDiameter：白芯与墨边宽度即设计值。
+        /// dashed = true 时按 segments 段切开，实段占 55%（与 INKWAVE 的超距虚线同节奏）。
         /// 几何风硬边、无柔光；Image.color 仍可正常染色。
         /// </summary>
-        private static Sprite GenerateDashedRingSprite()
+        private static Sprite MakeRingSprite(string name, float displayDiameter, float coreThickness,
+            float outlineThickness, bool dashed = false, int segments = 18)
         {
-            const int size = 128;
-            const int segments = 18;
+            float diameter = Mathf.Max(8f, displayDiameter);
+            int size = Mathf.Max(16, Mathf.RoundToInt(diameter * 2f));
             const float solidFraction = 0.55f;
 
-            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
-            {
-                name = "ReticleDashedRingTex"
-            };
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = name };
             Color[] pixels = new Color[size * size];
-            Vector2 center = new Vector2(63.5f, 63.5f);
-            float segmentDegrees = 360f / segments;
+            float center = (size - 1) * 0.5f;
+            float coreHalf = Mathf.Max(0.75f, coreThickness);
+            float outlineHalf = Mathf.Max(0.5f, outlineThickness);
+            // 墨边外缘收在贴图半径内侧 1px，避免圆环被边缘裁成直边。
+            float ringRadius = Mathf.Max(coreHalf + outlineHalf, center - coreHalf - outlineHalf - 1f);
+            float segmentDegrees = 360f / Mathf.Max(2, segments);
 
             for (int y = 0; y < size; y++)
             {
                 for (int x = 0; x < size; x++)
                 {
-                    float dx = x - center.x;
-                    float dy = y - center.y;
+                    float dx = x - center;
+                    float dy = y - center;
                     float dist = Mathf.Sqrt(dx * dx + dy * dy);
-                    float ringDiff = Mathf.Abs(dist - 56f);
-                    if (ringDiff > 5.5f)
+                    float ringDiff = Mathf.Abs(dist - ringRadius);
+                    if (ringDiff > coreHalf + outlineHalf)
                     {
                         pixels[y * size + x] = Color.clear;
                         continue;
                     }
 
-                    float angle = Mathf.Atan2(dy, dx) * Mathf.Rad2Deg + 180f;
-                    float phase = Mathf.Repeat(angle / segmentDegrees, 1f);
-                    if (phase > solidFraction)
+                    if (dashed)
                     {
-                        pixels[y * size + x] = Color.clear;
-                        continue;
+                        float angle = Mathf.Atan2(dy, dx) * Mathf.Rad2Deg + 180f;
+                        if (Mathf.Repeat(angle / segmentDegrees, 1f) > solidFraction)
+                        {
+                            pixels[y * size + x] = Color.clear;
+                            continue;
+                        }
                     }
 
-                    pixels[y * size + x] = ringDiff <= 3f ? Color.white : ComicStyle.Ink;
+                    pixels[y * size + x] = ringDiff <= coreHalf ? Color.white : ComicStyle.Ink;
                 }
             }
 
@@ -557,28 +591,44 @@ namespace P1.UI
             return bar;
         }
 
+        /// <summary>
+        /// 由两个端点生成一条白芯墨边线段（长轴自动对齐 from→to）。
+        /// 条形的长轴沿本地 +Y，绕 Z 转 θ 后方向是 (-sinθ, cosθ)，所以 θ = atan2(-dx, dy)。
+        /// 用端点而不是「中心 + 手算角度」拼形状：拱形/斗/菱形的端点能直接读懂，也不会转错方向。
+        /// </summary>
+        private static OutlinedBar CreateSegment(Transform parent, string name, Vector2 from, Vector2 to,
+            float thickness)
+        {
+            Vector2 delta = to - from;
+            float length = Mathf.Max(1f, delta.magnitude);
+            float angle = Mathf.Atan2(-delta.x, delta.y) * Mathf.Rad2Deg;
+            OutlinedBar bar = CreateOutlinedBar(parent, name, new Vector2(thickness, length), angle);
+            bar.Root.anchoredPosition = (from + to) * 0.5f;
+            return bar;
+        }
+
         private void BuildShooterUI()
         {
             var go = new GameObject("ShooterReticle", typeof(RectTransform));
             go.transform.SetParent(transform, false);
             _shooterContainer = go.GetComponent<RectTransform>();
 
-            // 中心圆点 (11x11 px)：白芯 + 墨边
-            var dotGo = new GameObject("CenterDot", typeof(Image));
-            dotGo.transform.SetParent(_shooterContainer, false);
-            _shooterCenterDot = dotGo.GetComponent<Image>();
-            _shooterCenterDot.sprite = _dotSprite;
-            _shooterCenterDot.rectTransform.sizeDelta = new Vector2(11f, 11f);
+            // P40：5 套身份外形壳并列，同一时刻只亮一套（ApplyShooterStyle 硬切）。
+            // 共用「中心点 + 4 向散布刻度」的读数语言，只换轮廓——玩家不用读 HUD 也能认出武器。
+            _basicStyleRoot = CreateStyleRoot("Style_Basic");
+            _twinStyleRoot = CreateStyleRoot("Style_Twin");
+            _lobStyleRoot = CreateStyleRoot("Style_Lob");
+            _blastStyleRoot = CreateStyleRoot("Style_Blast");
+            _spinStyleRoot = CreateStyleRoot("Style_Spin");
 
-            // 主圆环 (60x60 px，环带半径约 26px)
-            var ringGo = new GameObject("MainRing", typeof(Image));
-            ringGo.transform.SetParent(_shooterContainer, false);
-            _shooterRing = ringGo.GetComponent<Image>();
-            _shooterRing.sprite = _ringSprite;
-            _shooterRing.rectTransform.sizeDelta = new Vector2(60f, 60f);
+            BuildBasicStyle();
+            BuildTwinStyle();
+            BuildLobStyle();
+            BuildBlastStyle();
+            BuildSpinStyle();
 
-            // 蓄力进度环：与蓄力狙同款 Radial360 填充，套在主环外侧（76px），
-            // 加特林蓄力时才能看到进度条；其它枪形武器 Charge01 恒为 0，这一层始终隐藏。
+            // 蓄力进度环：只给「蓄力后扫射」的加特林显示，套在 8 段刻度外侧（64px），
+            // 其它枪形武器 Charge01 恒为 0，这一层始终隐藏。
             var chargeGo = new GameObject("ChargeRing", typeof(Image));
             chargeGo.transform.SetParent(_shooterContainer, false);
             _shooterChargeRing = chargeGo.GetComponent<Image>();
@@ -588,16 +638,161 @@ namespace P1.UI
             _shooterChargeRing.fillOrigin = (int)Image.Origin360.Top;
             _shooterChargeRing.fillClockwise = true;
             _shooterChargeRing.fillAmount = 0f;
-            _shooterChargeRing.rectTransform.sizeDelta = new Vector2(76f, 76f);
+            _shooterChargeRing.rectTransform.sizeDelta = new Vector2(64f, 64f);
             chargeGo.SetActive(false);
 
-            // 4 个刻度 (白芯 4x12 + 墨边)：静止时收在环带内侧（r≈16，与圆点/环带各留空隙不粘连），
-            // 开火随 Bloom 越过环带向外扫
-            float[] angles = new float[] { 0f, 90f, 180f, 270f };
+            // 4 个散布刻度 (白芯 3.2x10 + 1.2 墨边)：静止时收在主环内侧（15px），
+            // 开火随 Bloom 越过主环向外扫。Lob 只用左右两枚、Blast 不用、Spin 只用上下两枚。
+            float[] angles = { 0f, 90f, 180f, 270f };
             for (int i = 0; i < 4; i++)
             {
-                _shooterBars[i] = CreateOutlinedBar(_shooterContainer, $"Tick_{i}", new Vector2(4f, 12f), angles[i]);
+                _shooterBars[i] = CreateOutlinedBar(_shooterContainer, $"Tick_{i}", new Vector2(3.2f, 10f), angles[i]);
+                _shooterBars[i].SetCoreColor(Color.white);
+                _shooterBars[i].SetBackingColor(ComicStyle.Ink);
             }
+
+            // 中心圆点 (9x9 px)：最后建，永远压在环与刻度之上。
+            var dotGo = new GameObject("CenterDot", typeof(Image));
+            dotGo.transform.SetParent(_shooterContainer, false);
+            _shooterCenterDot = dotGo.GetComponent<Image>();
+            _shooterCenterDot.sprite = _dotSprite;
+            _shooterCenterDot.raycastTarget = false;
+            _shooterCenterDot.rectTransform.sizeDelta = new Vector2(9f, 9f);
+
+            ApplyShooterStyle(ReticleStyle.Basic);
+        }
+
+        private RectTransform CreateStyleRoot(string name)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(_shooterContainer, false);
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            return rect;
+        }
+
+        private void BuildBasicStyle()
+        {
+            // 小枪：一枚细主环（44px）。超距时换 44px 虚线版，厚度与实体版一致。
+            var ringGo = new GameObject("MainRing", typeof(Image));
+            ringGo.transform.SetParent(_basicStyleRoot, false);
+            _shooterRing = ringGo.GetComponent<Image>();
+            _shooterRing.sprite = _ringSlimSprite;
+            _shooterRing.raycastTarget = false;
+            _shooterRing.rectTransform.sizeDelta =
+                new Vector2(ReticleStateMath.ShooterRingDiameter, ReticleStateMath.ShooterRingDiameter);
+        }
+
+        private void BuildTwinStyle()
+        {
+            // 双枪：左右各一枚小环（26px，中心距 ±17）。架枪时再叠一枚菱形锁定框。
+            _twinRingLeft = CreateRingImage(_twinStyleRoot, "TwinRing_L", _ringTwinSprite, 26f);
+            _twinRingRight = CreateRingImage(_twinStyleRoot, "TwinRing_R", _ringTwinSprite, 26f);
+            _twinRingLeft.rectTransform.anchoredPosition = new Vector2(-17f, 0f);
+            _twinRingRight.rectTransform.anchoredPosition = new Vector2(17f, 0f);
+
+            // 菱形锁定框：4 条边按顶点连出来（22 半径），几何风用直条拼形状，不引入新贴图。
+            Vector2 top = new Vector2(0f, 22f);
+            Vector2 right = new Vector2(22f, 0f);
+            Vector2 bottom = new Vector2(0f, -22f);
+            Vector2 left = new Vector2(-22f, 0f);
+            _twinLockBars[0] = CreateSegment(_twinStyleRoot, "Lock_TR", top, right, 2.6f);
+            _twinLockBars[1] = CreateSegment(_twinStyleRoot, "Lock_BR", right, bottom, 2.6f);
+            _twinLockBars[2] = CreateSegment(_twinStyleRoot, "Lock_BL", bottom, left, 2.6f);
+            _twinLockBars[3] = CreateSegment(_twinStyleRoot, "Lock_TL", left, top, 2.6f);
+        }
+
+        private void BuildLobStyle()
+        {
+            // 泼桶：上方拱形（A(-24,14)→B(-10,24)→C(10,24)→D(24,14)）+ 下方落点斗（\_/）。
+            // 拱尾 y=14 / 斗尾 y=-14，中间留 28px 空隙——若两端靠太近会连成一个六边形环，读不出「泼出去的弧线」。
+            var archRoot = new GameObject("Arch", typeof(RectTransform));
+            archRoot.transform.SetParent(_lobStyleRoot, false);
+            _lobArchRoot = archRoot.GetComponent<RectTransform>();
+            _lobArchRoot.anchorMin = _lobArchRoot.anchorMax = new Vector2(0.5f, 0.5f);
+            _lobArchRoot.pivot = new Vector2(0.5f, 0.5f);
+            _lobArchRoot.anchoredPosition = Vector2.zero;
+
+            _lobBars[0] = CreateSegment(_lobArchRoot, "Arch_L", new Vector2(-24f, 14f), new Vector2(-10f, 24f), 2.6f);
+            _lobBars[1] = CreateSegment(_lobArchRoot, "Arch_Top", new Vector2(-10f, 24f), new Vector2(10f, 24f), 2.6f);
+            _lobBars[2] = CreateSegment(_lobArchRoot, "Arch_R", new Vector2(10f, 24f), new Vector2(24f, 14f), 2.6f);
+
+            var bucketRoot = new GameObject("Bucket", typeof(RectTransform));
+            bucketRoot.transform.SetParent(_lobStyleRoot, false);
+            _lobBucketRoot = bucketRoot.GetComponent<RectTransform>();
+            _lobBucketRoot.anchorMin = _lobBucketRoot.anchorMax = new Vector2(0.5f, 0.5f);
+            _lobBucketRoot.pivot = new Vector2(0.5f, 0.5f);
+            _lobBucketRoot.anchoredPosition = Vector2.zero;
+
+            _lobBars[3] = CreateSegment(_lobBucketRoot, "Bucket_L", new Vector2(-18f, -14f), new Vector2(-5f, -22f), 2.6f);
+            _lobBars[4] = CreateSegment(_lobBucketRoot, "Bucket_Bottom", new Vector2(-5f, -22f), new Vector2(5f, -22f), 2.6f);
+            _lobBars[5] = CreateSegment(_lobBucketRoot, "Bucket_R", new Vector2(5f, -22f), new Vector2(18f, -14f), 2.6f);
+        }
+
+        private void BuildBlastStyle()
+        {
+            // 爆破枪：外环 = 爆炸半径，内环 = 直击核心。不画散布刻度（弹道是单发重弹）。
+            _blastOuterRing = CreateRingImage(_blastStyleRoot, "BlastOuterRing", _ringSlimSprite, 52f);
+            _blastInnerRing = CreateRingImage(_blastStyleRoot, "BlastInnerRing", _ringCoreSprite, 20f);
+        }
+
+        private void BuildSpinStyle()
+        {
+            // 加特林：8 段旋转蓄力刻度（26px 半径），段间 45°。蓄满时整圈提亮。
+            // 先铺一枚暗主环做参照：少了它，8 根径向短条会读成一朵六角星而不是「旋转蓄力」。
+            _spinRing = CreateRingImage(_spinStyleRoot, "SpinRing", _ringSlimSprite,
+                ReticleStateMath.ShooterRingDiameter);
+            for (int i = 0; i < _spinSegments.Length; i++)
+            {
+                float rad = i * 45f * Mathf.Deg2Rad;
+                Vector2 dir = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad));
+                _spinSegments[i] = CreateSegment(_spinStyleRoot, $"SpinSeg_{i}",
+                    dir * 22f, dir * 30f, 2.4f);
+            }
+        }
+
+        private static Image CreateRingImage(Transform parent, string name, Sprite sprite, float diameter)
+        {
+            var go = new GameObject(name, typeof(Image));
+            go.transform.SetParent(parent, false);
+            var image = go.GetComponent<Image>();
+            image.sprite = sprite;
+            image.raycastTarget = false;
+            image.rectTransform.sizeDelta = new Vector2(diameter, diameter);
+            return image;
+        }
+
+        /// <summary>
+        /// 切换枪形身份外形壳（硬切，几何大胆风不做过场）：只亮当前武器那一套，
+        /// 同时决定 4 枚散布刻度里哪几枚参与（Blast 不画刻度，Lob 只留左右，Spin 只留上下）。
+        /// </summary>
+        private void ApplyShooterStyle(ReticleStyle style)
+        {
+            if (_basicStyleRoot == null || _shooterStyle == style)
+                return;
+
+            _shooterStyle = style;
+            _basicStyleRoot.gameObject.SetActive(style == ReticleStyle.Basic);
+            _twinStyleRoot.gameObject.SetActive(style == ReticleStyle.Twin);
+            _lobStyleRoot.gameObject.SetActive(style == ReticleStyle.Lob);
+            _blastStyleRoot.gameObject.SetActive(style == ReticleStyle.Blast);
+            _spinStyleRoot.gameObject.SetActive(style == ReticleStyle.Spin);
+
+            SetTickVisible(0, style == ReticleStyle.Basic || style == ReticleStyle.Twin || style == ReticleStyle.Spin);
+            // 双枪的左右两枚小环已经占据水平方向，再叠左右刻度会压在小环上糊成一团 → 只留上下。
+            SetTickVisible(1, style == ReticleStyle.Basic || style == ReticleStyle.Lob);
+            SetTickVisible(2, style == ReticleStyle.Basic || style == ReticleStyle.Twin || style == ReticleStyle.Spin);
+            SetTickVisible(3, style == ReticleStyle.Basic || style == ReticleStyle.Lob);
+        }
+
+        private void SetTickVisible(int index, bool visible)
+        {
+            if (index < 0 || index >= _shooterBars.Length) return;
+            OutlinedBar bar = _shooterBars[index];
+            if (bar?.Root != null && bar.Root.gameObject.activeSelf != visible)
+                bar.Root.gameObject.SetActive(visible);
         }
 
         private void BuildRollerUI()
@@ -606,21 +801,52 @@ namespace P1.UI
             go.transform.SetParent(transform, false);
             _rollerContainer = go.GetComponent<RectTransform>();
 
-            // 宽屏横向指示条 (140x16 px)
-            var barGo = new GameObject("Bar", typeof(Image));
-            barGo.transform.SetParent(_rollerContainer, false);
-            _rollerBarImage = barGo.GetComponent<Image>();
-            _rollerBarImage.sprite = _pillSprite;
-            _rollerBarRect = barGo.GetComponent<RectTransform>();
-            _rollerBarRect.sizeDelta = new Vector2(140f, 14f);
+            // P40：胶囊横条（读起来像底部 HUD 的进度条）改成「左右括号 + 落点弧线」：
+            // 括号 = 推地宽度，弧线 = 墨带落点方向。宽度随 weapon.Config.rollWidth 缩放。
+            for (int i = 0; i < 2; i++)
+            {
+                string side = i == 0 ? "L" : "R";
+                int b = i * 3;
+                _rollerBracketBars[b] = CreateOutlinedBar(_rollerContainer, $"Bracket_{side}_V", new Vector2(3.2f, 24f));
+                _rollerBracketBars[b + 1] = CreateOutlinedBar(_rollerContainer, $"Bracket_{side}_Top", new Vector2(10f, 3.2f));
+                _rollerBracketBars[b + 2] = CreateOutlinedBar(_rollerContainer, $"Bracket_{side}_Bottom", new Vector2(10f, 3.2f));
+            }
 
-            // 中间瞄准凹槽指示点：白芯条上必须用墨色才能读出来
+            // 落点弧线：3 段折线按端点拼一条浅笑弧（两端高、中间低），落在中心点下方。
+            var arcRootGo = new GameObject("Arc", typeof(RectTransform));
+            arcRootGo.transform.SetParent(_rollerContainer, false);
+            _rollerArcRoot = arcRootGo.GetComponent<RectTransform>();
+            _rollerArcRoot.anchorMin = _rollerArcRoot.anchorMax = new Vector2(0.5f, 0.5f);
+            _rollerArcRoot.pivot = new Vector2(0.5f, 0.5f);
+            _rollerArcRoot.anchoredPosition = Vector2.zero;
+
+            _rollerArcBars[0] = CreateSegment(_rollerArcRoot, "Arc_L", new Vector2(-14f, -8f), new Vector2(-6f, -17f), 2.6f);
+            _rollerArcBars[1] = CreateSegment(_rollerArcRoot, "Arc_Bottom", new Vector2(-6f, -17f), new Vector2(6f, -17f), 2.6f);
+            _rollerArcBars[2] = CreateSegment(_rollerArcRoot, "Arc_R", new Vector2(6f, -17f), new Vector2(14f, -8f), 2.6f);
+
+            // 中心瞄准点：括号之间唯一实心元素，白芯 + 墨边（与枪形共用同一枚圆点贴图）。
             var notch = new GameObject("Notch", typeof(Image));
             notch.transform.SetParent(_rollerContainer, false);
-            var notchImg = notch.GetComponent<Image>();
-            notchImg.sprite = _dotSprite;
-            notchImg.color = ComicStyle.Ink;
-            notch.GetComponent<RectTransform>().sizeDelta = new Vector2(8f, 8f);
+            _rollerNotch = notch.GetComponent<Image>();
+            _rollerNotch.sprite = _dotSprite;
+            _rollerNotch.raycastTarget = false;
+            _rollerNotch.rectTransform.sizeDelta = new Vector2(9f, 9f);
+
+            LayoutRollerBrackets(_rollerHalfWidth);
+        }
+
+        /// <summary>按半宽摆放左右括号（竖直条 + 上下两个向内的短爪）。</summary>
+        private void LayoutRollerBrackets(float halfWidth)
+        {
+            _rollerHalfWidth = halfWidth;
+            for (int i = 0; i < 2; i++)
+            {
+                float sign = i == 0 ? -1f : 1f;
+                int b = i * 3;
+                _rollerBracketBars[b].Root.anchoredPosition = new Vector2(sign * halfWidth, 0f);
+                _rollerBracketBars[b + 1].Root.anchoredPosition = new Vector2(sign * (halfWidth - 5f), 10.5f);
+                _rollerBracketBars[b + 2].Root.anchoredPosition = new Vector2(sign * (halfWidth - 5f), -10.5f);
+            }
         }
 
         private void BuildChargerUI()
@@ -636,12 +862,12 @@ namespace P1.UI
             _chargerCenterDot.sprite = _dotSprite;
             _chargerCenterDot.rectTransform.sizeDelta = new Vector2(10f, 10f);
 
-            // 背景导轨环 (暗度 0.55：旧 0.3 在中场调背景上几乎不可见)
+            // 背景导轨环 (暗度 0.55：旧 0.3 在中场调背景上几乎不可见)；P40 收到 54px 与细环族一致
             var trackGo = new GameObject("TrackRing", typeof(Image));
             trackGo.transform.SetParent(_chargerContainer, false);
             _chargerTrackRing = trackGo.GetComponent<Image>();
             _chargerTrackRing.sprite = _ringSprite;
-            _chargerTrackRing.rectTransform.sizeDelta = new Vector2(62f, 62f);
+            _chargerTrackRing.rectTransform.sizeDelta = new Vector2(54f, 54f);
             _chargerTrackRing.color = new Color(1f, 1f, 1f, 0.55f);
 
             // 360° 蓄力进度环 (Radial 360 Filled)
@@ -654,18 +880,18 @@ namespace P1.UI
             _chargerFillRing.fillOrigin = (int)Image.Origin360.Top;
             _chargerFillRing.fillClockwise = true;
             _chargerFillRing.fillAmount = 0f;
-            _chargerFillRing.rectTransform.sizeDelta = new Vector2(62f, 62f);
+            _chargerFillRing.rectTransform.sizeDelta = new Vector2(54f, 54f);
 
-            // 左右两条蓄力收束线 (白芯 18x3.5 + 墨边)，停在进度环外侧，蓄力时向内收 10px
-            _chargerLineLeftBar = CreateOutlinedBar(_chargerContainer, "LineLeft", new Vector2(18f, 3.5f));
-            _chargerLineLeftBar.Root.anchoredPosition = new Vector2(-42f, 0f);
+            // 左右两条蓄力收束线 (白芯 16x3.2 + 墨边)，停在进度环外侧，蓄力时向内收 10px
+            _chargerLineLeftBar = CreateOutlinedBar(_chargerContainer, "LineLeft", new Vector2(16f, 3.2f));
+            _chargerLineLeftBar.Root.anchoredPosition = new Vector2(-38f, 0f);
 
-            _chargerLineRightBar = CreateOutlinedBar(_chargerContainer, "LineRight", new Vector2(18f, 3.5f));
-            _chargerLineRightBar.Root.anchoredPosition = new Vector2(42f, 0f);
+            _chargerLineRightBar = CreateOutlinedBar(_chargerContainer, "LineRight", new Vector2(16f, 3.2f));
+            _chargerLineRightBar.Root.anchoredPosition = new Vector2(38f, 0f);
         }
 
         /// <summary>
-        /// 手雷冷却徽标（旧名 SubAimBadge）：准星下方一条几何风读数——
+        /// 手雷冷却徽标（旧名 SubAimBadge）：底部三卡正上方一条几何风读数——
         /// 冷却中「[手雷图标] █████░░ 5.4s」，冷却一结束立刻收起（不再弹「手雷就绪」提示）。
         ///
         /// 左侧优先用手雷图标（UIIconLibrary.sub_bomb），取不到时退回中文「手雷」；
@@ -692,17 +918,16 @@ namespace P1.UI
             _subAimBadge.anchorMin = _subAimBadge.anchorMax = new Vector2(0.5f, 0.5f);
             _subAimBadge.pivot = new Vector2(0.5f, 0.5f);
             _subAimBadge.sizeDelta = new Vector2(badgeWidth, badgeHeight);
-            _subAimBadge.anchoredPosition = new Vector2(0f, _subAimMobile ? -84f : -68f);
+            PositionSubAimBadge(); // 底部三卡正上方：按画布高度换算，见 PositionSubAimBadge 注释
             _subAimCanvasGroup = badgeGo.AddComponent<CanvasGroup>();
             _subAimCanvasGroup.alpha = 1f;
             _subAimCanvasGroup.blocksRaycasts = false;
             _subAimCanvasGroup.interactable = false;
 
-            // 底板：墨黑实心 + 纸白硬边（几何大胆风，无圆角 / 无渐变 / 无阴影）
+            // 底板：墨黑实心 + 纸白硬边（几何大胆风胶囊签，无渐变 / 无阴影）
             var bg = badgeGo.GetComponent<UIInkShapeGraphic>();
             bg.raycastTarget = false;
-            bg.Shape = UIInkShape.SharpRect;
-            bg.CornerRadius = ComicStyle.CornerSharp;
+            bg.Shape = UIInkShape.Pill; // 圆角化：手雷冷却徽标改胶囊
             bg.BorderWidth = ComicStyle.BorderThin;
             bg.BorderColor = ComicStyle.Paper;
             bg.color = ComicStyle.Ink;
@@ -741,22 +966,23 @@ namespace P1.UI
             float barX = pad + labelWidth + gap;
             float barWidth = Mathf.Max(64f, badgeWidth - barX - pad - timeWidth - gap);
 
-            var barBgGo = new GameObject("BarBg", typeof(RectTransform), typeof(Image));
+            var barBgGo = new GameObject("BarBg", typeof(RectTransform), typeof(UIPillImage));
             barBgGo.transform.SetParent(_subAimBadge, false);
             _subAimBarBg = barBgGo.GetComponent<RectTransform>();
             var barBg = barBgGo.GetComponent<Image>();
-            UIFlatSprite.MakeFlat(barBg);
-            barBg.color = new Color(1f, 1f, 1f, 0.18f);
+            barBg.color = new Color(1f, 1f, 1f, 0.18f); // 圆角化：胶囊轨道
             barBg.raycastTarget = false;
             _subAimBarBg.anchorMin = _subAimBarBg.anchorMax = new Vector2(0f, 0.5f);
             _subAimBarBg.pivot = new Vector2(0f, 0.5f);
             _subAimBarBg.sizeDelta = new Vector2(barWidth, 10f);
             _subAimBarBg.anchoredPosition = new Vector2(barX, 0f);
 
-            var barFillGo = new GameObject("BarFill", typeof(Image));
+            var barFillGo = new GameObject("BarFill", typeof(UIPillImage));
             barFillGo.transform.SetParent(barBgGo.transform, false);
             _subAimFill = barFillGo.GetComponent<Image>();
-            UIFlatSprite.MakeFlat(_subAimFill, filled: true);
+            _subAimFill.type = Image.Type.Filled; // 圆角化：胶囊填充，fillAmount 逻辑不变
+            _subAimFill.fillMethod = Image.FillMethod.Horizontal;
+            _subAimFill.fillOrigin = (int)Image.OriginHorizontal.Left;
             _subAimFill.color = ComicStyle.Yellow;
             _subAimFill.fillAmount = 0f;
             _subAimFill.raycastTarget = false;
@@ -860,12 +1086,14 @@ namespace P1.UI
             float[] angles = { 45f, 135f, 225f, 315f };
             for (int i = 0; i < angles.Length; i++)
             {
-                OutlinedBar bar = CreateOutlinedBar(_hitMarkerRoot, $"HitTick_{i}", new Vector2(4.5f, 15f), angles[i]);
+                // P40：3.2×11 + 起始半径 11——命中标记整体收在准星主环以内，
+                // 旧版 13~15px 长条叠上 44px 冲击环会糊成一枚「菱形靶心」，读不出是命中确认。
+                OutlinedBar bar = CreateOutlinedBar(_hitMarkerRoot, $"HitTick_{i}", new Vector2(3.2f, 11f), angles[i]);
                 bar.Root.anchorMin = new Vector2(0.5f, 0.5f);
                 bar.Root.anchorMax = new Vector2(0.5f, 0.5f);
                 bar.Root.pivot = new Vector2(0.5f, 0.5f);
                 float rad = angles[i] * Mathf.Deg2Rad;
-                bar.Root.anchoredPosition = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad)) * 9f;
+                bar.Root.anchoredPosition = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad)) * 11f;
                 _hitBars[i] = bar;
             }
 
@@ -879,7 +1107,8 @@ namespace P1.UI
             _hitRingRect.anchorMin = new Vector2(0.5f, 0.5f);
             _hitRingRect.anchorMax = new Vector2(0.5f, 0.5f);
             _hitRingRect.pivot = new Vector2(0.5f, 0.5f);
-            _hitRingRect.sizeDelta = new Vector2(30f, 30f);
+            // P40：旧版缩到 30px 时环带只剩 1.4px（等于看不见）；36px 下环带 1.8px 且不越过准星主环。
+            _hitRingRect.sizeDelta = new Vector2(36f, 36f);
             _hitRingRect.anchoredPosition = Vector2.zero;
 
             // P6-B 击杀墨滴徽标：Blob 形队伍色墨滴，平时 alpha=0 完全隐藏（几何风：不用图片资源，纯程序化形状）。
@@ -927,7 +1156,7 @@ namespace P1.UI
                 : (heavy ? hitMarkerHeavyDuration : hitMarkerDuration);
             _hitMarkerTimer = _hitMarkerLifetime;
             _hitMarkerScale = HitFeedbackMath.MarkerScale(damage, combo) * (killed ? 1.45f : 1f);
-            _hitMarkerTravel = killed ? 18f : 10f;
+            _hitMarkerTravel = killed ? 16f : 8f;
             _hitMarkerColor = killed
                 ? Color.Lerp(teamColor, Color.white, 0.25f)
                 : HitFeedbackMath.ComboTint(Color.white, teamColor, combo);
@@ -938,7 +1167,7 @@ namespace P1.UI
                 OutlinedBar bar = _hitBars[i];
                 if (bar == null) continue;
                 bar.SetCoreColor(_hitMarkerColor);
-                bar.SetSize(fat ? new Vector2(6.5f, 20f) : new Vector2(4.5f, 15f));
+                bar.SetSize(fat ? new Vector2(4.6f, 15f) : new Vector2(3.2f, 11f));
             }
 
             if (_hitRing != null)
@@ -1038,12 +1267,12 @@ namespace P1.UI
                 ? Mathf.LerpUnclamped(1.30f, 1f, EaseOutCubic(progress / 0.35f))
                 : 1f;
             float scale = _hitMarkerScale * pop;
-            _hitMarkerRoot.localScale = new Vector3(scale, scale, 1f);
+            _hitMarkerRoot.localScale = new Vector3(scale * _baseScale, scale * _baseScale, 1f);
 
             float alpha = progress < 0.45f ? 1f : 1f - EaseOutCubic((progress - 0.45f) / 0.55f);
             _hitMarkerGroup.alpha = Mathf.Clamp01(alpha);
 
-            float spread = 9f + Mathf.Clamp(_hitCombo, 0, 6) * 1.2f + progress * _hitMarkerTravel;
+            float spread = 11f + Mathf.Clamp(_hitCombo, 0, 6) * 1.2f + progress * _hitMarkerTravel;
             for (int i = 0; i < _hitBars.Length; i++)
             {
                 RectTransform tick = _hitBars[i]?.Root;
@@ -1114,8 +1343,7 @@ namespace P1.UI
 
             var toastBg = toastGo.GetComponent<UIInkShapeGraphic>();
             toastBg.raycastTarget = false;
-            toastBg.Shape = UIInkShape.SharpRect;
-            toastBg.CornerRadius = ComicStyle.CornerSharp;
+            toastBg.Shape = UIInkShape.Pill; // 圆角化：空墨提示改胶囊
             toastBg.BorderWidth = ComicStyle.BorderThin;
             toastBg.BorderColor = ComicStyle.Red;
             toastBg.color = ComicStyle.Ink;
@@ -1167,6 +1395,21 @@ namespace P1.UI
             _emptyToastRoot.anchoredPosition = new Vector2(0f, EmptyToastBottomOffset - height * 0.5f);
         }
 
+        /// <summary>
+        /// 手雷冷却徽标贴画布底边居中（底部三卡正上方）：与空墨 toast 同一套
+        /// 「锚点在父级中心 → 按画布高度换算成相对中心的 Y」落位，画布尺寸变化时重算。
+        /// 徽标只在冷却期间可见，因此随 UpdateSubAim 每帧调用即可覆盖激活与分辨率变化两种时机。
+        /// </summary>
+        private void PositionSubAimBadge()
+        {
+            if (_subAimBadge == null || _canvasRect == null) return;
+            float height = _canvasRect.rect.height;
+            if (height <= 1f || Mathf.Approximately(height, _subAimBadgeCanvasHeight)) return;
+            _subAimBadgeCanvasHeight = height;
+            float bottomOffset = _subAimMobile ? BombBadgeBottomOffsetMobile : BombBadgeBottomOffsetDesktop;
+            _subAimBadge.anchoredPosition = new Vector2(0f, bottomOffset - height * 0.5f);
+        }
+
         /// <summary>扣扳机被拒（空墨）：红叉弹跳 + 准星震颤 + 弹出「弹药耗尽」toast。</summary>
         private void TriggerEmptyPunch()
         {
@@ -1194,7 +1437,7 @@ namespace P1.UI
                     // 亮相位拉满、暗相位压到 0.35；空打瞬间无视相位直接拉满，保证一定被看到。
                     float blink = _isOutOfInk && !_emptyBlinkOn ? 0.35f : 1f;
                     _emptyInkWarningGroup.alpha = Mathf.Clamp01(blink + _emptyPunch * 0.8f);
-                    float pop = 1f + 0.5f * _emptyPunch;
+                    float pop = (1f + 0.5f * _emptyPunch) * _baseScale;
                     _emptyInkWarningRoot.localScale = new Vector3(pop, pop, 1f);
                 }
             }
@@ -1605,57 +1848,162 @@ namespace P1.UI
 
         private void UpdateShooter(WeaponController weapon, Color teamColor)
         {
-            if (_shooterWeight > 0.01f)
+            if (_shooterWeight <= 0.01f)
             {
-                if (!_shooterContainer.gameObject.activeSelf) _shooterContainer.gameObject.SetActive(true);
-
-                float alpha = _shooterWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
-                float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
-                _shooterContainer.localScale = Vector3.one * (_shooterWeight * lockScale);
-                _shooterContainer.anchoredPosition = _emptyShakeOffset * _shooterWeight;
-
-                // 散布 Bloom: 1.2° ~ 5.5° 映射到 16px ~ 38px 刻度距离（静止收在环带内侧，开火越过环带）；
-                // 开火再叠一层短促外扩。0 散布武器（泼桶 / 双枪架枪）按 1.2° 下限计算，避免刻度叠在中心点上。
-                // 空打（没子弹扣扳机）反向收拢 4px：与正常击发的向外弹跳形成相反手感。
-                float spreadDeg = ReticleStateMath.ClampSpread(weapon.CurrentSpreadDegrees);
-                float tickOffset = 16f + (spreadDeg - 1.2f) * 5.2f + _shotPunch * 5f - _emptyPunch * 4f;
-                tickOffset = Mathf.Max(10f, tickOffset);
-
-                // 4 个刻度沿自身角度向外偏移
-                _shooterBars[0].Root.anchoredPosition = new Vector2(0f, tickOffset);
-                _shooterBars[1].Root.anchoredPosition = new Vector2(-tickOffset, 0f);
-                _shooterBars[2].Root.anchoredPosition = new Vector2(0f, -tickOffset);
-                _shooterBars[3].Root.anchoredPosition = new Vector2(tickOffset, 0f);
-
-                // 环根据 Bloom 散布微缩放
-                float ringScale = 1.0f + (spreadDeg - 1.2f) * 0.06f;
-                _shooterRing.rectTransform.localScale = Vector3.one * ringScale;
-
-                Color tint = Color.Lerp(Color.white, ComicStyle.Red, _targetWeight);
-                if (_isOutOfInk) tint = Color.Lerp(tint, ComicStyle.Red, 0.9f);
-                tint.a = alpha;
-                _shooterCenterDot.color = tint;
-                _shooterCenterDot.rectTransform.localScale = Vector3.one *
-                    (1f + _shotPunch * 0.35f) * (1f - 0.45f * _farWeight);
-                _shooterRing.color = tint;
-                Sprite ringSprite = _farWeight > 0.5f ? _ringDashedSprite : _ringSprite;
-                if (_shooterRing.sprite != ringSprite) _shooterRing.sprite = ringSprite;
-                Color barBacking = ComicStyle.Ink;
-                barBacking.a = alpha;
-                for (int i = 0; i < 4; i++)
+                if (_shooterContainer.gameObject.activeSelf)
                 {
-                    _shooterBars[i].SetCoreColor(tint);
-                    _shooterBars[i].SetBackingColor(barBacking);
+                    _shooterContainer.gameObject.SetActive(false);
+                    if (_shooterChargeRing != null && _shooterChargeRing.gameObject.activeSelf)
+                        _shooterChargeRing.gameObject.SetActive(false);
+                }
+                return;
+            }
+
+            if (!_shooterContainer.gameObject.activeSelf) _shooterContainer.gameObject.SetActive(true);
+
+            // 武器身份外壳：小枪 / 双枪 / 泼桶 / 爆破 / 加特林（唯一映射源 ReticleStateMath.StyleFor）
+            ApplyShooterStyle(ReticleStateMath.StyleFor(weapon.CurrentWeaponKind));
+
+            float alpha = _shooterWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
+            float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
+            _shooterContainer.localScale = Vector3.one * (_shooterWeight * lockScale * _baseScale);
+            _shooterContainer.anchoredPosition = _emptyShakeOffset * _shooterWeight;
+
+            // 散布 Bloom 只驱动 4 枚刻度（P40 起主环不再跟着缩放：同一个信息只画一遍）。
+            // 静止收在主环内侧、开火越过主环外扫；空打（没子弹扣扳机）反向收拢，形成相反手感。
+            float spreadDeg = ReticleStateMath.ClampSpread(weapon.CurrentSpreadDegrees);
+            float tickOffset = ReticleStateMath.TickOffset(spreadDeg, _shotPunch, _emptyPunch);
+
+            _shooterBars[0].Root.anchoredPosition = new Vector2(0f, tickOffset);
+            _shooterBars[1].Root.anchoredPosition = new Vector2(-tickOffset, 0f);
+            _shooterBars[2].Root.anchoredPosition = new Vector2(0f, -tickOffset);
+            _shooterBars[3].Root.anchoredPosition = new Vector2(tickOffset, 0f);
+
+            Color tint = Color.Lerp(Color.white, ComicStyle.Red, _targetWeight);
+            if (_isOutOfInk) tint = Color.Lerp(tint, ComicStyle.Red, 0.9f);
+            tint.a = alpha;
+
+            _shooterCenterDot.color = tint;
+            _shooterCenterDot.rectTransform.localScale = Vector3.one *
+                (1f + _shotPunch * 0.25f) * (1f - 0.45f * _farWeight);
+
+            Color barBacking = ComicStyle.Ink;
+            barBacking.a = alpha;
+            for (int i = 0; i < 4; i++)
+            {
+                _shooterBars[i].SetCoreColor(tint);
+                _shooterBars[i].SetBackingColor(barBacking);
+            }
+
+            UpdateShooterStyleShell(weapon, tint, barBacking, alpha);
+            UpdateShooterChargeRing(weapon, tint, alpha);
+        }
+
+        /// <summary>
+        /// 身份外壳的每帧表现：只有主环/外环参与「超距虚线」；双枪叠架枪锁定框、
+        /// 泼桶随前摇抬拱、加特林 8 段随蓄力提亮——全部用已有的 <see cref="OutlinedBar"/> 直条拼，
+        /// 不引入新贴图，几何风硬边一条不走样。
+        /// </summary>
+        private void UpdateShooterStyleShell(WeaponController weapon, Color tint, Color backing, float alpha)
+        {
+            switch (_shooterStyle)
+            {
+                case ReticleStyle.Basic:
+                    _shooterRing.color = tint;
+                    SetRingSprite(_shooterRing, _farWeight > 0.5f);
+                    break;
+
+                case ReticleStyle.Twin:
+                {
+                    _twinLockWeight = Mathf.MoveTowards(
+                        _twinLockWeight, weapon.IsTurretLocked ? 1f : 0f, Time.unscaledDeltaTime * 9f);
+
+                    // 架枪时两枚小环向外让开，把中心留给菱形锁定框（INKWAVE dualies 的 is-lock 同语义）
+                    float ringOffset = 17f + _twinLockWeight * 3f;
+                    _twinRingLeft.rectTransform.anchoredPosition = new Vector2(-ringOffset, 0f);
+                    _twinRingRight.rectTransform.anchoredPosition = new Vector2(ringOffset, 0f);
+
+                    Color twinColor = tint;
+                    twinColor.a = alpha * (1f - _twinLockWeight * 0.35f);
+                    _twinRingLeft.color = twinColor;
+                    _twinRingRight.color = twinColor;
+
+                    Color lockColor = Color.Lerp(Color.white, tint, 0.35f);
+                    lockColor.a = alpha * _twinLockWeight;
+                    Color lockBacking = ComicStyle.Ink;
+                    lockBacking.a = lockColor.a;
+                    for (int i = 0; i < _twinLockBars.Length; i++)
+                    {
+                        _twinLockBars[i].SetCoreColor(lockColor);
+                        _twinLockBars[i].SetBackingColor(lockBacking);
+                    }
+                    break;
                 }
 
-                UpdateShooterChargeRing(weapon, tint, alpha);
+                case ReticleStyle.Lob:
+                {
+                    // 前摇（甩桶抬手）：拱形整组上抬、落点斗整组下沉，读作「墨浪起手」。
+                    float windup = weapon.IsWindingUp ? Mathf.Clamp01(weapon.Windup01) : 0f;
+                    if (_lobArchRoot != null)
+                        _lobArchRoot.anchoredPosition = new Vector2(0f, windup * 3f);
+                    if (_lobBucketRoot != null)
+                        _lobBucketRoot.anchoredPosition = new Vector2(0f, -windup * 2f);
+
+                    for (int i = 0; i < _lobBars.Length; i++)
+                    {
+                        _lobBars[i].SetCoreColor(tint);
+                        _lobBars[i].SetBackingColor(backing);
+                    }
+                    break;
+                }
+
+                case ReticleStyle.Blast:
+                {
+                    _blastOuterRing.color = tint;
+                    SetRingSprite(_blastOuterRing, _farWeight > 0.5f);
+                    Color core = tint;
+                    core.a = alpha * 0.85f;
+                    _blastInnerRing.color = core;
+                    break;
+                }
+
+                case ReticleStyle.Spin:
+                {
+                    float charge = Mathf.Clamp01(weapon.Charge01);
+                    bool spinning = weapon.IsCharging || weapon.IsStreaming;
+                    float segmentAlpha = SpinSegmentAlpha(spinning, charge);
+
+                    // 暗主环只做参照，不参与蓄力读数（蓄力读数是 8 段 + 外圈进度环）。
+                    Color ringColor = tint;
+                    ringColor.a = alpha * 0.4f;
+                    _spinRing.color = ringColor;
+
+                    Color segment = Color.Lerp(tint, Color.white, charge * 0.8f);
+                    segment.a = alpha * segmentAlpha;
+                    Color segmentBacking = ComicStyle.Ink;
+                    segmentBacking.a = alpha * segmentAlpha;
+                    for (int i = 0; i < _spinSegments.Length; i++)
+                    {
+                        _spinSegments[i].SetCoreColor(segment);
+                        _spinSegments[i].SetBackingColor(segmentBacking);
+                    }
+                    break;
+                }
             }
-            else if (_shooterContainer.gameObject.activeSelf)
-            {
-                _shooterContainer.gameObject.SetActive(false);
-                if (_shooterChargeRing != null && _shooterChargeRing.gameObject.activeSelf)
-                    _shooterChargeRing.gameObject.SetActive(false);
-            }
+        }
+
+        private static float SpinSegmentAlpha(bool spinning, float charge)
+        {
+            // 平时压到 0.35（不抢中心视野），转起来随蓄力提亮到 1。
+            return spinning ? Mathf.Lerp(0.45f, 1f, charge) : 0.35f;
+        }
+
+        /// <summary>主环/外环在实线与超距虚线之间硬切（两张贴图只差分段，厚度一致）。</summary>
+        private void SetRingSprite(Image ring, bool dashed)
+        {
+            if (ring == null) return;
+            Sprite sprite = dashed ? _ringSlimDashedSprite : _ringSlimSprite;
+            if (ring.sprite != sprite) ring.sprite = sprite;
         }
 
         /// <summary>
@@ -1673,17 +2021,37 @@ namespace P1.UI
             if (_shooterChargeRing.gameObject.activeSelf != show)
                 _shooterChargeRing.gameObject.SetActive(show);
             if (!show)
+            {
+                FullChargeFlash(0f);
                 return;
+            }
 
             _shooterChargeRing.fillAmount = charge01;
 
-            // 蓄力越满越白、环越亮；满蓄时轻微脉冲，给「可以松手了」的明确信号（与蓄力狙同语义）
+            // 蓄力越满越白、环越亮；满蓄只闪一次（几何风禁止循环脉冲），给「可以松手了」的明确信号。
             Color ringColor = Color.Lerp(tint, Color.white, charge01 * 0.75f);
             ringColor.a = alpha;
             _shooterChargeRing.color = ringColor;
+            _shooterChargeRing.rectTransform.localScale = Vector3.one * FullChargeFlash(charge01);
+        }
 
-            float pulse = charge01 >= 0.999f ? 1f + Mathf.PingPong(Time.time * 6f, 0.12f) : 1f;
-            _shooterChargeRing.rectTransform.localScale = Vector3.one * pulse;
+        /// <summary>
+        /// 满蓄一次性闪光缩放系数：正从「未满」跨到「满」时记起始时刻，之后 0.35s 内
+        /// 走一条 sin 半波放大再归 1；回落/松手后重置。幂等，蓄力狙与加特林共用。
+        /// </summary>
+        private float FullChargeFlash(float charge01)
+        {
+            bool full = charge01 >= 0.999f;
+            if (!full)
+            {
+                _fullChargeSince = -1f;
+                return 1f;
+            }
+
+            if (_fullChargeSince < 0f) _fullChargeSince = Time.unscaledTime;
+            float t = (Time.unscaledTime - _fullChargeSince) / ChargeFlashDuration;
+            if (t >= 1f) return 1f;
+            return 1f + ChargeFlashScale * Mathf.Sin(t * Mathf.PI);
         }
 
         private void UpdateRoller(WeaponController weapon, Color teamColor)
@@ -1694,17 +2062,40 @@ namespace P1.UI
 
                 float alpha = _rollerWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
                 float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
-                _rollerContainer.localScale = Vector3.one * (_rollerWeight * lockScale);
+                _rollerContainer.localScale = Vector3.one * (_rollerWeight * lockScale * _baseScale);
                 _rollerContainer.anchoredPosition = _emptyShakeOffset * _rollerWeight;
 
                 Color tint = Color.Lerp(Color.white, ComicStyle.Red, _targetWeight);
                 if (_isOutOfInk) tint = Color.Lerp(tint, ComicStyle.Red, 0.9f);
                 tint.a = alpha;
-                _rollerBarImage.color = tint;
+                Color backing = ComicStyle.Ink;
+                backing.a = alpha;
 
-                // 空打：推地条横向收窄，与枪形的刻度内收同语义（没墨推不动）。
-                float clench = 1f - 0.08f * _emptyPunch;
-                _rollerBarImage.rectTransform.localScale = new Vector3(clench, 1f, 1f);
+                // 括号宽度 = 实际推地宽度（1.9m 基准映射到 140px）；挥击时向外张 6px，
+                // 空打（没墨扣扳机）向内收 6px——与枪形刻度的「击发外扩 / 空打内收」同一套手感语言。
+                float rollWidth = weapon.Config != null ? Mathf.Max(0.5f, weapon.Config.rollWidth) : 1.9f;
+                float flick = weapon.IsFlicking ? 6f : 0f;
+                LayoutRollerBrackets(70f * Mathf.Clamp(rollWidth / 1.9f, 0.6f, 1.4f) + flick - _emptyPunch * 6f);
+
+                for (int i = 0; i < _rollerBracketBars.Length; i++)
+                {
+                    _rollerBracketBars[i].SetCoreColor(tint);
+                    _rollerBracketBars[i].SetBackingColor(backing);
+                }
+
+                // 落点弧线：散布越大弧线整组越往下沉（墨带落点更散）。
+                float spreadDeg = ReticleStateMath.ClampSpread(weapon.CurrentSpreadDegrees);
+                float sag = Mathf.Clamp01((spreadDeg - ReticleStateMath.MinSpreadDegrees) / 5f) * 3f;
+                if (_rollerArcRoot != null)
+                    _rollerArcRoot.anchoredPosition = new Vector2(0f, -sag);
+                for (int i = 0; i < _rollerArcBars.Length; i++)
+                {
+                    _rollerArcBars[i].SetCoreColor(tint);
+                    _rollerArcBars[i].SetBackingColor(backing);
+                }
+
+                _rollerNotch.color = tint;
+                _rollerNotch.rectTransform.localScale = Vector3.one * (1f + _shotPunch * 0.2f);
             }
             else if (_rollerContainer.gameObject.activeSelf)
             {
@@ -1720,7 +2111,7 @@ namespace P1.UI
 
                 float alpha = _chargerWeight * Mathf.Lerp(1f, ReticleStateMath.FarAlpha, _farWeight);
                 float lockScale = Mathf.Lerp(1f, ReticleStateMath.TargetScale, _targetWeight);
-                _chargerContainer.localScale = Vector3.one * (_chargerWeight * lockScale);
+                _chargerContainer.localScale = Vector3.one * (_chargerWeight * lockScale * _baseScale);
                 _chargerContainer.anchoredPosition = _emptyShakeOffset * _chargerWeight;
 
                 float ch01 = weapon.Charge01;
@@ -1751,17 +2142,16 @@ namespace P1.UI
                     _chargerLineRightBar.SetBackingColor(lineBacking);
                 }
 
-                // 左右两条收紧线：从 ±42px 靠拢到 ±32px (对应 Inkwave var(--ch, 0) 收 10px)
+                // 左右两条收紧线：从 ±38px 靠拢到 ±28px (对应 Inkwave var(--ch, 0) 收 10px)
                 // 空打时再向内收 3px：没墨扣扳机的「落空感」与正常蓄力收束区分开。
-                float lineOffset = Mathf.Lerp(42f, 32f, ch01) - _emptyPunch * 3f;
+                float lineOffset = Mathf.Lerp(38f, 28f, ch01) - _emptyPunch * 3f;
                 if (_chargerLineLeftBar != null) _chargerLineLeftBar.Root.anchoredPosition = new Vector2(-lineOffset, 0f);
                 if (_chargerLineRightBar != null) _chargerLineRightBar.Root.anchoredPosition = new Vector2(lineOffset, 0f);
 
-                // 满蓄力闪烁与放大动效
+                // 满蓄：只闪一次（几何风禁止循环脉冲），之后稳在白；回落/松手后重置。
                 if (ch01 >= 0.999f)
                 {
-                    float flashPulse = 1f + Mathf.PingPong(Time.time * 6f, 0.20f);
-                    _chargerFillRing.rectTransform.localScale = Vector3.one * flashPulse;
+                    _chargerFillRing.rectTransform.localScale = Vector3.one * FullChargeFlash(ch01);
                     Color fullColor = Color.white;
                     fullColor.a = alpha;
                     _chargerFillRing.color = fullColor;
@@ -1769,6 +2159,7 @@ namespace P1.UI
                 }
                 else
                 {
+                    FullChargeFlash(0f);
                     _chargerFillRing.rectTransform.localScale = Vector3.one;
                     Color fillColor = Color.Lerp(teamColor, Color.white, ch01 * 0.7f);
                     fillColor = Color.Lerp(fillColor, ComicStyle.Red, Mathf.Max(_targetWeight, _isOutOfInk ? 0.8f : 0f));
@@ -1811,6 +2202,7 @@ namespace P1.UI
                 _subAimBadge.gameObject.SetActive(true);
             }
             _subAimCanvasGroup.alpha = 1f;
+            PositionSubAimBadge();
 
             // 充能式进度：0 → 1 表示剩余冷却逐渐恢复；数字同步倒计时
             _subAimFill.fillAmount = 1f - Mathf.Clamp01(remaining / duration);

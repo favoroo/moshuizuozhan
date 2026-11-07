@@ -145,8 +145,11 @@ namespace P1.Player
         /// 贴地与滚轴自转都按主鼓体计算——TreadRib 花纹只比主鼓高 4.6mm，按花纹外缘贴地会让
         /// 大面积的队伍色鼓体悬空近 1cm，正是"看起来浮着"的来源；按主鼓贴地时花纹轻陷墨面，观感才对。</summary>
         public const float DrumRadiusMeters = 0.1104f;
-        /// <summary>贴地闭环的目标压入量（米）：滚轴外缘略陷进墨面，读作"压住"而不是"擦过"。</summary>
-        public const float GroundContactPenetration = 0.004f;
+        /// <summary>贴地闭环的目标压入量（米）。P40 0.004 → 0.026：4mm 只是圆柱切线"吻到地面"，
+        /// 第三人称俯视下接触线被鼓体侧面挡住，实测仍读作悬浮；压入约 1/8 鼓径（2.6cm / Ø22cm）
+        /// 才读作"压进墨面"。对应 SO 默认值与 CharacterAnimConfig.asset 同步改，PlayMode 贴地
+        /// 回归的下陷下限是 -0.03，勿超过。</summary>
+        public const float GroundContactPenetration = 0.026f;
 
         public const float RollPitchDeg = 40f;
         public const float RollDropMeters = 0.02f;

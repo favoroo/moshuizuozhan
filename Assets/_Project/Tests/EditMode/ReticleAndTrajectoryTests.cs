@@ -186,6 +186,35 @@ namespace P1.Tests
         }
 
         /// <summary>
+        /// P40 回归：5 把弹丸武器各有一套身份外形壳，且默认只亮小枪那一套。
+        /// 漏建壳不会让准星消失（会退回小枪轮廓），但玩家就认不出武器了——必须钉住。
+        /// </summary>
+        [Test]
+        public void WeaponReticleUI_BuildsOneShellPerProjectileStyle()
+        {
+            var canvasGo = new GameObject("TestCanvas", typeof(Canvas));
+            var reticleGo = new GameObject("TestReticleUI", typeof(RectTransform));
+            reticleGo.transform.SetParent(canvasGo.transform, false);
+
+            var reticleUI = reticleGo.AddComponent<P1.UI.WeaponReticleUI>();
+            reticleUI.EnsureInitialized();
+
+            var shooter = reticleGo.transform.Find("ShooterReticle");
+            Assert.IsNotNull(shooter);
+
+            string[] shells = { "Style_Basic", "Style_Twin", "Style_Lob", "Style_Blast", "Style_Spin" };
+            for (int i = 0; i < shells.Length; i++)
+            {
+                Transform shell = shooter.Find(shells[i]);
+                Assert.IsNotNull(shell, $"{shells[i]} 外形壳必须随准星一起装配");
+                Assert.AreEqual(i == 0, shell.gameObject.activeSelf,
+                    $"{shells[i]} 默认激活态错误：只有小枪壳（Style_Basic）应当默认亮");
+            }
+
+            Object.DestroyImmediate(canvasGo);
+        }
+
+        /// <summary>
         /// 回归：手雷冷却徽标的两块文字都必须放进自己的框里，且不再有「就绪」提示节点。
         /// 旧版 220×36 胶囊 + 60px 标签框，"BOMB" 在 18 号已溢出 2.5px，移动端 24 号会压进进度条。
         /// 左侧后来改成手雷图标（取不到图标才退回中文「手雷」），所以标签可能是 Icon 也可能是 Text，

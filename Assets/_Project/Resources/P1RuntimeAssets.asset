@@ -186,6 +186,8 @@ MonoBehaviour:
   - climb_loop_1
   - countdown_tick_1
   - death_1
+  - dodge_roll_1
+  - dodge_roll_2
   - enemy_ink_sizzle_1
   - enemy_ink_sizzle_loop_1
   - go_horn_1
@@ -270,6 +272,8 @@ MonoBehaviour:
   - {fileID: 8300000, guid: ae71de81a0edf47bcb72d78f3d00ae37, type: 3}
   - {fileID: 8300000, guid: 19386b2a36fc74386bf0439f305d3c3f, type: 3}
   - {fileID: 8300000, guid: 5ff2100f87533445ea37bfab0192baf2, type: 3}
+  - {fileID: 8300000, guid: 3801bfb504b6743cb8e2a47a7f00977d, type: 3}
+  - {fileID: 8300000, guid: 29767fd240460493c839b72829e6f598, type: 3}
   - {fileID: 8300000, guid: 454a5bb175ee546e1bbd4c1051127594, type: 3}
   - {fileID: 8300000, guid: f508b6b456a264625bab4157c86a339f, type: 3}
   - {fileID: 8300000, guid: 7c2e46149cfc1428d9cc4f4a7b426f83, type: 3}

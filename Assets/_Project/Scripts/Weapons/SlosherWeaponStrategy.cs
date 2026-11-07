@@ -31,6 +31,9 @@ namespace P1.Weapons
 
         public override bool IsWindingUp => _windupTimer >= 0f;
 
+        /// <summary>甩桶前摇期间移速 ×0.7（INKWAVE weapons.js：slosh ≥ 0 → moveSpeedFiring × 0.7，重心随挥桶下沉）。</summary>
+        public override float MoveSpeedMultiplier => IsWindingUp ? 0.7f : 1f;
+
         public override float Windup01
         {
             get

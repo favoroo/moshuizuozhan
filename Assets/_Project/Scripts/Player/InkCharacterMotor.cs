@@ -48,6 +48,10 @@ namespace P1.Player
         private float _jumpBufferTimer;
         private float _coyoteTimer;
 
+        // 双枪战术翻滚：Motor 侧自计时（策略计时器在 LateUpdate 递减，这里用上升沿对齐），驱动快出缓停速度曲线
+        private bool _wasRollingDodge;
+        private float _dodgeElapsed;
+
         // 敌墨「受击槽」：踩敌墨时锁定 1，离开敌墨后按速率快速恢复（惩罚状态的可读化退出）
         private float _enemyInkGrip01;
         private float _enemyInkRecoveryRatePerSec = 2.0f;
@@ -521,14 +525,27 @@ namespace P1.Player
 
             if (isRollingDodge)
             {
-                // 双枪战术翻滚：锁死翻滚方向，移动速度提升至翻滚速度（约 9.33m/s），不执行跳跃
+                // 双枪战术翻滚（INKWAVE weapons.js dodgeVel）：快出缓停速度曲线 ——
+                // 起步 = burst × 距离/时长的爆发，随 (1-u²) 二次方减速到 0，曲线积分恰为一个翻滚距离；
+                // 旧实现是匀速滑行，观感是「平移冲刺」而不是翻滚。
+                // 策略计时器在 WeaponController.LateUpdate 才递减，这里用上升沿自起计时保持对齐。
+                if (!_wasRollingDodge)
+                {
+                    _dodgeElapsed = 0f;
+                }
+                _dodgeElapsed += dt;
+
                 float rollSpd = 9.33f;
                 if (_weapon.Config != null)
                 {
                     float dur = Mathf.Max(0.05f, _weapon.Config.dualiesRollDuration);
                     float dist = Mathf.Max(0.1f, _weapon.Config.dualiesRollDistance);
-                    rollSpd = dist / dur;
+                    float burst = Mathf.Clamp(_weapon.Config.dualiesRollBurstSpeedMultiplier, 1f, 2.5f);
+                    float u = Mathf.Clamp01(_dodgeElapsed / dur);
+                    rollSpd = burst * (dist / dur) * (1f - u * u);
                 }
+                // 同步锁定 _glideSpeed：超速滑行的 42/s 衰减追不上曲线前段的陡降，会把翻滚距离拖长
+                _glideSpeed = rollSpd;
                 CurrentMoveSpeed = rollSpd;
                 Vector3 dodgeDir = _weapon.DodgeDirection;
                 if (dodgeDir.sqrMagnitude > 0.001f)
@@ -625,13 +642,19 @@ namespace P1.Player
                 }
                 else if (_isFiringOrThrowing)
                 {
-                    CurrentMoveSpeed = fireSpd * weaponSpeedMult;
+                    // INKWAVE 逐武器开火移速（weapons.js moveSpeed）：武器给出绝对覆盖值时直接采用
+                    //（小枪 4.6 / 双枪 5.0 / 爆破 4.0 / 泼桶 4.2 / 滚筒鼓速 4.4 / 加特林 4.5→2.4→3.4 / 蓄力狙 4.2→1.8），
+                    // 未配置（0）时保留旧全局开火移速 × 倍率，老武器行为不变。
+                    float weaponFiringSpd = _weapon != null ? _weapon.FiringMoveSpeedOverride : 0f;
+                    CurrentMoveSpeed = (weaponFiringSpd > 0f ? weaponFiringSpd : fireSpd) * weaponSpeedMult;
                 }
                 else
                 {
                     CurrentMoveSpeed = normalSpd * (weaponSpeedMult < 1f ? weaponSpeedMult : 1f);
                 }
             }
+
+            _wasRollingDodge = isRollingDodge;
 
             // 4.5 超速惯性滑行（INKWAVE swim-exit glide，config.js L60：swimDecel=42，注释 "1.6 m glide to a stop"）：
             // 形态切换/离开敌墨瞬间当前速度可能远高于新目标（潜墨 11.8 → 人形 6.0），不瞬间贴回目标，
@@ -736,10 +759,19 @@ namespace P1.Player
                     }
 
                     // ---- P29 水平速度：S 曲线加减速 + 转向限速（不再一帧满速/一帧急停） ----
-                    float airControl = isGrounded ? 1.0f : (config != null ? config.airControl : 0.95f);
-                    // 目标速度用 EffectiveMoveSpeed（含超速滑行惯性），而非直接贴目标值的 CurrentMoveSpeed
-                    Vector3 desiredVel = _moveInputWorld * (EffectiveMoveSpeed * airControl);
-                    _planarVelocity = ComputePlanarVelocity(_planarVelocity, desiredVel, isGrounded, config, dt, IsInEnemyInk);
+                    if (isRollingDodge)
+                    {
+                        // 翻滚期间速度曲线完全接管（INKWAVE dodgeVel 的「weapon runner owns horizontal velocity」）：
+                        // 加速限幅会吃掉起步爆发、衰减限幅会拖长减速尾，翻滚距离就不再是配置值
+                        _planarVelocity = _moveInputWorld * EffectiveMoveSpeed;
+                    }
+                    else
+                    {
+                        float airControl = isGrounded ? 1.0f : (config != null ? config.airControl : 0.95f);
+                        // 目标速度用 EffectiveMoveSpeed（含超速滑行惯性），而非直接贴目标值的 CurrentMoveSpeed
+                        Vector3 desiredVel = _moveInputWorld * (EffectiveMoveSpeed * airControl);
+                        _planarVelocity = ComputePlanarVelocity(_planarVelocity, desiredVel, isGrounded, config, dt, IsInEnemyInk);
+                    }
 
                     Vector3 step = _planarVelocity * dt + Vector3.up * (_verticalVelocity * dt);
                     Vector3 beforeMove = transform.position;

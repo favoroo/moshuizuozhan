@@ -372,8 +372,7 @@ namespace P1.UI
 
             if (frameShape != null)
             {
-                frameShape.Shape = UIInkShape.SharpRect;
-                frameShape.CornerRadius = ComicStyle.CornerSharp;
+                frameShape.Shape = UIInkShape.Pill; // 圆角化：胶囊描边环保持一致
                 // 轨道边框：纸白卡片上墨框常态（低墨告警时由 UpdateWarningVisuals 硬切翻红）
                 frameShape.BorderColor = ComicStyle.Ink;
                 frameShape.BorderWidth = ComicStyle.BorderThin;

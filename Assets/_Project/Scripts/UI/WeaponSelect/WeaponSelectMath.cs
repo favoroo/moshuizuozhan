@@ -425,7 +425,7 @@ namespace P1.UI.WeaponSelect
                 case WeaponKind.Blaster:
                 {
                     float burst = Mathf.PI * Sq(config != null ? config.blasterBurstRadius : 1.9f) * EndSplatOverlapFactor;
-                    return SafeDiv(burst, Mathf.Max(1f, config != null ? config.inkCostPerShot : 10.4f));
+                    return SafeDiv(burst, Mathf.Max(1f, config != null ? config.inkCostPerShot : 9f));
                 }
                 default:
                 {

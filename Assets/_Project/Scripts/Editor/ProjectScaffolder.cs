@@ -2538,6 +2538,7 @@ namespace P1.Editor
             mgr.resultLoseClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/result_lose_1.wav");
             mgr.uiClickClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/ui_click_1.wav");
             mgr.lowInkWarningClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/low_ink_warning_1.wav");
+            mgr.dodgeRollClip = AssetDatabase.LoadAssetAtPath<AudioClip>($"{sfxDir}/dodge_roll_1.wav");
 
             // P5-C / 无语音版：流程提示全部走音效；双段动态 BGM + 混音调参
             const string musicDir = "Assets/_Project/Audio/Music";

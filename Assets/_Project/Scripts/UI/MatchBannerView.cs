@@ -101,13 +101,12 @@ namespace P1.UI
                 burstGraphic.raycastTarget = false;
                 burstGo.SetActive(false);
 
-                // 几何风直角横向纯色块（直角 SharpRect + 6px 墨边 + 无阴影 + 无网点）
+                // 圆角横向纯色块（RoundedRect 自适应半径 + 6px 墨边 + 无阴影 + 无网点）
                 var splatGo = new GameObject("SplatBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
                 splatGo.transform.SetParent(bannerRoot, false);
                 Stretch((RectTransform)splatGo.transform);
                 bannerSplatBg = splatGo.GetComponent<UIInkShapeGraphic>();
-                bannerSplatBg.Shape = UIInkShape.SharpRect;
-                bannerSplatBg.CornerRadius = ComicStyle.CornerSharp;
+                bannerSplatBg.Shape = UIInkShape.RoundedRect; // 圆角化
                 bannerSplatBg.BorderWidth = ComicStyle.BorderHeavy;
                 bannerSplatBg.BorderColor = ComicStyle.Ink;
                 bannerSplatBg.HardShadow = false;
@@ -231,18 +230,18 @@ namespace P1.UI
             UIThemeSO resolved = UIThemeSO.Resolve(theme);
 
             _currentType = MatchBannerType.Go;
-            _activeTimer = 1.35f;
+            _activeTimer = 0.9f;
 
             bannerRoot.anchoredPosition = new Vector2(0f, 60f);
             bannerRoot.localRotation = Quaternion.identity;
-            bannerRoot.sizeDelta = new Vector2(720f, 300f);
+            bannerRoot.sizeDelta = new Vector2(520f, 210f);
 
             if (bannerSplatBg != null)
             {
                 bannerSplatBg.color = ComicStyle.Yellow;
             }
 
-            ApplyBannerText("开战!", 140f, "涂满全场!", 24f, ComicStyle.Ink, ComicStyle.Ink);
+            ApplyBannerText("开战!", 104f, "涂满全场!", 22f, ComicStyle.Ink, ComicStyle.Ink);
 
             if (actionLinesGraphic != null)
             {
@@ -301,18 +300,18 @@ namespace P1.UI
             UIThemeSO resolved = UIThemeSO.Resolve(theme);
 
             _currentType = MatchBannerType.Finish;
-            _activeTimer = 2.4f;
+            _activeTimer = 1.8f;
 
             bannerRoot.anchoredPosition = new Vector2(0f, 60f);
             bannerRoot.localRotation = Quaternion.identity;
-            bannerRoot.sizeDelta = new Vector2(760f, 300f);
+            bannerRoot.sizeDelta = new Vector2(560f, 220f);
 
             if (bannerSplatBg != null)
             {
                 bannerSplatBg.color = ComicStyle.Ink;
             }
 
-            ApplyBannerText("结束!", 140f, "时间到!", 24f, ComicStyle.Paper, ComicStyle.Yellow);
+            ApplyBannerText("结束!", 104f, "时间到!", 22f, ComicStyle.Paper, ComicStyle.Yellow);
 
             if (actionLinesGraphic != null)
             {

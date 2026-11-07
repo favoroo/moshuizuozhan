@@ -47,21 +47,28 @@ namespace P1.Weapons
             }
         }
 
-        public override float MoveSpeedMultiplier
+        public override float FiringMoveSpeedOverride
         {
             get
             {
+                if (Config == null)
+                    return base.FiringMoveSpeedOverride;
+
+                // 扫射：恒定移速 3.4（INKWAVE moveSpeedFiring）
+                if (_isStreaming)
+                    return Config.splatlingMoveSpeedFiring;
+
+                // 蓄力：起步 4.5（= 跑速 × 0.75）随蓄力渐入 2.4（INKWAVE lerp(run×0.75, charging, min(1, charge×2.5))）。
+                // 旧实现把「÷6.0 的比率」交给电机的 3.8 基数，实际只有 1.52 m/s —— 现在直接给绝对速度。
                 if (_isCharging)
                 {
-                    // 蓄力时移速明显降低
-                    return Config != null ? Config.splatlingMoveSpeedCharging / 6.0f : 0.4f;
+                    float end = Mathf.Max(0.1f, Config.splatlingMoveSpeedCharging);
+                    float start = Config.splatlingMoveSpeedChargeStart > end ? Config.splatlingMoveSpeedChargeStart : end;
+                    return Mathf.Lerp(start, end, Mathf.Clamp01(_charge * 2.5f));
                 }
-                if (_isStreaming)
-                {
-                    // 扫射时移速轻度降低
-                    return Config != null ? Config.splatlingMoveSpeedFiring / 6.0f : 0.57f;
-                }
-                return 1f;
+
+                // 冷却间隙按住扳机：配置基础值（firingMoveSpeed 3.4）
+                return base.FiringMoveSpeedOverride;
             }
         }
 

@@ -24,7 +24,8 @@ namespace P1.UI
     ///  └────────────┘ └────────────┘ └──────────────────┘
     /// </code>
     ///
-    /// 风格约束（Docs/UI-GeometricBold.md）：纯色直角块、无渐变、无网点；满能只用「整卡翻黄 + 墨字 + Q 释放」
+    /// 风格约束（Docs/UI-GeometricBold.md）：纯色圆角块（卡片圆角矩形自适应半径、轨道胶囊、徽章正圆）、
+    /// 无渐变、无网点；满能只用「整卡翻黄 + 墨字 + Q 释放」
     /// 硬切表达；硬影只走主题档位（卡片 Panel (4,-5)、提示条 Tag (2,-3)）。
     /// 公共 API（BuildCluster / ApplyMobileBottomLayout / GaugeCluster / 常量）保持向后兼容。
     /// </summary>
@@ -244,6 +245,24 @@ namespace P1.UI
             x = PlaceCard(inkCard, x, InkCardWidth, height, gap);
             x = PlaceCard(specialCard, x, SpecialCardWidth, height, gap);
             PlaceCard(healthCard, x, HealthCardWidth, height, gap);
+
+            // 圆角化：卡片拿到最终尺寸后刷新身份色带内缩量（BuildCardChrome 时尺寸未定，见其注释）
+            RefreshRailInset(inkCard);
+            RefreshRailInset(specialCard);
+            RefreshRailInset(healthCard);
+        }
+
+        /// <summary>按卡片最终 rect 重算顶部身份色带的横向内缩量（圆角半径 + 3px 墨框）。</summary>
+        private static void RefreshRailInset(RectTransform card)
+        {
+            if (card == null || card.rect.width < 1f) return;
+
+            if (card.Find(CardRailName) is RectTransform rail
+                && Mathf.Approximately(rail.anchorMin.x, 0f) && Mathf.Approximately(rail.anchorMax.x, 1f))
+            {
+                float radius = ComicStyle.CornerFor(card.rect.width, card.rect.height);
+                rail.sizeDelta = new Vector2(-(radius + CardBorderWidth) * 2f, rail.sizeDelta.y);
+            }
         }
 
         /// <summary>
@@ -267,8 +286,7 @@ namespace P1.UI
             var bg = bgRect.GetComponent<UIInkShapeGraphic>();
             if (bg == null) bg = bgRect.gameObject.AddComponent<UIInkShapeGraphic>();
             bg.raycastTarget = false;
-            bg.Shape = UIInkShape.SharpRect;
-            bg.CornerRadius = ComicStyle.CornerSharp;
+            bg.Shape = UIInkShape.RoundedRect; // 圆角化：自适应半径，硬影同形状自动跟随
             bg.SpeechTail = false;
             bg.BorderWidth = CardBorderWidth;
             bg.BorderColor = ComicStyle.Ink;
@@ -286,18 +304,21 @@ namespace P1.UI
                 railRect = NewRect(CardRailName, card);
             }
 
-            // 色带内缩边框宽度，只占顶边内侧 5px：不让它盖住 3px 墨框
+            // 圆角化：卡片顶角现在是圆的，色带横向内缩到圆角的直线段内（胶囊端头），不再戳出卡外。
+            // 陷阱：BuildCardChrome 常在 PlaceCard 设定卡片尺寸之前调用，card.rect 还是 100×100 默认值；
+            // 半径先按已知卡高常量估算，ApplyStatusCardsLayout 拿到最终尺寸后再刷新（RefreshRailInset）。
+            float cardHeight = card.rect.height >= 1f ? card.rect.height : CardHeightDesktop;
+            float cardRadius = ComicStyle.CornerFor(Mathf.Max(card.rect.width, 1f), cardHeight);
             railRect.anchorMin = new Vector2(0f, 1f);
             railRect.anchorMax = new Vector2(1f, 1f);
             railRect.pivot = new Vector2(0.5f, 1f);
-            railRect.sizeDelta = new Vector2(-CardBorderWidth * 2f, CardRailHeight);
+            railRect.sizeDelta = new Vector2(-(cardRadius + CardBorderWidth) * 2f, CardRailHeight);
             railRect.anchoredPosition = new Vector2(0f, -CardBorderWidth);
 
             var rail = railRect.GetComponent<UIInkShapeGraphic>();
             if (rail == null) rail = railRect.gameObject.AddComponent<UIInkShapeGraphic>();
             rail.raycastTarget = false;
-            rail.Shape = UIInkShape.SharpRect;
-            rail.CornerRadius = ComicStyle.CornerSharp;
+            rail.Shape = UIInkShape.Pill; // 圆角化：5px 身份色带改胶囊短划
             rail.SpeechTail = false;
             rail.BorderWidth = 0f;
             rail.BorderColor = ComicStyle.Ink;
@@ -329,8 +350,7 @@ namespace P1.UI
             PlaceLeft(glowRect, trackLeft - 3f, MeterTrackWidth + 6f, TrackHeight + 6f);
             var warningGlow = glowRect.gameObject.AddComponent<UIInkShapeGraphic>();
             warningGlow.raycastTarget = false;
-            warningGlow.Shape = UIInkShape.SharpRect;
-            warningGlow.CornerRadius = ComicStyle.CornerSharp;
+            warningGlow.Shape = UIInkShape.Pill; // 圆角化：贴着胶囊轨道的红光板
             warningGlow.BorderWidth = 0f;
             warningGlow.HardShadow = false;
             warningGlow.Halftone = false;
@@ -343,8 +363,7 @@ namespace P1.UI
             PlaceLeft(plateRect, CardPadding, CardBadgeSize, CardBadgeSize);
             var plate = plateRect.gameObject.AddComponent<UIInkShapeGraphic>();
             plate.raycastTarget = false;
-            plate.Shape = UIInkShape.SharpRect;
-            plate.CornerRadius = ComicStyle.CornerSharp;
+            plate.Shape = UIInkShape.Pill; // 圆角化：44×44 徽章改正圆
             plate.BorderWidth = CardBadgeBorderWidth;
             plate.BorderColor = accent;
             plate.HardShadow = false;
@@ -399,8 +418,7 @@ namespace P1.UI
             PlaceLeft(plateRect, CardPadding, CardBadgeSize, CardBadgeSize);
             var plate = plateRect.gameObject.AddComponent<UIInkShapeGraphic>();
             plate.raycastTarget = false;
-            plate.Shape = UIInkShape.SharpRect;
-            plate.CornerRadius = ComicStyle.CornerSharp;
+            plate.Shape = UIInkShape.Pill; // 圆角化：44×44 徽章改正圆
             plate.BorderWidth = CardBadgeBorderWidth;
             plate.BorderColor = ComicStyle.Yellow;
             plate.HardShadow = false;
@@ -427,8 +445,7 @@ namespace P1.UI
 
             var hintPill = hintRect.gameObject.AddComponent<UIInkShapeGraphic>();
             hintPill.raycastTarget = false;
-            hintPill.Shape = UIInkShape.SharpRect;
-            hintPill.CornerRadius = ComicStyle.CornerSharp;
+            hintPill.Shape = UIInkShape.Pill; // 圆角化：满能提示签改胶囊
             hintPill.SpeechTail = false;
             hintPill.BorderWidth = ComicStyle.BorderThin;
             hintPill.BorderColor = ComicStyle.Ink;
@@ -484,26 +501,26 @@ namespace P1.UI
             RectTransform track = NewRect(name, parent);
             PlaceLeft(track, left, width, TrackHeight);
 
-            var trackImage = track.gameObject.AddComponent<Image>();
+            var trackImage = track.gameObject.AddComponent<UIPillImage>();
             trackImage.raycastTarget = false;
-            // 纸白 ALT 底：卡片是纸白，轨道要低一级才看得见
+            // 纸白 ALT 底：卡片是纸白，轨道要低一级才看得见（圆角化：胶囊轨道）
             trackImage.color = ComicStyle.PaperAlt;
-            UIFlatSprite.MakeFlat(trackImage);
 
             RectTransform fillRect = NewRect("Fill", track);
             Stretch(fillRect);
-            var fill = fillRect.gameObject.AddComponent<Image>();
+            var fill = fillRect.gameObject.AddComponent<UIPillImage>();
             fill.raycastTarget = false;
             fill.color = fillColor;
-            UIFlatSprite.MakeFlat(fill, filled: true);
+            fill.type = Image.Type.Filled; // 圆角化：胶囊填充，fillAmount 逻辑不变
+            fill.fillMethod = Image.FillMethod.Horizontal;
+            fill.fillOrigin = (int)Image.OriginHorizontal.Left;
             fill.fillAmount = 1f;
 
             RectTransform frameRect = NewRect("Frame", parent);
             PlaceLeft(frameRect, left, width, TrackHeight);
             var frame = frameRect.gameObject.AddComponent<UIInkShapeGraphic>();
             frame.raycastTarget = false;
-            frame.Shape = UIInkShape.SharpRect;
-            frame.CornerRadius = ComicStyle.CornerSharp;
+            frame.Shape = UIInkShape.Pill; // 圆角化：胶囊描边环，与轨道/填充轮廓一致
             frame.BorderWidth = ComicStyle.BorderThin;
             frame.BorderColor = ComicStyle.Ink;
             frame.HardShadow = false;

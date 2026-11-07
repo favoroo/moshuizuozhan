@@ -54,6 +54,7 @@ namespace P1.Tests
             Assert.AreEqual(36f, config.damage, 0.0001f, "小枪单发 36 伤");
             Assert.AreEqual(1.2f, config.spreadMinDegrees, 0.0001f, "首发高精度");
             Assert.AreEqual(5.5f, config.spreadDegrees, 0.0001f, "持续开火最大散布");
+            Assert.AreEqual(4.6f, config.firingMoveSpeed, 0.0001f, "开火移速对齐 INKWAVE 小枪 4.6");
 
             Assert.AreEqual(1.9f, config.rollWidth, 0.0001f, "滚筒 1.9m 墨带");
             Assert.AreEqual(140f, config.rollDamage, 0.0001f, "碾压 140 秒杀");
@@ -277,6 +278,9 @@ namespace P1.Tests
             Assert.AreEqual(140f, sweep.Damage, 0.0001f, "碾压伤害 140");
             Assert.AreEqual(0.5f, sweep.HitInterval, 0.0001f);
             Assert.AreEqual(0.34f, sweep.PaintRadius, 0.0001f);
+            // P41 涂带前伸：墨带远端必须越过脚下、铺到滚筒触地处（ drumAhead≈0.6m + 半鼓径），
+            // 否则滚筒滚过未涂色地面，俯视角读作悬空（INKWAVE 涂点=玩家前方 0.75m）。
+            Assert.AreEqual(0.7f, sweep.PaintLead, 0.0001f, "涂带前伸 0.7m 覆盖滚筒触地位置");
             Assert.AreEqual(0f, sweep.From.z, 0.001f);
             Assert.AreEqual(0.5f, sweep.To.z, 0.001f);
 
@@ -412,6 +416,37 @@ namespace P1.Tests
         }
 
         [Test]
+        public void Charger_ChargingMoveSpeed_GlidesDownToFullChargeSpeed()
+        {
+            // 开火移速对齐 INKWAVE：lerp(跑速×0.7≈4.2, 1.8, min(1, charge×3))——
+            // 起手接近跑速，蓄到 1/3 后钉在满蓄移速（狙击的开枪代价）。
+            var config = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            _createdConfigs.Add(config);
+            config.firingMoveSpeed = 1.8f;
+            config.chargeMoveSpeedStart = 4.2f;
+
+            var host = new FakeHost { Config = config, CurrentInk = 100f };
+            var strategy = new ChargerWeaponStrategy(config);
+            WeaponAim aim = WeaponAim.FromDirection(Vector3.forward, new Vector3(0f, 0f, 10f));
+
+            strategy.OnTriggerHeld(aim, 1f / 60f, host);
+            Assert.IsTrue(strategy.IsCharging, "按住扳机应进入蓄力");
+            Assert.AreEqual(4.2f, strategy.FiringMoveSpeedOverride, 0.01f, "蓄力起步移速 4.2");
+
+            strategy.Tick(0.2f, true, aim, host);
+            // 蓄力本身走 SmoothStep 曲线：0.2s ≈ 0.104，×3 ≈ 0.31 → lerp(4.2, 1.8, 0.31) ≈ 3.45
+            Assert.AreEqual(3.45f, strategy.FiringMoveSpeedOverride, 0.05f, "蓄力 0.2s 应降到约 3.45");
+
+            strategy.Tick(0.8f, true, aim, host);
+            Assert.AreEqual(1.8f, strategy.FiringMoveSpeedOverride, 0.01f, "满蓄力移速钉在 1.8");
+
+            // 松手发射后冷却期间按住扳机：回落到配置基础值 1.8
+            strategy.Tick(1f / 60f, false, aim, host);
+            Assert.AreEqual(1, host.Beams.Count);
+            Assert.AreEqual(1.8f, strategy.FiringMoveSpeedOverride, 0.01f, "松手后回落到配置开火移速");
+        }
+
+        [Test]
         public void Charger_BeamKillsBothTargets_WhenPiercing()
         {
             // 放到高空，避免依赖当前编辑器场景里是否存在地面/掩体碰撞体。
@@ -454,6 +489,7 @@ namespace P1.Tests
             Assert.AreEqual(30f, dualies.damage, 0.001f, "双枪单发 30 伤");
             Assert.AreEqual(8f, dualies.dualiesRollInkCost, 0.001f, "翻滚耗墨 8");
             Assert.AreEqual(2.8f, dualies.dualiesRollDistance, 0.001f, "翻滚距离 2.8m");
+            Assert.AreEqual(1.5f, dualies.dualiesRollBurstSpeedMultiplier, 0.001f, "翻滚爆发倍率 1.5（快出缓停曲线）");
             Assert.AreEqual(0.5f, dualies.dualiesTurretDuration, 0.001f, "站桩架枪 0.5s");
             Assert.AreEqual(0.0664f, dualies.dualiesTurretFireInterval, 0.001f, "架枪射速提升 20%");
             Assert.AreEqual(0f, dualies.dualiesTurretSpreadDegrees, 0.001f, "架枪散布清零");
@@ -619,10 +655,12 @@ namespace P1.Tests
             Assert.AreEqual(100f - 8.6f, host.CurrentInk, 0.01f, "泼墨扣除 8.6 墨");
             Assert.IsTrue(strategy.IsWindingUp, "进入 0.13s 前摇");
             Assert.IsEmpty(host.Shots, "前摇期间尚未泼出墨滴");
+            Assert.AreEqual(0.7f, strategy.MoveSpeedMultiplier, 0.001f, "甩桶前摇移速 ×0.7（INKWAVE slosh ≥ 0）");
 
             // 走完 0.13s 前摇
             strategy.Tick(0.14f, true, aim, host);
             Assert.IsFalse(strategy.IsWindingUp, "前摇结束");
+            Assert.AreEqual(1f, strategy.MoveSpeedMultiplier, 0.001f, "前摇结束移速恢复");
             Assert.AreEqual(8, host.Shots.Count, "一次泼出 8 滴墨浪");
 
             // 头滴直击 70 伤
@@ -717,7 +755,7 @@ namespace P1.Tests
 
             bool fired = strategy.OnTriggerHeld(aim, 1f / 60f, host);
             Assert.IsTrue(fired);
-            Assert.AreEqual(100f - 10.4f, host.CurrentInk, 0.01f, "爆破枪消耗 10.4 墨水");
+            Assert.AreEqual(100f - 9f, host.CurrentInk, 0.01f, "爆破枪消耗 9.0 墨水（INKWAVE 对齐）");
             Assert.AreEqual(1, host.Shots.Count);
 
             WeaponShot shot = host.Shots[0];
@@ -726,6 +764,7 @@ namespace P1.Tests
             Assert.AreEqual(0f, shot.Gravity, 0.001f, "重弹水平平直飞行");
             Assert.IsTrue(shot.IsBlaster, "标记为 Blaster 弹丸");
             Assert.AreEqual(2.6f, shot.SplashRadius, 0.001f, "空爆溅射半径 2.6m");
+            Assert.AreEqual(0.38f, shot.HitRadius, 0.001f, "直击判定球 0.38m（接角色）；撞墙/撞地走细射线");
 
             // 直击直接秒杀 100 HP 角色
             var victimGo = CreateCombatant("BlasterDirectVictim", Team.TeamB, new Vector3(0f, 50f, 5f));
@@ -797,18 +836,22 @@ namespace P1.Tests
             // 按住扳机开始蓄力
             Assert.IsFalse(strategy.OnTriggerHeld(aim, 1f / 60f, host));
             Assert.IsTrue(strategy.IsCharging);
-            Assert.AreEqual(config.splatlingMoveSpeedCharging / 6.0f, strategy.MoveSpeedMultiplier, 0.01f, "蓄力移速减速");
+            Assert.AreEqual(config.splatlingMoveSpeedChargeStart, strategy.FiringMoveSpeedOverride, 0.01f,
+                "蓄力起步移速 4.5（= 跑速 × 0.75，INKWAVE 渐入曲线起点）");
 
             // 推进 0.85s 到达满蓄力
             strategy.Tick(0.86f, true, aim, host);
             Assert.AreEqual(1f, strategy.Charge01, 0.001f, "0.85s 满蓄力");
+            Assert.AreEqual(config.splatlingMoveSpeedCharging, strategy.FiringMoveSpeedOverride, 0.01f,
+                "满蓄力移速降到 2.4");
             Assert.IsEmpty(host.Shots, "蓄力阶段不发射弹丸");
 
             // 松开扳机释放 1.7s 高密度暴风雨弹幕
             strategy.Tick(1f / 60f, false, aim, host);
             Assert.IsFalse(strategy.IsCharging);
             Assert.IsTrue(strategy.IsStreaming, "进入扫射状态");
-            Assert.AreEqual(config.splatlingMoveSpeedFiring / 6.0f, strategy.MoveSpeedMultiplier, 0.01f, "扫射移速轻微减速");
+            Assert.AreEqual(config.splatlingMoveSpeedFiring, strategy.FiringMoveSpeedOverride, 0.01f,
+                "扫射移速恒定 3.4");
 
             // 模拟推进 1.7s 扫射
             const float dt = 1f / 60f;

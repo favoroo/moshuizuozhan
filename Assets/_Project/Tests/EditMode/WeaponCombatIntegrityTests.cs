@@ -461,13 +461,18 @@ namespace P1.Tests
 
             Assert.AreEqual(6.0f, motor.CurrentMoveSpeed, 0.01f, "初始人形移速为 6.0");
 
-            // 2) 触发双枪翻滚：速度提升至翻滚速度 2.8 / 0.3 ≈ 9.33
+            // 2) 触发双枪翻滚：快出缓停曲线首帧 = burst × 2.8/0.3 ≈ 14 m/s（P40 前不再是匀速 9.33）
             bool rolled = weapon.TryDodgeRoll(Vector3.right);
             Assert.IsTrue(rolled, "成功触发战术翻滚");
             Assert.IsTrue(weapon.IsRollingDodge);
 
             updateMethod.Invoke(motor, null);
-            Assert.AreEqual(2.8f / 0.3f, motor.CurrentMoveSpeed, 0.05f, "翻滚期间 Motor 移速应提升为翻滚速度 (~9.33 m/s)");
+            // dt 取自 Time.deltaTime（EditMode 反射驱动，值不恒定），断言曲线前段区间而非精确值：
+            // u=0 时 14.0；dt=0.1（u≈0.33）也有 12.5，全程高于旧匀速 9.33
+            Assert.That(motor.CurrentMoveSpeed, Is.InRange(10.5f, 14.05f),
+                "翻滚首帧应处于快出缓停曲线的爆发段（burst × 距离/时长 ≈ 14 m/s）");
+            Assert.That(motor.CurrentMoveSpeed, Is.GreaterThan(2.8f / 0.3f),
+                "爆发段首帧速度必须高于旧的匀速翻滚速度");
 
             // 3) 推进武器时钟至翻滚结束、进入站桩架枪 (TurretLock)
             weapon.LateUpdateForTesting(0.31f);
@@ -486,7 +491,7 @@ namespace P1.Tests
         }
 
         [Test]
-        public void Splatling_MoveSpeedMultiplier_SlowsMotorFiringSpeed()
+        public void Splatling_ChargingMoveSpeed_UsesAbsoluteOverride()
         {
             var go = new GameObject("TestSplatlingMotorActor", typeof(CharacterController));
             _createdObjects.Add(go);
@@ -509,15 +514,16 @@ namespace P1.Tests
             // 开始蓄力
             weapon.TryFireMainWeapon(Vector3.forward);
             Assert.IsTrue(weapon.IsCharging);
-            Assert.AreEqual(2.4f / 6.0f, weapon.MoveSpeedMultiplier, 0.01f, "加特林蓄力中移速倍率为 0.4");
+            Assert.AreEqual(4.5f, weapon.FiringMoveSpeedOverride, 0.01f, "蓄力起步移速 4.5（INKWAVE 渐入曲线起点）");
 
             // Motor 设置为开火状态
             motor.SetFrameIntent(Vector3.forward, Vector3.forward, false, isFiring: true);
             updateMethod.Invoke(motor, null);
 
-            float expectedSpeed = 3.8f * (2.4f / 6.0f);
+            // 电机开火分支直接采用策略给出的绝对移速（旧 ÷6.0 比率乘在 3.8 基数上，实际只有 1.52 m/s）
+            float expectedSpeed = 4.5f;
             Assert.AreEqual(expectedSpeed, motor.CurrentMoveSpeed, 0.05f,
-                $"加特林蓄力时开火移速应为 {expectedSpeed:F2} m/s（3.8 * 0.4），实际为 {motor.CurrentMoveSpeed:F2}");
+                $"加特林蓄力时开火移速应为策略覆盖值 {expectedSpeed:F2} m/s，实际为 {motor.CurrentMoveSpeed:F2}");
         }
 
         // ------------------------------------------------------------------ helpers

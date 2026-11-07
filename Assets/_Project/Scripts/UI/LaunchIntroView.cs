@@ -401,8 +401,8 @@ namespace P1.UI
             ringRt.sizeDelta = new Vector2(720f, 720f);
             ringRt.anchoredPosition = new Vector2(-690f, -170f);
 
-            var square = CreateShape("YellowSquare", _stageRoot, UIInkShape.SharpRect, new Color(0f, 0f, 0f, 0f),
-                DecorYellow, 5f);
+            var square = CreateShape("YellowSquare", _stageRoot, UIInkShape.RoundedRect, new Color(0f, 0f, 0f, 0f),
+                DecorYellow, 5f); // 圆角化：旋转装饰块 → 圆角菱形
             square.raycastTarget = false;
             var squareRt = square.rectTransform;
             squareRt.anchorMin = squareRt.anchorMax = new Vector2(0.5f, 0.5f);
@@ -410,8 +410,8 @@ namespace P1.UI
             squareRt.anchoredPosition = new Vector2(760f, 300f);
             squareRt.localEulerAngles = new Vector3(0f, 0f, 13f);
 
-            var small = CreateShape("CobaltSquare", _stageRoot, UIInkShape.SharpRect, new Color(0f, 0f, 0f, 0f),
-                DecorBlue, 4f);
+            var small = CreateShape("CobaltSquare", _stageRoot, UIInkShape.RoundedRect, new Color(0f, 0f, 0f, 0f),
+                DecorBlue, 4f); // 圆角化
             small.raycastTarget = false;
             var smallRt = small.rectTransform;
             smallRt.anchorMin = smallRt.anchorMax = new Vector2(0.5f, 0.5f);
@@ -444,8 +444,8 @@ namespace P1.UI
             splatRt.anchoredPosition = Vector2.zero;
             splatRt.localEulerAngles = new Vector3(0f, 0f, -8f);
 
-            // 贴纸：纸白 + 6px 墨框 + 弹窗档硬影（8,-9），内容用 App 图标本体。
-            var sticker = CreateShape("Sticker", _markRoot, UIInkShape.SharpRect, ComicStyle.Paper,
+            // 贴纸：纸白圆角 + 6px 墨框 + 弹窗档硬影（8,-9，同形状跟随），内容用 App 图标本体。
+            var sticker = CreateShape("Sticker", _markRoot, UIInkShape.RoundedRect, ComicStyle.Paper,
                 ComicStyle.Ink, 6f);
             sticker.ApplyHardShadow(new Vector2(8f, -9f));
             sticker.raycastTarget = false;
@@ -510,16 +510,16 @@ namespace P1.UI
             ruleRt.sizeDelta = new Vector2(760f, 4f);
             ruleRt.anchoredPosition = new Vector2(0f, -148f);
 
-            var pipLeft = CreateShape("RulePipL", _titleRoot, UIInkShape.SharpRect, ComicStyle.Yellow,
-                ComicStyle.Yellow, 0f);
+            var pipLeft = CreateShape("RulePipL", _titleRoot, UIInkShape.Pill, ComicStyle.Yellow,
+                ComicStyle.Yellow, 0f); // 圆角化：14×14 圆点
             pipLeft.raycastTarget = false;
             var pipLeftRt = pipLeft.rectTransform;
             pipLeftRt.anchorMin = pipLeftRt.anchorMax = new Vector2(0.5f, 0.5f);
             pipLeftRt.sizeDelta = new Vector2(14f, 14f);
             pipLeftRt.anchoredPosition = new Vector2(-382f, -148f);
 
-            var pipRight = CreateShape("RulePipR", _titleRoot, UIInkShape.SharpRect, ComicStyle.Yellow,
-                ComicStyle.Yellow, 0f);
+            var pipRight = CreateShape("RulePipR", _titleRoot, UIInkShape.Pill, ComicStyle.Yellow,
+                ComicStyle.Yellow, 0f); // 圆角化：14×14 圆点
             pipRight.raycastTarget = false;
             var pipRightRt = pipRight.rectTransform;
             pipRightRt.anchorMin = pipRightRt.anchorMax = new Vector2(0.5f, 0.5f);
@@ -542,8 +542,8 @@ namespace P1.UI
             _barBlocks = new UIInkShapeGraphic[BarBlockCount];
             for (int i = 0; i < BarBlockCount; i++)
             {
-                var block = CreateShape("BarBlock" + i, barRoot, UIInkShape.SharpRect, BarTrack,
-                    ComicStyle.Ink, 2f);
+                var block = CreateShape("BarBlock" + i, barRoot, UIInkShape.Pill, BarTrack,
+                    ComicStyle.Ink, 2f); // 圆角化：加载块胶囊化
                 block.raycastTarget = false;
                 var blockRt = block.rectTransform;
                 blockRt.anchorMin = blockRt.anchorMax = new Vector2(0f, 0.5f);
@@ -568,8 +568,8 @@ namespace P1.UI
 
         private void BuildCorners()
         {
-            // 左上角签：黄底墨字的 TURF WAR 标签（几何风角签档位 2,-3）。
-            var tag = CreateShape("Tag", _stageRoot, UIInkShape.SharpRect, ComicStyle.Yellow,
+            // 左上角签：黄底墨字的 TURF WAR 标签（几何风角签档位 2,-3；圆角化改胶囊）。
+            var tag = CreateShape("Tag", _stageRoot, UIInkShape.Pill, ComicStyle.Yellow,
                 ComicStyle.Ink, 3f);
             tag.ApplyHardShadow(ComicStyle.ShadowTag);
             tag.raycastTarget = false;
@@ -678,7 +678,7 @@ namespace P1.UI
 
             var graphic = go.GetComponent<UIInkShapeGraphic>();
             graphic.Shape = shape;
-            graphic.CornerRadius = ComicStyle.CornerSharp;
+            graphic.CornerRadius = 0f; // 0 = RoundedRect 自适应半径（Pill/Blob 忽略此项）
             graphic.BorderWidth = borderWidth;
             graphic.BorderColor = border;
             graphic.color = fill;

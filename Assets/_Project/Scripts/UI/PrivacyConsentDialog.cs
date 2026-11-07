@@ -288,8 +288,7 @@ namespace P1.UI
             _panelRect.sizeDelta = new Vector2(1000f, 780f); // 占位，正文测量后回填
 
             var panelShape = panelGo.GetComponent<UIInkShapeGraphic>();
-            panelShape.Shape = UIInkShape.SharpRect;
-            panelShape.CornerRadius = ComicStyle.CornerSharp;
+            panelShape.Shape = UIInkShape.RoundedRect; // 圆角化：隐私弹窗面板自适应圆角
             panelShape.BorderWidth = ComicStyle.BorderHeavy;
             panelShape.BorderColor = ComicStyle.Ink;
             panelShape.color = ComicStyle.Paper;
@@ -334,8 +333,7 @@ namespace P1.UI
             titleBarRt.anchoredPosition = new Vector2(0f, Y(topMargin + titleH * 0.5f));
             titleBarRt.sizeDelta = new Vector2(620f, titleH);
             var titleBarShape = titleBarGo.GetComponent<UIInkShapeGraphic>();
-            titleBarShape.Shape = UIInkShape.SharpRect;
-            titleBarShape.CornerRadius = ComicStyle.CornerSharp;
+            titleBarShape.Shape = UIInkShape.RoundedRect; // 圆角化：标题条自适应圆角
             titleBarShape.BorderWidth = 0f;
             titleBarShape.color = ComicStyle.Ink;
             titleBarShape.HardShadow = false;
@@ -387,8 +385,7 @@ namespace P1.UI
             checkBoxRt.anchoredPosition = new Vector2(0f, 0f);
             checkBoxRt.sizeDelta = new Vector2(42f, 42f);
             _checkBoxShape = checkBoxGo.GetComponent<UIInkShapeGraphic>();
-            _checkBoxShape.Shape = UIInkShape.SharpRect;
-            _checkBoxShape.CornerRadius = ComicStyle.CornerSharp;
+            _checkBoxShape.Shape = UIInkShape.Pill; // 圆角化：42×42 勾选框改正圆
             _checkBoxShape.BorderWidth = ComicStyle.Border;
             _checkBoxShape.BorderColor = ComicStyle.Ink;
             _checkBoxShape.color = ComicStyle.Paper;
@@ -483,7 +480,7 @@ namespace P1.UI
             rt.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：弹窗按钮自适应圆角
             shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = ComicStyle.Border;
             shape.BorderColor = ComicStyle.Ink;

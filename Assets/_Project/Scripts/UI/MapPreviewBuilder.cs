@@ -146,6 +146,7 @@ namespace P1.UI
             rt.anchoredPosition = Vector2.zero;
 
             UIInkShapeGraphic graphic = go.GetComponent<UIInkShapeGraphic>();
+            graphic.Shape = UIInkShape.RoundedRect; // 圆角化：示意图块自适应圆角（小尺寸自动钳到近直角）
             graphic.raycastTarget = false;
             graphic.HardShadow = false;
             graphic.Halftone = false;

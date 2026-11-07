@@ -65,8 +65,7 @@ namespace P1.UI
                 bgGo.transform.SetParent(transform, false);
                 Stretch((RectTransform)bgGo.transform);
                 cardBgGraphic = bgGo.GetComponent<UIInkShapeGraphic>();
-                cardBgGraphic.Shape = UIInkShape.SharpRect;
-                cardBgGraphic.CornerRadius = ComicStyle.CornerSharp;
+                cardBgGraphic.Shape = UIInkShape.RoundedRect; // 圆角化：自适应半径，硬影自动跟随
                 cardBgGraphic.SpeechTail = false;
                 cardBgGraphic.BorderWidth = ComicStyle.Border;
                 cardBgGraphic.BorderColor = ComicStyle.Ink;
@@ -191,11 +190,10 @@ namespace P1.UI
             Color killerCol = resolved.GetTeamColor(ev.KillerTeam);
             Color victimCol = resolved.GetTeamColor(ev.VictimTeam);
 
-            // 1. 直角黑底白字块（几何风：SharpRect + 面板档硬影，无气泡尾）
+            // 1. 圆角黑底白字块（圆角化：RoundedRect 自适应半径 + 面板档硬影，无气泡尾）
             if (cardBgGraphic != null)
             {
-                cardBgGraphic.Shape = UIInkShape.SharpRect;
-                cardBgGraphic.CornerRadius = ComicStyle.CornerSharp;
+                cardBgGraphic.Shape = UIInkShape.RoundedRect;
                 cardBgGraphic.SpeechTail = false;
                 cardBgGraphic.BorderWidth = ComicStyle.Border;
 

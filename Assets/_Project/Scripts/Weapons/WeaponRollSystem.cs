@@ -51,13 +51,19 @@ namespace P1.Weapons
             if (distance < 0.001f)
                 return 0;
 
+            // P41 涂带前伸：远端沿前进方向延伸 PaintLead，让墨带一直铺到滚筒触地处
+            //（旧墨带止于脚下，滚筒滚过未涂色地面，俯视角读作悬空）。碾压判定仍以未延伸的 to 为原点。
+            float lead = Mathf.Max(0f, sweep.PaintLead);
+            to += forward * lead;
+            float bandLength = distance + lead;
+
             float radius = Mathf.Max(0.1f, sweep.PaintRadius);
             float step = Mathf.Max(0.08f, radius * 0.9f);
 
             // 横向圆心止于 ±(W/2 - r)，这样圆并集的外包络正好等于 rollWidth，推地边缘保持笔直。
             float halfSpan = Mathf.Max(0f, sweep.Width * 0.5f - radius);
             int across = Mathf.Max(1, Mathf.CeilToInt((halfSpan * 2f) / step) + 1);
-            int along = Mathf.Max(1, Mathf.CeilToInt(distance / step));
+            int along = Mathf.Max(1, Mathf.CeilToInt(bandLength / step));
 
             Vector3 right = Vector3.Cross(Vector3.up, forward);
             if (right.sqrMagnitude < 0.0001f)
@@ -83,10 +89,11 @@ namespace P1.Weapons
                 InkSurfaceController.Instance.TriggerRipple(to + forward * 0.2f, 0.045f, 0.34f, 3.4f, 0.9f);
             }
 
-            // 滚筒推抵墙面时同时给接触立面下沿涂上墨水（墙面格单独计数：只充能、不计涂地统计）
+            // 滚筒推抵墙面时同时给接触立面下沿涂上墨水（墙面格单独计数：只充能、不计涂地统计）。
+            // 注意锚点用未前伸的 sweep.To：贴墙时脚距墙面仅 ~0.4m，前伸探针会罩空墙面接触格。
             if (InkWallSurface.All.Count > 0)
             {
-                wallPainted = InkWallSurface.PaintAllInSphere(to + forward * 0.35f, radius * 1.5f, team);
+                wallPainted = InkWallSurface.PaintAllInSphere(sweep.To + forward * 0.35f, radius * 1.5f, team);
             }
 
             return changed;

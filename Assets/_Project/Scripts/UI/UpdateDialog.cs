@@ -8,10 +8,10 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 应用内更新弹窗（P14 几何大胆风 Geometric Bold 重构）：
-    /// - 840×640 直角黑白面板（SharpRect，0 圆角，6px 粗墨边）；
-    /// - 纯色直角标题条；
-    /// - Red 关键 CTA 按钮（立即更新），直角白底墨字次级按钮（稍后再说），蓝底直角按钮（浏览器下载）；
+    /// 应用内更新弹窗（P14 几何大胆风 Geometric Bold 重构；2026-11 圆角化）：
+    /// - 840×640 圆角黑白面板（RoundedRect 自适应半径，6px 粗墨边）；
+    /// - 纯色圆角标题条；
+    /// - Red 关键 CTA 按钮（立即更新），圆角白底墨字次级按钮（稍后再说），蓝底圆角按钮（浏览器下载）；
     /// - 正文、版本号与发布说明字号 ≥22（移动端 ≥26，走 UITypography.FontSnapped）；
     /// - 去除网点、半调、动作线与硬阴影。
     /// </summary>
@@ -471,8 +471,7 @@ namespace P1.UI
             _panelRect = panelRt;
 
             var panelShape = panelGo.GetComponent<UIInkShapeGraphic>();
-            panelShape.Shape = UIInkShape.SharpRect; // 直角面板
-            panelShape.CornerRadius = ComicStyle.CornerSharp;
+            panelShape.Shape = UIInkShape.RoundedRect; // 圆角化：弹窗面板自适应圆角，硬影同形状跟随
             panelShape.BorderWidth = ComicStyle.BorderHeavy;
             panelShape.BorderColor = ComicStyle.Ink;
             panelShape.color = ComicStyle.Paper;
@@ -495,8 +494,7 @@ namespace P1.UI
             titleBoxRt.sizeDelta = new Vector2(420f, 64f);
 
             var titleBoxShape = titleBoxGo.GetComponent<UIInkShapeGraphic>();
-            titleBoxShape.Shape = UIInkShape.SharpRect;
-            titleBoxShape.CornerRadius = ComicStyle.CornerSharp;
+            titleBoxShape.Shape = UIInkShape.RoundedRect; // 圆角化：标题块自适应圆角
             titleBoxShape.BorderWidth = 0f;
             titleBoxShape.color = ComicStyle.Ink;
             titleBoxShape.HardShadow = false;
@@ -546,8 +544,7 @@ namespace P1.UI
             scrollRt.sizeDelta = new Vector2(740f, 230f);
 
             var scrollShape = scrollGo.GetComponent<UIInkShapeGraphic>();
-            scrollShape.Shape = UIInkShape.SharpRect;
-            scrollShape.CornerRadius = ComicStyle.CornerSharp;
+            scrollShape.Shape = UIInkShape.RoundedRect; // 圆角化：更新日志滚动框
             scrollShape.BorderWidth = ComicStyle.BorderThin;
             scrollShape.BorderColor = ComicStyle.Ink;
             scrollShape.color = ComicStyle.PaperAlt;
@@ -609,8 +606,7 @@ namespace P1.UI
             barBgRt.anchoredPosition = Vector2.zero;
 
             var barBgShape = barBgGo.GetComponent<UIInkShapeGraphic>();
-            barBgShape.Shape = UIInkShape.SharpRect;
-            barBgShape.CornerRadius = ComicStyle.CornerSharp;
+            barBgShape.Shape = UIInkShape.Pill; // 圆角化：进度槽胶囊化
             barBgShape.BorderWidth = ComicStyle.BorderThin;
             barBgShape.BorderColor = ComicStyle.Ink;
             barBgShape.color = ProgressTrackColor; // 深灰槽底：空槽与黄色填充都有清晰边界
@@ -635,11 +631,11 @@ namespace P1.UI
             _progressBarFill = fillGo.GetComponent<Image>();
             // 关键：Image 没有 sprite 时 fillAmount 完全失效（整条恒为满格）——
             // 这就是旧版「进度条一直全绿、像没有动画」的根因。
-            UIFlatSprite.MakeFlat(_progressBarFill, filled: true);
+            UIFlatSprite.MakePill(_progressBarFill, filled: true); // 圆角化：胶囊填充
             _progressBarFill.color = ComicStyle.Yellow; // 主行动黄，替代原来的绿色
             _progressBarFill.fillAmount = 0f;
 
-            // 进度头：纸白小方块 + 2px 墨边，沿填充条尽头移动（下载中的运动参照）
+            // 进度头：纸白小胶囊 + 2px 墨边，沿填充条尽头移动（下载中的运动参照）
             var headGo = new GameObject("ProgressHead", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             headGo.transform.SetParent(fillArea.transform, false);
             var headRt = headGo.GetComponent<RectTransform>();
@@ -650,8 +646,7 @@ namespace P1.UI
             headRt.anchoredPosition = Vector2.zero;
 
             _progressBarHead = headGo.GetComponent<UIInkShapeGraphic>();
-            _progressBarHead.Shape = UIInkShape.SharpRect;
-            _progressBarHead.CornerRadius = ComicStyle.CornerSharp;
+            _progressBarHead.Shape = UIInkShape.Pill; // 圆角化
             _progressBarHead.BorderWidth = 2f;
             _progressBarHead.BorderColor = ComicStyle.Ink;
             _progressBarHead.color = ComicStyle.Paper;
@@ -755,7 +750,7 @@ namespace P1.UI
             rt.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect; // 直角按钮
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：弹窗按钮自适应圆角
             shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = ComicStyle.Border;
             shape.BorderColor = ComicStyle.Ink;

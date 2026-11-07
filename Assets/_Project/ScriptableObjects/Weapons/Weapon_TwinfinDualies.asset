@@ -40,6 +40,7 @@ MonoBehaviour:
   rollInkPerMeter: 1.25
   rollMinInkToStart: 0.5
   rollPaintRadius: 0.34
+  rollPaintLeadMeters: 0.7
   rollMaxStepMeters: 1.5
   rollStartSpeedFactor: 0.5
   rollAccelTime: 0.45
@@ -90,6 +91,7 @@ MonoBehaviour:
   blasterSplashDamageMax: 70
   blasterSplashDamageMin: 30
   blasterBurstRadius: 1.9
+  blasterHitRadius: 0.38
   splatlingChargeTime: 0.85
   splatlingBurstMinDuration: 0.3
   splatlingBurstMaxDuration: 1.7
@@ -147,6 +149,9 @@ MonoBehaviour:
   stormGrowTime: 0.5
   stormFadeTime: 0.6
   stormThrowLockDuration: 0.35
+  firingMoveSpeed: 5
+  chargeMoveSpeedStart: 0
+  splatlingMoveSpeedChargeStart: 0
   recoilKickMeters: 0
   recoilPitchDegrees: 0
   cameraKickMeters: 0

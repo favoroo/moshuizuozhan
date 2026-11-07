@@ -351,8 +351,7 @@ namespace P1.UI
 
             if (readyHintPill != null)
             {
-                readyHintPill.Shape = UIInkShape.SharpRect;
-                readyHintPill.CornerRadius = ComicStyle.CornerSharp;
+                readyHintPill.Shape = UIInkShape.Pill; // 圆角化：满能提示签保持胶囊
                 readyHintPill.SpeechTail = false;
                 readyHintPill.HardShadow = false;
                 // 满能卡整块是黄的：小签反过来用墨底白字（t-1 的墨块语言），对比最强

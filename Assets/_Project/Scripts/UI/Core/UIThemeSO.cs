@@ -19,7 +19,7 @@ namespace P1.UI
     [System.Serializable]
     public class UIInkCardStyle
     {
-        public UIInkShape shape = UIInkShape.SharpRect;
+        public UIInkShape shape = UIInkShape.RoundedRect;
 
         public Color fillColor = Color.white;
 
@@ -30,6 +30,7 @@ namespace P1.UI
 
         [Range(0f, 32f)] public float borderWidth = 4f;
 
+        [Tooltip("0 = 按短边自适应（ComicStyle.CornerFor）；正圆/胶囊请直接把 shape 设为 Pill")]
         [Range(0f, 128f)] public float cornerRadius = 0f;
 
         [Range(0f, 0.25f)] public float wobble = 0f;
@@ -301,10 +302,10 @@ namespace P1.UI
         [Tooltip("正文/设置项用中文字体")]
         public TMP_FontAsset bodyCjkFont;
 
-        [Header("卡片预设（直角 + 实线边；硬影默认关，需要时把 shadowOffset 设成面板档 4,-5）")]
+        [Header("卡片预设（圆角矩形自适应半径 + 实线边；硬影默认关，需要时把 shadowOffset 设成面板档 4,-5）")]
         public UIInkCardStyle teamCard = new UIInkCardStyle
         {
-            shape = UIInkShape.SharpRect,
+            shape = UIInkShape.RoundedRect,
             fillColor = new Color(1f, 0.44f, 0.06f, 1f),
             fillUsesTeamColor = true,
             borderColor = new Color(0.078f, 0.078f, 0.078f, 1f),
@@ -324,7 +325,7 @@ namespace P1.UI
 
         public UIInkCardStyle darkCard = new UIInkCardStyle
         {
-            shape = UIInkShape.SharpRect,
+            shape = UIInkShape.RoundedRect,
             fillColor = new Color(0.078f, 0.078f, 0.078f, 1f),
             fillUsesTeamColor = false,
             borderColor = new Color(0.078f, 0.078f, 0.078f, 1f),
@@ -344,7 +345,7 @@ namespace P1.UI
 
         public UIInkCardStyle lightCard = new UIInkCardStyle
         {
-            shape = UIInkShape.SharpRect,
+            shape = UIInkShape.RoundedRect,
             fillColor = Color.white,
             fillUsesTeamColor = false,
             borderColor = new Color(0.078f, 0.078f, 0.078f, 1f),

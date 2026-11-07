@@ -319,6 +319,15 @@ namespace P1.Player
         private float _slosherThrowTimer;
         private float _blasterKickTimer;
         private float _dodgeWeight;
+
+        // P40 双枪翻滚本体：IsRollingDodge 上升沿自计时 + 求解结果缓存 + 根节点偏移记账
+        //（_dodgeRootOffset 由 ApplyVisualGroundOffset 每帧随贴地下沉一并写入，ApplyDodgeTumble 增量维护）
+        private bool _dodgeRollActive;
+        private float _dodgeRollElapsed;
+        private float _dodgeRollSide;
+        private float _dodgeRollForward;
+        private DodgeRollPose _dodgeRollPose = DodgeRollPose.None;
+        private Vector3 _dodgeRootOffset;
         private float _turretWeight;
         private float _streamingWeight;
         private float _splatlingSpinDegPerSec;
@@ -630,13 +639,16 @@ namespace P1.Player
         private void CacheRollerModelBasePosition()
         {
             _rollerModelBaseCaptured = false;
-            if (_weaponMap != null &&
-                _weaponMap.TryGetValue(WeaponKind.Roller, out GameObject roller) &&
-                roller != null)
+            // P40 与贴地闭环同款兜底：表里没有滚筒时退回序列化引用（旧场景/重装配竞态安全）。
+            if ((!_weaponMap.TryGetValue(WeaponKind.Roller, out GameObject roller) || roller == null)
+                && weaponRoller == null)
             {
-                _rollerModelBaseLocalPos = roller.transform.localPosition;
-                _rollerModelBaseCaptured = true;
+                return;
             }
+            if (roller == null) roller = weaponRoller;
+
+            _rollerModelBaseLocalPos = roller.transform.localPosition;
+            _rollerModelBaseCaptured = true;
         }
 
         /// <summary>
@@ -970,7 +982,7 @@ namespace P1.Player
             PlayerConfigSO playerConfig = _motor.Config;
             float sink = Mathf.Clamp(playerConfig != null ? playerConfig.controllerSkinWidth : 0.006f, 0.004f, 0.04f);
             Vector3 down = Vector3.down * sink;
-            if (kidRoot != null) kidRoot.transform.localPosition = _defaultKidRootPos + down;
+            if (kidRoot != null) kidRoot.transform.localPosition = _defaultKidRootPos + down + _dodgeRootOffset;
             if (squidRoot != null) squidRoot.transform.localPosition = _defaultSquidRootPos + down;
         }
 
@@ -981,6 +993,9 @@ namespace P1.Player
             {
                 _health = GetComponentInParent<CombatantHealth>();
             }
+            // P40 域重载自愈：运行中脚本重编译会把非序列化的 _weaponMap 清回空表且不再跑 Awake，
+            // 贴地闭环/姿态写入取不到模型就整段早退（表现为滚筒按住推地仍悬在半空）。见 EnsureWeaponMaps。
+            EnsureWeaponMaps();
             CombatantHealth.DamageApplied += HandleDamageApplied;
         }
 
@@ -1171,6 +1186,32 @@ namespace P1.Player
             }
             _prevWorldPos = transform.position;
             _prevYaw = transform.eulerAngles.y;
+        }
+
+        /// <summary>
+        /// P40 武器表自愈：_weaponMap / _weaponModelBaseRots / _armHoldPoses 都是非序列化运行期缓存，
+        /// 只在 Awake / BindHierarchy 构建。运行中的域重载（并行改码触发的脚本重编译）会把它们清回
+        /// 空表而不再跑 Awake —— UpdateAimPose 与滚筒贴地闭环取不到模型就整段早退，滚筒会退化成
+        /// 纯造型姿态悬在半空（实测 gap≈0.06~0.22m、contact=0，"按住推地滚筒不贴地"）。
+        /// 这里按需重建一次，并按 WeaponController 的当前配置重同步武器种类；表健康时零开销。
+        /// </summary>
+        private void EnsureWeaponMaps()
+        {
+            if (_weaponMap.Count > 0)
+                return;
+
+            BuildWeaponMaps();
+            if (_weaponMap.Count == 0)
+                return;
+
+            if (_weaponController != null && _weaponController.Config != null)
+            {
+                EquipWeaponKind(_weaponController.Config.weaponKind);
+            }
+            else
+            {
+                EquipWeaponKind(_currentWeaponKind);
+            }
         }
 
         private void BuildWeaponMaps()
@@ -1378,6 +1419,39 @@ namespace P1.Player
             _turretWeight += ((turret ? 1f : 0f) - _turretWeight) * weightK;
             _streamingWeight += ((streaming ? 1f : 0f) - _streamingWeight) * weightK;
 
+            // P40 双枪翻滚本体：IsRollingDodge 是唯一信号，上升沿起本地计时拿进度
+            //（策略计时器在 WeaponController.LateUpdate 才递减，逐帧对齐足够精确），
+            // 采样 DodgeRollPoseSolver 得到转角/转轴/蜷身/抬升，UpdateBodyPose 里应用。
+            if (dodging && !_dodgeRollActive)
+            {
+                _dodgeRollElapsed = 0f;
+                _dodgeRollSide = _weaponController != null ? _weaponController.DodgeSide : 0f;
+                _dodgeRollForward = _weaponController != null ? _weaponController.DodgeForward : 1f;
+            }
+            _dodgeRollActive = dodging;
+            if (dodging)
+            {
+                _dodgeRollElapsed += dt;
+                DodgeRollPoseParams rollParams = DodgeRollPoseParams.Default;
+                if (cfg != null)
+                {
+                    rollParams.TumbleDegrees = cfg.dualiesDodgeTumbleDegrees;
+                    rollParams.TumbleEaseExponent = cfg.dualiesDodgeTumbleEase;
+                    rollParams.LiftMeters = cfg.dualiesDodgeTumbleLift;
+                    rollParams.SquashAmount = cfg.dualiesDodgeTuckSquash;
+                }
+                float rollDur = _weaponController != null && _weaponController.Config != null
+                    ? Mathf.Max(0.05f, _weaponController.Config.dualiesRollDuration)
+                    : 0.3f;
+                float rollProgress = Mathf.Clamp01(_dodgeRollElapsed / rollDur);
+                _dodgeRollPose = DodgeRollPoseSolver.Sample(
+                    rollProgress, _dodgeRollSide, _dodgeRollForward, rollParams);
+            }
+            else if (_dodgeRollPose.Tuck01 > 0f || _dodgeRollPose.TumbleRadians > 0f)
+            {
+                _dodgeRollPose = DodgeRollPose.None;
+            }
+
             float windup01 = _weaponController != null ? _weaponController.Windup01 : 0f;
             float throw01 = cfg.slosherThrowDuration > 0.0001f
                 ? Mathf.Clamp01(_slosherThrowTimer / cfg.slosherThrowDuration)
@@ -1462,6 +1536,10 @@ namespace P1.Player
             _chargerReleaseStrength = 1f;
             _slosherThrowTimer = 0f;
             _blasterKickTimer = 0f;
+            _dodgeRollActive = false;
+            _dodgeRollElapsed = 0f;
+            _dodgeRollPose = DodgeRollPose.None;
+            _dodgeRootOffset = Vector3.zero;
         }
 
         /// <summary>把 CharacterAnimConfigSO 的 P35 字段打包成纯函数参数（字段缺失时用默认值兜底）。</summary>
@@ -1587,6 +1665,7 @@ namespace P1.Player
             float dt = VisualMotionMath.SanitizeFrameDt(Time.deltaTime);
             if (dt <= 0f) return;
 
+            EnsureWeaponMaps();   // P40 武器表空/失效时原地重建（零开销：健康时只是一次 Count 比较）
             SampleMotion(dt);
             UpdateFormMorph(dt);
             UpdateRollerPose(dt);   // P27 滚筒时间线先算帧值，供下方武器/身体写回段合成
@@ -2147,6 +2226,7 @@ namespace P1.Player
             //     四段权重与时间窗全部来自 SlamPoseSolver（对齐 INKWAVE _poseLeap / _poseSlam）。
             SlamPerformance slam = SampleSlamPerformance(dt, cfg, out float slamBlend);
             float slamExtraPitch = 0f;
+            float dodgeTuckPitch = 0f;
             if (slamBlend > 0.001f)
             {
                 // 步态/待机层让位：演出一旦接管，腿不再按地面速度摆动
@@ -2209,6 +2289,37 @@ namespace P1.Player
                 _slamWeaponPitchDeg = 0f;
             }
 
+            // --- 7.6 双枪翻滚本体（P40）：蜷身团抱 —— 360° 转体与跳弧由 ApplyDodgeTumble 应用。
+            //     转角/转轴/蜷身权重/抬升来自 DodgeRollPoseSolver（对齐 INKWAVE _poseDodge），
+            //     进度由 UpdateWeaponWieldPose 按 IsRollingDodge 上升沿自计时。
+            float dodgeTuck = Mathf.Clamp01(_dodgeRollPose.Tuck01);
+            if (dodgeTuck > 0.001f)
+            {
+                // 步态/待机层让位：团身时腿不再按地面速度摆动（与 slam 的 keep 抑制同构）
+                float keep = 1f - dodgeTuck;
+                gaitWeight *= keep;
+                leftThigh *= keep;
+                rightThigh *= keep;
+                leftKnee *= keep;
+                rightKnee *= keep;
+                leftFoot *= keep;
+                rightFoot *= keep;
+                armSwing *= keep;
+                rock *= keep;
+                bob *= keep;
+
+                // 团身：收腿屈膝绷脚尖 + 脊柱/胸前卷（前滚翻的「抱团」，落地前由展开段还给步态）
+                tuckThigh -= dodgeTuck * 26f;
+                tuckKnee += dodgeTuck * cfg.dualiesDodgeTuckKneeDeg;
+                tuckFoot += dodgeTuck * 10f;
+                dodgeTuckPitch = dodgeTuck * cfg.dualiesDodgeTuckSpineDeg;
+
+                // 蜷身纵向压缩（solver 给 SQY 乘子）+ 轻微横向外扩保体积（与果冻弹簧叠加，写回段钳制）
+                squashY *= _dodgeRollPose.SquashMul;
+                squashXZ *= 1f + (1f - _dodgeRollPose.SquashMul) * 0.5f;
+            }
+            ApplyDodgeTumble();
+
             // --- 8. 骨骼链写回（P33 真骨骼版）---
             // 8.1 全身挤压（果冻/滞空/滚筒/待机）只作用 BodySquash；武器挂胸腔骨之下会跟着被缩放，
             //     在武器根逐帧做等量反缩放抵消 —— 枪永远不压扁（对齐 INKWAVE：skid 形变不进武器骨骼）。
@@ -2244,7 +2355,8 @@ namespace P1.Player
                 + _rollerBodyPitchDeg     // 滚筒蓄力后仰/砸地前压/拖地前倾
                 + _wieldBodyPitchDeg      // P35 蓄力后仰/泼桶甩出/爆破后坐/架枪前压
                 + _flinchPitchSpring.Value // P36 受击后仰顿挫
-                + slamExtraPitch;         // P38 大招起跳：蹬伸背弓/团身/落地深压
+                + slamExtraPitch          // P38 大招起跳：蹬伸背弓/团身/落地深压
+                + dodgeTuckPitch;         // P40 双枪翻滚：蜷身脊柱/胸前卷
             float dynRoll = _currentRoll + _leanRollSpring.Value + _wieldBodyRollDeg
                 + _flinchRollSpring.Value; // P36 受击侧让顿挫
             float rollMix = dynRoll + rock * 0.6f;
@@ -2486,6 +2598,53 @@ namespace P1.Player
             _slamImpactElapsed = -1f;
             if (kidRoot != null)
                 kidRoot.transform.localRotation = _defaultKidRootRot;
+        }
+
+        /// <summary>
+        /// P40 双枪翻滚转体：绕 <c>up × 滚向</c> 轴把 KidRoot 转过 <see cref="DodgeRollPoseSolver"/> 给出的累计角，
+        /// 并做绕髋枢轴（CharacterMetrics.HipBoneY）的 pivot 补偿 + 中段跳弧抬升 ——
+        /// 直接以脚底为轴转 360° 会把身体扫进地里，补偿后等效于「绕髋翻跟头 + 半程托跳」。
+        /// 旋转每帧绝对写（调用点晚于 <see cref="ApplySlamFlip"/>；slam 与翻滚互斥，共存安全）；
+        /// 位移走增量记账，与 <see cref="ApplyVisualGroundOffset"/> 的每帧重写协同（它会把 <c>_dodgeRootOffset</c> 一并写入）。
+        /// </summary>
+        private void ApplyDodgeTumble()
+        {
+            if (kidRoot == null)
+                return;
+
+            Vector3 desiredOffset = Vector3.zero;
+            float radians = _dodgeRollPose.TumbleRadians;
+            if (radians > 0.0001f)
+            {
+                try
+                {
+                    Vector3 axis = new Vector3(_dodgeRollPose.TumbleAxisX, 0f, _dodgeRollPose.TumbleAxisZ);
+                    if (axis.sqrMagnitude < 0.0001f)
+                        axis = Vector3.right;
+                    axis.Normalize();
+
+                    Quaternion tumbleRot = Quaternion.AngleAxis(radians * Mathf.Rad2Deg, axis);
+                    kidRoot.transform.localRotation = _defaultKidRootRot * tumbleRot;
+
+                    // pivot 补偿：期望变换 = 绕髋枢轴 P 旋转（P + R·(q−P)），展开后根位移 = P − R·P
+                    Vector3 pivot = new Vector3(0f, CharacterMetrics.HipBoneY, 0f);
+                    desiredOffset = pivot - tumbleRot * pivot
+                        + Vector3.up * Mathf.Max(0f, _dodgeRollPose.LiftMeters);
+                }
+                catch (System.Exception ex)
+                {
+                    // 装饰性演出失败不致命：归位并告警，不触发 PlayMode 的 log-error 门禁
+                    Debug.LogWarning($"[CharacterVisualController] 双枪翻滚转体失败，已跳过本帧: {ex.Message}");
+                    _dodgeRollPose = DodgeRollPose.None;
+                }
+            }
+
+            Vector3 delta = desiredOffset - _dodgeRootOffset;
+            if (delta.sqrMagnitude > 1e-10f)
+            {
+                kidRoot.transform.localPosition += delta;
+                _dodgeRootOffset = desiredOffset;
+            }
         }
 
         /// <summary>
@@ -3245,7 +3404,11 @@ namespace P1.Player
         /// </summary>
         private void ApplyRollerGroundContact(float dt)
         {
+            // P40 双保险：序列化引用兜底 —— 即便武器表被清空（域重载/重装配竞态），
+            // 贴地闭环也不得整段失效（否则滚筒按住推地仍悬空，且无任何报错可查）。
             if (!_weaponMap.TryGetValue(WeaponKind.Roller, out GameObject rollerModel) || rollerModel == null)
+                rollerModel = weaponRoller;
+            if (rollerModel == null)
             {
                 _rollerContactWeight = 0f;
                 HideRollerContactShadow();
@@ -3319,13 +3482,18 @@ namespace P1.Player
             model.localRotation = Quaternion.Slerp(originalRot, solvedRot, _rollerContactWeight);
 
             // P35 最终高度保险：俯仰反解在极端视角/坡度下仍可能残留 1~2cm，这里直接按世界高度差
-            // 平移整个滚筒模型（握把/双手随 IK 跟下去），确保"按住推地 = 滚轴底缘贴地"。
+            // 平移整个滚筒模型（握把/双手随 IK 跟下去），确保"按住推地 = 滚轴压进墨面"。
             // 只在贴地权重过半后生效；单帧限幅 ±5cm，避免把滚筒拽下悬崖或抬上箱顶。
+            // P40 修正：目标高度必须含压入量（gap + penetration → 0，即 gap → -penetration）。
+            // 旧实现把 gap 钉到 0，等于每帧把俯仰解算刚压进去的 rollerGroundPenetration 又抬了回来
+            // ——实测 final gap 恒为 0.000，压入量从未生效，这正是"看着悬空"的直接原因之一。
             if (_rollerContactWeight > 0.5f)
             {
+                float penetration = Mathf.Max(0f, cfg.rollerGroundPenetration);
                 float gap = rollerDrumTransform.position.y
                             - RollerWieldSolver.DrumRadiusMeters
-                            - groundY;
+                            - groundY
+                            + penetration;
                 if (Mathf.Abs(gap) > 0.001f)
                 {
                     float correction = Mathf.Clamp(gap, -0.05f, 0.05f) * _rollerContactWeight;

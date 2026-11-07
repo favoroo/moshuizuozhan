@@ -35,6 +35,27 @@ namespace P1.Weapons
 
         public override float Charge01 => _charge;
 
+        /// <summary>
+        /// 蓄力移速（对齐 INKWAVE weapons.js：lerp(run×0.7, moveSpeedFiring, min(1, charge×3))）：
+        /// 起手接近跑速、蓄到 1/3 后降到满蓄移速 1.8 —— 狙击的开枪代价，蓄满不能白拿机动。
+        /// 松手/冷却中按住扳机回落到配置基础值（firingMoveSpeed）。
+        /// </summary>
+        public override float FiringMoveSpeedOverride
+        {
+            get
+            {
+                float baseSpeed = base.FiringMoveSpeedOverride;
+                if (!_charging || Config == null || baseSpeed <= 0f)
+                    return baseSpeed;
+
+                float start = Config.chargeMoveSpeedStart;
+                if (start <= baseSpeed)
+                    return baseSpeed;
+
+                return Mathf.Lerp(start, baseSpeed, Mathf.Clamp01(_charge * 3f));
+            }
+        }
+
         public bool IsFullyCharged => _charging && _charge >= 0.995f;
 
         public float ChargeTime => Config != null ? Mathf.Max(0.05f, Config.chargeTime) : 1f;

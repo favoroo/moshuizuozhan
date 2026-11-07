@@ -397,7 +397,7 @@ namespace P1.UI
             var springMotion = slotGo.GetComponent<UISpringMotion>();
             springMotion.SetTheme(resolvedTheme);
 
-            // 1. 背景直角方块（几何风：SharpRect，4px 墨边，纯色块，无阴影）
+            // 1. 背景正圆（圆角化：Pill 方形 rect 即正圆，4px 墨边，纯色块，无阴影）
             var bgGo = new GameObject("BackgroundBlob", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             bgGo.transform.SetParent(slotGo.transform, false);
             var bgRect = bgGo.GetComponent<RectTransform>();
@@ -406,8 +406,7 @@ namespace P1.UI
             bgRect.sizeDelta = Vector2.zero;
 
             var bgShape = bgGo.GetComponent<UIInkShapeGraphic>();
-            bgShape.Shape = UIInkShape.SharpRect;
-            bgShape.CornerRadius = ComicStyle.CornerSharp;
+            bgShape.Shape = UIInkShape.Pill;
             bgShape.BorderWidth = ComicStyle.Border;
             bgShape.BorderColor = ComicStyle.Ink;
             bgShape.Halftone = false;
@@ -504,7 +503,7 @@ namespace P1.UI
             specRing.Configure(1.18f, 5f, 8, 140f, resolvedTheme.readyGold);
             specRing.Intensity = 0f;
 
-            // 5b. 大招就绪角标：几何风用右上角 14×14 纯黄方块，替代旋转金色光环（8 个头像同时转太吵）
+            // 5b. 大招就绪角标：右上角 14×14 纯黄圆点（圆角化：Pill 方形 rect 即正圆）
             var pipGo = new GameObject("SpecialReadyPip", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             pipGo.transform.SetParent(slotGo.transform, false);
             var pipRect = pipGo.GetComponent<RectTransform>();
@@ -515,8 +514,7 @@ namespace P1.UI
             pipRect.sizeDelta = new Vector2(14f, 14f);
 
             var pipShape = pipGo.GetComponent<UIInkShapeGraphic>();
-            pipShape.Shape = UIInkShape.SharpRect;
-            pipShape.CornerRadius = ComicStyle.CornerSharp;
+            pipShape.Shape = UIInkShape.Pill;
             pipShape.BorderWidth = 2f;
             pipShape.BorderColor = ComicStyle.Ink;
             pipShape.HardShadow = false;
@@ -524,7 +522,7 @@ namespace P1.UI
             pipShape.raycastTarget = false;
             pipGo.SetActive(false);
 
-            // 6. 倒计时秒数角标（直角黑块）
+            // 6. 倒计时秒数角标（圆角化：胶囊黑块）
             var badgeGo = new GameObject("CountdownBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             badgeGo.transform.SetParent(slotGo.transform, false);
             var badgeRect = badgeGo.GetComponent<RectTransform>();
@@ -535,8 +533,7 @@ namespace P1.UI
             badgeRect.sizeDelta = new Vector2(34f, 30f);
 
             var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
-            badgeShape.Shape = UIInkShape.SharpRect;
-            badgeShape.CornerRadius = ComicStyle.CornerSharp;
+            badgeShape.Shape = UIInkShape.Pill;
             badgeShape.BorderWidth = ComicStyle.BorderThin;
             badgeShape.BorderColor = ComicStyle.Paper;
             badgeShape.color = ComicStyle.Ink;
@@ -558,7 +555,7 @@ namespace P1.UI
             tmp.color = ComicStyle.Yellow;
             badgeGo.SetActive(false);
 
-            // 7. 本地玩家「YOU」黄底黑字角标（直角色块 + 色签档硬影）
+            // 7. 本地玩家「YOU」黄底黑字角标（胶囊 + 色签档硬影）
             var youGo = new GameObject("YouIndicator", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             youGo.transform.SetParent(slotGo.transform, false);
             var youRect = youGo.GetComponent<RectTransform>();
@@ -569,8 +566,7 @@ namespace P1.UI
             youRect.sizeDelta = new Vector2(YouBadgeWidthFallback, YouBadgeHeightFallback);
 
             var youShape = youGo.GetComponent<UIInkShapeGraphic>();
-            youShape.Shape = UIInkShape.SharpRect;
-            youShape.CornerRadius = ComicStyle.CornerSharp;
+            youShape.Shape = UIInkShape.Pill; // 圆角化：YOU 角签改胶囊
             youShape.BorderWidth = ComicStyle.BorderThin;
             youShape.BorderColor = ComicStyle.Ink;
             youShape.color = ComicStyle.Yellow;

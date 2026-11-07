@@ -6,6 +6,56 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+【发布 v0.1.29】含 2026-11-07 `#09`~`#24`；APK `moshuizuozhan-v0.1.29-arm64-v8a.apk`。
+
+## 2026-11-07 #24
+【准星 P40：7 把武器各自轮廓 + 整体克制化】5 把弹丸武器（小枪/双枪/泼桶/爆破/加特林）此前共用一个轮廓，现按身份各配外壳（双枪双小环+架枪菱形锁定框、泼桶拱形+落点斗、爆破内外双环、加特林 8 段蓄力环），共享中心点与散布刻度；主环 60→44 且不再随散布缩放（同一信息只画一遍）、满蓄 PingPong 循环脉冲改 0.35s 一次性闪光（几何风禁止循环脉冲）、移动端整体 ×1.28 与字号同源、滚筒「像进度条的胶囊」改括号+落点弧（宽度随 rollWidth）、命中标记收细并收进主环内（旧版 44px 冲击环+长条糊成菱形靶心）。陷阱：`OutlinedBar` 长轴沿本地 +Y，绕 Z 转 θ 后方向是 (-sinθ,cosθ)，手算角度拼拱形会转成放射线——新增 `CreateSegment(from,to)` 按端点连段（`WeaponReticleUI`）。文件：`Scripts/UI/{WeaponReticleUI,ReticleStateMath}.cs`、`Tests/EditMode/{ReticleStateMathTests,ReticleAndTrajectoryTests}.cs`。
+
+## 2026-11-07 #23
+【全站圆角加大一档】`ComicStyle` 圆角三 token 调大（Ratio 0.18→0.30、上限 20→32、下限 8→12），面板/卡片/按钮观感整体更圆；陷阱：MatchCalloutView 左侧竖条内缩量原按全局上限 `CornerPanel×2+14` 现编，上限提到 32 后会超过 80 高紧凑横幅、把竖条压成负高度——Fixed: 改为 ApplyLayout 里按 `CornerFor(横幅实际宽高)` 推导并随四档横幅尺寸刷新。文件：`Scripts/UI/Core/ComicStyle.cs`、`Scripts/UI/MatchCalloutView.cs`、`Docs/UI-GeometricBold.md`。
+
+## 2026-11-07 #22
+【手雷冷却徽标从屏幕正中挪到底部三卡正上方】原居中落位（准星下 68px）悬在瞄准视野正中；改为复用空墨 toast 的「按画布高度换算、随帧重算」落位（桌面 178 / 移动 156 参考像素，紧贴三卡顶边 +14），空墨 toast 相应上移到 218 避让徽标带（两者同显不叠压）。文件：`Scripts/UI/WeaponReticleUI.cs`。
+
+## 2026-11-07 #21
+【Fixed: 设置页每行底部的 2px 分隔线两端探出圆角】设置行改成圆角卡片后，行内 `Separator` 仍按整行宽拉伸，线端从左右圆角外探出成两条「小尾巴」（用户截图箭头所指的线条溢出）；内缩量改为 `ComicStyle.CornerFor` 的行圆角半径（左右各缩一个半径），线端正好落在圆角直线段端点。文件：`Scripts/UI/Menus/PauseMenuOverlay.cs`。
+
+## 2026-11-07 #20
+【双枪翻滚手感重做（对标 INKWAVE）】旧实现只是「匀速滑行+侧倾」，观感是平移冲刺；现改为快出缓停速度曲线（`burst×dist/dur×(1-u²)`，积分恰为翻滚距离，翻滚期 Motor 绕过 `ComputePlanarVelocity` 整形防加速限幅吃掉爆发）+ KidRoot 绕 `up×滚向` 轴整圈前滚翻（pivot 补偿绕髋轴防穿地 + 中段跳弧）+ 蜷身团抱（步态 keep 抑制/收腿/脊柱前卷/squash 压缩，直接衔接架枪）+ `dodge_roll` 音效（玩家/Bot 共用）。转体/蜷身经 `DodgeRollPoseSolver` 纯函数求解（仿 SlamPoseSolver 房规），角度量级入 `CharacterAnimConfig.asset`，burst 倍率入 `WeaponConfigSO.dualiesRollBurstSpeedMultiplier`。陷阱：slam 每帧无条件重写 `KidRoot.localRotation`，翻滚旋转必须在其后绝对覆盖；KidRoot 位移与 `ApplyVisualGroundOffset` 每帧重写协同走增量记账字段。文件：`Scripts/Player/{InkCharacterMotor,CharacterVisualController,DodgeRollPoseSolver,WeaponWieldSolver}.cs`、`Scripts/Weapons/{WeaponConfigSO,WeaponController}.cs`、`Scripts/Core/{AudioManager,AudioMixConfigSO}.cs`、`Scripts/Editor/ProjectScaffolder.cs`、`tools/bake_sfx.py`、`Tests/EditMode/DodgeRollPoseSolverTests.cs`。
+
+## 2026-11-07 #19
+【开战/结束横幅缩小并缩短】「开战!」720×300/1.35s → 520×210/0.9s，「结束!」760×300/2.4s → 560×220/1.8s，主标题字号 140→104（TMP 自动缩字兜底，场景无需重建，每次 Show 重写 sizeDelta）。文件：Scripts/UI/MatchBannerView.cs。顺带：并行改动给 `WeaponConfigSO` Tooltip 引入 `蜷卷恰` 三字导致 `FontCoverageTests` 判红，按提示重跑 `tools/font_charset.py` + 菜单 `P1/画风/漫画风/0` 修复。
+
+## 2026-11-07 #18
+【Fixed: 拖尾偶发断层——撞击帧吞滴墨】弹丸主循环撞击判定在位置推进之前短路 return，撞击帧内越过的滴墨阈值被整体跳过：加载顿帧让一帧从 ~2.6m 直接跨到撞击点时，滴 2 的补间墨道整段缺失，拖尾在滴 1 圆斑边缘与终点爆斑边缘之间出现 ~0.4m 断层（弹道 PlayMode 偶发翻红，采样图定位）。修复：撞击分支先 `FlushTrailDripsOnImpact` 按同套插值补画本步越过的阈值（`InkProjectilePool.cs`）。顺带把弹道拖尾测试改为显式装零散布小枪——PlayerPrefs 换枪（试玩选了蓄力狙）会把蓄力狙带进测试污染断言。
+
+## 2026-11-07 #17
+【Fixed: 加特林蓄力/扫射移速只有设计值六成——比率乘错基数】策略层把 `splatlingMoveSpeed/6.0` 当归一化交给电机，但电机开火分支的基数是 `firingMoveSpeed` 3.8 而非跑速 6.0，实际蓄力 1.52 / 扫射 2.15 m/s。改为 `MainWeaponStrategy.FiringMoveSpeedOverride`（**绝对移速**，0=旧全局兜底），7 把武器开火移速对齐 INKWAVE 逐武器 moveSpeed（小枪4.6/双枪5.0/爆破4.0/泼桶4.2 前摇×0.7/滚筒鼓速4.4/蓄力狙4.2→1.8/加特林4.5→2.4→3.4）；`WeaponConfigSO` 新增 `firingMoveSpeed`/`chargeMoveSpeedStart`/`splatlingMoveSpeedChargeStart`（菜单 6 重生成，契约测试补断言）。文件：Scripts/Weapons/{MainWeaponStrategy,ChargerWeaponStrategy,SplatlingWeaponStrategy,SlosherWeaponStrategy,WeaponController,WeaponConfigSO}.cs、Scripts/Player/InkCharacterMotor.cs。
+
+## 2026-11-07 #16
+【Fixed: 滚筒推地仍读作悬空——第三处根因在涂地位置而非高度】贴地闭环实测 gap 恒 -0.026（静止/移动一致，无物理抬高），真正的根因是墨带止于脚下（`RollSweep.From→To`）：滚筒在身前 0.6m 处滚过未涂色地面，墨永远出现在滚筒后方，俯视角读作"悬在干净地面上方"、一动"越滚越悬"。对齐 INKWAVE（涂点=玩家前方 0.75m=滚筒正下）：`RollSweep` 新增 `PaintLead`（缺省 0=旧行为，向后兼容）+ `WeaponConfigSO.rollPaintLeadMeters=0.7`，墨带远端前伸到滚筒触地处（实测带缘+1.2m > 鼓前缘+0.73m）；碾压判定与墙面涂墨锚点不变（墙面探针若随前伸会罩空贴墙接触格）。文件：Scripts/Weapons/{WeaponShot,WeaponRollSystem,WeaponConfigSO,RollerWeaponStrategy}.cs、ScriptableObjects/Weapons/Weapon_SwellRoller.asset、Tests/EditMode/WeaponStrategyTests.cs。
+
+## 2026-11-07 #15
+【Fixed: 爆破枪在直击目标前的地面/坡面提前爆裂】根因：弹丸池对爆破弹的几何体检测用 0.26m 球扫（本意是避免蹭到墙前地面），下压弹道上球体下沿会提前「半径 / tan(俯角)」米贴地，爆点停在目标前半米级、直击判定也收不到角色。改为两段球扫：角色用 `blasterHitRadius=0.38` 大球（直击 125 才好接），几何体用 `BlasterWorldHitRadius=0.02` 细射线，两段取更近者；非爆破弹丸走单段 `ImpactFilter.Any`，与原实现逐字一致（改两段时漏掉 `actorsOnly=false` 分支会把地面命中整个过滤掉，PlayMode 立刻判红）。同批：爆破枪耗墨 10.4→9（对齐 INKWAVE）。文件：Scripts/Weapons/{InkProjectilePool,BlasterWeaponStrategy,WeaponConfigSO}.cs、ScriptableObjects/{WeaponConfig,Weapons/Weapon_PopperBlaster}.asset、Tests/PlayMode/InkBallisticsPlayboxTests.cs（新增坡前爆裂回归；`LookingUp` 改为显式装备连发枪，不再依赖上次选中的武器）。
+
+## 2026-11-07 #14
+【Fixed: 滚筒按住推地悬空——两处叠加根因】① `CharacterVisualController` 的 `_weaponMap`/`_armHoldPoses` 是非序列化缓存，运行中域重载（并行改码触发脚本重编译）后清空且 Awake 不再跑，贴地闭环与姿态写入取不到模型整段早退，滚筒冻结在装配姿态悬浮（实测 gap 0.06~0.22m、contact=0、weaponMap=0）→ OnEnable/LateUpdate 按需重建自愈 + 贴地路径回退序列化引用；② 高度保险把目标 gap 钉在 0，等于每帧把俯仰解算压入的 4mm 又抬回去，且 4mm 切线接触俯视下仍读作悬浮 → 压入量 0.004→0.026（≈1/8 鼓径，PlayMode 下陷下限 -0.03 内）并让保险钉在压入后高度。文件：Scripts/Player/{CharacterVisualController,RollerWieldSolver,CharacterAnimConfigSO}.cs、ScriptableObjects/CharacterAnimConfig.asset、Tests/EditMode/CharacterVisualTests.cs。
+
+## 2026-11-07 #13
+【选枪卡片属性数字行下线】卡片上的「伤X 距X 频X 耗X%」玩家不读，整行删除，只留 伤害/涂地/机动 三条对比横条 + 大招行（口径仍是 `WeaponSelectMath.ComputeStatBars`）；卡片底部布局从「大招→横条→数字行」三段改两段自底向上。陷阱：`WeaponSelectMath.Format*` 四个格式化方法被阵亡整备（RespawnLoadoutMath）与 EditMode 测试共用，只删 UI 调用不删方法。文件：Scripts/UI/WeaponSelect/WeaponCardView.cs。
+
+## 2026-11-07 #12
+【结算页 UI 改为开场一次到位】旧顺序是「按钮 0s 就在 → 双读数板 + 1.4s 掷点 → 判定牌/战报卡最后一帧同弹」，读成自上而下倒着长；现判定牌/双板/战报卡在 Result 入场同批 pop-in（0.05s/张），掷点只负责点亮「胜」签与败方转灰。陷阱：判定牌内容（胜利/失败 + 语义色）必须入场前写好，否则输局会先亮 1.4s「胜利」；`UpdatePostRollVisuals` 只保留首帧直进 Result 的兜底激活。文件：Scripts/UI/MatchFlowUI.cs。
+
+## 2026-11-07 #11
+【开局 VS 阵容卡整层下线】开战演出两侧「昵称 + 武器」队伍卡与 VS 徽章对单机局没有信息量（击杀播报/结算已有昵称渠道），整层删除 `MatchIntroLineupOverlay.cs`（运行时自装配、零外部引用，`RuntimeInitializeOnLoadMethod` 随文件消失即不再建层，无场景/预制残留要清）；`MatchBannerView` 的「开战!」横幅保留。陷阱：文件同时带着当日 #09 圆角化批次的未提交改动一并删除，要找回走 git；`BotLoadoutService` 昵称池与结算/播报共用不受影响，仅两处注释去掉「VS 阵容卡」字样。文件：Scripts/UI/Menus/MatchIntroLineupOverlay.cs（已删除）、Scripts/AI/BotLoadoutService.cs（注释）。
+
+## 2026-11-07 #10
+【Fixed: 桌面端阵亡整备条无法点选——阵亡期间鼠标仍被锁死】根因：光标门禁 `ApplyCursorState(GameplayInputEnabled && InputAllowed)` 只看对局阶段，Playing 中阵亡时门禁恒真，光标整局 Locked+隐藏，整备条 7 槽 Button 挂了 GraphicRaycaster 也点不到（移动端无光标概念不受影响）；改为 `CursorShouldLock` 追加 `Health.IsAlive` 条件并同步 `OnApplicationFocus`/`Update` 两处调用点，阵亡即释放光标、复活下一帧自动重锁。陷阱：暂停菜单靠 `GameplayInputEnabled=false` 释放光标，而死亡没有任何开关翻转，属同类门禁的漏网分支；改后 `ApplyCursorState` 的旧 `gameplayActive` 形参语义不变（输入抑制逻辑仍用原门禁，只动光标）。文件：Scripts/Player/PlayerController.cs。
+
+## 2026-11-07 #09
+【UI 全站圆角化：直角 → 圆角矩形 / 胶囊 / 正圆】形状基元 `UIInkShapeGraphic` 把 `RoundedRect` 半径 0 语义改为「构建期按短边自适应（`ComicStyle.CornerFor` = clamp(短边×0.18, 8, 20)）」，`ApplyComic` 不再把 RoundedRect 降级成 SharpRect，硬影复用同一 effectiveRadius 自动跟随圆角；25 个 UI 文件约 120 处 `SharpRect+CornerSharp` 按语义换成 RoundedRect（面板/按钮/卡片）或 Pill（小徽章改正圆、条签/加载块/进度条改胶囊），顶部身份色带全部内缩进圆角直线段改胶囊短划（直角色带会戳出圆角轮廓）；条形轨道/填充换 `UIPillImage`（Image 子类，按纵横比自动取 `UIFlatSprite.Pill` 胶囊精灵，fillAmount 逻辑不变）。陷阱：胶囊条的本质约束是「圆头半径恒等于高度一半」，静态拉伸的方图做不到——必须按纵横比生成精灵或用 mesh；`CornerRadius=0` 现在意味着自适应而非直角，旧调用方显式写 0 反而安全。文件：`Scripts/UI/Core/{ComicStyle,UIInkShapeGraphic,UIFlatSprite,UIPillImage,UIThemeSO}.cs`、`Scripts/Editor/ComicStyleInstaller.cs`、`Scripts/UI/*`（HUD/菜单/选枪/移动端 25 文件）、`Docs/UI-GeometricBold.md`（圆角语言规范）。
+
 ## 2026-11-07 #08
 【手雷冷却徽标去掉「手雷就绪」弹出提示】冷却一结束徽标立即收起，只保留冷却中的倒计时 + 充能条（旧的整条翻黄「手雷就绪 · E」提示 1.8s 被玩家视为冗余打扰）；`WeaponReticleUI.UpdateSubAim` 删掉 `_bombReadyFlashTimer`/`_bombWasCooling` 与 `SetBombBadgeReadyState` 两态切换，`BuildSubAimBadge` 不再建 `ReadyText` 节点。陷阱：字段 `_subAimBg`/`_subAimIcon`/`_subAimLabelText` 原先只在就绪态被读取，删掉调用方后留着会触发 CS0414「assigned but never used」，改回构建期局部变量；EditMode `SubAimBadge_TextFitsItsBoxes` 原本断言 `ReadyText` 存在，同步改为断言其不存在（否则删节点立刻判红）。文件：Scripts/UI/WeaponReticleUI.cs、Tests/EditMode/ReticleAndTrajectoryTests.cs。
 

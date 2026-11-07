@@ -1228,7 +1228,16 @@ namespace P1.UI
             _toastPanel.sizeDelta = new Vector2(600f, 60f);
 
             var bgImg = panelGo.GetComponent<Image>();
-            bgImg.color = new Color(0.08f, 0.10f, 0.15f, 0.95f);
+            // 圆角化：节点已有 Image（不能再 AddComponent），圆角底走 CreateChildBackground 子图形
+            bgImg.color = Color.clear;
+            bgImg.raycastTarget = false;
+            var toastBg = UIInkShapeGraphic.CreateChildBackground(_toastPanel, "ToastBg");
+            if (toastBg != null)
+            {
+                toastBg.Shape = UIInkShape.RoundedRect; // 自适应圆角
+                toastBg.BorderWidth = 0f;
+                toastBg.color = new Color(0.08f, 0.10f, 0.15f, 0.95f);
+            }
 
             _toastGroup = panelGo.GetComponent<CanvasGroup>();
             _toastGroup.alpha = 0f;

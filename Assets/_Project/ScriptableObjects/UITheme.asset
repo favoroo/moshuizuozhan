@@ -101,7 +101,7 @@ MonoBehaviour:
   displayCjkFont: {fileID: 11400000, guid: fc229e5d33bba4abf91eaab774ce81ac, type: 2}
   bodyCjkFont: {fileID: 11400000, guid: 098f07be3104240bd8fff34b66914b93, type: 2}
   teamCard:
-    shape: 3
+    shape: 1
     fillColor: {r: 1, g: 1, b: 1, a: 1}
     fillUsesTeamColor: 1
     borderColor: {r: 0.078431375, g: 0.078431375, b: 0.078431375, a: 1}
@@ -122,7 +122,7 @@ MonoBehaviour:
     halftone: 0
     speechTail: 0
   darkCard:
-    shape: 3
+    shape: 1
     fillColor: {r: 0.078431375, g: 0.078431375, b: 0.078431375, a: 1}
     fillUsesTeamColor: 0
     borderColor: {r: 0.078431375, g: 0.078431375, b: 0.078431375, a: 1}
@@ -143,7 +143,7 @@ MonoBehaviour:
     halftone: 0
     speechTail: 0
   lightCard:
-    shape: 3
+    shape: 1
     fillColor: {r: 1, g: 1, b: 1, a: 1}
     fillUsesTeamColor: 0
     borderColor: {r: 0.078431375, g: 0.078431375, b: 0.078431375, a: 1}

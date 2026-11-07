@@ -483,6 +483,10 @@ namespace P1.UI
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
             var img = go.GetComponent<Image>();
+            // 圆角化：标记改胶囊/圆点（按实际长短比取形）
+            img.sprite = size.x >= 1f && size.y >= 1f
+                ? UIFlatSprite.Pill(size.x / size.y)
+                : UIFlatSprite.Circle;
             img.color = color;
             img.raycastTarget = false;
         }
@@ -509,8 +513,7 @@ namespace P1.UI
             visualRt.offsetMax = Vector2.zero;
 
             var shape = visualGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：触屏辅助按钮自适应圆角
             shape.BorderWidth = ComicStyle.BorderThin;
             shape.BorderColor = ComicStyle.FromHex(0x4A4A4A);
             shape.color = ComicStyle.FromHex(0x222222);
@@ -550,7 +553,7 @@ namespace P1.UI
             _selectionHighlight.sizeDelta = new Vector2(160f, 160f);
 
             var shape = selGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：选中框（仍只描边、填充全透明，测试契约不变）
             shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = ComicStyle.BorderThin; // 纯黄 3px 几何高亮描边
             shape.BorderColor = ComicStyle.Yellow;
@@ -581,8 +584,7 @@ namespace P1.UI
             _readoutBadge.sizeDelta = new Vector2(240f, 36f);
 
             var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
-            badgeShape.Shape = UIInkShape.SharpRect;
-            badgeShape.CornerRadius = ComicStyle.CornerSharp;
+            badgeShape.Shape = UIInkShape.Pill; // 圆角化：实时读数角标改胶囊
             badgeShape.BorderWidth = ComicStyle.BorderThin;
             badgeShape.BorderColor = ComicStyle.Yellow;
             badgeShape.color = ComicStyle.Ink;
@@ -616,6 +618,7 @@ namespace P1.UI
             rt.anchoredPosition = Vector2.zero;
             rt.sizeDelta = new Vector2(12f, 12f);
             var img = go.GetComponent<Image>();
+            img.sprite = UIFlatSprite.Circle; // 圆角化：四角标记改圆点
             img.color = ComicStyle.Yellow;
             img.raycastTarget = false;
         }
@@ -1253,8 +1256,7 @@ namespace P1.UI
             rt.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：布局编辑面板自适应圆角
             shape.BorderWidth = borderWidth;
             shape.BorderColor = (fillColor == ComicStyle.Ink) ? ComicStyle.Paper : ComicStyle.Ink;
             shape.color = fillColor;
@@ -1317,8 +1319,7 @@ namespace P1.UI
             visualRt.offsetMax = Vector2.zero;
 
             var shape = visualGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：布局编辑按钮自适应圆角
             shape.BorderWidth = (fillColor == ComicStyle.Yellow || fillColor == ComicStyle.Red) ? 0f : ComicStyle.BorderThin;
             shape.BorderColor = ComicStyle.FromHex(0x444444);
             shape.color = fillColor;
@@ -1454,13 +1455,13 @@ namespace P1.UI
 
             slider._rectTransform = go.GetComponent<RectTransform>();
 
-            // 纯色方块滑轨底色（直角黑底）
-            var bgImg = go.AddComponent<Image>();
+            // 滑轨底色（圆角化：胶囊黑底）
+            var bgImg = go.AddComponent<UIPillImage>();
             bgImg.color = ComicStyle.FromHex(0x181818);
             bgImg.raycastTarget = true;
 
-            // 亮黄纯色块填充条
-            var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(Image));
+            // 亮黄胶囊填充条（宽度随值变化，UIPillImage 自动跟随轮廓）
+            var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(UIPillImage));
             fillGo.transform.SetParent(go.transform, false);
             var fillRt = fillGo.GetComponent<RectTransform>();
             fillRt.anchorMin = new Vector2(0f, 0f);
@@ -1472,8 +1473,8 @@ namespace P1.UI
             slider._fillImage.color = ComicStyle.Yellow;
             slider._fillImage.raycastTarget = false;
 
-            // 方形把手（默认 16x28 纯白实心方块；设置类界面传 24x64）
-            var handleGo = new GameObject("Handle", typeof(RectTransform), typeof(Image));
+            // 胶囊把手（默认 16x28；设置类界面传 24x64，圆角化后两端全圆）
+            var handleGo = new GameObject("Handle", typeof(RectTransform), typeof(UIPillImage));
             handleGo.transform.SetParent(go.transform, false);
             var handleRt = handleGo.GetComponent<RectTransform>();
             handleRt.sizeDelta = handleSize;

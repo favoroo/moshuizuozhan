@@ -259,13 +259,14 @@ namespace P1.Tests
                 Assert.AreEqual(UIThemeSO.Resolve(null).GetHardShadowOffset(UIHardShadowLevel.Panel),
                     bg.ShadowOffset, "硬影必须是面板档 (4,-5)");
 
-                // 顶部 5px 身份色带：内缩 3px 墨框、不叠硬影
+                // 顶部 5px 身份色带：内缩「圆角半径 + 3px 墨框」（圆角化后直角色带会戳出卡外）、不叠硬影
                 var rail = card.Find("Rail").GetComponent<UIInkShapeGraphic>();
                 Assert.IsNotNull(rail, card.name + " 应有身份色带");
                 var railRect = (RectTransform)rail.transform;
                 Assert.AreEqual(5f, railRect.rect.height, 0.01f, "身份色带高 5px");
-                Assert.AreEqual(card.rect.width - ComicStyle.BorderThin * 2f, railRect.rect.width, 0.01f,
-                    "色带应内缩边框宽度");
+                float cardRadius = ComicStyle.CornerFor(card.rect.width, card.rect.height);
+                Assert.AreEqual(card.rect.width - (cardRadius + ComicStyle.BorderThin) * 2f, railRect.rect.width, 0.01f,
+                    "色带应内缩「圆角半径 + 边框」宽度");
                 Assert.IsFalse(rail.HasHardShadow, "色带不叠硬影");
             }
 

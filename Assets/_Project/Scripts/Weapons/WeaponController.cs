@@ -234,8 +234,15 @@ namespace P1.Weapons
             IsCharging || IsStreaming || IsRolling || IsFlicking || IsWindingUp ||
             IsRollingDodge || IsTurretLocked;
 
-        /// <summary>当前武器对角色移动速度的影响倍率（架枪 0，加特林蓄力 0.4 / 扫射 0.57，常规 1.0）。</summary>
+        /// <summary>当前武器对角色移动速度的影响倍率（架枪 0，泼桶前摇 0.7，滚筒推地渐入，常规 1.0；
+        /// 加特林/蓄力狙的动态移速走 <see cref="FiringMoveSpeedOverride"/> 绝对值）。</summary>
         public float MoveSpeedMultiplier => _strategy != null ? _strategy.MoveSpeedMultiplier : 1f;
+
+        /// <summary>
+        /// 开火期间（扳机按住）的绝对移速覆盖（米/秒，INKWAVE weapons.js 逐武器 moveSpeed）；
+        /// 0 = 未配置，电机沿用全局开火移速 × <see cref="MoveSpeedMultiplier"/>。
+        /// </summary>
+        public float FiringMoveSpeedOverride => _strategy != null ? _strategy.FiringMoveSpeedOverride : 0f;
 
         /// <summary>双枪当前剩余可用翻滚次数（最多 2 次）。</summary>
         public int RollsRemaining => _strategy != null ? _strategy.RollsRemaining : 0;
@@ -261,7 +268,13 @@ namespace P1.Weapons
             if (_strategy == null)
                 RebuildStrategy();
 
-            return _strategy.TryPerformDodgeRoll(moveDirection, this);
+            // 成功才出声：玩家与 Bot 共用（Bot 翻滚给战场氛围，音量由 Mix.dodgeRollVolume 压低于本地开火）
+            bool rolled = _strategy.TryPerformDodgeRoll(moveDirection, this);
+            if (rolled && AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayDodgeRoll();
+            }
+            return rolled;
         }
 
         /// <summary>当前 loadout 中装备的下标（无 loadout 时为 0）。</summary>

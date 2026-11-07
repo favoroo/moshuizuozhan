@@ -12,7 +12,7 @@ namespace P1.AI
     /// 每次进入 Countdown（开局 / 重开一局）统一执行一次「抽卡」——
     /// 1. 武器：同队 4 人类型互不重复，队友池排除玩家当前武器类型，敌方从 7 种里抽 4 种；
     /// 2. 个性：每个 Bot 一套风格倍率（<see cref="BotPersonality"/>），叠在难度之上；
-    /// 3. 昵称：每局从 <see cref="BotLoadoutMath.BotNames"/> 洗牌发放，击杀播报与 VS 阵容卡共用。
+    /// 3. 昵称：每局从 <see cref="BotLoadoutMath.BotNames"/> 洗牌发放，击杀播报与结算共用。
     ///
     /// 复活不换枪（与 INKWAVE 一致）：只在 Countdown 抽一次；下一局重抽。
     /// 装配模式仿 <see cref="P1.UI.WeaponSelect.WeaponSelectBootstrap"/>：
@@ -35,7 +35,7 @@ namespace P1.AI
 
         private const string PrefsKeySelectedWeaponIndex = "P1.Loadout.SelectedWeaponIndex";
 
-        /// <summary>本局阵容快照条目：VS 阵容卡与结算/播报按它展示「昵称 + 武器」。</summary>
+        /// <summary>本局阵容快照条目：结算 / 击杀播报按它展示「昵称 + 武器」。</summary>
         public struct RosterEntry
         {
             public Team Team;

@@ -13,7 +13,8 @@ namespace P1.UI
     /// 规范红线（改 UI 前必读，详见 Docs/UI-GeometricBold.md）：
     /// - 纯色大色块 + 黑白为主 + 1~2 种强调色；禁止渐变、柔光、模糊阴影；
     /// - 唯一允许的立体感来源是「零模糊硬偏移阴影」（ShadowButton/Panel/Hero/Dialog… 档位）；
-    /// - 面板/按钮一律直角（CornerSharp=0），圆角只给正圆/胶囊（CornerBubble）；
+    /// - 圆角语言（2026-11 #09）：面板/卡片/按钮 = 圆角矩形（CornerFor 按短边自适应半径），
+    ///   小方块徽章 = 正圆（Pill）、条签/进度条 = 胶囊（Pill）；CornerSharp=0 真直角仅为兼容保留；
     /// - 交互一律硬切（按下 0ms、松开 0.1s Cubic-Out），禁止弹簧/bounce/摆动；
     /// - 移动端字号 ≥ 桌面，全部走 UITypography.Font()。
     ///
@@ -41,11 +42,29 @@ namespace P1.UI
         public const float Border = 4f;
         public const float BorderHeavy = 6f;
 
-        /// <summary>直角：几何风的面板与按钮一律用它。</summary>
+        /// <summary>兼容常量（=0 真直角）：圆角化后 UI 代码不再使用，仅为旧调用方编译保留。</summary>
         public const float CornerSharp = 0f;
 
-        /// <summary>全圆角：正圆/胶囊（头像、大招球、Tag）。</summary>
+        /// <summary>全圆角：正圆/胶囊（头像、Tag、进度条）。</summary>
         public const float CornerBubble = 999f;
+
+        /// <summary>圆角半径上限：大面板/卡片/弹窗（短边 ≥107px 时封顶到此）。</summary>
+        public const float CornerPanel = 32f;
+
+        /// <summary>圆角半径下限：小徽章/键帽（短边 ≤40px 时兜底到此）。</summary>
+        public const float CornerChip = 12f;
+
+        /// <summary>圆角随短边的占比：半径 = 短边 × 该值，大小盒子观感统一且绝不吃字。</summary>
+        public const float CornerRatio = 0.30f;
+
+        /// <summary>
+        /// 按短边自适应的圆角半径（RoundedRect 半径为 0 时构建期自动取用，rect 变化自动跟随）：
+        /// 短边 40 → 12、88 → 26.4、≥107 → 32 封顶；正圆/胶囊走 Pill（CornerBubble），不经此函数。
+        /// </summary>
+        public static float CornerFor(float width, float height)
+        {
+            return Mathf.Clamp(Mathf.Min(width, height) * CornerRatio, CornerChip, CornerPanel);
+        }
 
         /// <summary>
         /// 兼容常量（旧调用方仍引用）：真正画阴影请用下面的 Shadow* 档位。

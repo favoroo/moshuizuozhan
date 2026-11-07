@@ -142,15 +142,14 @@ namespace P1.UI
 
             UIThemeSO resolved = UIThemeSO.Resolve(theme);
 
-            // 1. 直角黑边外框（SharpRect + 4px 墨边 + 纯纸白底 + 面板档硬影）
+            // 1. 圆角黑边外框（RoundedRect 自适应半径 + 4px 墨边 + 纯纸白底 + 面板档硬影）
             if (frameGraphic == null)
             {
                 var bgGo = new GameObject("FrameBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
                 bgGo.transform.SetParent(transform, false);
                 Stretch((RectTransform)bgGo.transform);
                 frameGraphic = bgGo.GetComponent<UIInkShapeGraphic>();
-                frameGraphic.Shape = UIInkShape.SharpRect;
-                frameGraphic.CornerRadius = ComicStyle.CornerSharp;
+                frameGraphic.Shape = UIInkShape.RoundedRect; // 圆角化
                 frameGraphic.BorderWidth = ComicStyle.Border;
                 frameGraphic.BorderColor = ComicStyle.Ink;
                 frameGraphic.Halftone = false;
@@ -246,8 +245,7 @@ namespace P1.UI
                 mapBadge.sizeDelta = new Vector2(72f, 32f);
 
                 var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
-                badgeShape.Shape = UIInkShape.SharpRect;
-                badgeShape.CornerRadius = ComicStyle.CornerSharp;
+                badgeShape.Shape = UIInkShape.Pill; // 圆角化：MAP 角签改胶囊
                 badgeShape.BorderWidth = ComicStyle.BorderThin;
                 badgeShape.BorderColor = ComicStyle.Ink;
                 badgeShape.color = ComicStyle.Yellow;

@@ -36,7 +36,8 @@ namespace P1.Weapons
         /// <summary>
         /// 滚筒移速手感（P35，参考 INKWAVE weapons.js L57-68）：
         /// 挥击前摇 1 → 0.45；推地 0.5 → 1（0.45s）；挥击后收势 0.6 → 1（0.18s）。
-        /// 推地时角色按 firingMoveSpeed 计速，因此满速仍是 3.8m/s，不改变平衡上限。
+        /// 推地时角色按配置 firingMoveSpeed 计速，满速 = 鼓速 4.4 m/s（INKWAVE rollSpeed），
+        /// 起步/收势仍是该基数的系数曲线。
         /// </summary>
         public override float MoveSpeedMultiplier
         {
@@ -223,7 +224,10 @@ namespace P1.Weapons
                 ForwardReach = Config != null ? Mathf.Max(0.1f, Config.rollForwardReach) : 1.35f,
                 Damage = Config != null ? Config.rollDamage : 140f,
                 HitInterval = Config != null ? Mathf.Max(0.05f, Config.rollDamageInterval) : 0.5f,
-                PaintRadius = Config != null ? Mathf.Max(0.1f, Config.rollPaintRadius) : 0.34f
+                PaintRadius = Config != null ? Mathf.Max(0.1f, Config.rollPaintRadius) : 0.34f,
+                // P41 涂带前伸到滚筒触地处（默认 0.7m ≈ 鼓轴前 0.59m + 半个鼓径）：
+                // 滚筒始终压在刚涂的湿墨上，而不是滚过未涂色地面。
+                PaintLead = Config != null ? Mathf.Max(0f, Config.rollPaintLeadMeters) : 0.7f
             });
 
             _lastRollPosition = current;

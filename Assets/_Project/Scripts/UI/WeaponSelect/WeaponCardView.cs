@@ -64,7 +64,6 @@ namespace P1.UI.WeaponSelect
         private TextMeshProUGUI _titleText;
         private TextMeshProUGUI _enTitleText;
         private TextMeshProUGUI _roleTagText;
-        private TextMeshProUGUI _statsText;
         private TextMeshProUGUI _specialText;
 
         /// <summary>三条对比横条的固定标签（2 字，窄卡放得下；全称口径见 WeaponSelectMath.WeaponStatBars）。</summary>
@@ -232,28 +231,26 @@ namespace P1.UI.WeaponSelect
 
             float titleH = _mobile ? 50f : 34f;
             float enH = _mobile ? 30f : 22f;
-            float statsH = _mobile ? 34f : 26f;
             float bottomPad = _mobile ? 18f : 10f;
-            // 自底向上三段：大招信息行 → 三条对比横条 → 属性数字行；标题/英文名仍从顶部排。
+            // 自底向上两段：大招信息行 → 三条对比横条；标题/英文名仍从顶部排。
+            // 属性数字行（伤/距/频/耗）已移除：玩家不读数字，分项横条才是换枪决策的有效信息。
             float specialH = _mobile ? 36f : 26f;
             float barH = _mobile ? 18f : 13f;
             float barGap = _mobile ? 5f : 4f;
             float barsH = 3 * barH + 2 * barGap;
             float specialBottom = bottomPad;
             float barsBottom = specialBottom + specialH + (_mobile ? 6f : 4f);
-            float statsBottom = barsBottom + barsH + (_mobile ? 6f : 4f);
 
             _rectTransform = GetComponent<RectTransform>();
             _rectTransform.sizeDelta = new Vector2(_mobile ? 759f : 580f, m.CardHeight);
 
-            // 1. 直角卡片背景：纸白底 + 3px 墨框 + 面板硬影 (4,-5)（t-1 卡片身份层级）
+            // 1. 圆角卡片背景：纸白底 + 3px 墨框 + 面板硬影 (4,-5)（t-1 卡片身份层级；圆角化自适应半径）
             _bgGraphic = gameObject.GetComponent<UIInkShapeGraphic>();
             if (_bgGraphic == null)
             {
                 _bgGraphic = gameObject.AddComponent<UIInkShapeGraphic>();
             }
-            _bgGraphic.Shape = UIInkShape.SharpRect;
-            _bgGraphic.CornerRadius = ComicStyle.CornerSharp;
+            _bgGraphic.Shape = UIInkShape.RoundedRect;
             _bgGraphic.BorderWidth = CardBorderWidth;
             _bgGraphic.BorderColor = ComicStyle.Ink;
             _bgGraphic.color = ComicStyle.Paper;
@@ -290,7 +287,9 @@ namespace P1.UI.WeaponSelect
             _button.onClick.RemoveAllListeners();
             _button.onClick.AddListener(() => _onSelect?.Invoke(_index));
 
-            // 3.5 顶部武器身份色带（5px 常态 / 8px 选中，画在 3px 墨框内侧，绝不盖住边框）
+            // 3.5 顶部武器身份色带（5px 常态 / 8px 选中，画在 3px 墨框内侧，绝不盖住边框）。
+            // 圆角化：色带内缩到圆角直线段内并改胶囊短划。
+            float cardRadius = ComicStyle.CornerFor(_rectTransform.sizeDelta.x, _rectTransform.sizeDelta.y);
             var bandGo = new GameObject("AccentBand", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             bandGo.transform.SetParent(transform, false);
             bandGo.transform.SetAsFirstSibling();
@@ -298,12 +297,11 @@ namespace P1.UI.WeaponSelect
             _accentBandRect.anchorMin = new Vector2(0f, 1f);
             _accentBandRect.anchorMax = new Vector2(1f, 1f);
             _accentBandRect.pivot = new Vector2(0.5f, 1f);
-            _accentBandRect.sizeDelta = new Vector2(-CardBorderWidth * 2f, AccentBandHeight);
+            _accentBandRect.sizeDelta = new Vector2(-(cardRadius + CardBorderWidth) * 2f, AccentBandHeight);
             _accentBandRect.anchoredPosition = new Vector2(0f, -CardBorderWidth);
 
             _accentBand = bandGo.GetComponent<UIInkShapeGraphic>();
-            _accentBand.Shape = UIInkShape.SharpRect;
-            _accentBand.CornerRadius = ComicStyle.CornerSharp;
+            _accentBand.Shape = UIInkShape.Pill;
             _accentBand.BorderWidth = 0f;
             _accentBand.color = GetWeaponAccentColor(_kind);
             _accentBand.HardShadow = false;
@@ -371,8 +369,7 @@ namespace P1.UI.WeaponSelect
                 badgeRect.sizeDelta = m.IndexSize;
 
                 _hotkeyBadgeBg = badgeGo.GetComponent<UIInkShapeGraphic>();
-                _hotkeyBadgeBg.Shape = UIInkShape.SharpRect;
-                _hotkeyBadgeBg.CornerRadius = ComicStyle.CornerSharp;
+                _hotkeyBadgeBg.Shape = UIInkShape.Pill; // 圆角化：编号徽章改胶囊
                 _hotkeyBadgeBg.BorderWidth = 0f;
                 _hotkeyBadgeBg.color = ComicStyle.Ink;
                 _hotkeyBadgeBg.HardShadow = false;
@@ -466,25 +463,7 @@ namespace P1.UI.WeaponSelect
             _enTitleText.overflowMode = TextOverflowModes.Overflow;
             _enTitleText.raycastTarget = false;
 
-            // 6.3 属性文字（伤/距/频/耗）
-            var statsGo = new GameObject("StatsText", typeof(RectTransform), typeof(TextMeshProUGUI));
-            statsGo.transform.SetParent(infoGo.transform, false);
-            var sr = statsGo.GetComponent<RectTransform>();
-            sr.anchorMin = new Vector2(0f, 0f);
-            sr.anchorMax = new Vector2(1f, 0f);
-            sr.pivot = new Vector2(0f, 0f);
-            sr.anchoredPosition = new Vector2(0f, statsBottom);
-            sr.sizeDelta = new Vector2(0f, statsH);
-            _statsText = statsGo.GetComponent<TextMeshProUGUI>();
-            _statsText.fontSize = UITypography.FontSnapped(m.StatsFont);
-            _statsText.fontStyle = FontStyles.Normal;
-            _statsText.alignment = TextAlignmentOptions.MidlineLeft;
-            _statsText.color = ComicStyle.Ink;
-            _statsText.textWrappingMode = TextWrappingModes.NoWrap;
-            _statsText.overflowMode = TextOverflowModes.Overflow;
-            _statsText.raycastTarget = false;
-
-            // 6.4 三条对比横条（伤害密度 / 涂地效率 / 射程机动）：数值口径见 WeaponSelectMath.ComputeStatBars。
+            // 6.3 三条对比横条（伤害密度 / 涂地效率 / 射程机动）：数值口径见 WeaponSelectMath.ComputeStatBars。
             // 旧 7 段总评块是一条没有解释的定档读数，换成三条分项条才支撑「换枪」决策。
             var barsGo = new GameObject("StatBars", typeof(RectTransform));
             barsGo.transform.SetParent(infoGo.transform, false);
@@ -539,8 +518,7 @@ namespace P1.UI.WeaponSelect
                 trackRt.offsetMin = new Vector2(labelW + 6f, 0f);
                 trackRt.offsetMax = new Vector2(-2f, 0f);
                 var track = trackGo.GetComponent<UIInkShapeGraphic>();
-                track.Shape = UIInkShape.SharpRect;
-                track.CornerRadius = ComicStyle.CornerSharp;
+                track.Shape = UIInkShape.Pill; // 圆角化：属性条轨道胶囊化（描边环同形状）
                 track.BorderWidth = 2f;
                 track.BorderColor = ComicStyle.Ink;
                 track.color = ComicStyle.PaperAlt;
@@ -557,8 +535,7 @@ namespace P1.UI.WeaponSelect
                 fillRt.anchoredPosition = new Vector2(2f, 0f);
                 fillRt.sizeDelta = new Vector2(4f, _barFillHeight);
                 _barFills[b] = fillGo.GetComponent<UIInkShapeGraphic>();
-                _barFills[b].Shape = UIInkShape.SharpRect;
-                _barFills[b].CornerRadius = ComicStyle.CornerSharp;
+                _barFills[b].Shape = UIInkShape.Pill; // 圆角化：属性条填充胶囊化
                 _barFills[b].BorderWidth = 0f;
                 _barFills[b].HardShadow = false;
                 _barFills[b].Halftone = false;
@@ -583,7 +560,7 @@ namespace P1.UI.WeaponSelect
             _specialText.overflowMode = TextOverflowModes.Overflow;
             _specialText.raycastTarget = false;
 
-            // 7. 右侧「已选定」直角徽章
+            // 7. 右侧「已选定」胶囊徽章
             _equippedBadge = new GameObject("EquippedBadge", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(ComicBadge));
             _equippedBadge.transform.SetParent(transform, false);
             var eqRect = _equippedBadge.GetComponent<RectTransform>();
@@ -594,8 +571,7 @@ namespace P1.UI.WeaponSelect
             eqRect.sizeDelta = m.EquippedSize;
 
             _equippedBadgeBg = _equippedBadge.GetComponent<UIInkShapeGraphic>();
-            _equippedBadgeBg.Shape = UIInkShape.SharpRect;
-            _equippedBadgeBg.CornerRadius = ComicStyle.CornerSharp;
+            _equippedBadgeBg.Shape = UIInkShape.Pill; // 圆角化：已选定徽章改胶囊
             _equippedBadgeBg.BorderWidth = ComicStyle.BorderThin;
             _equippedBadgeBg.BorderColor = ComicStyle.Ink;
             _equippedBadgeBg.color = ComicStyle.Yellow;
@@ -666,24 +642,6 @@ namespace P1.UI.WeaponSelect
                 _roleTagText.text = $"【{role}】";
             }
 
-            string dmg = WeaponSelectMath.FormatDamage(_config, _kind);
-            string rng = WeaponSelectMath.FormatRange(_config, _kind);
-            string rate = WeaponSelectMath.FormatFireRate(_config, _kind);
-            string ink = WeaponSelectMath.FormatInkCost(_config, _kind);
-
-            if (_statsText != null)
-            {
-                if (_mobile)
-                {
-                    rate = StripParenthetical(CompactRate(rate));
-                }
-                string text = _mobile
-                    ? $"伤{dmg} 距{rng} 频{rate} 耗{CompactPercent(ink)}"
-                    : $"伤{dmg} 距{rng} 频{rate} 耗{ink}";
-                _statsText.font = _theme.ResolveFont(false, text);
-                _statsText.text = text;
-            }
-
             string ult = WeaponSelectMath.FormatSpecial(_config, _kind);
             if (_mobile)
             {
@@ -699,25 +657,6 @@ namespace P1.UI.WeaponSelect
 
             _statBars = WeaponSelectMath.ComputeStatBars(_config, _kind);
             RefreshStatBars();
-        }
-
-        /// <summary>移动端卡片较窄，频率去掉多余小数（10.0/s → 10/s）。</summary>
-        private static string CompactRate(string rate)
-        {
-            return rate.Replace(".0/s", "/s").Replace(".0/sec", "/s");
-        }
-
-        /// <summary>移动端卡片较窄，去掉括号里的补充射速（架枪15/s）。</summary>
-        private static string StripParenthetical(string value)
-        {
-            int paren = value.IndexOf('(');
-            return paren > 0 ? value.Substring(0, paren).Trim() : value;
-        }
-
-        /// <summary>移动端卡片较窄，耗墨去掉多余小数（1.0% → 1%）。</summary>
-        private static string CompactPercent(string percent)
-        {
-            return percent.Replace(".0%", "%");
         }
 
         private void RefreshIconPlate()
@@ -800,7 +739,6 @@ namespace P1.UI.WeaponSelect
             if (_titleText != null) _titleText.color = ComicStyle.Ink;
             if (_enTitleText != null) _enTitleText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.65f);
             if (_roleTagText != null) _roleTagText.color = ComicStyle.Ink;
-            if (_statsText != null) _statsText.color = ComicStyle.Ink;
             if (_specialText != null) _specialText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.75f);
         }
 
@@ -841,7 +779,6 @@ namespace P1.UI.WeaponSelect
             if (_titleText != null) _titleText.color = ComicStyle.Ink;
             if (_enTitleText != null) _enTitleText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.65f);
             if (_roleTagText != null) _roleTagText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.80f);
-            if (_statsText != null) _statsText.color = ComicStyle.Ink;
             if (_specialText != null) _specialText.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.75f);
         }
 

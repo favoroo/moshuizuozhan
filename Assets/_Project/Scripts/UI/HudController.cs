@@ -591,8 +591,7 @@ namespace P1.UI
                 badgeRt.sizeDelta = new Vector2(110f, 36f);
 
                 var shape = badgeGo.GetComponent<UIInkShapeGraphic>();
-                shape.Shape = UIInkShape.SharpRect;
-                shape.CornerRadius = ComicStyle.CornerSharp;
+                shape.Shape = UIInkShape.Pill; // 圆角化：FPS 徽章改胶囊
                 shape.BorderWidth = 0f;
                 shape.color = ComicStyle.WithAlpha(ComicStyle.Ink, 0.78f);
                 shape.raycastTarget = false;
@@ -1003,7 +1002,7 @@ namespace P1.UI
                     trackImage.raycastTarget = false;
                     // 纸白 ALT 轨道底（旧版是黑底 16% 白）：场景烘焙的九宫格精灵必须换成 1×1 纯色
                     trackImage.color = ComicStyle.PaperAlt;
-                    UIFlatSprite.MakeFlat(trackImage);
+                    UIFlatSprite.MakePill(trackImage); // 圆角化：胶囊轨道
                 }
 
                 // 3px 墨框（画在填充之上）
@@ -1024,8 +1023,7 @@ namespace P1.UI
                 if (frame != null)
                 {
                     frame.raycastTarget = false;
-                    frame.Shape = UIInkShape.SharpRect;
-                    frame.CornerRadius = ComicStyle.CornerSharp;
+                    frame.Shape = UIInkShape.Pill; // 圆角化：胶囊描边环，与轨道/填充轮廓一致
                     frame.BorderWidth = ComicStyle.BorderThin;
                     frame.BorderColor = ComicStyle.Ink;
                     frame.HardShadow = false;
@@ -1067,7 +1065,7 @@ namespace P1.UI
                     fill.enabled = true;
                     fill.raycastTarget = false;
                     fill.color = ComicStyle.Green;
-                    UIFlatSprite.MakeFlat(fill, filled: true);
+                    UIFlatSprite.MakePill(fill, filled: true); // 圆角化：胶囊填充
                     // 迁移场景血条时重新绑定，Update 的填充路径不能断
                     if (healthBarFill == null) healthBarFill = fill;
                 }
@@ -1107,8 +1105,7 @@ namespace P1.UI
             if (_hpBadgeGraphic != null)
             {
                 _hpBadgeGraphic.raycastTarget = false;
-                _hpBadgeGraphic.Shape = UIInkShape.SharpRect;
-                _hpBadgeGraphic.CornerRadius = ComicStyle.CornerSharp;
+                _hpBadgeGraphic.Shape = UIInkShape.Pill; // 圆角化：44×44 徽章改正圆
                 _hpBadgeGraphic.BorderWidth = HudSpecialGaugeFactory.CardBadgeBorderWidth;
                 _hpBadgeGraphic.BorderColor = ComicStyle.Green;
                 _hpBadgeGraphic.HardShadow = false;

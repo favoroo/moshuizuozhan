@@ -128,5 +128,14 @@ namespace P1.Weapons
 
         /// <summary>横向每一枚墨印的半径（越小边缘越平整，但涂抹调用越多）。</summary>
         public float PaintRadius;
+
+        /// <summary>
+        /// 涂带前伸量（米）：墨带远端从 <see cref="To"/> 再沿前进方向延伸，让墨出现在滚筒触地处。
+        /// P41 根因修复：旧墨带止于脚下（From→To），滚筒在身前 ~0.6m 处滚过未涂色地面，
+        /// 墨永远出现在滚筒后方——俯视角读作"滚筒悬在干净地面上方"。
+        /// INKWAVE weapons.js L243 的涂点 = 玩家前方 0.75m（滚筒正下方）。
+        /// 只影响涂带几何与涟漪位置；碾压判定（ForwardReach 矩形）不变。旧调用缺省 0 = 旧行为。
+        /// </summary>
+        public float PaintLead;
     }
 }

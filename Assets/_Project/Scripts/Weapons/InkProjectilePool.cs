@@ -358,16 +358,20 @@ namespace P1.Weapons
                 }
 
                 Vector3 dir = moveVec / stepDist;
+                Vector3 previousPosition = p.Position;
 
                 // 1. SphereCast 碰撞检测（敌人 / 掩体墙 / 地面斜坡）
                 if (TryCheckImpact(in p, dir, stepDist, out RaycastHit hit, out CombatantHealth hitCombatant))
                 {
+                    // 撞击帧不能吞滴墨：本步越过的滴墨阈值先补画（滴点按步内比例插值），
+                    // 否则加载顿帧让一帧从 ~2.6m 直接跨到撞击点时，滴 2 的补间墨道整段缺失，
+                    // 拖尾在「滴 1 圆斑边缘 → 终点爆斑边缘」之间出现 ~0.4m 断层（PlayMode 偶发）。
+                    FlushTrailDripsOnImpact(ref p, previousPosition, moveVec, stepDist);
                     HandleImpact(ref p, hit, hitCombatant, dir, settleAllowed);
                     RecycleAt(i);
                     continue;
                 }
 
-                Vector3 previousPosition = p.Position;
                 p.Position += moveVec;
                 p.DistanceTraveled += stepDist;
                 p.RangeTraveled += new Vector2(moveVec.x, moveVec.z).magnitude;
@@ -693,6 +697,41 @@ namespace P1.Weapons
         }
 
         /// <summary>
+        /// 撞击帧的滴墨补画：撞击分支在位置推进<strong>之前</strong>短路返回，
+        /// 本步越过的滴墨阈值（DistanceTraveled 尚未累加）会被整体跳过。
+        /// 与 <see cref="UpdateTrailDrips"/> 同一套插值，只是阈值判定改用「旧里程 + 本步步长」。
+        /// </summary>
+        private static void FlushTrailDripsOnImpact(ref ActiveProjectile p, Vector3 previousPosition, Vector3 moveVec, float stepDist)
+        {
+            if (p.TrailDropSpacing <= 0.0001f)
+                return;
+
+            int guard = 0;
+            while (p.DistanceTraveled + stepDist >= p.NextTrailDropDistance && guard++ < 16)
+            {
+                float distanceIntoSegment = Mathf.Clamp(p.NextTrailDropDistance - p.DistanceTraveled, 0f, stepDist);
+                Vector3 dropPos = previousPosition + moveVec * (distanceIntoSegment / stepDist);
+
+                if (TryProjectToGround(dropPos, out Vector3 groundPoint))
+                {
+                    if (p.HasTrailGroundPoint)
+                    {
+                        PaintGroundStreak(p.LastTrailGroundPoint, groundPoint, p.TrailSplatRadius, p.Team, p.OnCellsPainted, p.TrailVisualScale);
+                    }
+                    else
+                    {
+                        PaintGroundCircle(groundPoint, p.TrailSplatRadius, p.Team, p.OnCellsPainted, visualScale: p.TrailVisualScale);
+                    }
+
+                    p.LastTrailGroundPoint = groundPoint;
+                    p.HasTrailGroundPoint = true;
+                }
+
+                p.NextTrailDropDistance += p.TrailDropSpacing;
+            }
+        }
+
+        /// <summary>
         /// P30-A2：按飞行距离在弹道后方留下低透明度队色墨雾，按武器预设的概率同时甩出一颗
         /// 沿速度反方向的小卫星墨珠。阈值按本帧位移精确插值，高速弹的雾团不会偏到错误位置。
         /// 每帧全场景预算由调用方传入（耗尽后仍推进阈值，避免下帧补发一串）。
@@ -859,6 +898,14 @@ namespace P1.Weapons
             return changed;
         }
 
+        /// <summary>
+        /// 爆破弹撞墙/撞地用的世界判定半径（米）：几乎等于细射线。
+        /// 弹丸半径只用来「接住角色」，不能拿去扫几何体——0.26~0.38m 的球体下沿在下压弹道上
+        /// 会提前「半径 / tan(俯角)」米贴地（枪口约 0.55m、瞄 10m 外地面时约 5m 就炸在脚边）。
+        /// 对齐 INKWAVE：世界走细线段、角色走胶囊 + 弹丸尺寸。
+        /// </summary>
+        private const float BlasterWorldHitRadius = 0.02f;
+
         private bool TryCheckImpact(
             in ActiveProjectile p,
             Vector3 dir,
@@ -869,11 +916,46 @@ namespace P1.Weapons
             bestHit = default;
             bestCombatant = null;
 
-            int count = Physics.SphereCastNonAlloc(p.Position, p.HitRadius, dir, _hitBuffer, stepDist, GameLayers.QueryMask, QueryTriggerInteraction.Ignore);
+            // 角色：按弹丸半径球扫（爆破枪的大半径只为让直击更好接）；
+            // 其它弹丸一次 Any 扫完角色与几何体，与旧实现完全一致。
+            bool found = CollectClosestImpact(
+                in p, dir, stepDist, p.HitRadius,
+                p.IsBlaster ? ImpactFilter.ActorsOnly : ImpactFilter.Any,
+                ref bestHit, ref bestCombatant);
+            if (!p.IsBlaster)
+                return found;
+
+            // 几何体：细射线。两段取更近者，避免大球体把「墙前一点点的地面/墙角」判成命中。
+            CollectClosestImpact(in p, dir, stepDist, BlasterWorldHitRadius, ImpactFilter.WorldOnly, ref bestHit, ref bestCombatant);
+            return bestCombatant != null || bestHit.collider != null;
+        }
+
+        /// <summary>本次球扫收哪一类命中：任意 / 只收角色 / 只收几何体。</summary>
+        private enum ImpactFilter
+        {
+            Any,
+            ActorsOnly,
+            WorldOnly,
+        }
+
+        /// <summary>
+        /// 一次球扫，按 <paramref name="filter"/> 收命中，与已有的最近命中比较后写回。
+        /// 爆破弹分两段调用（角色大半径 + 几何体细射线），其它弹丸一次 Any 走完全部。
+        /// </summary>
+        private bool CollectClosestImpact(
+            in ActiveProjectile p,
+            Vector3 dir,
+            float stepDist,
+            float radius,
+            ImpactFilter filter,
+            ref RaycastHit bestHit,
+            ref CombatantHealth bestCombatant)
+        {
+            int count = Physics.SphereCastNonAlloc(p.Position, radius, dir, _hitBuffer, stepDist, GameLayers.QueryMask, QueryTriggerInteraction.Ignore);
             if (count <= 0)
                 return false;
 
-            float closestDist = float.MaxValue;
+            float closestDist = bestHit.collider != null ? bestHit.distance : float.MaxValue;
             bool found = false;
 
             for (int i = 0; i < count; i++)
@@ -890,6 +972,11 @@ namespace P1.Weapons
                     if (combatant.Team == p.Team || !combatant.IsAlive)
                         continue;
                 }
+
+                if (filter == ImpactFilter.ActorsOnly && combatant == null)
+                    continue;
+                if (filter == ImpactFilter.WorldOnly && combatant != null)
+                    continue;
 
                 if (h.distance < closestDist)
                 {

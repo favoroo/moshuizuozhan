@@ -213,6 +213,15 @@ namespace P1.Weapons
         /// <summary>武器对移动速度的系数（正常 1.0，架枪 0.0，加特林蓄力/扫射减速）。</summary>
         public virtual float MoveSpeedMultiplier => 1f;
 
+        /// <summary>
+        /// 开火期间（扳机按住）的<strong>绝对</strong>移速覆盖（米/秒）；0 = 用全局开火移速 × <see cref="MoveSpeedMultiplier"/>。
+        /// 对齐 INKWAVE weapons.js 的逐武器 moveSpeed：连发类直接取 Config.firingMoveSpeed，
+        /// 蓄力狙 / 加特林这类「按住即持续形态」的武器在子类按蓄力进度给出绝对速度
+        /// （旧加特林实现把「÷6.0 的比率」交给 3.8 基数，实际移速只有设计值六成）。
+        /// </summary>
+        public virtual float FiringMoveSpeedOverride =>
+            Config != null && Config.firingMoveSpeed > 0f ? Config.firingMoveSpeed : 0f;
+
         /// <summary>双枪当前剩余可用翻滚次数（最多 2 次）。</summary>
         public virtual int RollsRemaining => 0;
 

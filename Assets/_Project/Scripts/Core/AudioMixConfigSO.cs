@@ -61,6 +61,8 @@ namespace P1.Core
         [Range(0f, 1f)] public float hitMarkerVolume = 0.55f;
         [Range(0f, 1f)] public float jumpVolume = 0.50f;
         [Range(0f, 1f)] public float landVolume = 0.55f;
+        [Tooltip("双枪战术翻滚（P40）：高于脚步、低于开火，强调位移反馈")]
+        [Range(0f, 1f)] public float dodgeRollVolume = 0.42f;
         [Range(0f, 1f)] public float squidTransformVolume = 0.60f;
         [Tooltip("干地脚步，刻意压低避免与武器争抢（Inkwave step_dry 0.16）")]
         [Range(0f, 1f)] public float stepDryVolume = 0.26f;

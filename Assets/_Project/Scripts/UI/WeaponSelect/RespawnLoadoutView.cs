@@ -160,8 +160,7 @@ namespace P1.UI.WeaponSelect
             _panelRoot.sizeDelta = new Vector2(-panelMargin * 2f, panelHeight);
 
             var panelBg = panelGo.GetComponent<UIInkShapeGraphic>();
-            panelBg.Shape = UIInkShape.SharpRect;
-            panelBg.CornerRadius = ComicStyle.CornerSharp;
+            panelBg.Shape = UIInkShape.RoundedRect; // 圆角化：复活换枪面板自适应圆角
             panelBg.BorderWidth = ComicStyle.Border;
             panelBg.BorderColor = ComicStyle.Ink;
             panelBg.color = ComicStyle.Paper;
@@ -277,8 +276,7 @@ namespace P1.UI.WeaponSelect
             layoutElement.minWidth = 0f;
 
             var background = slotGo.GetComponent<UIInkShapeGraphic>();
-            background.Shape = UIInkShape.SharpRect;
-            background.CornerRadius = ComicStyle.CornerSharp;
+            background.Shape = UIInkShape.RoundedRect; // 圆角化：换枪槽位自适应圆角
             background.BorderWidth = ComicStyle.BorderThin;
             background.BorderColor = ComicStyle.Ink;
             background.color = ComicStyle.PaperAlt;

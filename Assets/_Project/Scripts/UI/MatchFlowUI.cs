@@ -140,7 +140,6 @@ namespace P1.UI
         private GameObject _fullscreenUnderlay;
         private float _resultElapsed;
         private MatchManager.Phase _lastPhase = (MatchManager.Phase)(-1);
-        private bool _badgePlayed;
         private bool _numbersSettled;
 
         [Header("结算个人战报与成长（简化版）")]
@@ -537,7 +536,7 @@ namespace P1.UI
             CreateStarField(parent, UITypography.IsMobileLike ? 30 : 44, 0x5EED1204u);
         }
 
-        /// <summary>稀疏星点：小方块 + 少量 45° 斜块；用归一化锚点，任何宽高比都不变形。</summary>
+        /// <summary>稀疏星点：正圆点（圆角化）；用归一化锚点，任何宽高比都不变形。</summary>
         private static void CreateStarField(RectTransform parent, int count, uint seed)
         {
             uint state = seed == 0u ? 20261101u : seed;
@@ -560,11 +559,9 @@ namespace P1.UI
                 rect.anchorMax = rect.anchorMin;
                 rect.anchoredPosition = Vector2.zero;
                 rect.sizeDelta = new Vector2(size, size);
-                rect.localRotation = Quaternion.Euler(0f, 0f, roll < 0.32f ? 45f : 0f);
 
                 var shape = go.GetComponent<UIInkShapeGraphic>();
-                shape.Shape = UIInkShape.SharpRect;
-                shape.CornerRadius = ComicStyle.CornerSharp;
+                shape.Shape = UIInkShape.Pill; // 圆角化：星点改正圆点，不再旋转方块
                 shape.BorderWidth = 0f;
                 shape.color = color;
                 shape.HardShadow = false;
@@ -597,8 +594,7 @@ namespace P1.UI
             _homeHeroCard = card;
 
             var bg = cardGo.GetComponent<UIInkShapeGraphic>();
-            bg.Shape = UIInkShape.SharpRect;
-            bg.CornerRadius = ComicStyle.CornerSharp;
+            bg.Shape = UIInkShape.RoundedRect; // 圆角化：Hero 大卡自适应圆角，硬影同形状跟随
             bg.BorderWidth = m.CardBorderWidth;
             bg.BorderColor = ComicStyle.Ink;
             bg.color = ComicStyle.Yellow;
@@ -722,8 +718,7 @@ namespace P1.UI
             rect.sizeDelta = new Vector2(width, height);
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：难度段选自适应圆角
             shape.BorderWidth = ComicStyle.BorderThin;
             shape.BorderColor = ComicStyle.Ink;
             shape.color = ComicStyle.Paper;
@@ -1035,8 +1030,7 @@ namespace P1.UI
             root.sizeDelta = tileSize;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：次级卡自适应圆角，硬影同形状跟随
             shape.BorderWidth = m.TileBorderWidth;
             shape.BorderColor = ComicStyle.Ink;
             shape.color = ComicStyle.Paper;
@@ -1049,19 +1043,20 @@ namespace P1.UI
             motion.SetTheme(theme);
             _homeEntrance.Add(motion);
 
-            // 顶部 5px 身份色带（规范：色带不承载文字）
+            // 顶部 5px 身份色带（规范：色带不承载文字）。
+            // 圆角化：卡片顶角是圆的，色带横向内缩到圆角直线段内并改胶囊短划。
+            float tileRadius = ComicStyle.CornerFor(tileSize.x, tileSize.y);
             var bandGo = new GameObject("AccentBand", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             bandGo.transform.SetParent(root, false);
             var bandRect = (RectTransform)bandGo.transform;
             bandRect.anchorMin = new Vector2(0f, 1f);
             bandRect.anchorMax = new Vector2(1f, 1f);
             bandRect.pivot = new Vector2(0.5f, 1f);
-            bandRect.sizeDelta = new Vector2(-m.TileBorderWidth * 2f, m.TileBandHeight);
+            bandRect.sizeDelta = new Vector2(-(tileRadius + m.TileBorderWidth) * 2f, m.TileBandHeight);
             bandRect.anchoredPosition = new Vector2(0f, -m.TileBorderWidth);
 
             var bandShape = bandGo.GetComponent<UIInkShapeGraphic>();
-            bandShape.Shape = UIInkShape.SharpRect;
-            bandShape.CornerRadius = ComicStyle.CornerSharp;
+            bandShape.Shape = UIInkShape.Pill;
             bandShape.BorderWidth = 0f;
             bandShape.color = spec.Accent;
             bandShape.HardShadow = false;
@@ -1279,8 +1274,7 @@ namespace P1.UI
             if (shape == null) shape = UIInkShapeGraphic.CreateChildBackground(rect, "GeometricBg");
             if (shape != null)
             {
-                shape.Shape = UIInkShape.SharpRect;
-                shape.CornerRadius = ComicStyle.CornerSharp;
+                shape.Shape = UIInkShape.Pill; // 圆角化：检查更新小标签改胶囊
                 shape.BorderWidth = ComicStyle.BorderThin;
                 shape.BorderColor = ComicStyle.Ink;
                 shape.color = ComicStyle.Yellow; // 主行动黄：角签里只有这颗可点
@@ -1381,8 +1375,7 @@ namespace P1.UI
             rect.sizeDelta = box.Size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.Pill; // 圆角化：底部角签改胶囊
             shape.BorderWidth = 0f;
             shape.color = fill;
             shape.HardShadow = false;
@@ -1411,8 +1404,7 @@ namespace P1.UI
             rect.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.Pill; // 圆角化：角签（PLAY / 角标）改胶囊
             shape.BorderWidth = 0f;
             shape.color = fill;
             shape.HardShadow = false;
@@ -1603,12 +1595,38 @@ namespace P1.UI
             }
         }
 
-        /// <summary>结算入场：两块读数板先到，判定牌 / 台账卡在掷点揭晓时各自 pop-in。</summary>
+        /// <summary>
+        /// 结算入场：判定牌 / 两块读数板 / 战报卡按阅读顺序同一批 pop-in（0.05s/张）。
+        /// 掷点（覆盖率滚动）只负责点亮胜方，不再负责把元素「变出来」。
+        /// </summary>
         private void PlayResultEntrance()
         {
             _resultEntrance.Clear();
+
+            MatchManager match = MatchManager.Instance;
+
+            // 判定牌内容必须提前写好：它现在一开场就可见，若沿用「掷点后才写胜利 / 失败」，
+            // 输局会先亮 1.4s 的「胜利」再被改掉。这里只写内容，入场动画交给 PlayStaggered。
+            if (victoryBadgeRoot != null)
+            {
+                PrepareVictoryBadge(match != null && match.PlayerWon);
+                victoryBadgeRoot.gameObject.SetActive(true);
+                if (victoryBadgeMotion != null) _resultEntrance.Add(victoryBadgeMotion);
+            }
+
+            // 读数板：入场前先归零，避免第二局沿用上一局终值闪一帧。
+            UpdateCoverReadout(0f, 0f);
             if (_coverPlateA != null) _resultEntrance.Add(_coverPlateA.GetComponent<UISpringMotion>());
             if (_coverPlateB != null) _resultEntrance.Add(_coverPlateB.GetComponent<UISpringMotion>());
+
+            // 战报卡：与判定牌同批出现，数值在入场前就写好（掷点结束只推进经验计数）。
+            if (_reportPanelRoot != null)
+            {
+                _reportPanelRoot.gameObject.SetActive(true);
+                PopulateReportCard(match);
+                if (_reportMotion != null) _resultEntrance.Add(_reportMotion);
+            }
+
             PlayStaggered(_resultEntrance);
         }
 
@@ -1711,8 +1729,7 @@ namespace P1.UI
                 return;
             }
 
-            btnShape.Shape = UIInkShape.SharpRect;
-            btnShape.CornerRadius = ComicStyle.CornerSharp;
+            btnShape.Shape = UIInkShape.RoundedRect; // 圆角化：开赛 CTA 自适应圆角，硬影同形状跟随
             btnShape.BorderWidth = 0f;
             btnShape.BorderColor = ComicStyle.Ink;
             btnShape.Halftone = false;
@@ -1760,8 +1777,7 @@ namespace P1.UI
             rect.localRotation = Quaternion.Euler(0f, 0f, rotDegrees);
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：装饰盒自适应圆角（旋转后为圆角菱形）
             shape.BorderWidth = borderWidth;
             shape.BorderColor = borderColor ?? ComicStyle.Ink;
             shape.color = fill;
@@ -1787,8 +1803,7 @@ namespace P1.UI
             rect.localRotation = Quaternion.Euler(0f, 0f, rotDegrees);
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：装饰方块 → 圆角菱形
             shape.BorderWidth = border;
             shape.BorderColor = borderColor ?? ComicStyle.Ink;
             shape.HardShadow = false;
@@ -1956,8 +1971,7 @@ namespace P1.UI
                 bgGo.transform.SetParent(victoryBadgeRoot, false);
                 Stretch(bgGo.GetComponent<RectTransform>());
                 victoryBadgeBg = bgGo.GetComponent<UIInkShapeGraphic>();
-                victoryBadgeBg.Shape = UIInkShape.SharpRect;
-                victoryBadgeBg.CornerRadius = ComicStyle.CornerSharp;
+                victoryBadgeBg.Shape = UIInkShape.RoundedRect; // 圆角化：胜利判定牌
                 victoryBadgeBg.BorderWidth = ComicStyle.BorderHeavy;
                 victoryBadgeBg.BorderColor = ComicStyle.Yellow;
                 victoryBadgeBg.HardShadow = false;
@@ -2070,8 +2084,7 @@ namespace P1.UI
                 }
                 if (rShape != null)
                 {
-                    rShape.Shape = UIInkShape.SharpRect;
-                    rShape.CornerRadius = ComicStyle.CornerSharp;
+                    rShape.Shape = UIInkShape.RoundedRect; // 圆角化：再来一局按钮
                     rShape.BorderWidth = ComicStyle.Border;
                     rShape.BorderColor = ComicStyle.Ink;
                     rShape.color = ComicStyle.Yellow; // 主行动色（红=危险，不挪用到主 CTA）
@@ -2108,8 +2121,7 @@ namespace P1.UI
                 bImg.raycastTarget = true;
 
                 var bShape = UIInkShapeGraphic.CreateChildBackground((RectTransform)backGo.transform, "BackBg");
-                bShape.Shape = UIInkShape.SharpRect;
-                bShape.CornerRadius = ComicStyle.CornerSharp;
+                bShape.Shape = UIInkShape.RoundedRect; // 圆角化：返回按钮
                 bShape.BorderWidth = ComicStyle.BorderThin;
                 bShape.BorderColor = ComicStyle.Ink;
                 bShape.color = ComicStyle.Paper; // 白底墨字
@@ -2234,8 +2246,7 @@ namespace P1.UI
             Color teamColor = resolved.GetTeamColor(team);
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：覆盖率读数板自适应圆角
             shape.BorderWidth = ComicStyle.BorderThin;
             shape.BorderColor = teamColor;
             shape.color = PlateInk;
@@ -2271,8 +2282,7 @@ namespace P1.UI
             winMark.sizeDelta = new Vector2(52f, 30f);
 
             var markShape = markGo.GetComponent<UIInkShapeGraphic>();
-            markShape.Shape = UIInkShape.SharpRect;
-            markShape.CornerRadius = ComicStyle.CornerSharp;
+            markShape.Shape = UIInkShape.Pill; // 圆角化：「胜」签改胶囊
             markShape.BorderWidth = ComicStyle.BorderThin;
             markShape.BorderColor = ComicStyle.Ink;
             markShape.color = ComicStyle.Yellow;
@@ -2333,8 +2343,7 @@ namespace P1.UI
             _reportPanelRoot.sizeDelta = new Vector2(frameW, frameH);
 
             var frameShape = frameGo.GetComponent<UIInkShapeGraphic>();
-            frameShape.Shape = UIInkShape.SharpRect;
-            frameShape.CornerRadius = ComicStyle.CornerSharp;
+            frameShape.Shape = UIInkShape.RoundedRect; // 圆角化：战报卡自适应圆角
             frameShape.BorderWidth = ComicStyle.BorderThin;
             frameShape.BorderColor = ComicStyle.Ink;
             frameShape.color = ComicStyle.Paper;
@@ -2347,7 +2356,9 @@ namespace P1.UI
             _reportMotion = frameGo.GetComponent<UISpringMotion>();
             _reportMotion.SetTheme(resolved);
 
-            // 顶部身份色带（胜利金 / 失败灰蓝，揭晓时才定色）
+            // 顶部身份色带（胜利金 / 失败灰蓝，揭晓时才定色）。
+            // 圆角化：色带横向内缩到圆角直线段内并改胶囊短划。
+            float reportRadius = ComicStyle.CornerFor(frameW, frameH);
             var bandGo = new GameObject("ReportBand", typeof(RectTransform), typeof(CanvasRenderer),
                 typeof(UIInkShapeGraphic));
             bandGo.transform.SetParent(frameGo.transform, false);
@@ -2355,12 +2366,11 @@ namespace P1.UI
             _reportBand.anchorMin = new Vector2(0f, 1f);
             _reportBand.anchorMax = new Vector2(1f, 1f);
             _reportBand.pivot = new Vector2(0.5f, 1f);
-            _reportBand.sizeDelta = new Vector2(-ComicStyle.BorderThin * 2f, bandH);
+            _reportBand.sizeDelta = new Vector2(-(reportRadius + ComicStyle.BorderThin) * 2f, bandH);
             _reportBand.anchoredPosition = new Vector2(0f, -ComicStyle.BorderThin);
 
             _reportBandShape = bandGo.GetComponent<UIInkShapeGraphic>();
-            _reportBandShape.Shape = UIInkShape.SharpRect;
-            _reportBandShape.CornerRadius = ComicStyle.CornerSharp;
+            _reportBandShape.Shape = UIInkShape.Pill;
             _reportBandShape.BorderWidth = 0f;
             _reportBandShape.color = ComicStyle.Yellow;
             _reportBandShape.HardShadow = false;
@@ -2445,8 +2455,7 @@ namespace P1.UI
             trackRt.sizeDelta = new Vector2(trackW, mobile ? 14f : 12f);
 
             var trackShape = trackGo.GetComponent<UIInkShapeGraphic>();
-            trackShape.Shape = UIInkShape.SharpRect;
-            trackShape.CornerRadius = ComicStyle.CornerSharp;
+            trackShape.Shape = UIInkShape.Pill; // 圆角化：XP 轨道胶囊化（描边环同形状）
             trackShape.BorderWidth = 1f;
             trackShape.BorderColor = ComicStyle.Ink;
             trackShape.color = ComicStyle.PaperAlt;
@@ -2462,7 +2471,7 @@ namespace P1.UI
             fillRt.offsetMax = new Vector2(-1f, -1f);
 
             _xpBarFill = fillGo.GetComponent<Image>();
-            UIFlatSprite.MakeFlat(_xpBarFill, filled: true);
+            UIFlatSprite.MakePill(_xpBarFill, filled: true); // 圆角化：胶囊填充
             _xpBarFill.color = ComicStyle.Yellow;
             _xpBarFill.fillAmount = 0f;
             _xpBarFill.raycastTarget = false;
@@ -2479,8 +2488,7 @@ namespace P1.UI
             _levelUpBadgeRoot.sizeDelta = new Vector2(mobile ? 240f : 216f, mobile ? 34f : 30f);
 
             var luShape = luGo.GetComponent<UIInkShapeGraphic>();
-            luShape.Shape = UIInkShape.SharpRect;
-            luShape.CornerRadius = ComicStyle.CornerSharp;
+            luShape.Shape = UIInkShape.Pill; // 圆角化：升级页签改胶囊
             luShape.BorderWidth = ComicStyle.BorderThin;
             luShape.BorderColor = ComicStyle.Ink;
             luShape.color = ComicStyle.Yellow;
@@ -2819,7 +2827,6 @@ namespace P1.UI
                 // 入场墨幕在 HUD 画布（0），晚一帧关闭就会看到菜单盖在墨幕上。
                 if (readyPanel != null) readyPanel.SetActive(false);
                 if (resultPanel != null) resultPanel.SetActive(false);
-                _badgePlayed = false;
                 _numbersSettled = false;
                 s_SettledThisMatch = false;
                 _profileSettled = false;
@@ -2843,7 +2850,6 @@ namespace P1.UI
             else if (phase == MatchManager.Phase.Result)
             {
                 _resultElapsed = 0f;
-                _badgePlayed = false;
                 _numbersSettled = false;
                 _lastLevelUpStep = 0;
                 HideResultRevealVisuals();
@@ -2942,10 +2948,11 @@ namespace P1.UI
                 _numbersSettled = true;
                 UpdateCoverReadout(match.FinalCoverageA, match.FinalCoverageB);
 
-                // 掷点定格后点亮胜方：顶部判定大牌 + 胜方「胜」签，败方读数转不透明灰。
-                if (!_badgePlayed)
+                // 掷点定格后点亮胜方：胜方「胜」签 + 败方读数转不透明灰。
+                // 判定牌已在开场入场时与读数板 / 战报卡一起出现（内容也提前写好），这里只做兜底，
+                // 绝不再 PlayIn 一次——否则整块牌会在数字停住时「二次弹出」。
+                if (victoryBadgeRoot != null && !victoryBadgeRoot.gameObject.activeSelf)
                 {
-                    _badgePlayed = true;
                     TriggerVictoryBadge(match.PlayerWon);
                 }
                 ApplyWinnerEmphasis(match.PlayerWon);
@@ -3021,15 +3028,12 @@ namespace P1.UI
 
         private void UpdatePostRollVisuals(MatchManager match)
         {
+            // 兜底：正常入场时战报卡已在 PlayResultEntrance 里出现；
+            // 只有首帧就直接同步进 Result（没走 PhaseChanged）时才会走到这里补显示。
             if (_reportPanelRoot != null && !_reportPanelRoot.gameObject.activeSelf)
             {
                 _reportPanelRoot.gameObject.SetActive(true);
-
-                // 顶部身份色带：胜利金 / 失败灰蓝（状态色只占一条，信息层保持纸白可读）
-                if (_reportBandShape != null)
-                {
-                    _reportBandShape.color = (match != null && match.PlayerWon) ? ComicStyle.Yellow : DefeatSlate;
-                }
+                PopulateReportCard(match);
 
                 // 卡片本身也做一记 pop-in（错峰由更新循环里的 0.05s 承接）
                 if (_reportMotion != null)
@@ -3037,27 +3041,6 @@ namespace P1.UI
                     _reportMotion.Build();
                     _reportMotion.SnapHome();
                     _reportMotion.PlayIn(0.05f);
-                }
-
-                // 本局个人战绩：三列数字一次写入（数值固定，不需要滚动）。
-                if (_statTurfText != null)
-                {
-                    _statTurfText.text = Mathf.RoundToInt(_localStats.TurfSquareMeters).ToString();
-                }
-                if (_statKillText != null) _statKillText.text = _localStats.Kills.ToString();
-                if (_statDeathText != null) _statDeathText.text = _localStats.Deaths.ToString();
-
-                // 卡片刚露出的第一帧先回到「本局结算前」的读数，
-                // 否则第二局会把上一局的等级 / 经验沿用到 0.25s 后才被动画覆盖。
-                if (_profileSettled)
-                {
-                    SetLevelDisplay(_profileResult.OldLevel);
-                    if (_xpGainText != null) _xpGainText.text = "经验 +0";
-                    if (_xpBarFill != null)
-                    {
-                        int req = _profileResult.XpRequiredForNextLevel;
-                        _xpBarFill.fillAmount = req > 0 ? Mathf.Clamp01((float)_profileResult.OldXp / req) : 0f;
-                    }
                 }
             }
 
@@ -3116,6 +3099,39 @@ namespace P1.UI
         }
 
         /// <summary>
+        /// 战报卡内容：顶部身份色带 + 三列战绩 + 成长区复位到「本局结算前」的读数。
+        /// 卡片与判定牌同批入场，所以这些值必须在入场时就写好；掷点结束只负责推进经验计数。
+        /// </summary>
+        private void PopulateReportCard(MatchManager match)
+        {
+            // 顶部身份色带：胜利金 / 失败灰蓝（状态色只占一条，信息层保持纸白可读）
+            if (_reportBandShape != null)
+            {
+                _reportBandShape.color = (match != null && match.PlayerWon) ? ComicStyle.Yellow : DefeatSlate;
+            }
+
+            // 本局个人战绩：三列数字一次写入（数值固定，不需要滚动）。
+            if (_statTurfText != null)
+            {
+                _statTurfText.text = Mathf.RoundToInt(_localStats.TurfSquareMeters).ToString();
+            }
+            if (_statKillText != null) _statKillText.text = _localStats.Kills.ToString();
+            if (_statDeathText != null) _statDeathText.text = _localStats.Deaths.ToString();
+
+            // 先回到「本局结算前」的读数，否则第二局会把上一局的等级 / 经验沿用过来。
+            if (_profileSettled)
+            {
+                SetLevelDisplay(_profileResult.OldLevel);
+                if (_xpGainText != null) _xpGainText.text = "经验 +0";
+                if (_xpBarFill != null)
+                {
+                    int req = _profileResult.XpRequiredForNextLevel;
+                    _xpBarFill.fillAmount = req > 0 ? Mathf.Clamp01((float)_profileResult.OldXp / req) : 0f;
+                }
+            }
+        }
+
+        /// <summary>
         /// 战报卡等级读数：只写「等级 N」，段位名与经验分数不再上屏。
         /// </summary>
         private void SetLevelDisplay(int level)
@@ -3138,7 +3154,12 @@ namespace P1.UI
             }
         }
 
-        private void TriggerVictoryBadge(bool playerWon)
+        /// <summary>
+        /// 写判定牌内容与语义色（胜利金 / 失败灰蓝）。只写内容、不负责显示：
+        /// 正常入场由 PlayResultEntrance 与读数板 / 战报卡同批 pop-in，
+        /// 这样一开场就能读到正确的胜负，不会先亮「胜利」再改。
+        /// </summary>
+        private void PrepareVictoryBadge(bool playerWon)
         {
             if (victoryBadgeRoot == null) return;
 
@@ -3172,6 +3193,16 @@ namespace P1.UI
                     victoryBadgeText.color = fill;
                 }
             }
+        }
+
+        /// <summary>
+        /// 兜底显示：只有首帧就直接处于 Result（没走 PhaseChanged、入场没播）时才调用，
+        /// 此时自己补一次 pop-in；正常路径下判定牌已在入场批次里出现过，绝不再重复播放。
+        /// </summary>
+        private void TriggerVictoryBadge(bool playerWon)
+        {
+            PrepareVictoryBadge(playerWon);
+            if (victoryBadgeRoot == null) return;
 
             victoryBadgeRoot.gameObject.SetActive(true);
             if (victoryBadgeMotion != null)

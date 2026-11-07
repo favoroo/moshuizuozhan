@@ -37,6 +37,25 @@ namespace P1.Tests
             {
                 bot.enabled = false;
             }
+
+            // 武器选择是持久化的（PlayerPrefs）：本地玩家可能带着蓄力狙/加特林等武器进场
+            //（蓄力狙会在等待帧松弦打出 1.2m 间隔的墨线，污染拖尾断言）。
+            // 本用例验收小枪拖尾语义，显式装一把零散布小枪保证确定性。
+            var shooterConfig = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            shooterConfig.weaponKind = WeaponKind.Shooter;
+            shooterConfig.fireInterval = 0.1f;
+            shooterConfig.damage = 36f;
+            shooterConfig.projectileSpeed = 34f;
+            shooterConfig.projectileGravity = 28f;
+            shooterConfig.maxRange = 12f;
+            shooterConfig.spreadMinDegrees = 0f;
+            shooterConfig.spreadDegrees = 0f;
+            shooterConfig.trailStartDistance = 2.5f;
+            shooterConfig.trailDropDistance = 1.05f;
+            shooterConfig.trailSplatRadius = 0.44f;
+            var shooterWeapon = player.Weapon;
+            shooterWeapon.EquipWeapon(shooterConfig);
+            shooterWeapon.ResetAllWeaponState();
             player.Motor.RefillInkFull();
             yield return null;
 
@@ -60,14 +79,106 @@ namespace P1.Tests
             Assert.Greater(muzzleToAim, 2.5f + 0.2f, "枪口到落点应超过首次滴墨距离，便于验证拖尾");
 
             Vector3 trailDir = (aimPoint - flatMuzzle).normalized;
+            // 失败信息带整条拖尾的 0.1m 步距采样（# = 己方墨，. = 中性）与横向 ±0.3m 对照，
+            // 拖尾断层一眼定位：是滴墨没画、还是画偏了线
+            var map = new System.Text.StringBuilder();
+            for (float d = 2.0f; d <= 5.2f; d += 0.1f)
+            {
+                Vector3 probe = flatMuzzle + trailDir * d;
+                map.Append(surface.InkAt(probe) == team ? '#' : '.');
+            }
+            var lateral = new System.Text.StringBuilder();
+            for (float d = 2.4f; d <= 3.6f; d += 0.2f)
+            {
+                Vector3 probe = flatMuzzle + trailDir * d;
+                Vector3 side = Vector3.Cross(Vector3.up, trailDir);
+                float near = Mathf.Max(
+                    surface.InkAt(probe - side * 0.3f) == team ? 1f : 0f,
+                    surface.InkAt(probe + side * 0.3f) == team ? 1f : 0f);
+                lateral.Append(near > 0f ? '#' : '.');
+            }
             const int samples = 8;
             for (int i = 0; i <= samples; i++)
             {
                 float distance = Mathf.Lerp(2.6f, muzzleToAim - 0.05f, i / (float)samples);
                 Vector3 probe = flatMuzzle + trailDir * distance;
                 Assert.AreEqual(team, surface.InkAt(probe),
-                    $"距离枪口 {distance:0.00}m 的拖尾应连续无断层");
+                    $"距离枪口 {distance:0.00}m 的拖尾应连续无断层 | m2a={muzzleToAim:0.00} " +
+                    $"map[2.0→5.2]={map} lateral±0.3[2.4→3.6]={lateral}");
             }
+        }
+
+        /// <summary>
+        /// 爆破枪空爆落点验收：8.5m 外的准星点必须被爆裂涂到，且爆点不能提前落在近处地面。
+        /// 回归「弹丸半径被拿去扫世界几何」的 bug：0.26~0.38m 的球体下沿会在下压弹道上
+        /// 提前「半径 / tan(俯角)」米贴地（旧实现在枪口前约 5m 就爆，8m 外永远打不到）。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Blaster_BurstsAtAimPoint_InsteadOfPoppingOnNearGround()
+        {
+            SceneManager.LoadScene(SceneName);
+            yield return null;
+            yield return null;
+
+            var player = PlayerController.LocalPlayer;
+            Assert.IsNotNull(player, "场景里应存在本地玩家 PlayerController");
+            var surface = InkSurfaceController.Instance;
+            Assert.IsNotNull(surface, "场景里应存在 InkSurfaceController");
+
+            player.enabled = false;
+            foreach (var bot in UnityEngine.Object.FindObjectsByType<BotController>(FindObjectsSortMode.None))
+            {
+                bot.enabled = false;
+            }
+
+            // 临时爆破枪配置：零散布 + 关闭沿途滴墨，让墨迹只可能来自爆裂本身
+            const float aimDistance = 8.5f;
+            var config = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            config.weaponKind = WeaponKind.Blaster;
+            config.fireInterval = 0.78f;
+            config.damage = 125f;
+            config.inkCostPerShot = 9f;
+            config.projectileSpeed = 23f;
+            config.projectileGravity = 0f;
+            config.maxRange = 10.5f;
+            config.spreadMinDegrees = 0f;
+            config.spreadDegrees = 0f;
+            config.blasterSplashRadius = 2.6f;
+            config.blasterSplashDamageMax = 70f;
+            config.blasterSplashDamageMin = 30f;
+            config.blasterBurstRadius = 1.9f;
+            config.blasterHitRadius = 0.38f;
+            config.endSplatRadius = 1.5f;
+            config.endSplatRadiusMin = 1.3f;
+            config.endSplatRadiusMax = 1.7f;
+            config.trailStartDistance = 999f;
+            config.trailDropDistance = 999f;
+
+            var weapon = player.Weapon;
+            weapon.EquipWeapon(config);
+            weapon.ResetAllWeaponState();
+            player.Motor.RefillInkFull();
+            yield return null;
+
+            var host = (IWeaponRuntimeHost)weapon;
+            Vector3 muzzle = host.MuzzlePosition;
+            Assert.IsTrue(TryFindClearShotPoint(player, muzzle, aimDistance, out Vector3 aimPoint),
+                $"{aimDistance}m 内应能找到一条无遮挡、平坦且可涂的枪口→落点弹道");
+
+            Team team = player.Health.Team;
+            Assert.AreEqual(Team.Neutral, surface.InkAt(aimPoint), "开火前瞄准点应是中性地面");
+
+            Assert.IsTrue(weapon.TryFireMainWeapon(aimPoint - muzzle, aimPoint), "墨水充足时应能开火");
+            yield return new WaitForSeconds(0.8f);
+
+            Assert.AreEqual(team, surface.InkAt(aimPoint),
+                "爆破弹必须在准星落点爆裂：命中球半径只接角色，撞地走细射线，不得提前贴地");
+            Vector3 nearProbe = muzzle + (aimPoint - muzzle).normalized * (aimDistance - 3.2f);
+            nearProbe.y = aimPoint.y;
+            Assert.AreEqual(Team.Neutral, surface.InkAt(nearProbe),
+                "枪口前方近处不应出现爆斑（说明爆点在途中提前触发）");
+
+            Object.Destroy(config);
         }
 
         /// <summary>
@@ -127,6 +238,13 @@ namespace P1.Tests
             float weaponPitch = Mathf.DeltaAngle(0f, activeModel.localEulerAngles.x);
             Assert.Greater(Mathf.Abs(weaponPitch), 15f, "抬头时武器模型应随视角俯仰，而不是保持水平");
 
+            // 武器选择是持久化的：本地玩家当前可能装备蓄力类武器（Splatling 首拉扳机只开始蓄力、
+            // 按设计返回 false）。这里显式装一把连发枪，让「朝天能开火」只验证瞄准与弹道，
+            // 不依赖上次选中的武器。
+            var config = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            config.weaponKind = WeaponKind.Shooter;
+            player.Weapon.EquipWeapon(config);
+            player.Weapon.ResetAllWeaponState();
             player.Motor.RefillInkFull();
             Assert.IsTrue(player.Weapon.TryFireMainWeapon(player.AimDirection, player.AimPoint),
                 "朝天也应能正常开火");
@@ -278,6 +396,58 @@ namespace P1.Tests
 
             aimPoint = default;
             aimDirection = Vector3.forward;
+            return false;
+        }
+
+        /// <summary>
+        /// 找一条「枪口 → 落点」真正无遮挡的瞄准点（爆破枪回归用）：
+        /// 与平射探测不同，这里按实际弹道高度整段验证，避免低矮掩体造成假阳性。
+        /// </summary>
+        private static bool TryFindClearShotPoint(PlayerController player, Vector3 muzzle, float distance, out Vector3 aimPoint)
+        {
+            var grid = InkSurfaceController.Instance.Grid;
+            float playerGroundY = player.transform.position.y;
+
+            for (int i = 0; i < 36; i++)
+            {
+                Vector3 dir = Quaternion.Euler(0f, i * 10f, 0f) * Vector3.forward;
+                Vector3 candidate = player.transform.position + dir * distance;
+                if (!Physics.Raycast(candidate + Vector3.up * 5f, Vector3.down, out RaycastHit ground, 12f, ~0, QueryTriggerInteraction.Ignore))
+                    continue;
+                if (ground.normal.y < 0.85f || Mathf.Abs(ground.point.y - playerGroundY) > 1.2f)
+                    continue;
+
+                candidate.y = ground.point.y;
+                if (grid.IsBlockedAt(new Vector2(candidate.x, candidate.z)))
+                    continue;
+
+                Vector3 toPoint = candidate - muzzle;
+                float length = toPoint.magnitude;
+                if (length < 1f)
+                    continue;
+
+                RaycastHit[] hits = Physics.RaycastAll(muzzle, toPoint / length, length - 0.05f, ~0, QueryTriggerInteraction.Ignore);
+                bool blocked = false;
+                foreach (RaycastHit hit in hits)
+                {
+                    if (hit.collider == null)
+                        continue;
+                    if (hit.collider.transform.IsChildOf(player.transform))
+                        continue;
+                    if (hit.collider.GetComponentInParent<CombatantHealth>() != null)
+                        continue;
+                    blocked = true;
+                    break;
+                }
+
+                if (blocked)
+                    continue;
+
+                aimPoint = candidate;
+                return true;
+            }
+
+            aimPoint = default;
             return false;
         }
 

@@ -288,8 +288,7 @@ namespace P1.UI.WeaponSelect
             _drawerRoot.anchoredPosition = new Vector2(24f, 0f);
 
             _drawerBg = drawerGo.GetComponent<UIInkShapeGraphic>();
-            _drawerBg.Shape = UIInkShape.SharpRect;
-            _drawerBg.CornerRadius = ComicStyle.CornerSharp;
+            _drawerBg.Shape = UIInkShape.RoundedRect; // 圆角化：抽屉面板自适应圆角，硬影同形状跟随
             // t-1 抽屉面板：纸白底 + 3px 墨框 + 弹窗硬影 (8,-9)（抽屉是模态层，用弹窗档）
             _drawerBg.BorderWidth = ComicStyle.BorderThin;
             _drawerBg.BorderColor = ComicStyle.Ink;
@@ -349,7 +348,7 @@ namespace P1.UI.WeaponSelect
             float closeH = _metrics.CloseSize.y;
             float bubbleH = _mobile ? 76f : 52f;
 
-            // 4.1 收起按钮（黄色直角块，右上角）
+            // 4.1 收起按钮（黄色圆角块，右上角）
             var closeGo = new GameObject("CloseBtn", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(UIJellyButton));
             closeGo.transform.SetParent(headerGo.transform, false);
             var closeRect = closeGo.GetComponent<RectTransform>();
@@ -360,8 +359,7 @@ namespace P1.UI.WeaponSelect
             closeRect.sizeDelta = new Vector2(closeW, closeH);
 
             var closeBg = closeGo.GetComponent<UIInkShapeGraphic>();
-            closeBg.Shape = UIInkShape.SharpRect;
-            closeBg.CornerRadius = ComicStyle.CornerSharp;
+            closeBg.Shape = UIInkShape.RoundedRect; // 圆角化：收起按钮自适应圆角
             closeBg.BorderWidth = ComicStyle.BorderThin;
             closeBg.BorderColor = ComicStyle.Ink;
             closeBg.color = ComicStyle.Yellow;
@@ -391,7 +389,7 @@ namespace P1.UI.WeaponSelect
             closeJelly.Configure(theme, _closeButton, closeBg);
             closeJelly.EnableThemeHardShadow(); // 按钮硬影 (3,-4) + 0ms 压印 + 0.1s Cubic-Out 回弹
 
-            // 4.2 标题条（墨底白字直角块，保留 TitleBubble/Title 测试契约路径）
+            // 4.2 标题条（墨底白字圆角块，保留 TitleBubble/Title 测试契约路径）
             var bubbleGo = new GameObject("TitleBubble", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             bubbleGo.transform.SetParent(headerGo.transform, false);
             var bubbleRt = bubbleGo.GetComponent<RectTransform>();
@@ -402,15 +400,14 @@ namespace P1.UI.WeaponSelect
             bubbleRt.sizeDelta = new Vector2(_drawerWidth - inset * 2f - closeW - 12f, bubbleH);
 
             var bubbleShape = bubbleGo.GetComponent<UIInkShapeGraphic>();
-            bubbleShape.Shape = UIInkShape.SharpRect;
-            bubbleShape.CornerRadius = ComicStyle.CornerSharp;
+            bubbleShape.Shape = UIInkShape.RoundedRect; // 圆角化：标题条
             bubbleShape.BorderWidth = 0f;
             bubbleShape.color = ComicStyle.Ink;
             bubbleShape.HardShadow = false;
             bubbleShape.SpeechTail = false;
             bubbleShape.Halftone = false;
 
-            // 左侧黄色小方块作标题锚点（几何构图，不用阴影）
+            // 左侧黄色小胶囊作标题锚点（几何构图，不用阴影）
             var accentGo = new GameObject("TitleAccent", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             accentGo.transform.SetParent(bubbleGo.transform, false);
             var accentRect = accentGo.GetComponent<RectTransform>();
@@ -420,8 +417,7 @@ namespace P1.UI.WeaponSelect
             accentRect.anchoredPosition = new Vector2(_mobile ? 18f : 14f, 0f);
             accentRect.sizeDelta = new Vector2(_mobile ? 14f : 10f, bubbleH * 0.56f);
             var accentShape = accentGo.GetComponent<UIInkShapeGraphic>();
-            accentShape.Shape = UIInkShape.SharpRect;
-            accentShape.CornerRadius = ComicStyle.CornerSharp;
+            accentShape.Shape = UIInkShape.Pill; // 圆角化：标题锚点改胶囊
             accentShape.BorderWidth = 0f;
             accentShape.color = ComicStyle.Yellow;
             accentShape.raycastTarget = false;
@@ -484,8 +480,7 @@ namespace P1.UI.WeaponSelect
                 _profileBadgeRoot.sizeDelta = new Vector2(_mobile ? 300f : 220f, _mobile ? 40f : 32f);
 
                 var badgeShape = badgeGo.GetComponent<UIInkShapeGraphic>();
-                badgeShape.Shape = UIInkShape.SharpRect;
-                badgeShape.CornerRadius = ComicStyle.CornerSharp;
+                badgeShape.Shape = UIInkShape.RoundedRect; // 圆角化：段位徽章自适应圆角
                 badgeShape.BorderWidth = ComicStyle.BorderThin;
                 badgeShape.BorderColor = ComicStyle.Ink;
                 badgeShape.color = ComicStyle.PaperAlt;
@@ -523,7 +518,7 @@ namespace P1.UI.WeaponSelect
                 trackRt.sizeDelta = new Vector2(-8f, _mobile ? 4f : 3f);
 
                 var trackImg = trackGo.GetComponent<Image>();
-                UIFlatSprite.MakeFlat(trackImg, filled: false);
+                UIFlatSprite.MakePill(trackImg, filled: false); // 圆角化：XP 细条胶囊化
                 trackImg.color = new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.2f);
                 trackImg.raycastTarget = false;
 
@@ -536,7 +531,7 @@ namespace P1.UI.WeaponSelect
                 fillRt.sizeDelta = Vector2.zero;
 
                 _profileBadgeXpFill = fillGo.GetComponent<Image>();
-                UIFlatSprite.MakeFlat(_profileBadgeXpFill, filled: true);
+                UIFlatSprite.MakePill(_profileBadgeXpFill, filled: true); // 圆角化
                 _profileBadgeXpFill.color = ComicStyle.Yellow;
                 _profileBadgeXpFill.raycastTarget = false;
 
@@ -642,8 +637,7 @@ namespace P1.UI.WeaponSelect
             _toggleButtonRoot.sizeDelta = actualSize;
 
             _toggleButtonBg = btnGo.GetComponent<UIInkShapeGraphic>();
-            _toggleButtonBg.Shape = UIInkShape.SharpRect;
-            _toggleButtonBg.CornerRadius = ComicStyle.CornerSharp;
+            _toggleButtonBg.Shape = UIInkShape.RoundedRect; // 圆角化：武器整备卡自适应圆角
             _toggleButtonBg.BorderWidth = ComicStyle.Border;
             _toggleButtonBg.BorderColor = ComicStyle.Ink;
             _toggleButtonBg.color = ComicStyle.Paper;
@@ -737,8 +731,7 @@ namespace P1.UI.WeaponSelect
             chevRect.sizeDelta = new Vector2(chevron, chevron);
 
             var chevShape = chevGo.GetComponent<UIInkShapeGraphic>();
-            chevShape.Shape = UIInkShape.SharpRect;
-            chevShape.CornerRadius = ComicStyle.CornerSharp;
+            chevShape.Shape = UIInkShape.Pill; // 圆角化：方形箭头块改正圆
             chevShape.BorderWidth = 0f;
             chevShape.color = ComicStyle.Yellow;
             chevShape.raycastTarget = false;

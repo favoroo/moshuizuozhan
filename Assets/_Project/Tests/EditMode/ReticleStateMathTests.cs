@@ -118,5 +118,71 @@ namespace P1.Tests
             Assert.AreEqual(ReticleStateMath.MinSpreadDegrees, ReticleStateMath.ClampSpread(-3f), 0.0001f);
             Assert.AreEqual(4f, ReticleStateMath.ClampSpread(4f), 0.0001f);
         }
+
+        // ------------------------------------------------------------------ P40 武器身份外形
+
+        [Test]
+        public void EveryWeaponKind_MapsToAReticleStyle()
+        {
+            foreach (WeaponKind kind in Enum.GetValues(typeof(WeaponKind)))
+            {
+                Assert.IsTrue(Enum.IsDefined(typeof(ReticleStyle), ReticleStateMath.StyleFor(kind)),
+                    $"{kind} 必须映射到一个枪形身份外形，否则它会退回小枪轮廓、玩家认不出武器");
+            }
+        }
+
+        [Test]
+        public void WeaponStyle_IsTheExpectedSilhouette()
+        {
+            Assert.AreEqual(ReticleStyle.Basic, ReticleStateMath.StyleFor(WeaponKind.Shooter));
+            Assert.AreEqual(ReticleStyle.Twin, ReticleStateMath.StyleFor(WeaponKind.Dualies));
+            Assert.AreEqual(ReticleStyle.Lob, ReticleStateMath.StyleFor(WeaponKind.Slosher));
+            Assert.AreEqual(ReticleStyle.Blast, ReticleStateMath.StyleFor(WeaponKind.Blaster));
+            Assert.AreEqual(ReticleStyle.Spin, ReticleStateMath.StyleFor(WeaponKind.Splatling));
+
+            // 五把弹丸武器必须各不相同（旧版 5 把共用一个轮廓，这是 P40 要修的核心问题）
+            var seen = new System.Collections.Generic.HashSet<ReticleStyle>();
+            foreach (WeaponKind kind in new[]
+                     {
+                         WeaponKind.Shooter, WeaponKind.Dualies, WeaponKind.Slosher,
+                         WeaponKind.Blaster, WeaponKind.Splatling
+                     })
+            {
+                Assert.IsTrue(seen.Add(ReticleStateMath.StyleFor(kind)), $"{kind} 的外形与其他弹丸武器重复");
+            }
+        }
+
+        [Test]
+        public void TickOffset_ClearsCenterDotAtRest()
+        {
+            // 静止收在主环内侧，但不能盖住中心点（中心点直径 9px → 半径 4.5）
+            float offset = ReticleStateMath.TickOffset(ReticleStateMath.MinSpreadDegrees);
+            Assert.Greater(offset, 9f, "静止时刻度必须离开中心点");
+            Assert.LessOrEqual(offset, ReticleStateMath.ShooterRingDiameter * 0.5f,
+                "静止时刻度中心应落在主环内侧，不能一开局就压住环带");
+        }
+
+        [Test]
+        public void TickOffset_GrowsWithSpreadAndPunch()
+        {
+            float rest = ReticleStateMath.TickOffset(ReticleStateMath.MinSpreadDegrees);
+            float wide = ReticleStateMath.TickOffset(6.5f);
+            float punch = ReticleStateMath.TickOffset(ReticleStateMath.MinSpreadDegrees, 1f, 0f);
+            float empty = ReticleStateMath.TickOffset(ReticleStateMath.MinSpreadDegrees, 0f, 1f);
+
+            Assert.Greater(wide, rest, "散布越大刻度越外扩");
+            Assert.Greater(punch, rest, "开火当帧刻度必须弹出去");
+            Assert.Less(empty, rest, "空墨拒射刻度反向收拢");
+        }
+
+        [Test]
+        public void TickOffset_StaysInComfortableBand()
+        {
+            // 上限保护：叠满散布 + 开火冲击也不能飞出 1080p 视野的舒适读数区
+            float max = ReticleStateMath.TickOffset(90f, 1f, 0f);
+            Assert.LessOrEqual(max, 64f, "刻度外扩上限必须钳住，否则高散布武器准星会散成一整屏");
+            Assert.GreaterOrEqual(ReticleStateMath.TickOffset(0f, 0f, 1f), 10f,
+                "下限保护：空打收拢也不能把刻度收回中心点");
+        }
     }
 }

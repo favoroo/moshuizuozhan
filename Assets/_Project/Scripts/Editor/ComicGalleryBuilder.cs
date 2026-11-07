@@ -70,7 +70,7 @@ namespace P1.Editor
             CreateText(canvasGo.transform, "TitleCjk", "几何大胆风", 56f,
                 new Vector2(-760f, 330f), new Vector2(520f, 70f), theme, display: true,
                 fill: ComicStyle.Ink, align: TextAlignmentOptions.Left);
-            CreateText(canvasGo.transform, "Subtitle", "BOLD BLOCKS / SHARP CORNERS / BIG TYPE / NO SHADOW",
+            CreateText(canvasGo.transform, "Subtitle", "BOLD BLOCKS / BIG CORNERS / BIG TYPE / NO SHADOW",
                 20f, new Vector2(-470f, 268f), new Vector2(820f, 34f), theme, display: false,
                 fill: ComicStyle.Ink, align: TextAlignmentOptions.Left);
 

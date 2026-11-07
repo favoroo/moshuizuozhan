@@ -432,8 +432,8 @@ namespace P1.Player
         public float rollerGroundContactInRate = 16f;
         [Tooltip("贴地闭环退出速率（1/s）：松手/起跳/换枪时释放贴地修正")]
         public float rollerGroundContactOutRate = 22f;
-        [Tooltip("滚轴外缘目标压入地面深度（米）：0.004 读作压住墨面，0 会像悬停擦过")]
-        public float rollerGroundPenetration = 0.004f;
+        [Tooltip("滚轴外缘目标压入地面深度（米）：≈1/8 鼓径才读作压进墨面，0 会像悬停擦过")]
+        public float rollerGroundPenetration = 0.026f;
         [Tooltip("拖地入地瞬间果冻压扁冲量（0 = 关闭），让角色有'把滚筒按下去'的重量感")]
         public float rollerRollPlantSquashImpulse = 0.6f;
         [Tooltip("滚筒接地阴影开关：鼓体底缘被圆柱侧面挡住，没有贴地暗斑时即使轴心贴地也会读作悬浮")]
@@ -478,6 +478,24 @@ namespace P1.Player
         [Tooltip("双枪翻滚重心下沉（比例）")]
         [Range(0f, 0.2f)]
         public float dualiesDodgeSink = 0.05f;
+        [Tooltip("双枪翻滚整圈转角（度）：360 = 完整前滚翻，0 = 关闭转体（只剩旧侧倾）")]
+        [Range(0f, 720f)]
+        public float dualiesDodgeTumbleDegrees = 360f;
+        [Tooltip("双枪翻滚快出缓停指数：越大起步转体越爆发（INKWAVE _poseDodge = 2.4）")]
+        [Range(0.5f, 5f)]
+        public float dualiesDodgeTumbleEase = 2.4f;
+        [Tooltip("双枪翻滚中段整体抬升（米）：sin(π·u) 跳弧，起跳/落地都贴地")]
+        [Range(0f, 0.6f)]
+        public float dualiesDodgeTumbleLift = 0.30f;
+        [Tooltip("双枪翻滚蜷身纵向压缩量（0 = 不压缩，0.07 ≈ INKWAVE SQY 压 7%）")]
+        [Range(0f, 0.3f)]
+        public float dualiesDodgeTuckSquash = 0.07f;
+        [Tooltip("双枪翻滚蜷身脊柱/胸前卷角（度，满蜷身）")]
+        [Range(0f, 60f)]
+        public float dualiesDodgeTuckSpineDeg = 22f;
+        [Tooltip("双枪翻滚蜷身屈膝角（度，满蜷身）")]
+        [Range(0f, 120f)]
+        public float dualiesDodgeTuckKneeDeg = 55f;
         [Tooltip("双枪架枪重心下沉（比例）")]
         [Range(0f, 0.2f)]
         public float dualiesTurretSink = 0.06f;

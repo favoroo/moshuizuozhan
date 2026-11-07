@@ -9,7 +9,7 @@ namespace P1.Tests
     /// <summary>
     /// [P6-B] 全武器库回归契约（7 类主武器）：
     /// 1. 工厂分派与配置档案（射程 / 单发伤害 / 每次攻击耗墨）；
-    /// 2. 真实策略耗墨比例（小枪 1.1、双枪 1.0、泼桶 8.6、爆破枪 10.4、加特林 0.7/发、蓄力狙 21 满蓄）；
+    /// 2. 真实策略耗墨比例（小枪 1.1、双枪 1.0、泼桶 8.6、爆破枪 9.0、加特林 0.7/发、蓄力狙 21 满蓄）；
     /// 3. 伤害衰减曲线（滚筒挥击 125→30；蓄力狙 40→160；爆破枪 125 直击 + 70/30 溅射）；
     /// 4. 特殊状态（双枪翻滚/架枪、泼桶 Volley 聚合、加特林蓄力释放）；
     /// 5. 空墨罐时 7 类武器一律拒绝开火（不产生幽灵弹丸）。
@@ -84,6 +84,7 @@ namespace P1.Tests
             Assert.AreEqual(36f, shooter.damage, 0.0001f);
             Assert.AreEqual(1.1f, shooter.inkCostPerShot, 0.0001f);
             Assert.AreEqual(34f, shooter.projectileSpeed, 0.0001f);
+            Assert.AreEqual(4.6f, shooter.firingMoveSpeed, 0.0001f, "开火移速 4.6（INKWAVE moveSpeedFiring）");
 
             // 滚筒 Swell Roller
             WeaponConfigSO roller = CreateSpecConfig(WeaponKind.Roller);
@@ -94,6 +95,7 @@ namespace P1.Tests
             Assert.AreEqual(140f, roller.rollDamage, 0.0001f, "碾压 140");
             Assert.AreEqual(1.9f, roller.rollWidth, 0.0001f, "墨带 1.9m");
             Assert.AreEqual(1.25f, roller.rollInkPerMeter, 0.0001f, "推地 1.25 墨/米");
+            Assert.AreEqual(4.4f, roller.firingMoveSpeed, 0.0001f, "推地满速 = 鼓速 4.4（INKWAVE rollSpeed）");
 
             // 蓄力狙 Glint Charger
             WeaponConfigSO charger = CreateSpecConfig(WeaponKind.Charger);
@@ -102,6 +104,8 @@ namespace P1.Tests
             Assert.AreEqual(40f, charger.chargeDamageMin, 0.0001f);
             Assert.AreEqual(160f, charger.chargeDamageMax, 0.0001f);
             Assert.AreEqual(21f, charger.chargeInkCostFull, 0.0001f, "满蓄耗墨 21");
+            Assert.AreEqual(1.8f, charger.firingMoveSpeed, 0.0001f, "满蓄移速锁定 1.8");
+            Assert.AreEqual(4.2f, charger.chargeMoveSpeedStart, 0.0001f, "蓄力起步移速 4.2");
 
             // 双枪 Twinfin Dualies
             WeaponConfigSO dualies = CreateSpecConfig(WeaponKind.Dualies);
@@ -110,6 +114,7 @@ namespace P1.Tests
             Assert.AreEqual(1.0f, dualies.inkCostPerShot, 0.0001f);
             Assert.AreEqual(8f, dualies.dualiesRollInkCost, 0.0001f);
             Assert.AreEqual(2.8f, dualies.dualiesRollDistance, 0.0001f);
+            Assert.AreEqual(5.0f, dualies.firingMoveSpeed, 0.0001f, "开火移速 5.0（机动是双枪立身之本）");
 
             // 泼桶 Tidebucket Slosher
             WeaponConfigSO slosher = CreateSpecConfig(WeaponKind.Slosher);
@@ -118,15 +123,18 @@ namespace P1.Tests
             Assert.AreEqual(34f, slosher.slosherTailDamage, 0.0001f);
             Assert.AreEqual(8.6f, slosher.inkCostPerShot, 0.0001f);
             Assert.AreEqual(8, slosher.slosherDrops);
+            Assert.AreEqual(4.2f, slosher.firingMoveSpeed, 0.0001f, "开火移速 4.2（前摇再乘 0.7）");
 
             // 爆破枪 Popper Blaster
             WeaponConfigSO blaster = CreateSpecConfig(WeaponKind.Blaster);
             Assert.AreEqual(10.5f, blaster.maxRange, 0.0001f);
             Assert.AreEqual(125f, blaster.damage, 0.0001f);
-            Assert.AreEqual(10.4f, blaster.inkCostPerShot, 0.0001f);
+            Assert.AreEqual(9f, blaster.inkCostPerShot, 0.0001f, "对齐 INKWAVE inkPerShot=9");
+            Assert.AreEqual(0.38f, blaster.blasterHitRadius, 0.0001f, "直击判定球 0.38m");
             Assert.AreEqual(2.6f, blaster.blasterSplashRadius, 0.0001f);
             Assert.AreEqual(70f, blaster.blasterSplashDamageMax, 0.0001f);
             Assert.AreEqual(30f, blaster.blasterSplashDamageMin, 0.0001f);
+            Assert.AreEqual(4.0f, blaster.firingMoveSpeed, 0.0001f, "开火移速 4.0");
 
             // 加特林 Gyre Splatling
             WeaponConfigSO splatling = CreateSpecConfig(WeaponKind.Splatling);
@@ -135,6 +143,8 @@ namespace P1.Tests
             Assert.AreEqual(0.7f, splatling.inkCostPerShot, 0.0001f);
             Assert.AreEqual(40f, splatling.projectileSpeed, 0.0001f);
             Assert.AreEqual(0.85f, splatling.splatlingChargeTime, 0.0001f);
+            Assert.AreEqual(3.4f, splatling.firingMoveSpeed, 0.0001f, "扫射移速 3.4");
+            Assert.AreEqual(4.5f, splatling.splatlingMoveSpeedChargeStart, 0.0001f, "蓄力起步移速 4.5");
         }
 
         // ------------------------------------------------------------------ 耗墨比例
@@ -229,7 +239,7 @@ namespace P1.Tests
             WeaponAim aim = ForwardAim(8f);
 
             Assert.IsTrue(strategy.OnTriggerHeld(aim, 1f / 60f, host));
-            Assert.AreEqual(100f - 10.4f, host.CurrentInk, 0.005f, "爆破枪单发耗墨 10.4");
+            Assert.AreEqual(100f - 9f, host.CurrentInk, 0.005f, "爆破枪单发耗墨 9.0（INKWAVE 对齐）");
             Assert.AreEqual(1, host.Shots.Count);
 
             WeaponShot shot = host.Shots[0];
@@ -425,16 +435,19 @@ namespace P1.Tests
 
             switch (kind)
             {
-                // 默认字段即 Spritzer（小枪）规范，滚筒/蓄力狙只覆写类型与射程。
+                // 默认字段即 Spritzer（小枪）规范，滚筒/蓄力狙只覆写类型、射程与开火移速（与菜单 6 一致）。
                 case WeaponKind.Roller:
                     config.weaponKind = WeaponKind.Roller;
                     config.displayName = "Swell Roller";
                     config.maxRange = 6f;
+                    config.firingMoveSpeed = 4.4f;
                     break;
                 case WeaponKind.Charger:
                     config.weaponKind = WeaponKind.Charger;
                     config.displayName = "Glint Charger";
                     config.maxRange = config.chargeRangeMax;
+                    config.firingMoveSpeed = 1.8f;
+                    config.chargeMoveSpeedStart = 4.2f;
                     break;
                 case WeaponKind.Dualies:
                     WeaponConfigSO.ApplyDualiesSpec(config);

@@ -224,13 +224,13 @@ namespace P1.Player
                 return;
             }
 
-            ApplyCursorState(GameplayInputEnabled && MatchManager.InputAllowed);
+            ApplyCursorState(CursorShouldLock);
         }
 
         private void Update()
         {
             bool gameplayActive = GameplayInputEnabled && MatchManager.InputAllowed;
-            ApplyCursorState(gameplayActive);
+            ApplyCursorState(CursorShouldLock);
 
             if (!_health.IsAlive || !gameplayActive)
             {
@@ -817,6 +817,14 @@ namespace P1.Player
         // ------------------------------------------------------------------
         // 光标锁定
         // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 桌面光标是否该锁：对局允许输入 + 本地玩家存活。
+        /// 阵亡期间阵亡整备条可点选，必须释放光标（移动端没有光标概念，不受影响）；
+        /// 复活后本方法每帧重入，自动重新锁定。
+        /// </summary>
+        private bool CursorShouldLock =>
+            GameplayInputEnabled && MatchManager.InputAllowed && (_health == null || _health.IsAlive);
 
         private void ApplyCursorState(bool gameplayActive)
         {

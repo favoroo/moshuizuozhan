@@ -393,8 +393,7 @@ namespace P1.UI.Menus
             _mobilePauseButtonRt.sizeDelta = new Vector2(88f, 88f);
 
             var shape = btnGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect; // 直角方块
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.Pill; // 圆角化：88×88 移动端暂停按钮改正圆
             shape.BorderWidth = ComicStyle.Border;
             shape.BorderColor = ComicStyle.Ink;
             shape.color = ComicStyle.Paper;
@@ -485,8 +484,7 @@ namespace P1.UI.Menus
             _panelRect.sizeDelta = new Vector2(PausePanelWidth, PausePanelHeight);
 
             _panelShape = panelGo.GetComponent<UIInkShapeGraphic>();
-            _panelShape.Shape = UIInkShape.SharpRect; // 直角面板
-            _panelShape.CornerRadius = ComicStyle.CornerSharp;
+            _panelShape.Shape = UIInkShape.RoundedRect; // 圆角化：暂停面板自适应圆角
             _panelShape.BorderWidth = ComicStyle.BorderThin; // 3px 墨框
             _panelShape.BorderColor = ComicStyle.Ink;
             _panelShape.color = ComicStyle.Paper; // 纸白底
@@ -557,8 +555,7 @@ namespace P1.UI.Menus
             barRt.anchoredPosition = new Vector2(0f, 0f);
             barRt.sizeDelta = new Vector2(10f, 54f);
             var barShape = barGo.GetComponent<UIInkShapeGraphic>();
-            barShape.Shape = UIInkShape.SharpRect;
-            barShape.CornerRadius = ComicStyle.CornerSharp;
+            barShape.Shape = UIInkShape.Pill; // 圆角化：标题竖条改胶囊
             barShape.BorderWidth = 0f;
             barShape.color = ComicStyle.Yellow;
             barShape.HardShadow = false;
@@ -677,8 +674,7 @@ namespace P1.UI.Menus
             cardRt.sizeDelta = new Vector2(ControlsCardWidth, cardHeight);
 
             var cardShape = cardGo.GetComponent<UIInkShapeGraphic>();
-            cardShape.Shape = UIInkShape.SharpRect;
-            cardShape.CornerRadius = ComicStyle.CornerSharp;
+            cardShape.Shape = UIInkShape.RoundedRect; // 圆角化：操作说明卡自适应圆角
             cardShape.BorderWidth = ComicStyle.BorderThin;
             cardShape.BorderColor = ComicStyle.Ink;
             cardShape.color = ComicStyle.PaperAlt;
@@ -698,8 +694,7 @@ namespace P1.UI.Menus
             accentRt.anchoredPosition = new Vector2(-halfWidth + ControlsCardPadding, halfHeight - 42f);
             accentRt.sizeDelta = new Vector2(8f, 30f);
             var accentShape = accentGo.GetComponent<UIInkShapeGraphic>();
-            accentShape.Shape = UIInkShape.SharpRect;
-            accentShape.CornerRadius = ComicStyle.CornerSharp;
+            accentShape.Shape = UIInkShape.Pill; // 圆角化：标题色标改胶囊
             accentShape.BorderWidth = 0f;
             accentShape.color = ComicStyle.Yellow;
             accentShape.HardShadow = false;
@@ -743,7 +738,7 @@ namespace P1.UI.Menus
             {
                 float y = firstRowY - i * (ControlsRowHeight + ControlsRowGap);
 
-                // 键帽：墨底纸白字 + 色签硬影，直角
+                // 键帽：墨底纸白字 + 色签硬影，圆角（自适应半径）
                 var capGo = new GameObject("KeyCap_" + i, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
                 capGo.transform.SetParent(cardGo.transform, false);
                 var capRt = capGo.GetComponent<RectTransform>();
@@ -753,8 +748,7 @@ namespace P1.UI.Menus
                 capRt.sizeDelta = new Vector2(ControlsKeyCapWidth, ControlsRowHeight);
 
                 var capShape = capGo.GetComponent<UIInkShapeGraphic>();
-                capShape.Shape = UIInkShape.SharpRect;
-                capShape.CornerRadius = ComicStyle.CornerSharp;
+                capShape.Shape = UIInkShape.RoundedRect; // 圆角化：键帽
                 capShape.BorderWidth = 0f;
                 capShape.color = ComicStyle.Ink;
                 capShape.HardShadow = false;
@@ -1109,8 +1103,7 @@ namespace P1.UI.Menus
             rt.anchoredPosition = new Vector2(0f, rowTop - PauseSettingRowHeight * 0.5f);
 
             var shape = rowGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：设置行自适应圆角
             shape.BorderWidth = 0f;
             shape.color = ComicStyle.PaperAlt;
             shape.HardShadow = false;
@@ -1119,13 +1112,17 @@ namespace P1.UI.Menus
 
             if (showSeparator)
             {
+                // 设置行是圆角卡片：2px 分隔线必须内缩到圆角直线段内，否则线端会从两侧圆角
+                // 探出成「小尾巴」（用户反馈的线条溢出）。内缩量取行圆角半径，与
+                // UIInkShapeGraphic 的 CornerFor 自适应半径同源。
+                float rowRadius = ComicStyle.CornerFor(SettingsContentWidth, PauseSettingRowHeight);
                 var lineGo = new GameObject("Separator", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
                 lineGo.transform.SetParent(rowGo.transform, false);
                 var lrt = lineGo.GetComponent<RectTransform>();
                 lrt.anchorMin = new Vector2(0f, 0f);
                 lrt.anchorMax = new Vector2(1f, 0f);
                 lrt.pivot = new Vector2(0.5f, 0f);
-                lrt.sizeDelta = new Vector2(0f, 2f);
+                lrt.sizeDelta = new Vector2(-rowRadius * 2f, 2f);
                 lrt.anchoredPosition = Vector2.zero;
                 var img = lineGo.GetComponent<Image>();
                 img.color = ComicStyle.InkSoft;
@@ -1272,8 +1269,7 @@ namespace P1.UI.Menus
             barRt.sizeDelta = size;
 
             var barShape = barGo.GetComponent<UIInkShapeGraphic>();
-            barShape.Shape = UIInkShape.SharpRect;
-            barShape.CornerRadius = ComicStyle.CornerSharp;
+            barShape.Shape = UIInkShape.Pill; // 圆角化：分区色标改胶囊
             barShape.BorderWidth = 0f;
             barShape.color = ComicStyle.Yellow;
             barShape.HardShadow = false;
@@ -1366,8 +1362,7 @@ namespace P1.UI.Menus
             barRt.anchoredPosition = new Vector2(0f, 0f);
             barRt.sizeDelta = new Vector2(8f, 44f);
             var barShape = barGo.GetComponent<UIInkShapeGraphic>();
-            barShape.Shape = UIInkShape.SharpRect;
-            barShape.CornerRadius = ComicStyle.CornerSharp;
+            barShape.Shape = UIInkShape.Pill; // 圆角化：标题色标改胶囊
             barShape.BorderWidth = 0f;
             barShape.color = ComicStyle.Yellow;
             barShape.HardShadow = false;
@@ -1420,8 +1415,7 @@ namespace P1.UI.Menus
                 rt.anchoredPosition = new Vector2(0f, y);
 
                 var shape = rowGo.GetComponent<UIInkShapeGraphic>();
-                shape.Shape = UIInkShape.SharpRect;
-                shape.CornerRadius = ComicStyle.CornerSharp;
+                shape.Shape = UIInkShape.RoundedRect; // 圆角化：键位行自适应圆角
                 shape.BorderWidth = ComicStyle.BorderThin;
                 shape.BorderColor = ComicStyle.InkSoft;
                 shape.color = (i % 2 == 0) ? ComicStyle.Paper : ComicStyle.PaperAlt;
@@ -2389,7 +2383,7 @@ namespace P1.UI.Menus
             rt.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect; // 直角方块
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：按钮圆角矩形（radius 0 = 自适应，999 = 胶囊）
             shape.CornerRadius = cornerRadius;
             shape.BorderWidth = borderWidth;
             shape.BorderColor = ComicStyle.Ink;
@@ -2464,8 +2458,7 @@ namespace P1.UI.Menus
             bgRt.anchorMax = new Vector2(1f, 0.5f);
             bgRt.sizeDelta = new Vector2(0f, SettingsSliderTrackHeight);
             var bgShape = bgGo.GetComponent<UIInkShapeGraphic>();
-            bgShape.Shape = UIInkShape.SharpRect;
-            bgShape.CornerRadius = ComicStyle.CornerSharp;
+            bgShape.Shape = UIInkShape.Pill; // 圆角化：滑轨槽胶囊化
             bgShape.BorderWidth = ComicStyle.BorderThin;
             bgShape.BorderColor = ComicStyle.Ink;
             bgShape.color = ComicStyle.PaperAlt;
@@ -2488,8 +2481,7 @@ namespace P1.UI.Menus
             var fillRt = fillGo.GetComponent<RectTransform>();
             fillRt.sizeDelta = Vector2.zero;
             var fillShape = fillGo.GetComponent<UIInkShapeGraphic>();
-            fillShape.Shape = UIInkShape.SharpRect;
-            fillShape.CornerRadius = ComicStyle.CornerSharp;
+            fillShape.Shape = UIInkShape.Pill; // 圆角化：滑轨填充胶囊化（宽度随值变化仍保持全圆端头）
             fillShape.BorderWidth = 0f;
             fillShape.color = ComicStyle.Yellow;
             fillShape.HardShadow = false;

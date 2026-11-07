@@ -64,6 +64,7 @@ namespace P1.Core
         public AudioClip[] stepEnemyClips;
         public AudioClip jumpClip;
         public AudioClip landClip;
+        public AudioClip dodgeRollClip;
 
         [Header("受击与战斗反馈（P6-A）")]
         public AudioClip hurtClip;
@@ -929,6 +930,12 @@ namespace P1.Core
             PlayOne(landClip, Mix.landVolume, 0.96f, 1.04f);
         }
 
+        /// <summary>双枪战术翻滚：下扫「唰」+ 低频体感（P40），双变体随机音高。</summary>
+        public void PlayDodgeRoll()
+        {
+            PlayOne(dodgeRollClip, Mix.dodgeRollVolume, 0.92f, 1.08f);
+        }
+
         public void PlaySquidIn()
         {
             PlayOne(squidInClip, Mix.squidTransformVolume, 0.98f, 1.02f);
@@ -1268,6 +1275,7 @@ namespace P1.Core
             EnsureClips(ref stepEnemyClips, library, "step_enemy_1", "step_enemy_2", "step_enemy_3");
             EnsureClip(ref jumpClip, library, "jump_1");
             EnsureClip(ref landClip, library, "land_1");
+            EnsureClip(ref dodgeRollClip, library, "dodge_roll_1");
 
             EnsureClip(ref hurtClip, library, "hurt_1");
             EnsureClips(ref hitMarkerClips, library, "hit_marker_1", "hit_marker_2");
@@ -1368,6 +1376,7 @@ namespace P1.Core
                 stepEnemyClips = LoadClips("step_enemy_1", "step_enemy_2", "step_enemy_3");
             if (jumpClip == null) jumpClip = LoadClip("jump_1");
             if (landClip == null) landClip = LoadClip("land_1");
+            if (dodgeRollClip == null) dodgeRollClip = LoadClip("dodge_roll_1");
 
             if (hurtClip == null) hurtClip = LoadClip("hurt_1");
             if (hitMarkerClips == null || hitMarkerClips.Length == 0)

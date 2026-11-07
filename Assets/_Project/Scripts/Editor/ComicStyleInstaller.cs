@@ -201,13 +201,13 @@ namespace P1.Editor
                 return;
             }
 
-            SetInt(p, "shape", (int)UIInkShape.SharpRect);
+            SetInt(p, "shape", (int)UIInkShape.RoundedRect);
             SetColor(p, "fillColor", fill);
             SetColor(p, "titleColor", title);
             SetBool(p, "fillUsesTeamColor", teamTint);
             SetColor(p, "borderColor", ComicStyle.Ink);
             SetFloat(p, "borderWidth", ComicStyle.Border);
-            SetFloat(p, "cornerRadius", ComicStyle.CornerSharp);
+            SetFloat(p, "cornerRadius", 0f); // 0 = RoundedRect 按短边自适应半径
             SetFloat(p, "wobble", 0f);
             SetFloat(p, "glossAlpha", 0f);
             SetFloat(p, "innerRimAlpha", 0f);

@@ -329,8 +329,9 @@ namespace P1.Player
             float dodge = Mathf.Clamp01(input.Dodge01);
             float side = Mathf.Clamp(input.DodgeSign, -1f, 1f);
             pose.RollDeg += side * 10f * dodge;
-            pose.DropMeters += 0.03f * dodge;
-            pose.ForwardMeters -= 0.02f * dodge;
+            // P40 翻滚抱胸：双枪贴胸口收拢（旧值 0.03/-0.02 只是轻微下沉，团身时枪仍外伸穿模）
+            pose.DropMeters += 0.05f * dodge;
+            pose.ForwardMeters -= 0.06f * dodge;
             pose.BodyRollDeg += side * Mathf.Max(0f, p.DualiesDodgeBodyRollDeg) * dodge;
             pose.BodyPitchDeg += Mathf.Clamp(input.DodgeForwardSign, -1f, 1f) * 4f * dodge;
             pose.Sink01 += Mathf.Max(0f, p.DualiesDodgeSink) * dodge;

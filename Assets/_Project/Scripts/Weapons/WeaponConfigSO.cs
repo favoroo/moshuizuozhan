@@ -87,6 +87,10 @@ namespace P1.Weapons
         [Tooltip("横向每一枚墨印的半径（米）：0.34 时 5 枚圆印拼出平整的 1.9m 墨带")]
         public float rollPaintRadius = 0.34f;
 
+        [Tooltip("涂带前伸量（米）：墨带远端从脚下沿前进方向延伸该长度，让墨出现在滚筒触地处。" +
+                 "0.7 ≈ 鼓轴前伸 0.59m + 半个鼓径；0 = 旧行为（墨带止于脚下，滚筒滚过干净地面读作悬空）")]
+        public float rollPaintLeadMeters = 0.7f;
+
         [Tooltip("单帧最大可信滚动位移（米）：超过即视为越界回收/复活传送，本帧不涂地、不扣墨。" +
                  "正常 60fps 潜行 11.8m/s 也只有 0.2m，1.5m 留足卡顿余量")]
         public float rollMaxStepMeters = 1.5f;
@@ -194,6 +198,10 @@ namespace P1.Weapons
         [Tooltip("翻滚位移距离（米）")]
         public float dualiesRollDistance = 2.8f;
 
+        [Tooltip("翻滚爆发速度倍率：起步峰值 = 倍率 × 距离/时长，快出缓停（INKWAVE dodgeVel = 1.5）；曲线积分恰为翻滚距离")]
+        [Range(1f, 2.5f)]
+        public float dualiesRollBurstSpeedMultiplier = 1.5f;
+
         [Tooltip("最大连续翻滚次数")]
         public int dualiesMaxRolls = 2;
 
@@ -246,6 +254,9 @@ namespace P1.Weapons
 
         [Tooltip("爆裂视觉与地面爆斑半径（米）")]
         public float blasterBurstRadius = 1.9f;
+
+        [Tooltip("直击判定球半径（米）：只用于接住角色；撞墙/撞地走细射线，避免大球体提前贴地")]
+        public float blasterHitRadius = 0.38f;
 
         [Header("主武器：加特林 (Gyre Splatling)")]
         [Tooltip("蓄满所需时间（秒）")]
@@ -374,6 +385,18 @@ namespace P1.Weapons
         [Tooltip("释放后锁枪/锁定移动的投掷前摇（秒）")]
         public float stormThrowLockDuration = 0.35f;
 
+        [Header("开火移速（对齐 INKWAVE weapons.js 的逐武器 moveSpeed）")]
+        [Tooltip("扳机按住期间的目标移速（米/秒）：0 = 沿用 PlayerConfig.firingMoveSpeed 全局值 3.8。" +
+                 "INKWAVE 逐武器定速：小枪 4.6 / 双枪 5.0 / 爆破 4.0 / 泼桶 4.2 / 滚筒 4.4 / 蓄力狙 1.8 / 加特林 3.4。" +
+                 "类字段默认 4.6 = 小枪规范，与「默认字段即 Spritzer」的约定一致")]
+        public float firingMoveSpeed = 4.6f;
+
+        [Tooltip("蓄力狙专用：蓄力起始移速（米/秒），随蓄力进度线性降到 firingMoveSpeed（INKWAVE = 跑速 × 0.7 ≈ 4.2）。0 = 不做减速渐变")]
+        public float chargeMoveSpeedStart = 4.2f;
+
+        [Tooltip("加特林专用：蓄力起始移速（米/秒），随蓄力进度线性降到 splatlingMoveSpeedCharging（INKWAVE = 跑速 × 0.75 ≈ 4.5）。0 = 不做渐变")]
+        public float splatlingMoveSpeedChargeStart = 4.5f;
+
         [Header("射击手感：后坐力 / 镜头冲击 / 枪口 (P16)")]
         [Tooltip("开火瞬间角色武器模型向后的位移（米）。0 = 使用武器类别默认值（见 WeaponFeelProfile）")]
         public float recoilKickMeters = 0f;
@@ -408,6 +431,7 @@ namespace P1.Weapons
             rollWidth = Mathf.Max(0.2f, rollWidth);
             rollForwardReach = Mathf.Max(0.1f, rollForwardReach);
             rollPaintRadius = Mathf.Max(0.05f, rollPaintRadius);
+            rollPaintLeadMeters = Mathf.Max(0f, rollPaintLeadMeters);
             rollStartSpeedFactor = Mathf.Clamp01(rollStartSpeedFactor);
             rollAccelTime = Mathf.Max(0.05f, rollAccelTime);
             flickWindupMoveFactor = Mathf.Clamp01(flickWindupMoveFactor);
@@ -423,6 +447,7 @@ namespace P1.Weapons
             chargeLineSplatEvery = Mathf.Max(0.2f, chargeLineSplatEvery);
 
             dualiesRollDuration = Mathf.Max(0.05f, dualiesRollDuration);
+            dualiesRollBurstSpeedMultiplier = Mathf.Clamp(dualiesRollBurstSpeedMultiplier, 1f, 2.5f);
             dualiesTurretDuration = Mathf.Max(0.05f, dualiesTurretDuration);
             dualiesMaxRolls = Mathf.Max(1, dualiesMaxRolls);
             dualiesTurretFireInterval = Mathf.Max(0.02f, dualiesTurretFireInterval);
@@ -454,6 +479,10 @@ namespace P1.Weapons
             stormRainSplatRadiusMax = Mathf.Max(stormRainSplatRadiusMin, stormRainSplatRadiusMax);
             stormGrowTime = Mathf.Max(0.05f, stormGrowTime);
             stormFadeTime = Mathf.Max(0.05f, stormFadeTime);
+
+            firingMoveSpeed = Mathf.Max(0f, firingMoveSpeed);
+            chargeMoveSpeedStart = Mathf.Max(0f, chargeMoveSpeedStart);
+            splatlingMoveSpeedChargeStart = Mathf.Max(0f, splatlingMoveSpeedChargeStart);
 
             // P16 射击手感：负值一律视为「未填写」，交给 WeaponFeelProfile 的类别默认值兜底
             recoilKickMeters = Mathf.Max(0f, recoilKickMeters);
@@ -509,6 +538,9 @@ namespace P1.Weapons
             roller.maxRange = 6f;
             roller.rollInkPerMeter = 1.25f;
             roller.flickInkCost = 10.5f;
+            // 开火移速对齐 INKWAVE rollSpeed 4.4：推地满速就是鼓速（P35 的起步/收势曲线不变，只换基数）。
+            // 旧值吃全局 3.8，同墨量涂地效率比 INKWAVE 低约 24% —— 涂地武器最不能砍的就是这个。
+            roller.firingMoveSpeed = 4.4f;
             UnityEditor.EditorUtility.SetDirty(roller);
 
             // 3. Glint Charger (蓄力狙)
@@ -518,6 +550,10 @@ namespace P1.Weapons
             charger.displayName = "Glint Charger";
             charger.maxRange = charger.chargeRangeMax;
             charger.chargeInkCostFull = 21f;
+            // 开火移速对齐 INKWAVE moveSpeedFiring：蓄满后钉在 1.8 m/s（狙击的开枪代价），
+            // 蓄力起步 4.2（= 跑速 × 0.7）随蓄力线性降下去。
+            charger.firingMoveSpeed = 1.8f;
+            charger.chargeMoveSpeedStart = 4.2f;
             UnityEditor.EditorUtility.SetDirty(charger);
 
             // 4. Twinfin Dualies (双枪)
@@ -552,6 +588,9 @@ namespace P1.Weapons
             config.fireInterval = 0.083f;
             config.damage = 30f;
             config.inkCostPerShot = 1.0f;
+            // 开火移速对齐 INKWAVE moveSpeedFiring 5.0：机动是双枪的立身之本（mobility 0.95），
+            // 全局 3.8 会把它的玩法砍没（翻滚/架枪之外的走喷节奏）
+            config.firingMoveSpeed = 5.0f;
             config.projectileSpeed = 32f;
             config.maxRange = 11f;
             config.spreadMinDegrees = 0.5f;
@@ -568,6 +607,7 @@ namespace P1.Weapons
             config.dualiesRollInkCost = 8f;
             config.dualiesRollDuration = 0.3f;
             config.dualiesRollDistance = 2.8f;
+            config.dualiesRollBurstSpeedMultiplier = 1.5f;
             config.dualiesMaxRolls = 2;
             config.dualiesTurretDuration = 0.5f;
             config.dualiesTurretFireInterval = 0.0664f; // 射速提升 20%
@@ -583,6 +623,7 @@ namespace P1.Weapons
             config.fireInterval = 0.62f;
             config.damage = 70f;
             config.inkCostPerShot = 8.6f;
+            config.firingMoveSpeed = 4.2f; // 开火移速对齐 INKWAVE moveSpeedFiring 4.2（前摇期间另乘策略层 0.7）
             config.projectileSpeed = 15f;
             config.projectileGravity = 22f;
             config.maxRange = 9.5f;
@@ -608,7 +649,10 @@ namespace P1.Weapons
             config.displayName = "Popper Blaster";
             config.fireInterval = 0.78f;
             config.damage = 125f; // 直击秒杀
-            config.inkCostPerShot = 10.4f;
+            // 对齐 INKWAVE inkPerShot=9：10.4 让满罐只剩 9.6 发，是 7 把枪里最缺墨的（输出 7.5s），
+            // 低射速 + 高单发耗墨叠加后实战里「打两发就见底」，体感明显偏弱。
+            config.inkCostPerShot = 9f;
+            config.firingMoveSpeed = 4.0f; // 开火移速对齐 INKWAVE moveSpeedFiring 4.0
             config.projectileSpeed = 23f;
             config.projectileGravity = 0f; // 直线飞行空爆
             config.maxRange = 10.5f;
@@ -618,6 +662,9 @@ namespace P1.Weapons
             config.blasterSplashDamageMax = 70f;
             config.blasterSplashDamageMin = 30f;
             config.blasterBurstRadius = 1.9f;
+            // 0.26 → 0.38：直击 125 秒杀是这把枪唯一的爆发来源，但 23m/s 的慢弹打移动目标
+            // 很难靠小球撞上；放大判定让「打准了就该秒」真正兑现（撞墙/撞地已不受该半径影响）。
+            config.blasterHitRadius = 0.38f;
             config.endSplatRadius = 1.5f;
             config.endSplatRadiusMin = 1.3f;
             config.endSplatRadiusMax = 1.7f;
@@ -631,6 +678,10 @@ namespace P1.Weapons
             config.fireInterval = 0.066f; // 15发/秒
             config.damage = 28f;
             config.inkCostPerShot = 0.7f;
+            // 开火移速对齐 INKWAVE moveSpeedFiring 3.4：蓄力起步 4.5（= 跑速 × 0.75）随蓄力渐入 2.4，
+            // 由策略层 FiringMoveSpeedOverride 给出绝对速度（旧 ÷6.0 比率乘错基数，实际只有 1.52 m/s）
+            config.firingMoveSpeed = 3.4f;
+            config.splatlingMoveSpeedChargeStart = 4.5f;
             config.projectileSpeed = 40f;
             config.maxRange = 15f;
             config.spreadMinDegrees = 0.6f;
@@ -727,7 +778,8 @@ namespace P1.Weapons
             ApplyInkEconomy($"{weaponsFolder}/Weapon_GlintCharger.asset", 1.1f, 1.25f, 10.5f, 21f, 8f);
             ApplyInkEconomy($"{weaponsFolder}/Weapon_TwinfinDualies.asset", 1.0f, 1.25f, 10.5f, 21f, 8f);
             ApplyInkEconomy($"{weaponsFolder}/Weapon_TidebucketSlosher.asset", 8.6f, 1.25f, 10.5f, 21f, 8f);
-            ApplyInkEconomy($"{weaponsFolder}/Weapon_PopperBlaster.asset", 10.4f, 1.25f, 10.5f, 21f, 8f);
+            // 爆破枪 9（对齐 INKWAVE）：低射速 + 10.4 会让满罐只剩 9.6 发，是全表最缺墨的一把
+            ApplyInkEconomy($"{weaponsFolder}/Weapon_PopperBlaster.asset", 9f, 1.25f, 10.5f, 21f, 8f);
             ApplyInkEconomy($"{weaponsFolder}/Weapon_GyreSplatling.asset", 0.7f, 1.25f, 10.5f, 21f, 8f);
 
             P1.Player.PlayerConfigSO playerConfig =
@@ -836,6 +888,7 @@ namespace P1.Weapons
             config.maxRange = 12f;
             config.projectileSpeed = 34f;
             config.inkCostPerShot = 1.1f;
+            config.firingMoveSpeed = 4.6f; // 开火移速对齐 INKWAVE moveSpeedFiring 4.6（跑 6.0 / 喷 4.6 的走喷节奏）
             config.spreadMinDegrees = 1.2f;
             config.spreadDegrees = 5.5f;
             config.bloomPerShot = 0.3f;

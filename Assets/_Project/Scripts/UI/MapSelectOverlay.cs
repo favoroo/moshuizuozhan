@@ -208,8 +208,7 @@ namespace P1.UI
             panel.sizeDelta = panelSize;
 
             var panelShape = panelGo.GetComponent<UIInkShapeGraphic>();
-            panelShape.Shape = UIInkShape.SharpRect;
-            panelShape.CornerRadius = ComicStyle.CornerSharp;
+            panelShape.Shape = UIInkShape.RoundedRect; // 圆角化：弹窗面板自适应圆角，硬影同形状跟随
             panelShape.BorderWidth = ComicStyle.Border;
             panelShape.BorderColor = ComicStyle.Ink;
             panelShape.color = ComicStyle.Paper;
@@ -273,18 +272,19 @@ namespace P1.UI
         {
             float innerWidth = panelSize.x - m.Padding * 2f;
 
+            // 圆角化：顶部身份色带内缩到圆角直线段内并改胶囊短划
+            float panelRadius = ComicStyle.CornerFor(panelSize.x, panelSize.y);
             var bandGo = new GameObject("AccentBand", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             bandGo.transform.SetParent(panel, false);
             var band = (RectTransform)bandGo.transform;
             band.anchorMin = new Vector2(0f, 1f);
             band.anchorMax = new Vector2(1f, 1f);
             band.pivot = new Vector2(0.5f, 1f);
-            band.sizeDelta = new Vector2(-ComicStyle.Border * 2f, m.TopBandHeight);
+            band.sizeDelta = new Vector2(-(panelRadius + ComicStyle.Border) * 2f, m.TopBandHeight);
             band.anchoredPosition = new Vector2(0f, -ComicStyle.Border);
 
             var bandShape = bandGo.GetComponent<UIInkShapeGraphic>();
-            bandShape.Shape = UIInkShape.SharpRect;
-            bandShape.CornerRadius = ComicStyle.CornerSharp;
+            bandShape.Shape = UIInkShape.Pill;
             bandShape.BorderWidth = 0f;
             bandShape.color = ComicStyle.Blue;
             bandShape.HardShadow = false;
@@ -436,8 +436,7 @@ namespace P1.UI
             rect.sizeDelta = m.ScrollArrowSize;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.Pill; // 圆角化：56×56 箭头键改正圆
             shape.BorderWidth = 0f;
             shape.color = ComicStyle.Ink;
             shape.HardShadow = false;
@@ -650,8 +649,7 @@ namespace P1.UI
             bool cardShadow = !_cardsScrollNeeded;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：地图卡自适应圆角
             shape.BorderWidth = selected ? m.CardBorderWidth : m.CardBorderThinWidth;
             shape.BorderColor = selected ? map.Accent : ComicStyle.Ink;
             shape.color = ComicStyle.PaperAlt;
@@ -669,18 +667,19 @@ namespace P1.UI
             if (cardShadow) jelly.EnableThemeHardShadow(UIHardShadowLevel.Panel);
             UISoundBinder.EnsureBinder(button);
 
+            // 圆角化：卡片色带内缩到圆角直线段内并改胶囊短划
+            float cardRadius = ComicStyle.CornerFor(size.x, size.y);
             var bandGo = new GameObject("AccentBand", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             bandGo.transform.SetParent(card, false);
             var band = (RectTransform)bandGo.transform;
             band.anchorMin = new Vector2(0f, 1f);
             band.anchorMax = new Vector2(1f, 1f);
             band.pivot = new Vector2(0.5f, 1f);
-            band.sizeDelta = new Vector2(-m.CardBorderThinWidth * 2f, m.CardBandHeight);
+            band.sizeDelta = new Vector2(-(cardRadius + m.CardBorderThinWidth) * 2f, m.CardBandHeight);
             band.anchoredPosition = new Vector2(0f, -m.CardBorderThinWidth);
 
             var bandShape = bandGo.GetComponent<UIInkShapeGraphic>();
-            bandShape.Shape = UIInkShape.SharpRect;
-            bandShape.CornerRadius = ComicStyle.CornerSharp;
+            bandShape.Shape = UIInkShape.Pill;
             bandShape.BorderWidth = 0f;
             bandShape.color = map.Accent;
             bandShape.HardShadow = false;
@@ -763,7 +762,7 @@ namespace P1.UI
             rect.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：选卡按钮自适应圆角
             shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = borderWidth;
             shape.BorderColor = borderColor;
@@ -875,8 +874,7 @@ namespace P1.UI
             rect.sizeDelta = m.CloseSize;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.Pill; // 圆角化：72×72 关闭键改正圆
             shape.BorderWidth = 0f;
             shape.color = ComicStyle.Ink;
             shape.HardShadow = false;
@@ -922,8 +920,7 @@ namespace P1.UI
             rect.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.Pill; // 圆角化：角签改胶囊
             shape.BorderWidth = 0f;
             shape.color = fill;
             shape.HardShadow = false;
@@ -951,7 +948,7 @@ namespace P1.UI
             rect.sizeDelta = size;
 
             var shape = go.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
+            shape.Shape = UIInkShape.RoundedRect; // 圆角化：细线/色块自适应（1~2px 线会被钳成直角）
             shape.CornerRadius = ComicStyle.CornerSharp;
             shape.BorderWidth = 0f;
             shape.color = color;

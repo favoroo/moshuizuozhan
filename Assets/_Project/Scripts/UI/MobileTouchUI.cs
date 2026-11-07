@@ -771,7 +771,7 @@ namespace P1.UI
             rt.anchoredPosition = new Vector2(124f, -32f);
             rt.sizeDelta = new Vector2(168f, 72f);
 
-            // 纸面底盘 + 4px 墨边（直角 SharpRect）
+            // 纸面底盘 + 4px 墨边（圆角化：RoundedRect 自适应）
             var shapeGo = new GameObject("Visual", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             shapeGo.transform.SetParent(go.transform, false);
             var shapeRt = shapeGo.GetComponent<RectTransform>();
@@ -780,8 +780,7 @@ namespace P1.UI
             shapeRt.offsetMin = Vector2.zero;
             shapeRt.offsetMax = Vector2.zero;
             var shape = shapeGo.GetComponent<UIInkShapeGraphic>();
-            shape.Shape = UIInkShape.SharpRect;
-            shape.CornerRadius = ComicStyle.CornerSharp;
+            shape.Shape = UIInkShape.RoundedRect;
             shape.BorderWidth = ComicStyle.Border;
             shape.BorderColor = ComicStyle.Ink;
             shape.color = ComicStyle.Paper;

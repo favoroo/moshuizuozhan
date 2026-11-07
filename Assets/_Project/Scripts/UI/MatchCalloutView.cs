@@ -61,6 +61,9 @@ namespace P1.UI
 
         [Header("成就装饰（运行时自动补齐）")]
         [SerializeField] private UIInkShapeGraphic accentGraphic;
+
+        /// <summary>左侧行动黄竖条的 RectTransform：内缩量在 ApplyLayout 按横幅实际圆角半径刷新。</summary>
+        private RectTransform _accentRect;
         [SerializeField] private UIInkShapeGraphic iconBadgeGraphic;
         [SerializeField] private Image iconImage;
         [SerializeField] private UIInkShapeGraphic countBadgeGraphic;
@@ -607,6 +610,16 @@ namespace P1.UI
                 _rootRect.sizeDelta = new Vector2(panelWidth, panelHeight);
             }
 
+            // 圆角化：左侧行动竖条内缩到圆角直线段内——按本档横幅实际圆角半径（CornerFor）推导。
+            // 陷阱：不能用全局上限 CornerPanel 兜底（2026-11 上限提到 32 后，2×上限+14 会超过
+            // 80 高的紧凑横幅，把竖条压成负高度）；四档横幅高 80/84/108/112，半径各不相同。
+            if (_accentRect != null)
+            {
+                float bannerRadius = ComicStyle.CornerFor(panelWidth, panelHeight);
+                _accentRect.anchoredPosition = new Vector2(bannerRadius + 5f, 0f);
+                _accentRect.sizeDelta = new Vector2(6f, -(bannerRadius * 2f + 14f));
+            }
+
             float iconSize = isBig ? IconSizeBig : IconSizeNormal;
             float iconY = hasSub ? 0.62f : 0.5f;
             if (_iconRect != null)
@@ -768,7 +781,7 @@ namespace P1.UI
 
             UIThemeSO resolved = UIThemeSO.Resolve(theme);
 
-            // 1. 直角纯色墨底 + 左侧行动黄竖条（与 HUD 卡色带 / 决战横幅同一语言）
+            // 1. 圆角纯色墨底（ApplyComic 自适应圆角）+ 左侧行动黄竖条（与 HUD 卡色带 / 决战横幅同一语言）
             if (bgGraphic == null)
             {
                 Transform bgTr = transform.Find("CalloutBg");
@@ -811,9 +824,10 @@ namespace P1.UI
                 accentRect.pivot = new Vector2(0f, 0.5f);
                 accentRect.anchoredPosition = new Vector2(5f, 0f);
                 accentRect.sizeDelta = new Vector2(6f, -14f);
+                _accentRect = accentRect; // 圆角化：内缩量由 ApplyLayout 按横幅实际圆角半径刷新（四档横幅高度不同）
 
-                accentGraphic.Shape = UIInkShape.SharpRect;
-                accentGraphic.CornerRadius = ComicStyle.CornerSharp;
+                // 圆角化：竖条改胶囊，不再戳出圆角轮廓
+                accentGraphic.Shape = UIInkShape.Pill;
                 accentGraphic.BorderWidth = 0f;
                 accentGraphic.HardShadow = false;
                 accentGraphic.Halftone = false;
@@ -959,8 +973,7 @@ namespace P1.UI
                 _countRect.anchoredPosition = new Vector2(-CountRight - CountWidthNormal * 0.5f, 0f);
                 _countRect.sizeDelta = new Vector2(CountWidthNormal, CountWidthNormal);
 
-                countBadgeGraphic.Shape = UIInkShape.SharpRect;
-                countBadgeGraphic.CornerRadius = ComicStyle.CornerSharp;
+                countBadgeGraphic.Shape = UIInkShape.Pill; // 圆角化：方形计数徽章改正圆
                 countBadgeGraphic.BorderWidth = ComicStyle.Border;
                 countBadgeGraphic.BorderColor = ComicStyle.Ink;
                 countBadgeGraphic.Halftone = false;
@@ -1037,8 +1050,7 @@ namespace P1.UI
                             typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
                         pipGo.transform.SetParent(_pipsRect, false);
                         var pip = pipGo.GetComponent<UIInkShapeGraphic>();
-                        pip.Shape = UIInkShape.SharpRect;
-                        pip.CornerRadius = ComicStyle.CornerSharp;
+                        pip.Shape = UIInkShape.Pill; // 圆角化：连击点改正圆
                         pip.BorderWidth = 0f;
                         pip.HardShadow = false;
                         pip.Halftone = false;

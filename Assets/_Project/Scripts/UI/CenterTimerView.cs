@@ -438,7 +438,7 @@ namespace P1.UI
                 scoreBarRoot.anchoredPosition = new Vector2(0f, -10f);
                 scoreBarRoot.sizeDelta = new Vector2(520f, 56f);
 
-                // 黑边底座直角块
+                // 黑边底座圆角块（圆角化：自适应半径，面板档硬影同形状自动跟随）
                 var bgBarGo = new GameObject("BarBackground", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
                 bgBarGo.transform.SetParent(scoreBarRoot, false);
                 var bgBarRect = bgBarGo.GetComponent<RectTransform>();
@@ -447,8 +447,7 @@ namespace P1.UI
                 bgBarRect.sizeDelta = Vector2.zero;
 
                 var bgBarGraphic = bgBarGo.GetComponent<UIInkShapeGraphic>();
-                bgBarGraphic.Shape = UIInkShape.SharpRect;
-                bgBarGraphic.CornerRadius = ComicStyle.CornerSharp;
+                bgBarGraphic.Shape = UIInkShape.RoundedRect;
                 bgBarGraphic.BorderWidth = ComicStyle.Border;
                 bgBarGraphic.BorderColor = ComicStyle.Ink;
                 bgBarGraphic.color = ComicStyle.Ink;
@@ -457,7 +456,8 @@ namespace P1.UI
                 resolvedTheme.ApplyHardShadow(bgBarGraphic, UIHardShadowLevel.Panel);
 
                 // Team A 填充条（左）——四边内缩走 FillInsetX/FillInsetY，与 ApplyScoreBarVisuals 同源
-                var barAGo = new GameObject("FillBarA", typeof(RectTransform), typeof(Image));
+                // 圆角化：UIPillImage 随条宽自适应胶囊轮廓（锚点驱动的尺寸变化会自动跟随）
+                var barAGo = new GameObject("FillBarA", typeof(RectTransform), typeof(UIPillImage));
                 barAGo.transform.SetParent(scoreBarRoot, false);
                 fillBarA = barAGo.GetComponent<RectTransform>();
                 fillBarA.anchorMin = new Vector2(FillInsetX, FillInsetY);
@@ -467,8 +467,8 @@ namespace P1.UI
                 fillImageA = barAGo.GetComponent<Image>();
                 fillImageA.color = resolvedTheme.GetTeamColor(Team.TeamA);
 
-                // Team B 填充条（右）——同上，四边内缩同源
-                var barBGo = new GameObject("FillBarB", typeof(RectTransform), typeof(Image));
+                // Team B 填充条（右）——同上，四边内缩同源（圆角化：胶囊）
+                var barBGo = new GameObject("FillBarB", typeof(RectTransform), typeof(UIPillImage));
                 barBGo.transform.SetParent(scoreBarRoot, false);
                 fillBarB = barBGo.GetComponent<RectTransform>();
                 fillBarB.anchorMin = new Vector2(0.5f, FillInsetY);
@@ -540,8 +540,7 @@ namespace P1.UI
                 blobMeshRect.sizeDelta = Vector2.zero;
 
                 timerBlobGraphic = blobMeshGo.GetComponent<UIInkShapeGraphic>();
-                timerBlobGraphic.Shape = UIInkShape.SharpRect;
-                timerBlobGraphic.CornerRadius = ComicStyle.CornerSharp;
+                timerBlobGraphic.Shape = UIInkShape.RoundedRect; // 圆角化：中央计时块
                 timerBlobGraphic.SpeechTail = false;
                 timerBlobGraphic.BorderWidth = ComicStyle.Border;
                 timerBlobGraphic.BorderColor = ComicStyle.Ink;
@@ -586,17 +585,18 @@ namespace P1.UI
                 finalMinuteBannerRoot.sizeDelta = new Vector2(500f, 88f);
 
                 // 左侧行动黄竖条：让横幅从「一条红条」变成有层级的通知卡（与 HUD 卡色带同语言）。
+                // 圆角化：横幅顶角是圆的，竖条内缩到圆角直线段内并改胶囊，不再戳出横幅轮廓。
+                float bannerRadius = ComicStyle.CornerFor(finalMinuteBannerRoot.sizeDelta.x, finalMinuteBannerRoot.sizeDelta.y);
                 var accentGo = new GameObject("BannerAccent", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
                 accentGo.transform.SetParent(finalMinuteBannerRoot, false);
                 var accentRect = accentGo.GetComponent<RectTransform>();
                 accentRect.anchorMin = new Vector2(0f, 0f);
                 accentRect.anchorMax = new Vector2(0f, 1f);
                 accentRect.pivot = new Vector2(0f, 0.5f);
-                accentRect.anchoredPosition = new Vector2(0f, 0f);
+                accentRect.anchoredPosition = new Vector2(ComicStyle.Border + bannerRadius + 2f, 0f);
                 accentRect.sizeDelta = new Vector2(10f, -ComicStyle.Border * 2f);
                 var accentGraphic = accentGo.GetComponent<UIInkShapeGraphic>();
-                accentGraphic.Shape = UIInkShape.SharpRect;
-                accentGraphic.CornerRadius = ComicStyle.CornerSharp;
+                accentGraphic.Shape = UIInkShape.Pill;
                 accentGraphic.BorderWidth = 0f;
                 accentGraphic.HardShadow = false;
                 accentGraphic.Halftone = false;
@@ -627,9 +627,8 @@ namespace P1.UI
                 bannerBgRect.sizeDelta = Vector2.zero;
 
                 bannerBgGraphic = bannerBgGo.GetComponent<UIInkShapeGraphic>();
-                bannerBgGraphic.Shape = UIInkShape.SharpRect;
+                // 圆角化：ApplyComic 现在直接给圆角矩形（自适应半径）
                 bannerBgGraphic.ApplyComic(ComicStyle.Red, dots: false, border: ComicStyle.Border);
-                bannerBgGraphic.CornerRadius = ComicStyle.CornerSharp;
                 // 横幅是浮起的信息卡：面板档硬影 (4,-5)
                 resolvedTheme.ApplyHardShadow(bannerBgGraphic, UIHardShadowLevel.Panel);
 

@@ -840,7 +840,8 @@ namespace P1.Tests
             // 贴地半径取主鼓外皮（0.24×0.92/2 = 0.1104）：TreadRib 花纹略高，按花纹贴地会让主鼓体悬空。
             // 同一半径用于 ω=地速/半径 的无滑动自转。
             Assert.AreEqual(0.1104f, RollerWieldSolver.DrumRadiusMeters, 0.0005f);
-            Assert.AreEqual(0.004f, RollerWieldSolver.GroundContactPenetration, 0.0001f);
+            // P40 0.004 → 0.026：切线接触（4mm）在第三人称俯视下仍读作悬浮，压入 1/8 鼓径才贴地。
+            Assert.AreEqual(0.026f, RollerWieldSolver.GroundContactPenetration, 0.0001f);
 
             RollerWieldPose roll = RollerWieldSolver.SampleRoll(p);
             Assert.Greater(roll.ForwardMeters, 0f, "拖地应把滚筒前推");

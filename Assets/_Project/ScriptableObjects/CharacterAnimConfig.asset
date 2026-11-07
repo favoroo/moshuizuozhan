@@ -495,7 +495,7 @@ MonoBehaviour:
   rollerDrumCoastDecay: 2.2
   rollerGroundContactInRate: 16
   rollerGroundContactOutRate: 22
-  rollerGroundPenetration: 0.004
+  rollerGroundPenetration: 0.026
   rollerRollPlantSquashImpulse: 0.6
   rollerContactShadowEnabled: 1
   rollerContactShadowWidth: 0.8
@@ -526,3 +526,25 @@ MonoBehaviour:
   splatlingStreamShakeDeg: 0.5
   shooterFireBodyPitchDeg: 2
   shooterFirePullbackMeters: 0.01
+  tankInkChaseRate: 8
+  tankLevelBobOmega: 15.1
+  tankLevelBobZeta: 0.18
+  tankLevelBobGain: 0.06
+  tankLevelBobMax: 0.08
+  tankSloshOmega: 10.05
+  tankSloshZeta: 0.14
+  tankSloshAccelGain: 0.004
+  tankSloshTargetMax: 0.1
+  tankTiltMaxRad: 0.06
+  tankSloshSqueeze: 0.03
+  tankConsumeKickGain: 100
+  tankEventKickJump: 2
+  tankEventKickLand: 2.2
+  tankEventKickBrake: 1.8
+  tankBrakeAccelMin: 14
+  tankLowInkFraction: 0.15
+  tankLowInkExitFraction: 0.2
+  tankLowInkPulseHz: 2.4
+  tankLowInkPulseAmp: 0.03
+  tankLevelFloor: 0.004
+  tankEmptyHideAt: 0.005

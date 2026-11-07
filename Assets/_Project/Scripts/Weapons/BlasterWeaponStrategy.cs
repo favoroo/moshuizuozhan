@@ -8,6 +8,8 @@ namespace P1.Weapons
     /// 2. 直击 125 伤害秒杀 100 HP 角色；
     /// 3. 飞行达到 10.5m 最大射程在空中爆裂，或撞击掩体/敌人发生爆裂；
     /// 4. 产生 2.6m 范围溅射（30~70 伤害按距离线性衰减），直击目标不重复受溅射。
+    /// 5. 撞墙/撞地按细射线判（爆点严格落在准星上），命中球半径只用于接住角色，
+    ///    否则球体下沿会在下压弹道上提前贴地、炸在脚边（详见 InkProjectilePool.BlasterWorldHitRadius）。
     /// </summary>
     public sealed class BlasterWeaponStrategy : MainWeaponStrategy
     {
@@ -47,6 +49,8 @@ namespace P1.Weapons
             float splashRadius = Config != null ? Mathf.Max(0.1f, Config.blasterSplashRadius) : 2.6f;
             float splashMax = Config != null ? Config.blasterSplashDamageMax : 70f;
             float splashMin = Config != null ? Config.blasterSplashDamageMin : 30f;
+            // 直击判定球半径：只用于「接住角色」，撞墙/撞地由弹丸池走细射线（见 InkProjectilePool.BlasterWorldHitRadius）
+            float hitRadius = Config != null ? Mathf.Max(0.02f, Config.blasterHitRadius) : 0.38f;
 
             Vector3 muzzle = host.MuzzlePosition;
             Vector3 aimDir = aim.GetShotDirection(muzzle);
@@ -63,7 +67,7 @@ namespace P1.Weapons
                 Gravity = 0f, // Blaster 在空中平直飞行并在尽头爆裂
                 MaxRange = maxRange,
                 Damage = damage,
-                HitRadius = 0.26f,
+                HitRadius = hitRadius,
                 FarDamage = 0f,
                 FalloffStart = 0f,
                 FalloffDistance = 0f,

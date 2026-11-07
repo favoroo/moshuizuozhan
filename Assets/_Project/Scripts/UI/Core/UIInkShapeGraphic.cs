@@ -3,33 +3,34 @@ using UnityEngine.UI;
 
 namespace P1.UI
 {
-    /// <summary>几何形状类型（几何大胆风：直角矩形 / 胶囊 / 正圆为全部词汇）。</summary>
+    /// <summary>几何形状类型（圆角语言：圆角矩形 / 胶囊 / 正圆为全部词汇）。</summary>
     public enum UIInkShape
     {
-        /// <summary>椭圆/正圆：几何风只当作 circle 用（wobble 已归零），适合头像、大招球、装饰圆。</summary>
+        /// <summary>椭圆/正圆：只当作 circle 用（wobble 已归零），适合头像、大招球、装饰圆。</summary>
         Blob = 0,
 
-        /// <summary>圆角矩形：兼容保留；几何风请用 <see cref="SharpRect"/>。</summary>
+        /// <summary>圆角矩形：面板、按钮、卡片的标准形状；半径 0 = 按短边自适应（ComicStyle.CornerFor）。</summary>
         RoundedRect = 1,
 
-        /// <summary>对话气泡：兼容保留；几何风已禁用气泡尾巴。</summary>
+        /// <summary>对话气泡：兼容保留；已禁用气泡尾巴。</summary>
         SpeechBubble = 2,
 
-        /// <summary>直角矩形（rounded-none）：几何风的面板、按钮、色块标准形状。</summary>
+        /// <summary>真直角（半径恒 0）：兼容保留；圆角化后 UI 代码不再使用。</summary>
         SharpRect = 3,
 
-        /// <summary>全圆角胶囊（rounded-full）：Tag、进度条、状态徽章。</summary>
+        /// <summary>全圆角胶囊（rounded-full）：方形 rect 即正圆，长条即胶囊——Tag、进度条、状态徽章。</summary>
         Pill = 4,
     }
 
     /// <summary>
-    /// 纯网格绘制的直角矩形 / 胶囊 / 正圆 / 圆角面板底图（P4-A 基类，P14 几何大胆风）。
+    /// 纯网格绘制的圆角矩形 / 胶囊 / 正圆面板底图（P4-A 基类，P14 几何大胆风；2026-11 圆角化）。
     ///
-    /// 一个 UI 元素即可同时画出：填充色、实线粗边框、可选偏移阴影（几何风已归零）。
+    /// 一个 UI 元素即可同时画出：填充色、实线粗边框、可选硬偏移阴影。
     /// 不依赖任何 Sprite / 材质资产，因此 HUD / 菜单 / 移动端都能直接复用；
     /// 颜色由 <see cref="Graphic.color"/> 控制，正好交给 InkTeamColorFilter 自动染色。
     ///
-    /// 几何风默认：直角、4px 实线边框、无网点、无渐变高光、无硬阴影、无 wobble。
+    /// 圆角化默认：圆角矩形（半径 0 = 短边自适应，硬影同形状自动跟随）、4px 实线边框、
+    /// 无网点、无渐变高光、无 wobble；条签/正圆用 <see cref="UIInkShape.Pill"/>。
     /// 旧字段全部保留，老调用方无需改签名。
     /// </summary>
     [AddComponentMenu("P1/UI/Ink Shape Graphic")]
@@ -38,7 +39,8 @@ namespace P1.UI
         private const int MaxRingPoints = 128;
 
         [Header("形状")]
-        [SerializeField] private UIInkShape shape = UIInkShape.SharpRect;
+        [Tooltip("圆角化默认：RoundedRect（半径 0 = 自适应）；真直角请显式选 SharpRect")]
+        [SerializeField] private UIInkShape shape = UIInkShape.RoundedRect;
 
         [Tooltip("周向分段数；圆角矩形会均分到 4 个圆角")]
         [SerializeField, Range(12, 128)] private int segments = 64;
@@ -206,7 +208,10 @@ namespace P1.UI
         {
             if (style == null) return;
 
-            shape = style.shape;
+            // 圆角化兜底：主题预设资产可能还是圆角化之前的 SharpRect 序列值
+            // （菜单 P1/画风/几何风/1 未重跑时），主题驱动的卡片路径在这里统一升级为
+            // RoundedRect（radius 0 = ComicStyle.CornerFor 自适应），旧资产无需重刷也不漏直角。
+            shape = style.shape == UIInkShape.SharpRect ? UIInkShape.RoundedRect : style.shape;
             borderWidth = style.borderWidth;
             borderColor = style.borderColor;
             cornerRadius = style.cornerRadius;
@@ -420,19 +425,20 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 一键套几何大胆风观感：直角 + 实线粗边 + 关掉高光/内沿/网点/阴影。
-        /// t-1 的硬影不在这里开——用 <see cref="UIThemeSO.ApplyHardShadow"/> 显式选档，
-        /// 避免各界面把偏移编成五花八门的数值。不传参数时取 ComicStyle 的静态 token。
-        /// （方法名沿用旧名，调用方零改动。）
+        /// 一键套几何大胆风观感：圆角矩形（自适应半径）+ 实线粗边 + 关掉高光/内沿/网点/阴影。
+        /// 2026-11 圆角化：直角/气泡统一升级为圆角矩形（radius 0 = ComicStyle.CornerFor 按短边自适应）；
+        /// 调用方预先设置的 Pill/Blob 保持不变。t-1 的硬影不在这里开——用
+        /// <see cref="UIThemeSO.ApplyHardShadow"/> 显式选档，避免各界面把偏移编成五花八门的数值。
+        /// 不传参数时取 ComicStyle 的静态 token。（方法名沿用旧名，调用方零改动。）
         /// </summary>
         public void ApplyComic(Color fill, bool dots = true, float border = ComicStyle.Border,
             Vector2? offset = null)
         {
-            if (shape == UIInkShape.SpeechBubble) shape = UIInkShape.SharpRect;
-            if (shape == UIInkShape.RoundedRect) shape = UIInkShape.SharpRect;
+            if (shape == UIInkShape.SpeechBubble || shape == UIInkShape.SharpRect)
+                shape = UIInkShape.RoundedRect;
             borderWidth = border;
             borderColor = ComicStyle.Ink;
-            cornerRadius = shape == UIInkShape.Pill ? ComicStyle.CornerBubble : ComicStyle.CornerSharp;
+            cornerRadius = 0f; // 0 = RoundedRect 构建期自适应半径
             wobbleAmplitude = 0f;
             glossAlpha = 0f;
             drawGloss = false;
@@ -500,13 +506,17 @@ namespace P1.UI
             _phase2 = Phase(2);
             _phase3 = Phase(3);
 
+            // 圆角语言（2026-11 #09）：RoundedRect 半径为 0 时按短边自适应（构建期实时计算，
+            // rect 变化自动重建跟随）；硬影复用同一 effectiveRadius，形状自动一致。
             float effectiveRadius = isBubble
                 ? Mathf.Max(cornerRadius, Mathf.Min(rect.width, rect.height) * 0.5f)
                 : shape == UIInkShape.SharpRect
                     ? 0f
                     : shape == UIInkShape.Pill
                         ? Mathf.Min(rect.width, rect.height) * 0.5f
-                        : cornerRadius;
+                        : cornerRadius > 0.01f
+                            ? cornerRadius
+                            : ComicStyle.CornerFor(rect.width, rect.height);
 
             float minHalf = Mathf.Min(rect.width, rect.height) * 0.5f;
             float border = Mathf.Clamp(borderWidth, 0f, Mathf.Max(0f, minHalf - 1f));

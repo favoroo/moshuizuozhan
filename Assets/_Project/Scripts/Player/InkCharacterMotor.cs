@@ -520,7 +520,6 @@ namespace P1.Player
             }
 
             bool isRollingDodge = _weapon != null && _weapon.IsRollingDodge;
-            bool isTurretLocked = _weapon != null && _weapon.IsTurretLocked;
             float weaponSpeedMult = _weapon != null ? _weapon.MoveSpeedMultiplier : 1f;
 
             if (isRollingDodge)
@@ -554,12 +553,6 @@ namespace P1.Player
                 }
                 _wantsJump = false;
             }
-            else if (isTurretLocked)
-            {
-                // 双枪翻滚后的站桩架枪模式（0.5s）：移速锁零，不可移动
-                CurrentMoveSpeed = 0f;
-                _planarVelocity = Vector3.zero;
-            }
             else if (_isLockedBySpecial)
             {
                 CurrentMoveSpeed = 0f;
@@ -579,9 +572,19 @@ namespace P1.Player
                 if (_currentInk < MaxInk)
                 {
                     _currentInk = Mathf.Min(MaxInk, _currentInk + refillRate * dt);
-                    if (Team == Team.TeamA && AudioManager.Instance != null)
+                    // 回墨「咕嘟」只给本地玩家：旧判定 TeamA 让 AI 队友的回墨音
+                    // 和自己的潜墨音混成一片，反而听不出自己的墨有没有回上。
+                    if (AudioManager.Instance != null && CombatantHealth.IsLocalPlayer(_health))
                     {
-                        AudioManager.Instance.PlaySwimRefillTick();
+                        if (_currentInk >= MaxInk)
+                        {
+                            // 「未满 → 满」边沿：refill_full 烘出来了但一直没接线
+                            AudioManager.Instance.PlayRefillFull();
+                        }
+                        else
+                        {
+                            AudioManager.Instance.PlaySwimRefillTick();
+                        }
                     }
                 }
                 _health.Heal(regenRate * dt);
@@ -754,7 +757,9 @@ namespace P1.Player
                         }
                         if (AudioManager.Instance != null)
                         {
-                            AudioManager.Instance.PlayJump();
+                            // 起跳音按位置衰减：旧版对 8 名角色都按全局 2D 满音量播，
+                            // Bot 起跳会把自己的起跳声盖掉。
+                            AudioManager.Instance.PlayJump(transform.position);
                         }
                     }
 
@@ -796,9 +801,10 @@ namespace P1.Player
                 _aimFacingTimer = Mathf.Max(0f, _aimFacingTimer - dt);
 
             // 武器处于开火姿态（INKWAVE weapons.js firingPose：蓄力/加特林扫射/滚筒推地与挥击前摇/
-            // 泼桶前摇/双枪翻滚与架枪站桩）：枪口即弹道方向，扳机松开也要保持朝准星。
+            // 泼桶前摇/双枪翻滚）：枪口即弹道方向，扳机松开也要保持朝准星。
             // 旧实现只在「按住扳机」的帧刷新保持计时，加特林松手扫射 0.4s 后身体转回移动方向
-            // → 枪口朝后、子弹朝前；双枪架枪更是移速为 0 却跟着移动输入原地打转。
+            // → 枪口朝后、子弹朝前。双枪翻滚后的架枪强化不在其列：它已不锁移速，
+            // 再钉住朝向会让「翻滚脱身」变成原地转身；开枪时另有 _isFiringOrThrowing 兜住朝向。
             bool weaponAimFacing = !IsInSquidForm && _weapon != null && _weapon.WantsAimFacing;
 
             // 外部瞄准姿态请求（副武器手雷按住瞄准：预览弹道按准星解算）。

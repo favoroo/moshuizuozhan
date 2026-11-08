@@ -915,6 +915,9 @@ namespace P1.Player
         /// </summary>
         private void Start()
         {
+            // 已烘焙场景的运行时性能收拾：清理 P39 遗留的 TankGlass 合并组，并按最新规则重刷阴影投射。
+            CharacterVisualAssembler.ApplyRuntimeVisualPerfPass(transform);
+
             var bodyMerge = CharacterVisualAssembler.MergeBodyRuntime(new CharacterVisualAssembler.BodyRigRefs
             {
                 Spine = spineTransform,
@@ -2320,6 +2323,49 @@ namespace P1.Player
             }
             ApplyDodgeTumble();
 
+            // --- 7.7 大招 Storm 投掷表演（P41）：0.35s 动作锁只控制移动，姿态层在这里完成
+            //     引臂 → 鞭甩 → 随挥（对齐 INKWAVE _poseThrow）。控制权恢复后身体继续随挥渐出，
+            //     与 slam 同构地复用躯干俯仰/侧倾 + 武器抬升通道，不新增写回链。
+            StormThrowPerformance stormThrow = SampleStormThrowPerformance(out float stormBlend);
+            float stormExtraPitch = 0f;
+            float stormExtraRoll = 0f;
+            if (stormBlend > 0.001f)
+            {
+                // 步态/待机层让位：投掷期间摆臂/摇晃交给表演段接管
+                float keep = 1f - stormBlend;
+                gaitWeight *= keep;
+                armSwing *= keep;
+                rock *= keep;
+
+                float tw = stormThrow.TotalWeight;
+                float w = tw > 1f ? 1f / tw : 1f;
+                float sCock = stormThrow.CockW * w;
+                float sWhip = stormThrow.WhipW * w;
+                float sFollow = stormThrow.FollowW * w;
+
+                // 躯干：后仰蓄势 → 前压甩出 → 前倾收势；侧倾反向拧出拧转观感
+                stormExtraPitch = stormBlend * (
+                    sCock * cfg.stormCockSpineDeg
+                    + sWhip * cfg.stormWhipSpineDeg
+                    + sFollow * cfg.stormFollowSpineDeg);
+                stormExtraRoll = stormBlend * (
+                    sCock * cfg.stormCockRollDeg
+                    + sWhip * cfg.stormWhipRollDeg);
+                armSwing += stormBlend * sWhip * cfg.stormWhipArmSwingBoost;
+
+                // 鞭甩瞬间纵向拉长一点（果冻弹簧叠加，写回段统一钳制）
+                squashY *= 1f + stormBlend * (sWhip * 0.05f - sFollow * 0.03f);
+
+                // 武器：抬起过肩 → 前甩向下 → 收势下沉（slam 武器通道在此帧未被 slam 占用）
+                _slamWeaponLift = stormBlend * (
+                    sCock * cfg.stormCockWeaponLiftMeters
+                    + sFollow * cfg.stormFollowWeaponLiftMeters);
+                _slamWeaponPitchDeg = stormBlend * (
+                    sCock * cfg.stormCockWeaponPitchDeg
+                    + sWhip * cfg.stormWhipWeaponPitchDeg
+                    + sFollow * cfg.stormFollowWeaponPitchDeg);
+            }
+
             // --- 8. 骨骼链写回（P33 真骨骼版）---
             // 8.1 全身挤压（果冻/滞空/滚筒/待机）只作用 BodySquash；武器挂胸腔骨之下会跟着被缩放，
             //     在武器根逐帧做等量反缩放抵消 —— 枪永远不压扁（对齐 INKWAVE：skid 形变不进武器骨骼）。
@@ -2356,8 +2402,10 @@ namespace P1.Player
                 + _wieldBodyPitchDeg      // P35 蓄力后仰/泼桶甩出/爆破后坐/架枪前压
                 + _flinchPitchSpring.Value // P36 受击后仰顿挫
                 + slamExtraPitch          // P38 大招起跳：蹬伸背弓/团身/落地深压
+                + stormExtraPitch         // P41 大招投掷：引臂后仰/鞭甩前压/随挥收势
                 + dodgeTuckPitch;         // P40 双枪翻滚：蜷身脊柱/胸前卷
             float dynRoll = _currentRoll + _leanRollSpring.Value + _wieldBodyRollDeg
+                + stormExtraRoll          // P41 大招投掷：躯干拧转（侧倾近似）
                 + _flinchRollSpring.Value; // P36 受击侧让顿挫
             float rollMix = dynRoll + rock * 0.6f;
 
@@ -2598,6 +2646,24 @@ namespace P1.Player
             _slamImpactElapsed = -1f;
             if (kidRoot != null)
                 kidRoot.transform.localRotation = _defaultKidRootRot;
+        }
+
+        /// <summary>
+        /// P41 大招 Storm 投掷表演采样：把 <see cref="WeaponController"/> 的投掷计时翻译成
+        /// <see cref="StormPoseSolver"/> 的三段权重。纯无状态采样，收势渐出由 solver 的时间窗负责。
+        /// </summary>
+        private StormThrowPerformance SampleStormThrowPerformance(out float blend)
+        {
+            WeaponController weapon = _weaponController;
+            if (weapon == null || !weapon.IsStormThrowing)
+            {
+                blend = 0f;
+                return StormThrowPerformance.None;
+            }
+
+            StormThrowPerformance pose = StormPoseSolver.Sample(weapon.StormThrowElapsed);
+            blend = pose.Blend01;
+            return pose;
         }
 
         /// <summary>

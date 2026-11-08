@@ -43,7 +43,7 @@ namespace P1.Tests
             }
         }
 
-        private InkSurfaceController CreateSurface(float dryingSeconds = 6f)
+        private InkSurfaceController CreateSurface(float dryingSeconds = 6f, float growSeconds = 0f)
         {
             _config = ScriptableObject.CreateInstance<InkGridConfigSO>();
             _config.mapSize = new Vector2(40f, 40f);
@@ -52,7 +52,7 @@ namespace P1.Tests
             _config.inkAtlasResolutionDesktop = 256;
             _config.inkAtlasResolutionMobile = 256;
             _config.atlasMipmaps = false;
-            _config.splatGrowSeconds = 0f;
+            _config.splatGrowSeconds = growSeconds;
             _config.inkDryingSeconds = dryingSeconds;
 
             // 先以未激活状态装配，避免 Awake 用默认配置先建一张 4096 图集
@@ -238,6 +238,61 @@ namespace P1.Tests
             yield return null;
 
             Assert.Less(ReadAtlasAt(surface, 0f, 0f).a, 0.05f, "重开比赛后图集应被清空");
+        }
+
+        /// <summary>
+        /// 写侧生长编排（P52）：splatGrowSeconds > 0 时 decorated 墨斑进入 _growing 逐帧重绘
+        /// （主体 40% 泛出 → 射线 → 卫星错峰落地）。收尾后图集必须达到与「一次性最终形态」
+        /// 相同的覆盖语义，且时间戳保持落墨时刻（重绘不得把 G 刷新成别的值）。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator DecoratedSplat_WithWriteSideGrowth_ReachesFinalCoverageAndKeepsTimestamp()
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+            {
+                Assert.Ignore("无图形设备，无法验证 RenderTexture 内容");
+            }
+
+            InkSurfaceController surface = CreateSurface(dryingSeconds: 6f, growSeconds: 0.1f);
+            yield return null;
+
+            Assert.IsNotNull(surface.SplatAtlas, "墨迹图集应已创建");
+
+            surface.PaintCircle(Vector3.zero, 3f, Team.TeamA);
+            // 生长中：队列应有条目（首帧 LateUpdate 才开始第一次重绘，先等一帧）
+            yield return null;
+            yield return null;
+            Assert.Greater(surface.SplatAtlas.TotalSplatCount, 0, "落墨应记录到图集");
+
+            var earlyBuf = new Color[1];
+            yield return ReadAtlasAtStable(surface, 0f, 0f, earlyBuf);
+            Color early = earlyBuf[0];
+            Assert.Greater(early.a, 0.5f, "生长一开始主体就应从 40% 泛出，圆心已覆盖");
+            Assert.Less(early.r, 0.15f, "TeamA 的队伍占比应为 0（R 通道）");
+
+            // 收尾窗口 = 1.75 × 0.1×(1+0.9×3) ≈ 0.65s，等 2s 足够清空
+            float waitUntil = Time.unscaledTime + 2f;
+            while (Time.unscaledTime < waitUntil && surface.SplatAtlas.HasGrowingSplats())
+            {
+                yield return null;
+            }
+            Assert.IsFalse(surface.SplatAtlas.HasGrowingSplats(), "生长队列应在收尾窗口后清空");
+
+            // 最终覆盖语义与一次性写入一致：圆心 + 半径 60% 实心、装饰半径外无覆盖
+            AssertBlobCoversRadius(surface, 3f, "写侧生长收尾后");
+            Assert.Greater(ReadAtlasAt(surface, 0f, 0f).a, 0.9f, "收尾后圆心覆盖率应接近 1");
+
+            // 重绘全程时间戳 = 落墨时刻（Max 混合下重绘不会把 G 改成其他值）。
+            // 必须等满 4s（相对 PaintCircle）再断言湿润度：WetnessFromTimestamp 是线性公式，
+            // 收尾 0.65s + 2s 时 age≈2.7s、线性湿润 0.55 恰好卡在断言线上。
+            waitUntil = Time.unscaledTime + 3.5f;
+            while (Time.unscaledTime < waitUntil)
+            {
+                yield return null;
+            }
+            float nowAtRead = Time.time;
+            float wetFinal = WetnessFromTimestamp(ReadAtlasAt(surface, 0f, 0f), nowAtRead, 6f);
+            Assert.Less(wetFinal, 0.55f, "时间戳必须保持落墨时刻：4s 后湿润度应已明显衰减，若仍≈1 说明重绘刷新了时间戳");
         }
     }
 }

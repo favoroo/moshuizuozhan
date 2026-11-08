@@ -332,7 +332,7 @@ namespace P1.Tests
             Assert.IsTrue(strategy.TryPerformDodgeRoll(Vector3.forward, host));
             strategy.Tick(config.dualiesRollDuration + 0.01f, true, aim, host);
             Assert.IsTrue(strategy.IsTurretLocked);
-            Assert.AreEqual(0f, strategy.MoveSpeedMultiplier, 0.001f, "架枪站桩，移速归零");
+            Assert.AreEqual(1f, strategy.MoveSpeedMultiplier, 0.001f, "架枪强化不锁移速（翻滚后可立刻走位）");
             Assert.AreEqual(0f, strategy.SpreadDegrees, 0.001f, "架枪散布清零");
 
             int before = host.Shots.Count;

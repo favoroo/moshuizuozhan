@@ -13,6 +13,7 @@ namespace P1.Editor
         public const string Root = "Assets/_Project/";
 
         public const string SpritesFolder = Root + "Art/Sprites/";
+        public const string IconsFolder = SpritesFolder + "Icons/";
         public const string TexturesFolder = Root + "Art/Textures/";
         public const string BrandFolder = Root + "Art/Brand/";
         public const string MusicFolder = Root + "Audio/Music/";
@@ -24,6 +25,7 @@ namespace P1.Editor
             Ignore,
             Sprite,
             PixelSprite,   // 将来若定像素风，把图放 Art/Sprites/Pixel/ 即自动最近邻
+            UiIconSprite,  // UI 图标：128px 原图常缩到 24~40px 显示，开 mip + 三线性消锯齿
             WorldTexture,
             NormalMap,     // 文件名以 _N 结尾：法线贴图（线性 + Normal 类型，P18 画风重做）
             MaskMap,       // 文件名以 _RMO / _Mask 结尾：线性通道打包掩码（P18 画风重做）
@@ -98,6 +100,9 @@ namespace P1.Editor
                 // 像素风豁免：Art/Sprites/Pixel/... 用最近邻，避免像素被平滑糊掉
                 if (assetPath.IndexOf("/Pixel/", System.StringComparison.Ordinal) >= 0)
                     return TextureKind.PixelSprite;
+                // UI 图标（128px 原图）在 HUD 里常缩到 24~40px：必须开 mip，否则边缘条带锯齿
+                if (assetPath.StartsWith(IconsFolder, System.StringComparison.Ordinal))
+                    return TextureKind.UiIconSprite;
                 return TextureKind.Sprite;
             }
 
@@ -184,13 +189,17 @@ namespace P1.Editor
             }
             else
             {
+                bool uiIcon = kind == TextureKind.UiIconSprite;
                 s.textureType = TextureImporterType.Sprite;
                 s.spriteMode = (int)SpriteImportMode.Single;
                 importer.spriteImportMode = SpriteImportMode.Single;
                 s.alphaIsTransparency = true;    // keyout 出的透明图标必须开，否则边缘发黑
-                s.mipmapEnabled = false;         // UI 不吃 mip
+                // 图标要从 128px 缩到 24~40px 显示，必须吃 mip；普通 Sprite 仍保持无 mip 省内存
+                s.mipmapEnabled = uiIcon;
                 s.wrapMode = TextureWrapMode.Clamp;
-                s.filterMode = kind == TextureKind.PixelSprite ? FilterMode.Point : FilterMode.Bilinear;
+                s.filterMode = kind == TextureKind.PixelSprite
+                    ? FilterMode.Point
+                    : uiIcon ? FilterMode.Trilinear : FilterMode.Bilinear;
                 s.npotScale = TextureImporterNPOTScale.None;
                 s.sRGBTexture = true;
                 s.spritePixelsPerUnit = 100f;
@@ -275,6 +284,18 @@ namespace P1.Editor
     /// </summary>
     public sealed class MediaImportPostprocessor : AssetPostprocessor
     {
+        /// <summary>
+        /// 导入策略版本：改动本文件的导入设置后 +1。Unity 在脚本重编译时检测到版本变化，
+        /// 会重导入本后处理关联的素材（已有 .meta 不会自己套新设置）。
+        /// v1：2026-11 UI 图标改 mip + 三线性（HUD 24~40px 显示抗锯齿）。
+        /// </summary>
+        private const uint ImportPolicyVersion = 1;
+
+        public override uint GetVersion()
+        {
+            return ImportPolicyVersion;
+        }
+
         void OnPreprocessTexture()
         {
             var kind = MediaImportPolicy.ClassifyTexture(assetPath);

@@ -24,6 +24,17 @@ namespace P1.UI
         public bool IsLocalPlayerVictim;
         public float Timestamp;
 
+        /// <summary>
+        /// 受害者的主武器（P42-B）：击杀卡在受害者名右侧补一颗小图标，
+        /// 让玩家在对局内就能读出「我用 A 打掉了一个拿 B 的人」。
+        /// 旧事件源（TriggerMockKill / 测试）不填该字段时 <see cref="HasVictimWeapon"/> 为 false，
+        /// 卡片只省略图标，其余渲染完全不变（向后兼容）。
+        /// </summary>
+        public WeaponKind VictimWeaponKind;
+
+        /// <summary>受害者武器是否已知（false = 不画受害者图标）。</summary>
+        public bool HasVictimWeapon;
+
         public bool IsLocalTeamKill => KillerTeam == PlayerLocalTeam;
 
         public static Team PlayerLocalTeam
@@ -147,6 +158,17 @@ namespace P1.UI
                 }
             }
 
+            // 受害者主武器（P42-B）：Die() 里武器还挂在身上（阵亡整备换枪要到复活那一帧才应用），
+            // 所以这里读到的一定是他被击倒时手上的枪。读不到就 HasVictimWeapon=false，卡片不画图标。
+            WeaponKind victimKind = WeaponKind.Shooter;
+            bool hasVictimWeapon = false;
+            var victimWeapon = victim.GetComponent<WeaponController>();
+            if (victimWeapon != null)
+            {
+                victimKind = victimWeapon.CurrentWeaponKind;
+                hasVictimWeapon = true;
+            }
+
             var ev = new KillFeedEvent
             {
                 KillerName = killerName,
@@ -159,7 +181,9 @@ namespace P1.UI
                 IsSpecial = isSpecial,
                 IsLocalPlayerKiller = isLocalKiller,
                 IsLocalPlayerVictim = isLocalVictim,
-                Timestamp = Time.time
+                Timestamp = Time.time,
+                VictimWeaponKind = victimKind,
+                HasVictimWeapon = hasVictimWeapon
             };
 
             ReportKill(ev);

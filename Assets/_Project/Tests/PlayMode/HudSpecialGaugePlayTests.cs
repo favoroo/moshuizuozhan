@@ -9,7 +9,7 @@ using UnityEngine.UI;
 namespace P1.Tests
 {
     /// <summary>
-    /// P4-C 运行时验收：HUD 自举装配、大招球满能爆发（光环 + 爆发计数 + 按键提示）、
+    /// P4-C 运行时验收：HUD 自举装配、大招横条满能（填充铺满 + 徽章反色 + 一次性爆闪）、
     /// 墨水管低墨告警与迟滞解除，全部在真实 MonoBehaviour 生命周期下运行。
     /// </summary>
     [Category("UI")]
@@ -38,77 +38,89 @@ namespace P1.Tests
             yield return null;
 
             Assert.IsNotNull(hud.LiquidOrb, "HudController 应自动装配大招条");
-            Assert.IsNotNull(hud.InkTank, "HudController 应自动装配墨水条");
             Assert.AreEqual(1, root.GetComponentsInChildren<LiquidOrbView>(true).Length,
                 "只应生成一个大招条，不允许重复装配");
-            Assert.AreEqual(1, root.GetComponentsInChildren<InkTankView>(true).Length,
-                "只应生成一个墨水条，不允许重复装配");
+            AssertBarTrack(hud.LiquidOrb.transform, "大招条内部应有墨黑胶囊轨道 + 胶囊填充");
 
-            AssertFilledBar(hud.LiquidOrb.transform, "大招条内部应有横向填充块");
-            AssertFilledBar(hud.InkTank.transform, "墨水条内部应有横向填充块");
+            // P42-E：底部墨水卡移除，墨水量改由准星旁竖罐承担
+            Assert.IsNull(hud.InkTank, "底部墨水卡应已移除（墨水量看准星旁墨水罐）");
+            Assert.IsNotNull(hud.InkTankCrosshair, "HudController 应自动装配准星旁墨水罐");
+            Assert.AreEqual(1, root.GetComponentsInChildren<InkTankCrosshairView>(true).Length,
+                "只应生成一个准星墨水罐，不允许重复装配");
 
             Object.Destroy(root);
             yield return null;
         }
 
-        /// <summary>横向仪表用 Image.Filled（水平方向）做纯色填充，取代旧的波浪液体网格。</summary>
-        private static void AssertFilledBar(Transform root, string message)
+        /// <summary>横条仪表 = 墨黑胶囊轨道（UIInkShapeGraphic）+ 胶囊填充（UIPillImage）。</summary>
+        private static void AssertBarTrack(Transform root, string message)
         {
-            Image[] images = root.GetComponentsInChildren<Image>(true);
-            for (int i = 0; i < images.Length; i++)
-            {
-                Image image = images[i];
-                if (image.type == Image.Type.Filled && image.fillMethod == Image.FillMethod.Horizontal)
-                {
-                    return;
-                }
-            }
-
-            Assert.Fail(message);
+            var track = root.Find(HudSpecialGaugeFactory.BarTrackName)?.GetComponent<UIInkShapeGraphic>();
+            var fill = root.Find(HudSpecialGaugeFactory.BarTrackName + "/" + HudSpecialGaugeFactory.BarFillName)
+                ?.GetComponent<UIPillImage>();
+            Assert.IsNotNull(track, message);
+            Assert.AreEqual(UIInkShape.Pill, track.Shape, "轨道必须是胶囊（圆角语言的进度条）");
+            Assert.IsNotNull(fill, "横条必须有胶囊填充");
+            Assert.AreEqual(Image.Type.Filled, fill.type, "填充必须是 Filled 才能驱动 fillAmount");
         }
 
         [UnityTest]
-        public IEnumerator LiquidOrb_TurnsYellowAndShowsKeyHintWhenReady()
+        public IEnumerator LiquidOrb_FillsBarAndInvertsBadgeWhenReady()
         {
             GameObject root = CreateCanvas();
             var cluster = HudSpecialGaugeFactory.BuildCluster(root.transform, null, null);
             LiquidOrbView orb = cluster.Orb;
-            Assert.IsNotNull(orb, "工厂应返回大招条视图");
+            Assert.IsNotNull(orb, "工厂应返回大招环视图");
 
             orb.SetCharge(0.35f, false);
             yield return null;
             Assert.IsFalse(orb.IsReady);
             Assert.AreEqual(0, orb.ReadyBurstCount, "未满能不应触发就绪");
-            Assert.AreEqual(0.35f, orb.BarFill.fillAmount, 0.01f, "充能条应跟随充能比例");
-            // t-1 三卡：徽章墨底常驻，身份色由 4px 黄边表达（旧版是纸白/黄整块翻色）
-            Assert.AreEqual(ComicStyle.Ink, orb.IconPlate.color, "未满能徽章应为墨底");
-            Assert.AreEqual(ComicStyle.Yellow, orb.IconPlate.BorderColor, "未满能徽章边框应为行动黄");
-            var cardBg = orb.transform.Find("CardBg") != null
-                ? orb.transform.Find("CardBg").GetComponent<UIInkShapeGraphic>()
-                : null;
-            Assert.IsNotNull(cardBg, "大招卡应有纸白卡底");
-            Assert.AreEqual(ComicStyle.Paper, cardBg.color, "未满能时卡片应为纸白");
+            Assert.IsNotNull(orb.BarFill, "大招条应装配胶囊填充");
+            Assert.AreEqual(0.35f, orb.BarFill.fillAmount, 0.01f, "胶囊填充应跟随充能比例");
+
+            // 横条化（三轮）：充能中 = 墨底徽章 + 黄图标；右端不挂任何小件（Q 键帽已下线）
+            Assert.AreEqual(ComicStyle.Ink, orb.IconPlate.color, "充能中徽章底色应为墨黑");
+            Assert.AreEqual(ComicStyle.Ink, orb.IconPlate.BorderColor, "徽章描边恒为墨色");
+            var glyph = orb.transform.Find("BarBadge/SpecialIcon/Glyph").GetComponent<Image>();
+            Assert.IsNotNull(glyph, "大招条左端徽章应有技能图标");
+            Assert.AreEqual(ComicStyle.Yellow, glyph.color, "充能中图标应为行动黄");
+            Assert.IsNull(orb.transform.Find("Percent"), "横条化后不再显示百分比读数");
+            Assert.IsNull(orb.transform.Find("CardBg"), "横条化后不再有纸白卡片");
+            Assert.IsNull(orb.transform.Find("ReadyHint"), "条内不再有「Q」键帽（三轮已删）");
+            Assert.IsNull(orb.transform.Find("HpChip"), "大招条不应有读数芯片");
+
+            // 第四轮：满能状态环 = 徽章外圈的 4px 黄环（填充透明），充能中隐藏
+            var readyRing = orb.transform.Find(HudSpecialGaugeFactory.ReadyRingName) as RectTransform;
+            Assert.IsNotNull(readyRing, "大招条应有满能状态环");
+            Assert.IsFalse(readyRing.gameObject.activeSelf, "充能中状态环必须隐藏");
+            var readyRingShape = readyRing.GetComponent<UIInkShapeGraphic>();
+            Assert.AreEqual(ComicStyle.Yellow, readyRingShape.BorderColor, "状态环环带应为行动黄");
+            Assert.AreEqual(Color.clear, readyRingShape.color, "状态环填充必须透明（只画环带，不挡徽章）");
 
             orb.SetCharge(1f, true);
+            // 满能只换徽章状态：条身颜色恒定，不闪、不爆闪（用户明确要求）
+            Assert.AreEqual(ComicStyle.Yellow, orb.BarFill.color, "满能时条身保持常驻行动黄，不做闪烁");
             yield return null;
             Assert.IsTrue(orb.IsReady, "满能后 IsReady 应为 true");
             Assert.AreEqual(1, orb.ReadyBurstCount, "进入满能应计数一次");
-            Assert.AreEqual(1f, orb.BarFill.fillAmount, 0.01f, "满能条应铺满");
-            Assert.AreEqual(ComicStyle.Ink, orb.IconPlate.color, "满能时徽章仍是墨底（翻黄由整卡承担）");
-            Assert.AreEqual(ComicStyle.Yellow, cardBg.color, "满能应整卡翻黄");
+            Assert.AreEqual(1f, orb.BarFill.fillAmount, 0.01f, "满能时填充应铺满整条");
+            // 满能 = 徽章整体反色（黄底墨图标），条内唯一的状态承载点
+            Assert.AreEqual(ComicStyle.Yellow, orb.IconPlate.color, "满能时徽章翻黄底");
+            Assert.AreEqual(ComicStyle.Ink, orb.IconPlate.BorderColor, "徽章 3px 墨边常驻");
+            Assert.AreEqual(ComicStyle.Ink, glyph.color, "满能时图标翻墨（黄底墨图标才读得出）");
 
-            Transform readyHint = orb.transform.Find("ReadyHint");
-            Assert.IsNotNull(readyHint, "大招条应包含满能按键提示节点");
-            Assert.IsTrue(readyHint.gameObject.activeSelf, "桌面端满能应显示「Q 释放」提示");
-            Assert.IsFalse(orb.transform.Find("Percent").gameObject.activeSelf, "满能时百分比让位给按键提示");
+            Assert.IsNull(orb.transform.Find("ReadyBurst"), "满能不再生成爆闪节点（改由徽章换状态）");
+            Assert.IsTrue(readyRing.gameObject.activeSelf, "满能时状态环应亮起");
 
-            // 掉回未满能：提示收起、百分比回来、整卡恢复纸白
+            // 掉回未满能：徽章恢复墨底黄图标
             orb.SetCharge(0f, false);
             yield return null;
             Assert.IsFalse(orb.IsReady);
-            Assert.IsFalse(readyHint.gameObject.activeSelf, "释放后提示应隐藏");
-            Assert.IsTrue(orb.transform.Find("Percent").gameObject.activeSelf, "释放后百分比应回来");
-            Assert.AreEqual(ComicStyle.Paper, cardBg.color, "释放后卡片恢复纸白");
+            Assert.IsFalse(readyRing.gameObject.activeSelf, "释放后状态环应收起");
+            Assert.AreEqual(ComicStyle.Ink, orb.IconPlate.color, "释放后徽章恢复墨底");
+            Assert.AreEqual(ComicStyle.Yellow, glyph.color, "释放后图标恢复行动黄");
+            Assert.AreEqual(ComicStyle.Yellow, orb.BarFill.color, "释放后条身回到常驻行动黄（闪烁停止）");
 
             Object.Destroy(root);
             yield return null;
@@ -142,9 +154,11 @@ namespace P1.Tests
         public IEnumerator InkTank_WarnsBelowThresholdAndClearsWithHysteresis()
         {
             GameObject root = CreateCanvas();
-            var cluster = HudSpecialGaugeFactory.BuildCluster(root.transform, null, null);
-            InkTankView tank = cluster.Tank;
-            Assert.IsNotNull(tank, "工厂应返回墨水管视图");
+            var tankGo = new GameObject("InkTankCrosshair", typeof(RectTransform));
+            tankGo.transform.SetParent(root.transform, false);
+            var tank = tankGo.AddComponent<InkTankCrosshairView>();
+            tank.EnsureBuilt();
+            yield return null;
 
             tank.SetInk(80f, 100f);
             yield return null;
@@ -173,37 +187,46 @@ namespace P1.Tests
         public IEnumerator InkTank_ThresholdMarkerFollowsBombCost()
         {
             GameObject root = CreateCanvas();
-            var cluster = HudSpecialGaugeFactory.BuildCluster(root.transform, null, null);
-            InkTankView tank = cluster.Tank;
+            var tankGo = new GameObject("InkTankCrosshair", typeof(RectTransform));
+            tankGo.transform.SetParent(root.transform, false);
+            var tank = tankGo.AddComponent<InkTankCrosshairView>();
+            tank.EnsureBuilt();
+            yield return null;
 
+            // 罐体挂在视图根下：直接按名字全量搜，避免依赖层级拼写
             RectTransform marker = null;
-            foreach (RectTransform child in tank.GetComponentsInChildren<RectTransform>(true))
+            foreach (Transform child in tank.GetComponentsInChildren<Transform>(true))
             {
-                if (child.name == "BombThreshold") marker = child;
+                if (child.name == "Threshold") marker = (RectTransform)child;
             }
 
-            Assert.IsNotNull(marker, "墨水条应有副武器刻度线节点");
+            Assert.IsNotNull(marker, "准星墨水罐应有副武器刻度线节点");
 
             tank.SetThreshold01(0.55f);
             yield return null;
-            float at55 = marker.anchoredPosition.x;
+            float at55 = marker.anchoredPosition.y;
 
             tank.SetThreshold01(0.7f);
             yield return null;
-            float at70 = marker.anchoredPosition.x;
+            float at70 = marker.anchoredPosition.y;
 
-            Assert.Greater(at70, at55, "横向条的竖刻度线应随阈值右移");
+            Assert.Greater(at70, at55, "竖罐的横向刻度线应随阈值上移");
+
+            tank.SetThreshold01(0f);
+            yield return null;
+            var line = marker.GetComponent<Image>();
+            Assert.AreEqual(Color.clear, line.color, "手雷不耗墨时刻度线应隐藏（透明）");
 
             Object.Destroy(root);
             yield return null;
         }
 
         [UnityTest]
-        public IEnumerator BottomStatus_ThreeIndependentCards_GeometryAndStyle()
+        public IEnumerator BottomStatus_TwoBars_GeometryAndStyle()
         {
             GameObject root = CreateCanvas();
-            // 真实场景里有烘焙的 BottomStatusPanel（旧黑块节点）：三卡改造后它只当不可见容器，
-            // 提示条与迁移后的血条都挂在它下面，所以测试也要先放一个同名节点。
+            // 真实场景里有烘焙的 BottomStatusPanel（旧黑块节点）：横条化后它只当不可见容器，
+            // 迁移后的血条节点挂在它下面，所以测试也要先放一个同名节点。
             var panelGo = new GameObject("BottomStatusPanel", typeof(RectTransform), typeof(Image));
             panelGo.transform.SetParent(root.transform, false);
             var hud = root.AddComponent<HudController>();
@@ -211,103 +234,114 @@ namespace P1.Tests
             yield return null;
 
             RectTransform cards = hud.GaugeRoot;
-            Assert.IsNotNull(cards, "底部状态区应有三卡根节点");
+            Assert.IsNotNull(cards, "底部状态区应有横条组根节点");
 
+            // P42-E：墨水卡移除；横条化后底部只留大招条 + 生命条
             var ink = cards.Find("InkCard") as RectTransform;
             var spec = cards.Find("SpecialCard") as RectTransform;
             var health = cards.Find("HealthCard") as RectTransform;
-            Assert.IsNotNull(ink, "应有独立的墨水卡");
-            Assert.IsNotNull(spec, "应有独立的大招卡");
-            Assert.IsNotNull(health, "应有独立的生命卡");
+            Assert.IsNull(ink, "墨水卡应已移除（墨水量在准星旁墨水罐上）");
+            Assert.IsNotNull(spec, "应有独立的大招条");
+            Assert.IsNotNull(health, "应有独立的生命条");
 
-            // 桌面几何：88 高、底边 56、卡间 16、三卡不重叠
-            Assert.AreEqual(HudSpecialGaugeFactory.CardHeightDesktop, cards.sizeDelta.y, 0.01f);
-            Assert.AreEqual(HudSpecialGaugeFactory.CardsBottomYDesktop, cards.anchoredPosition.y, 0.01f);
-            Assert.AreEqual(0f, ink.anchoredPosition.y, 0.01f, "卡片底边应与卡区底边对齐");
-            Assert.AreEqual(HudSpecialGaugeFactory.CardHeightDesktop, ink.rect.height, 0.01f);
-            Assert.AreEqual(HudSpecialGaugeFactory.CardHeightDesktop, spec.rect.height, 0.01f);
-            Assert.AreEqual(HudSpecialGaugeFactory.CardHeightDesktop, health.rect.height, 0.01f);
+            // 桌面几何：整组 344×78、底边 54；两行各 344×34、行距 10
+            Assert.AreEqual(HudSpecialGaugeFactory.BarGroupHeightDesktop, cards.sizeDelta.y, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.BarGroupWidthDesktop, cards.sizeDelta.x, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.BarGroupBottomYDesktop, cards.anchoredPosition.y, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.BarGroupWidthDesktop, spec.rect.width, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.BarRowHeightDesktop, spec.rect.height, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.BarGroupWidthDesktop, health.rect.width, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.BarRowHeightDesktop, health.rect.height, 0.01f);
 
-            Assert.AreEqual(ink.anchoredPosition.x + ink.rect.width + HudSpecialGaugeFactory.CardGapDesktop,
-                spec.anchoredPosition.x, 0.01f, "墨水卡与大招卡之间应留 16px");
-            Assert.AreEqual(spec.anchoredPosition.x + spec.rect.width + HudSpecialGaugeFactory.CardGapDesktop,
-                health.anchoredPosition.x, 0.01f, "大招卡与生命卡之间应留 16px");
+            // 大招在上、生命在下，中间行距 8
+            Assert.AreEqual(HudSpecialGaugeFactory.BarRowHeightDesktop + HudSpecialGaugeFactory.BarRowGapDesktop,
+                spec.anchoredPosition.y, 0.01f, "大招条应在上一行");
+            Assert.AreEqual(0f, health.anchoredPosition.y, 0.01f, "生命条应在下一行（贴组底）");
 
-            // 三卡整体居中：根节点锚定底边中央，卡片从根矩形左边起算、两端余量相等
-            Assert.AreEqual(0.5f, cards.anchorMin.x, 1e-4f, "三卡区根节点应锚定屏幕水平中心");
+            // 整组居中：根节点锚定底边中央
+            Assert.AreEqual(0.5f, cards.anchorMin.x, 1e-4f, "横条组应锚定屏幕水平中心");
             Assert.AreEqual(0.5f, cards.pivot.x, 1e-4f);
-            float sideInset = (HudSpecialGaugeFactory.CardAreaWidth -
-                (ink.rect.width + spec.rect.width + health.rect.width
-                 + HudSpecialGaugeFactory.CardGapDesktop * 2f)) * 0.5f;
-            Assert.AreEqual(sideInset, ink.anchoredPosition.x, 0.01f, "第一张卡左边距应等于右边余量");
-            Assert.AreEqual(cards.rect.width, health.anchoredPosition.x + health.rect.width + sideInset,
-                0.01f, "最后一张卡右边距应等于左边余量");
 
-            // 不伸进左右触控区（1920 宽屏左右各留 200px）
+            // 窄横条：整组远小于旧 712px 卡片区，且不伸进左右触控区
+            Assert.Less(cards.rect.width, 400f, "横条组应保持窄条形态");
             Assert.LessOrEqual(cards.rect.width * 0.5f + 200f, 960f,
-                "三卡区不得伸进左右下角的触控按键区");
+                "横条组不得伸进左右下角的触控按键区");
 
-            // 卡片外壳：纸白 + 3px 墨框 + 面板档硬影 (4,-5)
-            foreach (var card in new[] { ink, spec, health })
-            {
-                var bg = card.Find("CardBg").GetComponent<UIInkShapeGraphic>();
-                Assert.IsNotNull(bg, card.name + " 应有纸白卡底");
-                Assert.AreEqual(ComicStyle.Paper, bg.color);
-                Assert.AreEqual(ComicStyle.BorderThin, bg.BorderWidth, 0.01f);
-                Assert.AreEqual(ComicStyle.Ink, bg.BorderColor);
-                Assert.IsTrue(bg.HasHardShadow, card.name + " 必须开面板硬影");
-                Assert.AreEqual(UIThemeSO.Resolve(null).GetHardShadowOffset(UIHardShadowLevel.Panel),
-                    bg.ShadowOffset, "硬影必须是面板档 (4,-5)");
+            // 大招条：左端墨底徽章 + 墨黑胶囊轨道 + 胶囊填充（右端无任何附加小件）
+            Assert.IsNull(spec.Find("CardBg"), "横条化后不再有纸白卡片");
+            Assert.IsNull(spec.Find("Rail"), "横条化后不再有身份色带");
+            Assert.IsNull(spec.Find("Disc"), "横条化后不再有墨底正圆");
+            Assert.IsNull(spec.Find("Arc"), "横条化后不再有环形弧");
 
-                // 顶部 5px 身份色带：内缩「圆角半径 + 3px 墨框」（圆角化后直角色带会戳出卡外）、不叠硬影
-                var rail = card.Find("Rail").GetComponent<UIInkShapeGraphic>();
-                Assert.IsNotNull(rail, card.name + " 应有身份色带");
-                var railRect = (RectTransform)rail.transform;
-                Assert.AreEqual(5f, railRect.rect.height, 0.01f, "身份色带高 5px");
-                float cardRadius = ComicStyle.CornerFor(card.rect.width, card.rect.height);
-                Assert.AreEqual(card.rect.width - (cardRadius + ComicStyle.BorderThin) * 2f, railRect.rect.width, 0.01f,
-                    "色带应内缩「圆角半径 + 边框」宽度");
-                Assert.IsFalse(rail.HasHardShadow, "色带不叠硬影");
-            }
+            var specBadge = spec.Find(HudSpecialGaugeFactory.BarBadgeName)?.GetComponent<UIInkShapeGraphic>();
+            Assert.IsNotNull(specBadge, "大招条左端应有身份徽章");
+            Assert.AreEqual(UIInkShape.Pill, specBadge.Shape, "身份徽章应为正圆");
+            Assert.AreEqual(ComicStyle.Ink, specBadge.color, "未满能徽章应为墨底");
+            Assert.IsNotNull(spec.Find(HudSpecialGaugeFactory.BarBadgeName + "/SpecialIcon/Glyph"),
+                "大招徽章应有技能图标");
 
-            // 墨水卡：44 墨底徽章 + 4px 队伍色边 + 24 高轨道 + display 36 墨色读数
-            var inkBadge = ink.Find("InkBadge").GetComponent<UIInkShapeGraphic>();
-            Assert.AreEqual(44f, ((RectTransform)inkBadge.transform).rect.width, 0.01f);
-            Assert.AreEqual(4f, inkBadge.BorderWidth, 0.01f);
-            Assert.AreEqual(ComicStyle.Ink, inkBadge.color);
-            var inkTrack = (RectTransform)ink.Find("InkBar");
-            Assert.AreEqual(24f, inkTrack.rect.height, 0.01f);
-            var inkPct = ink.Find("Percent").GetComponent<TMPro.TMP_Text>();
-            // 桌面 36 / 移动端 clamp 到 38（UITypography 通路），三卡读数同档
-            Assert.AreEqual(HudSpecialGaugeFactory.ReadoutFontSize(), inkPct.fontSize, 0.01f);
-            Assert.GreaterOrEqual(inkPct.fontSize, HudSpecialGaugeFactory.CardReadoutFontSize,
-                "大百分比不得小于桌面基准 36");
-            Assert.AreEqual(ComicStyle.Ink, inkPct.color, "纸白卡上的读数是墨色");
+            var specTrack = spec.Find(HudSpecialGaugeFactory.BarTrackName)?.GetComponent<UIInkShapeGraphic>();
+            Assert.IsNotNull(specTrack, "大招条应有胶囊轨道");
+            Assert.AreEqual(UIInkShape.Pill, specTrack.Shape);
+            Assert.AreEqual(ComicStyle.Ink, specTrack.color, "轨道应为墨黑（填充的对比底 + 自动描边）");
 
-            // 大招卡：同构墨底徽章 + 行动黄读数 / 轨道
-            var specBadge = spec.Find("IconPlate").GetComponent<UIInkShapeGraphic>();
-            Assert.AreEqual(ComicStyle.Ink, specBadge.color);
-            Assert.AreEqual(ComicStyle.Yellow, specBadge.BorderColor);
-            Assert.AreEqual(ComicStyle.Yellow, spec.Find("SpecialBar/Fill").GetComponent<Image>().color);
+            var specFill = spec.Find(HudSpecialGaugeFactory.BarTrackName + "/" + HudSpecialGaugeFactory.BarFillName)
+                ?.GetComponent<UIPillImage>();
+            Assert.IsNotNull(specFill, "大招条应有胶囊填充");
+            Assert.AreEqual(ComicStyle.Yellow, specFill.color, "大招填充应为行动黄");
+            Assert.AreEqual(Image.Type.Filled, specFill.type);
+            Assert.IsNull(spec.Find(HudSpecialGaugeFactory.ReadyHintName), "三轮起条内不再有「Q」键帽");
+            var specTrackRect = (RectTransform)specTrack.transform;
+            Assert.AreEqual(HudSpecialGaugeFactory.BarTrackWidthDesktop, specTrackRect.rect.width, 0.01f,
+                "轨道应拉满到行右沿（300）");
+            Assert.AreEqual(spec.rect.width, specTrackRect.anchoredPosition.x + specTrackRect.rect.width, 0.01f,
+                "轨道右沿必须与行右沿重合，条内不留右槽");
 
-            // 生命卡：220 高轨道、绿色填充、右侧 display 36
-            var hpTrack = (RectTransform)health.Find("HealthBarBg");
-            Assert.AreEqual(HudSpecialGaugeFactory.HealthTrackWidth, hpTrack.rect.width, 0.01f);
-            Assert.AreEqual(24f, hpTrack.rect.height, 0.01f);
-            var hpFill = hpTrack.Find("HealthBarFill").GetComponent<Image>();
-            Assert.AreEqual(Image.Type.Filled, hpFill.type, "生命条必须是横向 Filled 纯色块");
-            Assert.AreEqual(ComicStyle.Green, hpFill.color);
-            Assert.AreEqual(HudSpecialGaugeFactory.ReadoutFontSize(),
-                health.Find("HpText").GetComponent<TMPro.TMP_Text>().fontSize, 0.01f);
+            // 生命条：左端绿底十字徽章 + 胶囊轨道 + 绿色填充（右端无读数芯片）
+            Assert.IsNull(health.Find("CardBg"), "横条化后不再有纸白卡片");
+            Assert.IsNull(health.Find("HpDisc"), "横条化后不再有墨底正圆");
+            Assert.IsNull(health.Find("HealthBarArc"), "横条化后不再有环形弧");
 
-            // 生命卡单层模式断言：HpText 与 HpBadge 都不应有活跃的 ChunkyFill 重影层
-            Transform hpTextTr = health.Find("HpText");
-            Transform hpFillTr = hpTextTr != null ? hpTextTr.Find("ChunkyFill") : null;
-            Assert.IsTrue(hpFillTr == null || !hpFillTr.gameObject.activeSelf, "HpText 单层模式下不允许存在活跃的 ChunkyFill 重影层");
+            var hpBadge = health.Find(HudSpecialGaugeFactory.BarBadgeName)?.GetComponent<UIInkShapeGraphic>();
+            Assert.IsNotNull(hpBadge, "生命条左端应有身份徽章");
+            Assert.AreEqual(UIInkShape.Pill, hpBadge.Shape, "身份徽章应为正圆");
+            Assert.AreEqual(ComicStyle.Green, hpBadge.color, "常态徽章应为语义绿（生命身份色）");
 
-            Transform hpBadgeTr = health.Find("HpBadge/Label");
-            Transform badgeFillTr = hpBadgeTr != null ? hpBadgeTr.Find("ChunkyFill") : null;
-            Assert.IsTrue(badgeFillTr == null || !badgeFillTr.gameObject.activeSelf, "HpBadge 单层模式下不允许存在活跃的 ChunkyFill 重影层");
+            var hpCrossIcon = health
+                .Find(HudSpecialGaugeFactory.BarBadgeName + "/" + HudSpecialGaugeFactory.HealthBadgeIconName)
+                ?.GetComponent<Image>();
+            Assert.IsNotNull(hpCrossIcon, "十字徽章应有 glyph_plus 图标");
+            Assert.IsTrue(hpCrossIcon.enabled && hpCrossIcon.sprite != null,
+                "十字图标必须加载成功（取不到要隐藏，不允许白块）");
+
+            var hpTrack = health.Find(HudSpecialGaugeFactory.BarTrackName)?.GetComponent<UIInkShapeGraphic>();
+            Assert.IsNotNull(hpTrack, "生命条应有胶囊轨道");
+            Assert.AreEqual(UIInkShape.Pill, hpTrack.Shape);
+            Assert.AreEqual(ComicStyle.Ink, hpTrack.color);
+
+            var hpFill = health.Find(HudSpecialGaugeFactory.BarTrackName + "/" + HudSpecialGaugeFactory.BarFillName)
+                ?.GetComponent<UIPillImage>();
+            Assert.IsNotNull(hpFill, "生命条应有胶囊填充");
+            Assert.AreEqual(ComicStyle.Green, hpFill.color, "生命填充应为语义绿");
+            Assert.AreEqual(1f, hpFill.fillAmount, 0.01f, "满血时生命填充应铺满整条");
+
+            // 旧横条 Image 只当数据载体：节点保留但禁绘制
+            var legacyFill = health.Find("HealthBarBg/HealthBarFill")?.GetComponent<Image>();
+            Assert.IsNotNull(legacyFill, "旧 HealthBarFill 绑定节点必须保留");
+            Assert.IsFalse(legacyFill.enabled, "旧横条填充不得再绘制");
+
+            // 右端读数芯片与数字全部下线：条内只有徽章 + 轨道 + 填充
+            Assert.IsNull(health.Find(HudSpecialGaugeFactory.HealthChipName),
+                "三轮起生命条不再有读数芯片");
+            var hpTrackRect = (RectTransform)hpTrack.transform;
+            Assert.AreEqual(HudSpecialGaugeFactory.BarTrackWidthDesktop, hpTrackRect.rect.width, 0.01f,
+                "生命轨道也应拉满到行右沿（300）");
+            Assert.AreEqual(health.rect.width, hpTrackRect.anchoredPosition.x + hpTrackRect.rect.width, 0.01f,
+                "生命轨道右沿必须与行右沿重合");
+
+            Transform hpBadgeLegacy = health.Find("HpBadge");
+            Assert.IsTrue(hpBadgeLegacy == null || !hpBadgeLegacy.gameObject.activeSelf,
+                "旧 [HP] 徽章已并入横条，必须隐藏");
 
             // 键鼠提示已迁到暂停菜单：HUD 底部不再出现提示条/小字
             Transform panel = hud.transform.Find("HudSafeArea/BottomStatusPanel");
@@ -384,46 +418,44 @@ namespace P1.Tests
             yield return null;
 
             Assert.IsNotNull(hud.LiquidOrb, "大招条应自动装配");
-            Assert.IsNotNull(hud.InkTank, "墨水条应自动装配");
-            Assert.IsNotNull(hud.GaugeRoot, "仪表条应有独立根节点，才能与底部面板同步移动");
+            Assert.IsNull(hud.InkTank, "底部墨水卡应已移除（P42-E）");
+            Assert.IsNotNull(hud.GaugeRoot, "横条组应有独立根节点，才能与底部面板同步移动");
 
             hud.ApplyMobileLayout();
             yield return null;
 
             RectTransform gaugeRoot = hud.GaugeRoot;
-            Assert.AreEqual(0.5f, gaugeRoot.anchorMin.x, 1e-4f, "移动端仪表条应锚定屏幕水平中心");
-            Assert.AreEqual(0f, gaugeRoot.anchorMin.y, 1e-4f, "移动端仪表条应锚定屏幕底部");
-            Assert.AreEqual(HudSpecialGaugeFactory.StripWidth, gaugeRoot.sizeDelta.x, 0.01f,
-                "三卡区根节点应与旧信息条矩形同宽（300+300+380+16×2）");
+            Assert.AreEqual(0.5f, gaugeRoot.anchorMin.x, 1e-4f, "移动端横条组应锚定屏幕水平中心");
+            Assert.AreEqual(0f, gaugeRoot.anchorMin.y, 1e-4f, "移动端横条组应锚定屏幕底部");
+            Assert.AreEqual(HudSpecialGaugeFactory.StripWidthMobile, gaugeRoot.sizeDelta.x, 0.01f,
+                "移动端横条组宽度应按移动端常量（318），不允许比桌面窄");
             Assert.AreEqual(HudSpecialGaugeFactory.StripHeightMobile, gaugeRoot.sizeDelta.y, 0.01f,
-                "移动端卡片应收矮（88 → 72）");
+                "移动端横条组应放大（64 → 73），不允许比桌面小");
             Assert.AreEqual(HudSpecialGaugeFactory.StripBottomYMobile, gaugeRoot.anchoredPosition.y, 0.01f);
             Assert.Less(gaugeRoot.sizeDelta.x, 1120f,
-                "三卡区必须留在屏幕中央，不能伸进左右触控按键区");
+                "横条组必须留在屏幕中央，不能伸进左右触控按键区");
 
-            // t-1 三卡：墨水条 / 大招条各自挂在独立卡片上（旧版是同一行 MeterRow）
-            Assert.AreEqual(gaugeRoot.Find("InkCard"), hud.InkTank.transform,
-                "墨水条应挂在独立的墨水卡上");
+            // P42-E 两行：墨水卡移除，大招条 / 生命条各自挂在独立节点上
+            Assert.IsNull(gaugeRoot.Find("InkCard"), "墨水卡应已移除");
             Assert.AreEqual(gaugeRoot.Find("SpecialCard"), hud.LiquidOrb.transform,
-                "大招条应挂在独立的大招卡上");
-            Assert.IsNotNull(gaugeRoot.Find("HealthCard"), "底部状态区应有独立的生命卡");
+                "大招条应挂在独立的 SpecialCard 上");
+            Assert.IsNotNull(gaugeRoot.Find("HealthCard"), "底部状态区应有独立的生命条");
 
-            // 移动端几何：卡高 72、间距 12、底边 46（横向排布与桌面一致）
-            var mobileInk = gaugeRoot.Find("InkCard") as RectTransform;
+            // 移动端几何：行高 38、整组 379×87（与桌面同构，只换尺寸）
             var mobileSpec = gaugeRoot.Find("SpecialCard") as RectTransform;
-            Assert.AreEqual(HudSpecialGaugeFactory.CardHeightMobile, mobileInk.sizeDelta.y, 0.01f);
-            Assert.AreEqual(HudSpecialGaugeFactory.CardHeightMobile, mobileSpec.sizeDelta.y, 0.01f);
-            Assert.AreEqual(HudSpecialGaugeFactory.CardGapMobile,
-                mobileSpec.anchoredPosition.x - (mobileInk.anchoredPosition.x + mobileInk.sizeDelta.x),
-                0.01f, "移动端卡间距应为 12");
-            Assert.AreEqual(HudSpecialGaugeFactory.CardsBottomYMobile, gaugeRoot.anchoredPosition.y, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.BarGroupWidthMobile, mobileSpec.sizeDelta.x, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.BarRowHeightMobile, mobileSpec.sizeDelta.y, 0.01f);
+            Assert.AreEqual(HudSpecialGaugeFactory.BarGroupBottomYMobile, gaugeRoot.anchoredPosition.y, 0.01f);
 
-            // 满能时移动端不应弹出「按 Q 释放」，大招键本身已有就绪提示
+            // 三轮起两端都没有「Q」键帽节点；移动端只能靠徽章反色 + 触控大招键表达就绪
             hud.LiquidOrb.SetCharge(1f, true);
             yield return null;
-            Transform readyHint = hud.LiquidOrb.transform.Find("ReadyHint");
-            Assert.IsNotNull(readyHint, "大招条应包含满能提示节点");
-            Assert.IsFalse(readyHint.gameObject.activeSelf, "移动端必须隐藏键盘 Q 提示");
+            Assert.IsNull(hud.LiquidOrb.transform.Find("ReadyHint"), "条内不再生成「Q」键帽（含移动端）");
+            Assert.AreEqual(ComicStyle.Yellow, hud.LiquidOrb.IconPlate.color,
+                "移动端满能同样靠徽章翻黄表达");
+            var mobileTrack = hud.LiquidOrb.transform.Find(HudSpecialGaugeFactory.BarTrackName) as RectTransform;
+            Assert.AreEqual(HudSpecialGaugeFactory.BarTrackWidthMobile, mobileTrack.sizeDelta.x, 0.01f,
+                "移动端轨道同样拉满（330）");
 
             // 重复应用布局必须幂等（分辨率/安全区变化会重复调用）
             hud.ApplyMobileLayout();

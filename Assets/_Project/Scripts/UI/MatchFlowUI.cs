@@ -139,6 +139,10 @@ namespace P1.UI
 
         private GameObject _fullscreenUnderlay;
         private float _resultElapsed;
+
+        // 结算列纵向拟合缓存：记录上次拟合时的画布高与位移量，画布尺寸变化时按差量重移。
+        private float _resultFitCanvasH = -1f;
+        private float _resultFitShift;
         private MatchManager.Phase _lastPhase = (MatchManager.Phase)(-1);
         private bool _numbersSettled;
 
@@ -159,7 +163,21 @@ namespace P1.UI
         private TextMeshProUGUI _statTurfText;
         private TextMeshProUGUI _statKillText;
         private TextMeshProUGUI _statDeathText;
+        private TextMeshProUGUI _statStreakText;
         private CombatantMatchStats _localStats;
+
+        // 新纪录角签（击杀 / 阵亡后扩展的列共用一套）：与四列读数一一对应，结算出纪录才点亮。
+        private RectTransform[] _recordTagRoots = new RectTransform[4];
+        private static readonly string[] RecordTagLabels = { "纪录!", "纪录!", "纪录!", "纪录!" };
+
+        // 勋章条：金银铜胶囊 chips（最多 4 枚）+ 首枚勋章幽默描述行（溢出并入该行）。
+        private RectTransform[] _medalChipRoots = new RectTransform[4];
+        private TextMeshProUGUI[] _medalChipTexts = new TextMeshProUGUI[4];
+        private TextMeshProUGUI _medalDescText;
+
+        private ResultAchievementsView _achievementsView;
+        private AchievementSettleOutcome _achievementOutcome;
+        private AwardType _localAwards;
 
         private TextMeshProUGUI _xpLevelText;
         private TextMeshProUGUI _xpGainText;
@@ -1627,6 +1645,17 @@ namespace P1.UI
                 if (_reportMotion != null) _resultEntrance.Add(_reportMotion);
             }
 
+            // 本局成就条：内容已在结算时写好；本局有新解锁才随同一批 pop-in。
+            if (_achievementsView != null)
+            {
+                bool stripVisible = _achievementsView.Populate(
+                    _achievementOutcome != null ? _achievementOutcome.NewlyUnlocked : null);
+                if (stripVisible && _achievementsView.Motion != null)
+                {
+                    _resultEntrance.Add(_achievementsView.Motion);
+                }
+            }
+
             PlayStaggered(_resultEntrance);
         }
 
@@ -1928,9 +1957,10 @@ namespace P1.UI
         /// 结算页（简化版 · 几何大胆风）：
         /// 1. 顶部 Hero 级「胜利 / 失败」判定大牌，一句话讲完胜负；
         /// 2. 中部两块「墨色读数板」（我方 / 敌方）：队色描边 + 超大百分比，胜方点亮黄色「胜」签；
-        /// 3. 底部一张个人战报卡：涂地 / 击杀 / 阵亡三列大数字 + 等级 / 经验条 / 本局经验；
-        /// 4. 关键 CTA「再来一局」黄底墨字直角大按钮 + 次级「返回」纸白墨框。
-        /// 4v4 明细表、勋章 chips、胜差贴纸与背景装饰已退场：结算页只回答「谁赢、赢多少、我干了什么」。
+        /// 3. 底部一张个人战报卡 v2：涂地 / 击杀 / 阵亡 / 连杀四列 + 勋章 chips + 等级 / 经验条 / 本局经验；
+        /// 4. 战报卡下方一条「本局成就」解锁卡（本局有新解锁才出现，见 <see cref="ResultAchievementsView"/>）；
+        /// 5. 关键 CTA「再来一局」黄底墨字直角大按钮 + 次级「返回」纸白墨框。
+        /// 4v4 明细表与胜差贴纸保持退场：结算页只回答「谁赢、赢多少、我干了什么、拿了什么」。
         /// 重影修复：百分比改纯平 TMP（display Heavy），不再给 Legacy Text 挂 uGUI Shadow——
         /// Shadow 复制的是不透明字形副本，配上半透明字色就会读成「灰字黑重影」。
         /// </summary>
@@ -2048,13 +2078,18 @@ namespace P1.UI
                 verdictText.gameObject.SetActive(false);
             }
 
-            // 5. 个人战报卡（涂地 / 击杀 / 阵亡 + 等级 / 经验条 / 本局经验）
+            // 5. 个人战报卡（涂地 / 击杀 / 阵亡 / 连杀 + 勋章条 + 等级 / 经验条 / 本局经验）
             BuildSummaryCard(rootRt, resolved, mobile);
 
+            // 5.5 本局成就解锁条（装饰层：本局无新解锁时整条隐藏）
+            EnsureAchievementsStrip(rootRt, resolved, mobile);
+
             // 6. 再来一局 CTA（主行动黄 + 墨字 + Button 硬影）+ 次级「返回」（纸白 + 墨框）
-            float btnY = mobile ? -400f : -390f;
-            Vector2 restartSize = mobile ? new Vector2(390f, 104f) : new Vector2(340f, 92f);
-            Vector2 backSize = mobile ? new Vector2(200f, 104f) : new Vector2(180f, 92f);
+            //    成就条的题头带（节标 + 6px 缝）要靠整体下移让出来，按钮跟着下沉；
+            //    底缘随之从 -508 / -504 变到 -520 / -530，同步更新 ApplyResultColumnFit 的设计稿包络。
+            float btnY = mobile ? -482f : -474f;
+            Vector2 restartSize = mobile ? new Vector2(390f, 96f) : new Vector2(340f, 92f);
+            Vector2 backSize = mobile ? new Vector2(200f, 96f) : new Vector2(180f, 92f);
             float btnGap = mobile ? 28f : 24f;
             float restartX = -(backSize.x + btnGap) * 0.5f; // 让「重开 + 返回」整组落在屏幕中线上
             float backX = restartX + restartSize.x * 0.5f + btnGap + backSize.x * 0.5f;
@@ -2179,6 +2214,66 @@ namespace P1.UI
 
             // 隐藏旧场景多余标题
             if (resultTitleText != null) resultTitleText.gameObject.SetActive(false);
+
+            // 9. 纵向拟合：宽屏（画布变矮）时整列上移，CTA 按钮不再溢出屏幕底缘。
+            ApplyResultColumnFit();
+        }
+
+        /// <summary>
+        /// 结算列纵向拟合：整列（判定牌 / 读数板 / 战报卡 / 成就条 / CTA 按钮组）
+        /// 按 1080 高设计稿从中心绝对定位，而 HUD 画布是 ScaleWithScreenSize(1920×1080, match 0.5)——
+        /// 宽屏下画布纵向单位数收缩（约 2.1:1 时只剩 ~987），按钮底缘（-520）会溢出屏幕底。
+        /// 这里按 resultPanel 实际高度把整列等量上移，内部间距一概不动；
+        /// 16:9 基准下位移约 12px（移动端 14px），刚好把设计稿留的底部余量（32 / 24）拿回来。
+        /// </summary>
+        private void ApplyResultColumnFit()
+        {
+            if (resultPanel == null) return;
+            float canvasH = ((RectTransform)resultPanel.transform).rect.height;
+            if (canvasH <= 1f) return; // 画布尚未完成布局，等 Update 里重试
+            if (_resultFitCanvasH >= 0f && Mathf.Abs(canvasH - _resultFitCanvasH) < 0.5f) return;
+            _resultFitCanvasH = canvasH;
+
+            bool mobile = UITypography.IsMobileLike;
+            float halfH = canvasH * 0.5f;
+            // 设计稿纵向包络：判定牌顶 +402（移动端 414），按钮底缘 -520（移动端 -530）。
+            // 底缘为成就条题头带让位后整体下沉过，改按钮位置时必须同步这里，否则窄屏会漏出屏幕。
+            float topExtent = mobile ? 414f : 402f;
+            float bottomExtent = mobile ? 530f : 520f;
+            float bottomMargin = mobile ? 24f : 32f;
+
+            float shift = Mathf.Max(0f, bottomExtent + bottomMargin - halfH);
+            // 超宽屏兜底：判定牌离屏顶至少留 16px，移不动就少移（此时底部只能部分保住）。
+            shift = Mathf.Min(shift, Mathf.Max(0f, halfH - topExtent - 16f));
+
+            float delta = shift - _resultFitShift;
+            if (Mathf.Abs(delta) < 0.01f) return;
+            _resultFitShift = shift;
+
+            if (victoryBadgeRoot != null) victoryBadgeRoot.anchoredPosition += new Vector2(0f, delta);
+
+            // GeometricResultRoot 是全屏拉伸：改 offsetMin/Max 整体平移，
+            // 读数板 / 战报卡 / 成就条 / 升级页签都挂在它下面，跟着一起走。
+            Transform colRoot = resultPanel.transform.Find("GeometricResultRoot");
+            if (colRoot != null)
+            {
+                var colRt = (RectTransform)colRoot;
+                colRt.offsetMin += new Vector2(0f, delta);
+                colRt.offsetMax += new Vector2(0f, delta);
+            }
+
+            if (restartButton != null)
+            {
+                var rRt = (RectTransform)restartButton.transform;
+                rRt.anchoredPosition += new Vector2(0f, delta);
+            }
+
+            Transform backTrans = resultPanel.transform.Find("ResultBackButton");
+            if (backTrans != null)
+            {
+                var bRt = (RectTransform)backTrans;
+                bRt.anchoredPosition += new Vector2(0f, delta);
+            }
         }
 
         /// <summary>
@@ -2316,8 +2411,36 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 个人战报卡（结算页唯一的信息卡）：
-        /// 上半 = 涂地 / 击杀 / 阵亡三列（小标 + 大数字），下半 = 等级 / 经验条 / 本局经验。
+        /// 本局成就解锁条宿主：条内卡片由 <see cref="ResultAchievementsView"/> 自行装配；
+        /// 本方法只负责挂载位置（战报卡下方）与一次性构建。
+        /// </summary>
+        private void EnsureAchievementsStrip(RectTransform parent, UIThemeSO resolved, bool mobile)
+        {
+            if (_achievementsView != null) return;
+
+            var go = new GameObject("ResultAchievements", typeof(RectTransform), typeof(ResultAchievementsView));
+            go.transform.SetParent(parent, false);
+            _achievementsView = go.GetComponent<ResultAchievementsView>();
+
+            var rt = (RectTransform)go.transform;
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            // 挂载点要连「本局成就」节标的题头带一起往下让：节标底边贴卡行上沿 6px、
+            // 顶边还要在战报卡下缘（-268 / -266）之外 10px，合起来约 50px（见 ResultAchievementsView.Build）。
+            // 旧值 -332 / -330 没算这段，节标整个压在战报卡的下边框上。
+            rt.anchoredPosition = new Vector2(0f, mobile ? -370f : -368f);
+            rt.sizeDelta = new Vector2(mobile ? 1080f : 1000f, mobile ? 190f : 180f);
+
+            _achievementsView.EnsureBuilt(resolved, mobile);
+            go.SetActive(false);
+        }
+
+        /// <summary>
+        /// 个人战报卡（结算页唯一的信息卡，v2）：
+        /// 上半 = 击杀 / 阵亡 / 涂地 / 连杀四列（小标 + 大数字 + 新纪录黄签），
+        /// 中段 = 勋章条（金银铜胶囊 chips + 首枚勋章幽默描述），
+        /// 下半 = 等级 / 经验条 / 本局经验。
         /// 纸白 + 3px 墨框 + 面板硬影 + 顶部 5px 身份色带：全页唯一的「纸上数据」。
         /// 读数值在掷点揭晓时才写入（见 <see cref="UpdatePostRollVisuals"/>），卡片本身先隐藏。
         /// </summary>
@@ -2327,8 +2450,8 @@ namespace P1.UI
 
             const float bandH = 5f; // 顶部身份色带（规范：5px，不承载文字）
             float frameW = mobile ? 1080f : 1000f;
-            float frameH = mobile ? 250f : 230f;
-            float frameY = mobile ? -140f : -135f;
+            float frameH = mobile ? 304f : 300f;
+            float frameY = mobile ? -114f : -118f;
             float padX = mobile ? 27f : 25f;
             float inset = ComicStyle.BorderThin + padX;
 
@@ -2377,23 +2500,50 @@ namespace P1.UI
             _reportBandShape.Halftone = false;
             _reportBandShape.raycastTarget = false;
 
-            // ---------- 三列个人战绩：涂地 / 击杀 / 阵亡 ----------
-            float colX = mobile ? 350f : 320f;
-            float labelY = mobile ? 70f : 64f;
-            float valueY = mobile ? 20f : 16f;
+            // ---------- 四列个人战绩：涂地 / 击杀 / 阵亡 / 连杀 ----------
+            float labelY = mobile ? 112f : 102f;
+            float valueY = mobile ? 66f : 56f;
 
-            _statTurfText = CreateStatColumn(frameGo.transform, "StatTurf", "涂地", -colX, labelY, valueY);
-            _statKillText = CreateStatColumn(frameGo.transform, "StatKill", "击杀", 0f, labelY, valueY);
-            _statDeathText = CreateStatColumn(frameGo.transform, "StatDeath", "阵亡", colX, labelY, valueY);
+            _statTurfText = CreateStatColumn(frameGo.transform, "StatTurf", "涂地", StatColumnX(0, mobile), labelY, valueY);
+            _statKillText = CreateStatColumn(frameGo.transform, "StatKill", "击杀", StatColumnX(1, mobile), labelY, valueY);
+            _statDeathText = CreateStatColumn(frameGo.transform, "StatDeath", "阵亡", StatColumnX(2, mobile), labelY, valueY);
+            _statStreakText = CreateStatColumn(frameGo.transform, "StatStreak", "连杀", StatColumnX(3, mobile), labelY, valueY);
+
+            // 新纪录角签：结算出「本局新高」才点亮的小黄签（0=涂地 1=击杀 2=阵亡占位 3=连杀）。
+            float tagY = mobile ? 12f : 10f;
+            for (int i = 0; i < _recordTagRoots.Length; i++)
+            {
+                _recordTagRoots[i] = CreateRecordTag(frameGo.transform, "RecordTag_" + i,
+                    StatColumnX(i, mobile), tagY, mobile);
+            }
+
+            // ---------- 勋章条：金银铜胶囊 chips（MatchAwards，最多 4 枚 + 「+N」） ----------
+            float chipY = mobile ? -22f : -20f;
+            for (int i = 0; i < _medalChipRoots.Length; i++)
+            {
+                _medalChipRoots[i] = CreateMedalChip(frameGo.transform, "MedalChip_" + i,
+                    i, chipY, mobile, out _medalChipTexts[i]);
+            }
+
+            // 首枚（优先级最高）勋章的幽默描述：单行小字，让「无人能碰」们不只是个名词。
+            _medalDescText = CreateTmpText(frameGo.transform, "MedalDescLine", string.Empty,
+                UITypography.FontSnapped(mobile ? 16f : 14f), isDisplay: false,
+                new Color(ComicStyle.Ink.r, ComicStyle.Ink.g, ComicStyle.Ink.b, 0.6f),
+                new Vector2(0f, mobile ? -52f : -48f), new Vector2(frameW - inset * 2f, 22f), 1f,
+                TextAlignmentOptions.Center);
+            _medalDescText.fontStyle = FontStyles.Bold;
+            _medalDescText.textWrappingMode = TextWrappingModes.NoWrap;
+            _medalDescText.overflowMode = TextOverflowModes.Overflow;
+            _medalDescText.gameObject.SetActive(false);
 
             // 战绩区与成长区之间的分隔规
-            float ruleY = mobile ? -34f : -30f;
+            float ruleY = mobile ? -64f : -60f;
             CreateGeometricSquare(frameGo.transform, "SummaryRule", new Vector2(0.5f, 0.5f),
                 new Vector2(0.5f, 0.5f), new Vector2(0f, ruleY),
                 new Vector2(frameW - inset * 2f, 2f), 0f, ComicStyle.PaperAlt);
 
             // ---------- 成长区：等级 + 经验条 + 本局经验 ----------
-            float stripY = mobile ? -80f : -72f;
+            float stripY = mobile ? -108f : -104f;
             float levelW = mobile ? 260f : 220f;
             float gainW = mobile ? 280f : 230f;
             float trackW = Mathf.Max(200f, frameW - inset * 2f - levelW - gainW - 60f);
@@ -2533,6 +2683,86 @@ namespace P1.UI
             value.fontStyle = FontStyles.Bold;
             value.overflowMode = TextOverflowModes.Overflow;
             return value;
+        }
+
+        /// <summary>战报卡四列读数的横向位置（0=涂地 1=击杀 2=阵亡 3=连杀）。</summary>
+        private static float StatColumnX(int index, bool mobile)
+        {
+            switch (index)
+            {
+                case 0: return mobile ? -382f : -356f;
+                case 1: return mobile ? -127f : -119f;
+                case 2: return mobile ? 127f : 119f;
+                default: return mobile ? 382f : 356f;
+            }
+        }
+
+        /// <summary>「纪录!」小黄签：挂在对应读数列下方，结算出本局新高才点亮。</summary>
+        private RectTransform CreateRecordTag(Transform parent, string name, float x, float y, bool mobile)
+        {
+            Vector2 size = new Vector2(mobile ? 86f : 74f, mobile ? 30f : 26f);
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            go.transform.SetParent(parent, false);
+            var rect = (RectTransform)go.transform;
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = new Vector2(x, y);
+            rect.sizeDelta = size;
+
+            var shape = go.GetComponent<UIInkShapeGraphic>();
+            shape.Shape = UIInkShape.Pill;
+            shape.BorderWidth = ComicStyle.BorderThin;
+            shape.BorderColor = ComicStyle.Ink;
+            shape.color = ComicStyle.Yellow;
+            shape.HardShadow = false;
+            shape.Halftone = false;
+            shape.raycastTarget = false;
+
+            var label = CreateTmpText(go.transform, "Text", "纪录!", UITypography.FontSnapped(mobile ? 15f : 13f),
+                isDisplay: false, ComicStyle.Ink, Vector2.zero, size, 1f, TextAlignmentOptions.Center);
+            label.fontStyle = FontStyles.Bold;
+
+            go.SetActive(false);
+            return rect;
+        }
+
+        /// <summary>勋章胶囊 chip：勋章色实底 + 墨字 + 墨框（金银铜由 MatchAwards.GetBadgeColor 决定）。</summary>
+        private RectTransform CreateMedalChip(Transform parent, string name, int index, float y, bool mobile,
+            out TextMeshProUGUI text)
+        {
+            float chipW = mobile ? 150f : 124f;
+            float chipH = mobile ? 40f : 34f;
+            float stride = chipW + (mobile ? 14f : 12f);
+            float x = -stride * (_medalChipRoots.Length - 1) * 0.5f + index * stride;
+
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            go.transform.SetParent(parent, false);
+            var rect = (RectTransform)go.transform;
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = new Vector2(x, y);
+            rect.sizeDelta = new Vector2(chipW, chipH);
+
+            var shape = go.GetComponent<UIInkShapeGraphic>();
+            shape.Shape = UIInkShape.Pill;
+            shape.BorderWidth = ComicStyle.BorderThin;
+            shape.BorderColor = ComicStyle.Ink;
+            shape.color = ComicStyle.Yellow;
+            shape.HardShadow = false;
+            shape.Halftone = false;
+            shape.raycastTarget = false;
+
+            text = CreateTmpText(go.transform, "Text", string.Empty, UITypography.FontSnapped(mobile ? 18f : 16f),
+                isDisplay: false, ComicStyle.Ink, Vector2.zero, new Vector2(chipW, chipH), 0.5f,
+                TextAlignmentOptions.Center);
+            text.fontStyle = FontStyles.Bold;
+            text.textWrappingMode = TextWrappingModes.NoWrap;
+            text.overflowMode = TextOverflowModes.Overflow;
+
+            go.SetActive(false);
+            return rect;
         }
 
         public void EnsureUpdateUI()
@@ -2782,6 +3012,7 @@ namespace P1.UI
             if (match.CurrentPhase == MatchManager.Phase.Result && resultPanel != null && resultPanel.activeSelf)
             {
                 _resultElapsed += Time.deltaTime;
+                ApplyResultColumnFit(); // 窗口比例变化时跟随重排（无变化时是廉价空转）
             }
 
             ApplyPhase(match);
@@ -2816,6 +3047,7 @@ namespace P1.UI
                 s_SettledThisMatch = false;
                 _profileSettled = false;
                 _lastLevelUpStep = 0;
+                ResetMatchAchievementState();
                 HideResultRevealVisuals();
                 RefreshHomeInfo();
                 if (!firstSync) _homeEntrancePending = true;
@@ -2831,6 +3063,7 @@ namespace P1.UI
                 s_SettledThisMatch = false;
                 _profileSettled = false;
                 _lastLevelUpStep = 0;
+                ResetMatchAchievementState();
                 if (victoryBadgeRoot != null) victoryBadgeRoot.gameObject.SetActive(false);
                 HideResultRevealVisuals();
             }
@@ -2866,7 +3099,18 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 收起结算页「掷点后才出现」的那一层（战报卡 / 成长条 / 胜签），
+        /// 复位「每局一次」的成就 / 勋章结算状态。必须在 Ready 与 Countdown 两个分支都调用：
+        /// 项目开了 DisableDomainReload，实例字段随对象存活，但第二局从 Countdown 重进时
+        /// 若只清一处就会沿用上一局的新解锁列表（s_SettledThisMatch 同款坑）。
+        /// </summary>
+        private void ResetMatchAchievementState()
+        {
+            _achievementOutcome = null;
+            _localAwards = AwardType.None;
+        }
+
+        /// <summary>
+        /// 收起结算页「掷点后才出现」的那一层（战报卡 / 成长条 / 胜签 / 勋章条 / 成就条），
         /// 让下一局的结算从干净的落后状态重新播放。
         /// </summary>
         private void HideResultRevealVisuals()
@@ -2876,6 +3120,19 @@ namespace P1.UI
             if (_winMarkA != null) _winMarkA.gameObject.SetActive(false);
             if (_winMarkB != null) _winMarkB.gameObject.SetActive(false);
             _winnerEmphasisApplied = false;
+
+            if (_achievementsView != null) _achievementsView.Hide();
+
+            for (int i = 0; i < _recordTagRoots.Length; i++)
+            {
+                if (_recordTagRoots[i] != null) _recordTagRoots[i].gameObject.SetActive(false);
+            }
+
+            for (int i = 0; i < _medalChipRoots.Length; i++)
+            {
+                if (_medalChipRoots[i] != null) _medalChipRoots[i].gameObject.SetActive(false);
+            }
+            if (_medalDescText != null) _medalDescText.gameObject.SetActive(false);
 
             // 败方数字的降灰要在下一局恢复，否则第二次结算会沿用上一局的胜负配色。
             if (_percentTmpA != null) _percentTmpA.color = _teamColorA;
@@ -3019,10 +3276,70 @@ namespace P1.UI
                 bool won = (match != null) && match.PlayerWon;
                 _profileResult = PlayerProfile.ApplyMatchResult(won, localStats);
                 _profileSettled = true;
+
+                // 勋章评定（全场参战者）+ 成就结算（单局阈值 + 生涯累计 + 新纪录）。
+                // 两者都是装饰性增强：失败只记警告，不影响 XP 与战报卡本身。
+                _localAwards = EvaluateLocalAwards(localHealth);
+                _achievementOutcome = SettleAchievements(localHealth, localStats, won);
             }
             catch (System.Exception ex)
             {
                 Debug.LogWarning("[MatchFlowUI] 结算个人档案异常: " + ex);
+            }
+        }
+
+        /// <summary>对全场参战者评定勋章，返回本地玩家的勋章掩码（异常回退 None）。</summary>
+        private AwardType EvaluateLocalAwards(CombatantHealth localHealth)
+        {
+            try
+            {
+                var all = CombatantHealthRegistry.All;
+                if (all == null || all.Count == 0 || localHealth == null) return AwardType.None;
+
+                AwardType[] results = new AwardType[all.Count]; // 结算期一次性分配，非热路径
+                MatchAwards.Evaluate(all, ch => MatchStatsService.Get(ch), results);
+                for (int i = 0; i < all.Count; i++)
+                {
+                    if (all[i] == localHealth) return results[i];
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[MatchFlowUI] 勋章评定失败: " + ex.Message);
+            }
+            return AwardType.None;
+        }
+
+        /// <summary>组装本局快照并交给成就服务结算（生涯累计 + 解锁判定 + 落盘）。</summary>
+        private AchievementSettleOutcome SettleAchievements(CombatantHealth localHealth,
+            CombatantMatchStats localStats, bool won)
+        {
+            try
+            {
+                float teamCoverage = 0f;
+                float enemyCoverage = 0f;
+                if (localHealth != null && InkSurfaceController.Instance != null)
+                {
+                    teamCoverage = InkSurfaceController.Instance.GetCoveragePercent(localHealth.Team);
+                    enemyCoverage = InkSurfaceController.Instance.GetCoveragePercent(localHealth.Team.GetOpponent());
+                }
+
+                var ctx = new MatchSettleContext
+                {
+                    Local = localStats,
+                    TeamCoveragePercent = teamCoverage,
+                    EnemyCoveragePercent = enemyCoverage,
+                    Won = won,
+                    LocalGotFirstKill = localHealth != null && MatchStatsService.FirstKillKiller == localHealth,
+                    MvpAwards = (_localAwards & AwardType.Mvp) != 0 ? 1 : 0,
+                };
+
+                return AchievementService.SettleMatch(ctx, ctx.MvpAwards);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[MatchFlowUI] 成就结算失败: " + ex.Message);
+                return null;
             }
         }
 
@@ -3110,13 +3427,25 @@ namespace P1.UI
                 _reportBandShape.color = (match != null && match.PlayerWon) ? ComicStyle.Yellow : DefeatSlate;
             }
 
-            // 本局个人战绩：三列数字一次写入（数值固定，不需要滚动）。
+            // 本局个人战绩：四列数字一次写入（数值固定，不需要滚动）。
             if (_statTurfText != null)
             {
                 _statTurfText.text = Mathf.RoundToInt(_localStats.TurfSquareMeters).ToString();
             }
             if (_statKillText != null) _statKillText.text = _localStats.Kills.ToString();
             if (_statDeathText != null) _statDeathText.text = _localStats.Deaths.ToString();
+            if (_statStreakText != null) _statStreakText.text = Mathf.Max(0, _localStats.MaxStreak).ToString();
+
+            // 新纪录角签：本局刷出个人新高才点亮（涂地 / 击杀 / 连杀）。
+            if (_achievementOutcome != null)
+            {
+                SetRecordTagVisible(0, _achievementOutcome.NewRecordTurf);
+                SetRecordTagVisible(1, _achievementOutcome.NewRecordKills);
+                SetRecordTagVisible(2, false);
+                SetRecordTagVisible(3, _achievementOutcome.NewRecordStreak);
+            }
+
+            PopulateMedalChips();
 
             // 先回到「本局结算前」的读数，否则第二局会把上一局的等级 / 经验沿用过来。
             if (_profileSettled)
@@ -3127,6 +3456,67 @@ namespace P1.UI
                 {
                     int req = _profileResult.XpRequiredForNextLevel;
                     _xpBarFill.fillAmount = req > 0 ? Mathf.Clamp01((float)_profileResult.OldXp / req) : 0f;
+                }
+            }
+        }
+
+        private void SetRecordTagVisible(int index, bool visible)
+        {
+            if (index < 0 || index >= _recordTagRoots.Length) return;
+            if (_recordTagRoots[index] != null) _recordTagRoots[index].gameObject.SetActive(visible);
+        }
+
+        /// <summary>
+        /// 勋章条填充：按 DisplayOrder 抽取本地玩家勋章写入 chips（最多 4 枚），
+        /// 溢出进「+N」，并让首枚勋章的幽默描述上屏。
+        /// </summary>
+        private void PopulateMedalChips()
+        {
+            AwardType[] extracted = new AwardType[8]; // 结算期一次性分配
+            int count = MatchAwards.ExtractAwards(_localAwards, extracted);
+
+            int shown = Mathf.Min(count, _medalChipRoots.Length);
+            for (int i = 0; i < shown; i++)
+            {
+                if (_medalChipRoots[i] == null || _medalChipTexts[i] == null) continue;
+
+                // 不足 4 枚时整组重新居中：剩余空槽不留在右侧。
+                float chipW = _medalChipRoots[i].sizeDelta.x;
+                float stride = chipW + 12f;
+                float groupWidth = shown * chipW + (shown - 1) * 12f;
+                float x = -groupWidth * 0.5f + chipW * 0.5f + i * stride;
+                var chipRt = _medalChipRoots[i];
+                chipRt.anchoredPosition = new Vector2(x, chipRt.anchoredPosition.y);
+
+                _medalChipRoots[i].gameObject.SetActive(true);
+                string title = MatchAwards.GetTitle(extracted[i]);
+                _medalChipTexts[i].text = title;
+                TMP_FontAsset font = UIThemeSO.Resolve(uiTheme).ResolveFont(false, title);
+                if (font != null) _medalChipTexts[i].font = font;
+
+                var chipShape = _medalChipRoots[i].GetComponent<UIInkShapeGraphic>();
+                if (chipShape != null) chipShape.color = MatchAwards.GetBadgeColor(extracted[i]);
+            }
+            for (int i = shown; i < _medalChipRoots.Length; i++)
+            {
+                if (_medalChipRoots[i] != null) _medalChipRoots[i].gameObject.SetActive(false);
+            }
+
+            // 首枚勋章的幽默描述（DisplayOrder 已按 MVP → 涂地王 → … 排好优先级）；勋章溢出并入同行。
+            if (_medalDescText != null)
+            {
+                if (count > 0)
+                {
+                    string desc = MatchAwards.GetDescription(extracted[0]);
+                    if (count > shown) desc += $" · 还有 {count - shown} 枚勋章";
+                    _medalDescText.gameObject.SetActive(true);
+                    _medalDescText.text = desc;
+                    TMP_FontAsset font = UIThemeSO.Resolve(uiTheme).ResolveFont(false, desc);
+                    if (font != null) _medalDescText.font = font;
+                }
+                else
+                {
+                    _medalDescText.gameObject.SetActive(false);
                 }
             }
         }

@@ -17471,55 +17471,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 120701693}
   m_Mesh: {fileID: 1728240242}
---- !u!1 &121354343
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 121354344}
-  - component: {fileID: 121354345}
-  m_Layer: 0
-  m_Name: SpawnZone_TeamB
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &121354344
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 121354343}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1.3199999, z: 23.5}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 724098842}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &121354345
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 121354343}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 783af841df6034d719353be57c830e2e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: P1.Game::P1.Environment.SpawnZone
-  owningTeam: 2
-  center: {x: 0, y: 1.3199999, z: 23.5}
-  radius: 6
-  pushSpeed: 8
-  config: {fileID: 11400000, guid: 74c2b5baac84241c58249abd1bd4dced, type: 2}
 --- !u!43 &122149596
 Mesh:
   m_ObjectHideFlags: 0
@@ -108920,7 +108871,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: P1.Game::P1.UI.MobileTouchUI
   showTouchUiInEditor: 0
   showSettingsEntryButton: 0
-  forceShowInEditor: 1
   moveStickRadius: 170
   moveDeadZone: 8
   moveStickDefaultPos: {x: 200, y: 200}
@@ -109087,6 +109037,7 @@ MonoBehaviour:
   stepEnemyClips: []
   jumpClip: {fileID: 0}
   landClip: {fileID: 0}
+  dodgeRollClip: {fileID: 0}
   hurtClip: {fileID: 0}
   hitMarkerClips: []
   refillFullClip: {fileID: 0}
@@ -109096,6 +109047,7 @@ MonoBehaviour:
   ultReadyClip: {fileID: 8300000, guid: 65630071553444d3687c1ac70ea41490, type: 3}
   ultCastClip: {fileID: 8300000, guid: 7b772798cb34346dca620097b29291e9, type: 3}
   specialSlamClip: {fileID: 0}
+  stormThunderClips: []
   killClip: {fileID: 8300000, guid: a6c0ca126e2c043dcba0c0c907e944ab, type: 3}
   deathClip: {fileID: 8300000, guid: 5ff2100f87533445ea37bfab0192baf2, type: 3}
   respawnClip: {fileID: 8300000, guid: 0e42e486ca499450b83262141cd38d59, type: 3}
@@ -109112,12 +109064,8 @@ MonoBehaviour:
   uiSliderClip: {fileID: 0}
   uiErrorClip: {fileID: 0}
   lowInkWarningClip: {fileID: 8300000, guid: c3241d1c132d04bb798d8b673ef38561, type: 3}
-  voiceCount3Clip: {fileID: 0}
-  voiceCount2Clip: {fileID: 0}
-  voiceCount1Clip: {fileID: 0}
-  voiceGoClip: {fileID: 0}
-  voiceOneMinuteClip: {fileID: 0}
-  voiceFinishClip: {fileID: 0}
+  goCueClip: {fileID: 0}
+  oneMinuteCueClip: {fileID: 0}
   bgmMainClip: {fileID: 8300000, guid: 63a33b527358246ad94c9e386557a197, type: 3}
   bgmFinalClip: {fileID: 8300000, guid: 88121875802cd4bf58fe94274a06f57a, type: 3}
   mixConfig: {fileID: 11400000, guid: 38fcbd6456d1f4c3dbda2e8a60f31c32, type: 2}
@@ -109195,6 +109143,7 @@ MonoBehaviour:
   - {fileID: 453776931}
   - {fileID: 1326679713}
   - {fileID: 561587422}
+  blockedWorldRects: []
   wetnessFactor: 1
   inkGlow: 0.2
 --- !u!4 &724098842
@@ -109209,9 +109158,7 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 1376395455}
-  - {fileID: 121354344}
+  m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &725094660
@@ -203780,55 +203727,6 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 10}
   m_SizeDelta: {x: 280, y: 28}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!1 &1376395454
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1376395455}
-  - component: {fileID: 1376395456}
-  m_Layer: 0
-  m_Name: SpawnZone_TeamA
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1376395455
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1376395454}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1.3199999, z: -23.5}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 724098842}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1376395456
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1376395454}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 783af841df6034d719353be57c830e2e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: P1.Game::P1.Environment.SpawnZone
-  owningTeam: 1
-  center: {x: 0, y: 1.3199999, z: -23.5}
-  radius: 6
-  pushSpeed: 8
-  config: {fileID: 11400000, guid: 74c2b5baac84241c58249abd1bd4dced, type: 2}
 --- !u!43 &1376620436
 Mesh:
   m_ObjectHideFlags: 0

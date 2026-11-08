@@ -169,6 +169,68 @@ namespace P1.Tests
         }
 
         [Test]
+        public void Persistence_CareerFields_AndAchievementSet_Roundtrip()
+        {
+            var profile = new PlayerProfile
+            {
+                TotalKills = 321,
+                TotalDeaths = 87,
+                TotalSpecials = 33,
+                BestMatchKills = 17,
+                BestMatchStreak = 6,
+                BestMatchLifeKills = 9,
+                BestTeamCoverage = 83.5f,
+                BestMatchTurf = 210.5f,
+                MvpCount = 12
+            };
+            Assert.IsTrue(profile.MarkAchievementUnlocked("ach_kill_10"));
+            Assert.IsTrue(profile.MarkAchievementUnlocked("ach_cover_70"));
+            profile.Save();
+
+            PlayerProfile.InvalidateCache();
+            var loaded = PlayerProfile.Load();
+
+            Assert.AreEqual(321, loaded.TotalKills);
+            Assert.AreEqual(87, loaded.TotalDeaths);
+            Assert.AreEqual(33, loaded.TotalSpecials);
+            Assert.AreEqual(17, loaded.BestMatchKills);
+            Assert.AreEqual(6, loaded.BestMatchStreak);
+            Assert.AreEqual(9, loaded.BestMatchLifeKills);
+            Assert.AreEqual(83.5f, loaded.BestTeamCoverage, 1e-4f);
+            Assert.AreEqual(210.5f, loaded.BestMatchTurf, 1e-4f);
+            Assert.AreEqual(12, loaded.MvpCount);
+
+            Assert.AreEqual(2, loaded.AchievementUnlockedCount);
+            Assert.IsTrue(loaded.IsAchievementUnlocked("ach_kill_10"));
+            Assert.IsTrue(loaded.IsAchievementUnlocked("ach_cover_70"));
+            Assert.IsFalse(loaded.IsAchievementUnlocked("ach_career_match_10"));
+
+            // 重复标记返回 false（不重复计入新解锁）
+            Assert.IsFalse(loaded.MarkAchievementUnlocked("ach_kill_10"));
+
+            // 生涯累计方法：只增不减、单局最佳取 max
+            loaded.AccumulateCareerStats(new CombatantMatchStats
+            {
+                Kills = 5,
+                Deaths = 2,
+                TurfSquareMeters = 260f,
+                MaxStreak = 8,
+                MaxLifeKills = 4,
+                SpecialCasts = 2
+            }, teamCoveragePercent: 60f, mvpAwards: 1);
+
+            Assert.AreEqual(326, loaded.TotalKills);
+            Assert.AreEqual(89, loaded.TotalDeaths);
+            Assert.AreEqual(35, loaded.TotalSpecials);
+            Assert.AreEqual(17, loaded.BestMatchKills); // 5 < 17 不刷新
+            Assert.AreEqual(8, loaded.BestMatchStreak); // 8 > 6 刷新
+            Assert.AreEqual(9, loaded.BestMatchLifeKills); // 4 < 9 不刷新
+            Assert.AreEqual(260f, loaded.BestMatchTurf, 1e-4f);
+            Assert.AreEqual(83.5f, loaded.BestTeamCoverage, 1e-4f); // 60 < 83.5 不刷新
+            Assert.AreEqual(13, loaded.MvpCount);
+        }
+
+        [Test]
         public void Reset_ClearsAllKeysAndResetsProfile()
         {
             var profile = PlayerProfile.Current;
@@ -176,6 +238,9 @@ namespace P1.Tests
             profile.Xp = 1000;
             profile.Wins = 10;
             profile.Matches = 15;
+            profile.TotalKills = 99;
+            profile.BestMatchLifeKills = 7;
+            profile.MarkAchievementUnlocked("ach_kill_3");
             profile.Save();
 
             PlayerProfile.Reset();
@@ -183,11 +248,16 @@ namespace P1.Tests
             Assert.IsFalse(PlayerPrefs.HasKey(PlayerProfile.KeyLevel));
             Assert.IsFalse(PlayerPrefs.HasKey(PlayerProfile.KeyXp));
             Assert.IsFalse(PlayerPrefs.HasKey(PlayerProfile.KeyWins));
+            Assert.IsFalse(PlayerPrefs.HasKey(PlayerProfile.KeyTotalKills));
+            Assert.IsFalse(PlayerPrefs.HasKey(PlayerProfile.KeyBestMatchLifeKills));
+            Assert.IsFalse(PlayerPrefs.HasKey(PlayerProfile.KeyAchievements));
 
             var resetProfile = PlayerProfile.Current;
             Assert.AreEqual(1, resetProfile.Level);
             Assert.AreEqual(0, resetProfile.Xp);
             Assert.AreEqual(0, resetProfile.Wins);
+            Assert.AreEqual(0, resetProfile.TotalKills);
+            Assert.AreEqual(0, resetProfile.AchievementUnlockedCount);
         }
     }
 }

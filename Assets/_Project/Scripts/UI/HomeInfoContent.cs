@@ -4,11 +4,12 @@ using UnityEngine;
 
 namespace P1.UI
 {
-    /// <summary>首页信息浮层的两种内容。</summary>
+    /// <summary>首页信息浮层的三种内容。</summary>
     public enum HomeInfoTab
     {
         Record = 0,
         Controls = 1,
+        Achievements = 2,
     }
 
     /// <summary>键位行的语义分组：左列移动、右列战斗。</summary>
@@ -47,6 +48,10 @@ namespace P1.UI
         public readonly float TurfPerMatch;
         public readonly float WinRate01;
         public readonly float LevelProgress01;
+        public readonly int TotalKills;
+        public readonly int BestStreak;
+        public readonly int AchievementsUnlocked;
+        public readonly int AchievementsTotal;
 
         public bool HasMatches => Matches > 0;
 
@@ -54,7 +59,9 @@ namespace P1.UI
             string playerName, string rankName,
             int level, int xp, int xpForNextLevel, int xpToNextLevel,
             int matches, int wins, float totalTurf, float turfPerMatch,
-            float winRate01, float levelProgress01)
+            float winRate01, float levelProgress01,
+            int totalKills, int bestStreak,
+            int achievementsUnlocked, int achievementsTotal)
         {
             PlayerName = playerName;
             RankName = rankName;
@@ -68,6 +75,10 @@ namespace P1.UI
             TurfPerMatch = turfPerMatch;
             WinRate01 = winRate01;
             LevelProgress01 = levelProgress01;
+            TotalKills = totalKills;
+            BestStreak = bestStreak;
+            AchievementsUnlocked = achievementsUnlocked;
+            AchievementsTotal = achievementsTotal;
         }
     }
 
@@ -199,7 +210,11 @@ namespace P1.UI
                     0f,
                     0f,
                     0f,
-                    0f);
+                    0f,
+                    0,
+                    0,
+                    0,
+                    AchievementCatalog.TotalCount);
             }
 
             int level = Mathf.Max(1, profile.Level);
@@ -225,7 +240,11 @@ namespace P1.UI
                 totalTurf,
                 turfPerMatch,
                 winRate,
-                progress);
+                progress,
+                Mathf.Max(0, profile.TotalKills),
+                Mathf.Max(0, profile.BestMatchStreak),
+                Mathf.Clamp(profile.AchievementUnlockedCount, 0, AchievementCatalog.TotalCount),
+                AchievementCatalog.TotalCount);
         }
 
         /// <summary>0~1 的比率 → 整数百分比文本。</summary>

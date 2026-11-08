@@ -75,6 +75,23 @@ namespace P1.Core
         [Tooltip("FOV 速度拉伸起始速度 (m/s)：低于该速度不叠加")]
         public float tpsSpeedFovStartSpeed = 6f;
 
+        [Header("开赛扫场镜头 (P41)：高空巡场 → 定格到玩家身后")]
+        [Tooltip("高空巡场机位高度（米）。25m 在 40×56m 场地上能一屏装下整块场地")]
+        public float matchIntroOverviewHeight = 25f;
+        [Tooltip("高空机位从场地中心朝敌方半场后退的距离（米）：越大越能看清我方半场纵深")]
+        public float matchIntroOverviewBackDistance = 19f;
+        [Tooltip("高空机位相对场地中轴的横向偏移（米）：斜角构图比正对中轴更有电影感")]
+        public float matchIntroOverviewSideOffset = 9f;
+        [Tooltip("扫场段绕场地中心横向划过的角度（度）：镜头在高空缓慢平移，读作「扫一遍场地」")]
+        public float matchIntroSweepDegrees = 34f;
+        [Tooltip("巡场段 FOV 相对跟随机位的加宽量（度）：更广才能装下整块场地")]
+        public float matchIntroFovBonus = 12f;
+        [Tooltip("扫场段占整条路径的比例（0~1）：之后是俯冲到玩家身后的冲刺段")]
+        [Range(0.05f, 0.95f)]
+        public float matchIntroDiveStart01 = 0.5f;
+        [Tooltip("俯冲段贝塞尔抬升（米）：让镜头从场地上方掠过，而不是贴着地面穿过去")]
+        public float matchIntroArcLift = 7f;
+
         [Header("大招：Tidal Slam 镜头演出（仅本地玩家）")]
         [Tooltip("起跳时相机枢轴额外抬升（米）：角色视觉体升空 4.2m，枢轴抬高 + 吊臂外拉才能把人留在画面内")]
         public float slamCameraPivotRise = 2f;
@@ -139,11 +156,5 @@ namespace P1.Core
         public float outOfBoundsMarginZ = 0.3f;
         [Tooltip("最低允许高度（米），低于此高度立即判定越界回收；须低于滑板场碗池底 -2.1m")]
         public float outOfBoundsMinY = DefaultOutOfBoundsMinY;
-
-        [Header("出生禁入圈 (P16-A)")]
-        [Tooltip("出生禁入圈半径（米）")]
-        public float spawnZoneRadius = 6f;
-        [Tooltip("敌方进入出生禁入圈时的径向推出速度 (m/s)")]
-        public float spawnZonePushSpeed = 8f;
     }
 }

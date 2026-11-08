@@ -172,7 +172,8 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayBombThrow();
+                // 按投出位置衰减：旧版是全局 2D 满音量，敌人在地图对面扔雷和自己扔一样响
+                AudioManager.Instance.PlayBombThrow(startPos);
             }
 
             _active.Add(b);
@@ -236,7 +237,7 @@ namespace P1.Weapons
 
                             if (AudioManager.Instance != null)
                             {
-                                AudioManager.Instance.PlayBombBeep();
+                                AudioManager.Instance.PlayBombBeep(b.Position);
                             }
                         }
                         else
@@ -246,6 +247,10 @@ namespace P1.Weapons
                             float vn = Vector3.Dot(b.Velocity, hit.normal);
                             b.Velocity += hit.normal * (-vn * InkBombTrajectoryUtility.BounceReflect);
                             b.Velocity *= InkBombTrajectoryUtility.BounceDampWall;
+
+                            // 撞墙音（旧版完全静音）：提示「炸弹还在弹」而不是凭空消失
+                            if (AudioManager.Instance != null)
+                                AudioManager.Instance.PlayBombBounce(b.Position);
                         }
                     }
                     else
@@ -370,7 +375,8 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayBombExplode();
+                // 爆炸按落点衰减：真正的炸弹在远处应该只剩闷响，而不是和自己脚下一样爆
+                AudioManager.Instance.PlayBombExplode(b.LandingPos);
                 AudioManager.Instance.PlayInkHitGround(b.LandingPos, 1.5f, b.SplatRadius);
             }
 

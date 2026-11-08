@@ -604,9 +604,15 @@ namespace P1.Ink
             if (rectW > 0 && rectH > 0 && (long)rectW * rectH * 4L <= (long)width * height)
             {
                 int need = rectW * rectH;
-                if (_uploadScratch == null || _uploadScratch.Length < need)
+                if (_uploadScratch == null)
                 {
-                    _uploadScratch = new Color32[need];
+                    // 一次性按整图上限预留（40x40 格 = 640KB），避免战斗中脏矩形突然变大时
+                    // new Color32[need] 在采样帧里分配出 100~640KB 的 GC 尖刺。
+                    _uploadScratch = new Color32[width * height];
+                }
+                else if (_uploadScratch.Length < need)
+                {
+                    _uploadScratch = new Color32[width * height];
                 }
 
                 for (int y = 0; y < rectH; y++)
@@ -651,7 +657,11 @@ namespace P1.Ink
             RenderEnvGlobals.PumpThrottled();
             Shader.SetGlobalFloat(GrowSecondsProp, config != null ? config.splatGrowSeconds : 0.08f);
             Shader.SetGlobalFloat(GrowShrinkMetersProp, config != null ? config.atlasGrowShrinkMeters : 0.18f);
-            Shader.SetGlobalFloat(GrowActiveProp, _atlas != null && _atlas.HasGrowingSplats() ? 1f : 0f);
+            // P52：生长动画改由写入端编排（InkSplatAtlas._growing 逐帧重绘，INKWAVE 同款
+            // 「主体泛出 → 射线冲出 → 卫星错峰落地」），地面片元的均匀形态学侵蚀停用——
+            // 两者叠加会互相打架。回滚方式：把下面这行改回
+            // `_atlas != null && _atlas.HasGrowingSplats() ? 1f : 0f` 即恢复旧片元侵蚀。
+            Shader.SetGlobalFloat(GrowActiveProp, 0f);
             // 边缘先干偏置（0 = 关闭）与墨斑方向性拉伸全局倍率：只影响着色 / 图集绘制读数，
             // 不参与玩法网格判定与覆盖率。两项都在这里每帧推送，改 config 立刻生效（无需重建图集）。
             Shader.SetGlobalFloat(EdgeDryBiasProp, config != null ? Mathf.Clamp01(config.inkEdgeDryBias) : 0f);

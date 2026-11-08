@@ -33,6 +33,8 @@ namespace P1.Environment
 
         private Camera _cachedCamera;
         private readonly RaycastHit[] _hitBuffer = new RaycastHit[32];
+        /// <summary>视线球扫节拍（20Hz）：OcclusionFader 仍逐帧平滑插值，遮挡判定本身无需每帧重算。</summary>
+        private float _nextSightCheckTime;
 
         private const double FallbackIntervalSeconds = 0.5;
         private long _lastFallbackCombatantTicks;
@@ -107,41 +109,63 @@ namespace P1.Environment
 
             Vector3 camPos = _cachedCamera.transform.position;
 
-            PlayerController localPlayer = localPlayerOnly ? PlayerController.LocalPlayer : null;
-            if (localPlayerOnly && localPlayer != null)
+            // 视线检测 20Hz：旧版每帧对头/胸各做一次 SphereCastNonAlloc，并逐命中
+            // GetComponentInParent；判定结果有 0.25s 迟滞，50ms 采样间隔肉眼不可见。
+            float sightNow = Time.realtimeSinceStartup;
+            if (sightNow >= _nextSightCheckTime)
             {
-                // 第三人称：只要存在本地玩家就只追踪本地玩家；阵亡时跳过投射
-                if (localPlayer.Health != null && localPlayer.Health.IsAlive)
-                {
-                    CheckCombatant(camPos, localPlayer.Health);
-                }
-            }
-            else
-            {
-                IReadOnlyList<CombatantHealth> allCombatants = CombatantHealthRegistry.All;
+                _nextSightCheckTime = sightNow + 0.05f;
 
-                if (allCombatants != null && allCombatants.Count > 0)
+                PlayerController localPlayer = localPlayerOnly ? PlayerController.LocalPlayer : null;
+                if (localPlayerOnly && localPlayer != null)
                 {
-                    for (int i = 0; i < allCombatants.Count; i++)
+                    // 第三人称：只要存在本地玩家就只追踪本地玩家；阵亡时跳过投射
+                    if (localPlayer.Health != null && localPlayer.Health.IsAlive)
                     {
-                        CheckCombatant(camPos, allCombatants[i]);
+                        CheckCombatant(camPos, localPlayer.Health);
                     }
-                }
-                else if (!Application.isPlaying)
-                {
-                    // 编辑模式下兜底，节流到 >= 0.5s 一次
-                    long now = System.Diagnostics.Stopwatch.GetTimestamp();
-                    if (_cachedFallbackCombatants == null || (now - _lastFallbackCombatantTicks) / (double)System.Diagnostics.Stopwatch.Frequency >= FallbackIntervalSeconds)
+                    else
                     {
-                        _cachedFallbackCombatants = FindObjectsByType<CombatantHealth>(FindObjectsSortMode.None);
-                        _lastFallbackCombatantTicks = now;
-                    }
-
-                    if (_cachedFallbackCombatants != null)
-                    {
-                        for (int i = 0; i < _cachedFallbackCombatants.Length; i++)
+                        // 阵亡观战：镜头改看击杀者，挡住击杀者的掩体同样要淡出，否则观战画面被集装箱糊死
+                        Transform spectateTarget = TopDownCameraFollow.Instance != null
+                            ? TopDownCameraFollow.Instance.DeathCamKiller
+                            : null;
+                        var spectateHealth = spectateTarget != null
+                            ? spectateTarget.GetComponent<CombatantHealth>()
+                            : null;
+                        if (spectateHealth != null)
                         {
-                            CheckCombatant(camPos, _cachedFallbackCombatants[i]);
+                            CheckCombatant(camPos, spectateHealth);
+                        }
+                    }
+                }
+                else
+                {
+                    IReadOnlyList<CombatantHealth> allCombatants = CombatantHealthRegistry.All;
+
+                    if (allCombatants != null && allCombatants.Count > 0)
+                    {
+                        for (int i = 0; i < allCombatants.Count; i++)
+                        {
+                            CheckCombatant(camPos, allCombatants[i]);
+                        }
+                    }
+                    else if (!Application.isPlaying)
+                    {
+                        // 编辑模式下兜底，节流到 >= 0.5s 一次
+                        long editNow = System.Diagnostics.Stopwatch.GetTimestamp();
+                        if (_cachedFallbackCombatants == null || (editNow - _lastFallbackCombatantTicks) / (double)System.Diagnostics.Stopwatch.Frequency >= FallbackIntervalSeconds)
+                        {
+                            _cachedFallbackCombatants = FindObjectsByType<CombatantHealth>(FindObjectsSortMode.None);
+                            _lastFallbackCombatantTicks = editNow;
+                        }
+
+                        if (_cachedFallbackCombatants != null)
+                        {
+                            for (int i = 0; i < _cachedFallbackCombatants.Length; i++)
+                            {
+                                CheckCombatant(camPos, _cachedFallbackCombatants[i]);
+                            }
                         }
                     }
                 }

@@ -18,7 +18,7 @@ namespace P1.Core
         private readonly Queue<ExpandingRing> _ringPool = new Queue<ExpandingRing>();
         private readonly List<PendingRing> _pendingRings = new List<PendingRing>(4);
         private readonly List<SatelliteDroplet> _activeDroplets = new List<SatelliteDroplet>(24);
-        private readonly Queue<SatelliteDroplet> _dropletPool = new Queue<SatelliteDroplet>(24);
+        private readonly Queue<SatelliteDroplet> _dropletPool = new Queue<SatelliteDroplet>(72);
 
         private Material _sharedParticleMat;
         private Material _sharedRingMat;
@@ -220,7 +220,8 @@ namespace P1.Core
                 _ringPool.Enqueue(CreateRingInstance(i));
             }
 
-            for (int i = 0; i < 24; i++)
+            // P41：风暴双层雨（密雨滴+雨丝 ~47 颗并发）+ 命中/枪口 reserves，24 颗会把雨饿成稀稀拉拉
+            for (int i = 0; i < 72; i++)
             {
                 _dropletPool.Enqueue(CreateDropletInstance(i));
             }
@@ -768,8 +769,25 @@ namespace P1.Core
 
         /// <summary>
         /// 风暴云落雨：从云底向下坠落的拉伸墨滴（纯视觉，不参与涂地判定）。
+        /// P41 起速度/寿命按新规范（旧签名的 9~13m/s / 0.20~0.34s 会从 4.5m 云底半空蒸发）。
         /// </summary>
         public void SpawnRainDrops(Vector3 cloudBottom, float radius, Color color, int count)
+        {
+            SpawnRainDrops(cloudBottom, radius, color, count, 16f, 20f, 0.34f, 0.5f, 0.030f, 0.055f, 2.2f, 3.2f);
+        }
+
+        /// <summary>
+        /// 参数化落雨：密雨层（粗短快）与雨丝层（细长亮、跨屏可读）共用同一个墨滴池，仅参数不同。
+        /// </summary>
+        public void SpawnRainDrops(
+            Vector3 cloudBottom,
+            float radius,
+            Color color,
+            int count,
+            float speedMin, float speedMax,
+            float lifetimeMin, float lifetimeMax,
+            float scaleMin, float scaleMax,
+            float stretchMin, float stretchMax)
         {
             if (count <= 0)
                 return;
@@ -787,12 +805,12 @@ namespace P1.Core
                     Mathf.Cos(angle) * distance,
                     Random.Range(0f, 0.6f),
                     Mathf.Sin(angle) * distance);
-                droplet.Velocity = Vector3.down * Random.Range(9f, 13f);
+                droplet.Velocity = Vector3.down * Random.Range(speedMin, speedMax);
                 droplet.Gravity = 0f;
                 droplet.Elapsed = 0f;
-                droplet.Lifetime = Random.Range(0.20f, 0.34f);
-                droplet.BaseScale = Random.Range(0.030f, 0.055f);
-                droplet.StretchY = Random.Range(2.2f, 3.2f);
+                droplet.Lifetime = Random.Range(lifetimeMin, lifetimeMax);
+                droplet.BaseScale = Random.Range(scaleMin, scaleMax);
+                droplet.StretchY = Random.Range(stretchMin, stretchMax);
                 // 风暴雨滴是环境表现，不做落地补涂（避免抢占战斗命中的每帧墨点预算）
                 droplet.Team = Team.Neutral;
                 droplet.PaintsOnLand = false;

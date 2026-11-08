@@ -82,6 +82,9 @@ namespace P1.Editor
         private const string ConcreteRmoPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Concrete_RMO.png";
         private const string MetalNPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Metal_N.png";
         private const string MetalRmoPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Metal_RMO.png";
+        private const string ContainerNPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Container_N.png";
+        private const string ContainerRmoPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Container_RMO.png";
+        private const string ContainerAlbedoPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Container_Albedo.png";
 
         private static readonly int GroundTexId = Shader.PropertyToID("_GroundTex");
         private static readonly int GroundTexNId = Shader.PropertyToID("_GroundTexN");
@@ -101,6 +104,9 @@ namespace P1.Editor
         private static readonly int SurfaceNormalStrengthId = Shader.PropertyToID("_SurfaceNormalStrength");
         private static readonly int SurfaceAoStrengthId = Shader.PropertyToID("_SurfaceAOStrength");
         private static readonly int SurfaceSmoothnessScaleId = Shader.PropertyToID("_SurfaceSmoothnessScale");
+        private static readonly int BaseMapId = Shader.PropertyToID("_BaseMap");
+        private static readonly int BaseMapWorldSpaceId = Shader.PropertyToID("_BaseMapWorldSpace");
+        private static readonly int BaseMapWorldScaleId = Shader.PropertyToID("_BaseMapWorldScale");
         private static readonly int WallWetnessId = Shader.PropertyToID("_WallWetness");
         private static readonly int WallEnvSpecId = Shader.PropertyToID("_WallEnvSpec");
         private static readonly int DampHaloStrengthId = Shader.PropertyToID("_DampHaloStrength");
@@ -463,8 +469,7 @@ namespace P1.Editor
             };
             string[] metalMaterials =
             {
-                "Mat_Container_Teal", "Mat_Container_Rust", "Mat_Container_Slate",
-                "Mat_Container_Mustard", "Mat_Prop_Steel", "Mat_Prop_SteelDark", "Mat_Prop_Metal"
+                "Mat_Prop_Steel", "Mat_Prop_SteelDark", "Mat_Prop_Metal"
             };
             foreach (string name in concreteMaterials)
             {
@@ -475,6 +480,27 @@ namespace P1.Editor
             {
                 ApplySurfacePbr(LoadMaterial(name), MetalNPath, MetalRmoPath,
                     texelScale: 0.5f, smoothnessScale: 1.25f, style);
+            }
+
+            // 集装箱：专用瓦楞钢板图族（竖沟法线 + 锈迹/掉漆 RMO + 近白 albedo 调制层）。
+            // albedo 走世界空间投影 —— 瓦楞壳的 uv0 是整面归一化坐标，直接采样会把长面压成一个周期。
+            string[] containerMaterials =
+            {
+                "Mat_Container_Teal", "Mat_Container_Rust",
+                "Mat_Container_Slate", "Mat_Container_Mustard"
+            };
+            foreach (string name in containerMaterials)
+            {
+                Material mat = LoadMaterial(name);
+                ApplySurfacePbr(mat, ContainerNPath, ContainerRmoPath,
+                    texelScale: 0.62f, smoothnessScale: 0.9f, style);
+                if (mat != null)
+                {
+                    SetTextureIf(mat, BaseMapId, ContainerAlbedoPath);
+                    SetFloatIf(mat, BaseMapWorldSpaceId, 1f);
+                    SetFloatIf(mat, BaseMapWorldScaleId, 0.42f);
+                    EditorUtility.SetDirty(mat);
+                }
             }
 
             // P18 后续修正：出生盘保持中性钢灰，不再回灌队色（队别信息由地面导向标/A-B 标记承担）。
@@ -488,7 +514,9 @@ namespace P1.Editor
             None = 0,
             Concrete = 1,
             Metal = 2,
-            Wood = 3
+            Wood = 3,
+            /// <summary>海运集装箱瓦楞钢板：竖沟法线 + 锈迹/掉漆 RMO + 近白 albedo 调制层。</summary>
+            Container = 4
         }
 
         /// <summary>
@@ -512,12 +540,25 @@ namespace P1.Editor
                     nPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Wood_N.png";
                     rmoPath = "Assets/_Project/Art/Textures/Surfaces/Surfaces_Wood_RMO.png";
                     break;
+                case StyleSurfaceKind.Container:
+                    nPath = ContainerNPath;
+                    rmoPath = ContainerRmoPath;
+                    break;
                 default:
                     nPath = ConcreteNPath;
                     rmoPath = ConcreteRmoPath;
                     break;
             }
             ApplySurfacePbr(mat, nPath, rmoPath, texelScale, smoothnessScale, style);
+
+            // 集装箱额外挂 albedo 调制层 + 世界空间投影（uv0 是整面归一化坐标，直接采样会拉伸）
+            if (kind == StyleSurfaceKind.Container)
+            {
+                SetTextureIf(mat, BaseMapId, ContainerAlbedoPath);
+                SetFloatIf(mat, BaseMapWorldSpaceId, 1f);
+                SetFloatIf(mat, BaseMapWorldScaleId, 0.42f);
+                EditorUtility.SetDirty(mat);
+            }
         }
 
         private static void ApplySurfacePbr(

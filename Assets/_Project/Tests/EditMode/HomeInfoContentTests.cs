@@ -167,6 +167,34 @@ namespace P1.Tests
         }
 
         [Test]
+        public void Record_CareerAndAchievementFields_FlowIntoSummary()
+        {
+            var profile = new PlayerProfile
+            {
+                TotalKills = 88,
+                BestMatchStreak = 5
+            };
+            profile.MarkAchievementUnlocked("ach_kill_3");
+            profile.MarkAchievementUnlocked("ach_cover_50");
+
+            RecordSummary summary = HomeInfoContent.Summarize(profile);
+
+            Assert.AreEqual(88, summary.TotalKills);
+            Assert.AreEqual(5, summary.BestStreak);
+            Assert.AreEqual(2, summary.AchievementsUnlocked);
+            Assert.AreEqual(AchievementCatalog.TotalCount, summary.AchievementsTotal);
+        }
+
+        [Test]
+        public void Record_NullProfile_ReportsZeroAchievements()
+        {
+            RecordSummary summary = HomeInfoContent.Summarize(null);
+
+            Assert.AreEqual(0, summary.AchievementsUnlocked);
+            Assert.AreEqual(AchievementCatalog.TotalCount, summary.AchievementsTotal);
+        }
+
+        [Test]
         public void Layout_MobileTouchTargetsAreBiggerThanDesktop()
         {
             HomeInfoMetrics desktop = HomeInfoLayoutMath.Metrics(false);

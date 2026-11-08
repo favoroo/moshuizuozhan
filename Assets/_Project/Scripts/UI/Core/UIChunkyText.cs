@@ -188,6 +188,13 @@ namespace P1.UI
             SetFillColor(UIThemeSO.Resolve(theme).GetTeamColor(team));
         }
 
+        /// <summary>关闭/开启拉丁自动大写（读数、单位「m²」等需要保持原样的场景）。</summary>
+        public void SetUppercaseLatin(bool enabled)
+        {
+            uppercaseLatin = enabled;
+            ApplyUppercase();
+        }
+
         /// <summary>像素级硬影（t-1）：固定像素偏移，不随字号缩放。</summary>
         public void SetHardShadowPixels(Vector2 shadowVector, bool enabled = true)
         {

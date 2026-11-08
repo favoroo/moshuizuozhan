@@ -36,6 +36,10 @@ float  _P1InkCoatRoughness;
 float  _P1InkEdgeRimStrength;
 float  _P1InkEdgeSmoothStrength;
 float  _P1InkTopDetailStrength;
+// 图集三次 B 样条重建强度（0 = 双线性旧行为，1 = 全量 C1 连续场，对齐 INKWAVE paintCubic）
+float  _P1InkBicubicStrength;
+// 阴影中墨水保饱和（INKWAVE INK_SHADE）：漫反射越弱，色度提升越多（亮度守恒）
+float  _P1InkShadowChroma;
 
 // ----------------------------------------------------------------------------
 // 太阳直射光盘项（glitter），由 P1InkEnvSpecular 与 P1InkEnvSpecularFull 共用
@@ -73,7 +77,7 @@ half3 P1InkEnvSpecular(float3 R, float rough, float NdotV)
     // 盘亮度必须随 NdotV 收紧，只保留正上方俯视时的镜面 glitter。
     half3 env = sky + P1InkEnvSunGlint(R, rough, NdotV);
 
-    // 清漆层菲涅尔。F0 抬到 0.09（物理 0.04 在俯视角下环境反射只剩 ~5%，墨面读作哑光粉漆；
+    // 清漆层菲涅尔。F0 抬到 0.09（物理 0.04 在斜俯视角下环境反射只剩 ~5%，墨面读作哑光粉漆；
     // Splatoon 式湿墨靠作弊的常数缎面光泽）；掠射上限压到 0.42，避免掠射白光把队色洗浅（P18 实测）。
     float fres = pow(saturate(1.0 - NdotV), 5.0);
     half F = (half)(0.09 + 0.42 * fres);
@@ -190,6 +194,98 @@ float3 P1InkApplyTangentPerturb(float3 tn, float3 N, float3 T1, float3 T2, half 
 {
     float3 n = N + (T1 * tn.x + T2 * tn.y) * strength;
     return normalize(n);
+}
+
+// ----------------------------------------------------------------------------
+// 三次 B 样条图集重建（对齐 INKWAVE inkShading.js 的 paintCubic）
+//
+// 动机：墨迹图集按双线性采样时，覆盖率场是分片双线性的，其中心差分梯度在
+// 纹元尺度上恒定 → 墨缘法线 / 接触阴影 / 队伍交界呈现纹元级「马赛克小面片」。
+// 三次 B 样条重建得到 C1 连续场 + 解析梯度，墨缘圆润顺滑（INKWAVE 实机观感的
+// 主要来源之一）。B 样条核无负瓣、不过冲，覆盖率场不会被滤出 >1 或 <0 的伪值。
+//
+// 采样 16 tap（4×4 整数纹元），每 tap 解析一阶导数权重，梯度按「每纹元」返回，
+// 由调用方按需换算成每米 / 每双纹元量纲。mip 安全：所有 tap 用
+// SAMPLE_TEXTURE2D_GRAD，屏幕空间导数钳到 ±8 纹元（INKWAVE textureGrad 同款钳制，
+// 远观防闪；图集默认无 mip 时该钳制无副作用）。
+// ----------------------------------------------------------------------------
+
+// 三次 B 样条核：输入连续纹元坐标 x，输出 4 个整数纹元（floor(x)-1 .. floor(x)+2）
+// 的权重 w 与一阶导数 dw（对 x 求导）。Σw = 1，B 样条无过冲。
+void P1CubicBSplineWeights(float x, out float4 w, out float4 dw)
+{
+    float i0 = floor(x) - 1.0;
+    float f = x - (i0 + 1.0);          // f ∈ [0,1)
+    float g = 1.0 - f;
+    float f2 = f * f;
+    float g2 = g * g;
+    w  = float4(g2 * g * (1.0 / 6.0),
+                2.0 / 3.0 - f2 + f2 * f * 0.5,
+                2.0 / 3.0 - g2 + g2 * g * 0.5,
+                f2 * f * (1.0 / 6.0));
+    dw = float4(-g2 * 0.5,
+                -2.0 * f + 1.5 * f2,
+                2.0 * g - 1.5 * g2,
+                f2 * 0.5);
+}
+
+// 重建预乘 RGBA 并返回每纹元梯度（gradX/gradY = d/d(texelX), d/d(texelY)）。
+// uv 必须已按调用方语义处理（saturate / 场外屏蔽由调用方负责）。
+float4 P1SampleInkAtlasCubicGrad(
+    TEXTURE2D_PARAM(tex, samp),
+    float2 uv, float2 texelUV,
+    float2 ddxUV, float2 ddyUV,
+    out float4 gradX, out float4 gradY)
+{
+    float2 res = 1.0 / max(texelUV, float2(1e-8, 1e-8));
+    float2 dX = clamp(ddxUV, -8.0 * texelUV, 8.0 * texelUV);
+    float2 dY = clamp(ddyUV, -8.0 * texelUV, 8.0 * texelUV);
+
+    float4 wx, dwx, wy, dwy;
+    P1CubicBSplineWeights(uv.x * res.x, wx, dwx);
+    P1CubicBSplineWeights(uv.y * res.y, wy, dwy);
+    float baseX = floor(uv.x * res.x) - 1.0;
+    float baseY = floor(uv.y * res.y) - 1.0;
+
+    float4 col0 = 0, col1 = 0, col2 = 0, col3 = 0;    // 每行沿 X 卷积结果（供 Y 梯度）
+    float4 dcol0 = 0, dcol1 = 0, dcol2 = 0, dcol3 = 0; // 每行沿 X 导数卷积结果（供 X 梯度）
+
+    [unroll]
+    for (int j = 0; j < 4; j++)
+    {
+        float rowV = (baseY + (float)j + 0.5) * texelUV.y;
+        float4 acc = 0;
+        float4 dacc = 0;
+        [unroll]
+        for (int i = 0; i < 4; i++)
+        {
+            float2 tapUV = saturate(float2((baseX + (float)i + 0.5) * texelUV.x, rowV));
+            float4 t = SAMPLE_TEXTURE2D_GRAD(tex, samp, tapUV, dX, dY);
+            acc += wx[i] * t;
+            dacc += dwx[i] * t;
+        }
+        if (j == 0) { col0 = acc; dcol0 = dacc; }
+        else if (j == 1) { col1 = acc; dcol1 = dacc; }
+        else if (j == 2) { col2 = acc; dcol2 = dacc; }
+        else { col3 = acc; dcol3 = dacc; }
+    }
+
+    // value = Σ wy[j]·col[j]；d/d(texelX) = Σ wy[j]·dcol[j]；d/d(texelY) = Σ dwy[j]·col[j]
+    gradX = wy[0] * dcol0 + wy[1] * dcol1 + wy[2] * dcol2 + wy[3] * dcol3;
+    gradY = dwy[0] * col0 + dwy[1] * col1 + dwy[2] * col2 + dwy[3] * col3;
+    return wy[0] * col0 + wy[1] * col1 + wy[2] * col2 + wy[3] * col3;
+}
+
+// ----------------------------------------------------------------------------
+// 阴影中墨水保饱和（对齐 INKWAVE INK_SHADE）：亮度守恒地提升色度。
+// amount = 0 时恒等返回；漫反射越弱（背光/阴影），调用方给的 amount 越大。
+// ----------------------------------------------------------------------------
+half3 P1InkShadowChroma(half3 color, float amount)
+{
+    half lum = Luminance(color);
+    half3 boosted = lerp(half3(lum, lum, lum), color, half(1.0 + amount));
+    half boostedLum = max(Luminance(boosted), half(1e-4));
+    return boosted * (lum / boostedLum);
 }
 
 #endif // P1_INK_WET_SHADING_INCLUDED

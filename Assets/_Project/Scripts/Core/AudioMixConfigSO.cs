@@ -89,7 +89,53 @@ namespace P1.Core
         [Range(0f, 1f)] public float climbLoopVolume = 0.45f;
         [Range(0f, 1f)] public float enemyInkSizzleLoopVolume = 0.52f;
         [Range(0f, 1f)] public float stormRainLoopVolume = 0.60f;
-        [Range(0f, 1f)] public float chargerChargeLoopVolume = 0.50f;
+        [Range(0f, 1f)] public float chargerChargeLoopVolume = 0.38f;
+        [Tooltip("蓄力狙循环音随蓄力进度的最低音量乘法器：轻蓄更安静，满蓄=1")]
+        [Range(0f, 1f)] public float chargerChargeRampMinVolume = 0.40f;
+
+        [Header("涂地补充（P-Audio：墨花分档 / 打墙 / 泵 / 死亡）")]
+        [Tooltip("墨花单发音量（splat_small / splat_big 共用，按墨斑大小分档）")]
+        [Range(0f, 1f)] public float splatVolume = 0.42f;
+        [Tooltip("墨水打墙：比落地略轻（墙没有体积）")]
+        [Range(0f, 1f)] public float inkHitWallVolume = 0.34f;
+        [Tooltip("爆破枪空爆（旧版烘了却从未播放）")]
+        [Range(0f, 1f)] public float blasterBoomVolume = 0.62f;
+        [Tooltip("爆破枪换气泵（仅本地）")]
+        [Range(0f, 1f)] public float blasterPumpVolume = 0.30f;
+        [Range(0f, 1f)] public float splatlingReadyVolume = 0.40f;
+        [Range(0f, 1f)] public float stormWindVolume = 0.38f;
+        [Tooltip("泼桶落墨重音（旧版烘了却从未播放）")]
+        [Range(0f, 1f)] public float sloshLandVolume = 0.52f;
+        [Tooltip("墨罐回满（旧版烘了却从未播放）")]
+        [Range(0f, 1f)] public float refillFullVolume = 0.34f;
+        [Range(0f, 1f)] public float deathVolume = 0.75f;
+
+        [Header("战斗状态提示（P-Audio）")]
+        [Tooltip("出生保护生效：只给本地玩家")]
+        [Range(0f, 1f)] public float spawnProtectVolume = 0.42f;
+        [Tooltip("低血心跳：必须压得住，只做存在感")]
+        [Range(0f, 1f)] public float lowHealthVolume = 0.34f;
+        [Tooltip("低血心跳的重复间隔（秒），约等于一次心跳")]
+        [Min(0.1f)] public float lowHealthThrottleSeconds = 1.1f;
+        [Range(0f, 1f)] public float respawnTickVolume = 0.30f;
+
+        [Header("战局提示（P-Audio）")]
+        [Range(0f, 1f)] public float leadChangeVolume = 0.36f;
+        [Tooltip("比分反超提示的最小间隔：避免比分来回拉锯时刷成音墙")]
+        [Min(0.5f)] public float leadChangeThrottleSeconds = 6f;
+        [Range(0f, 1f)] public float final10sVolume = 0.40f;
+        [Tooltip("敌方大招来袭警告：按距离衰减，远处只留方位感")]
+        [Range(0f, 1f)] public float enemySpecialWarnVolume = 0.40f;
+
+        [Header("操作反馈（P-Audio）")]
+        [Range(0f, 1f)] public float weaponSwitchVolume = 0.38f;
+        [Range(0f, 1f)] public float chargeCancelVolume = 0.34f;
+        [Range(0f, 1f)] public float bombBounceVolume = 0.26f;
+        [Min(0.01f)] public float bombBounceThrottleSeconds = 0.08f;
+        [Tooltip("准星锁定 tick：要很轻，否则瞄来瞄去会烦")]
+        [Range(0f, 1f)] public float reticleLockVolume = 0.26f;
+        [Min(0.02f)] public float reticleLockThrottleSeconds = 0.18f;
+        [Range(0f, 1f)] public float pauseVolume = 0.40f;
 
         [Header("音效节流窗口（秒）")]
         [Min(0.01f)] public float footstepThrottleSeconds = 0.16f;

@@ -193,6 +193,10 @@ namespace P1.Environment
         [Range(0f, 2f)] public float inkEdgeRimStrength = 0.8f;
         [Tooltip("墨水边缘平滑过度强度")]
         [Range(0f, 1f)] public float inkEdgeSmoothStrength = 0.7f;
+        [Tooltip("墨迹图集三次 B 样条重建强度（0 = 双线性旧行为，1 = C1 连续场，对齐 INKWAVE paintCubic）")]
+        [Range(0f, 1f)] public float inkBicubicStrength = 1f;
+        [Tooltip("阴影中墨水保饱和：漫反射越弱色度提升越多（亮度守恒，INKWAVE INK_SHADE 对齐）")]
+        [Range(0f, 1f)] public float inkShadowChromaBoost = 0.35f;
         [Tooltip("墨水顶面微细节强度")]
         [Range(0f, 2f)] public float inkTopDetailStrength = 1f;
         [Tooltip("立面墨水下淌动画速度")]

@@ -52,7 +52,7 @@ namespace P1.Weapons
                 return 0;
 
             // P41 涂带前伸：远端沿前进方向延伸 PaintLead，让墨带一直铺到滚筒触地处
-            //（旧墨带止于脚下，滚筒滚过未涂色地面，俯视角读作悬空）。碾压判定仍以未延伸的 to 为原点。
+            //（旧墨带止于脚下，滚筒滚过未涂色地面，第三人称斜视角读作悬空）。碾压判定仍以未延伸的 to 为原点。
             float lead = Mathf.Max(0f, sweep.PaintLead);
             to += forward * lead;
             float bandLength = distance + lead;

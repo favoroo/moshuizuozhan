@@ -101,6 +101,14 @@ namespace P1.Editor
             CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Container_Mustard.mat", arenaStyle.containerMustard, Color.Lerp(arenaStyle.containerMustard, arenaStyle.steelDark, 0.55f), 1.0f);
             CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_BoundaryWall.mat", arenaStyle.boundaryConcrete, arenaStyle.boundaryTrim, 0.0f);
 
+            // 集装箱瓦楞钢板图族（竖沟法线 + 锈迹/掉漆 RMO + 近白 albedo 调制层）。
+            // 必须在建材质时就写进去：主图构建链不走 ToonStyleInstaller.ApplyToonStyle，
+            // 只在那边挂贴图会让集装箱停留在旧版通用金属贴图上（瓦楞壳配平板法线，等于白做几何）。
+            ApplyContainerSurfaceMaterials(arenaStyle);
+
+            // 混凝土/钢构掩体的近白 albedo 调制层：否则掩体墙是一整片纯白大平面。
+            ApplyConcreteDetailAlbedo();
+
             // P7-B 新增：竞技场掩体用建材（支持 dither 遮挡剔除）
             CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Prop_Concrete.mat", arenaStyle.concreteLight, arenaStyle.concreteDark, 0.0f);
             CreateOrUpdateObstacleDitherMaterial($"{MatFolder}/Mat_Prop_ConcreteDark.mat", arenaStyle.concreteMid, arenaStyle.concreteDark, 0.0f);
@@ -115,6 +123,10 @@ namespace P1.Editor
             CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Emissive.mat", Color.white, 0.2f, 0f, arenaStyle.lampGlass, 1.6f, 2f);
             CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Cloth.mat", Color.white, 0.1f, 0f, Color.black, 0f, 0f);
             CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_Foliage.mat", Color.white, 0.08f, 0f, Color.black, 0f, 2f);
+
+            // 木质散件专用（PropLit + Wood 图族）：托盘/木箱/电缆盘靠顶点色上色，
+            // 复用 Mat_Prop_Matte 会让它们吃到混凝土法线，读成"纸箱/石膏块"。
+            ApplyPropWoodDetailMaterial();
             RefreshSpawnPadMaterials(arenaStyle);
             CreateOrUpdateWaterMaterial(arenaStyle);
             CreateOrUpdateSkyboxMaterial(arenaStyle);
@@ -993,7 +1005,7 @@ namespace P1.Editor
 
         /// <summary>
         /// 港湾水面调色：室外海面沿用主图配方（只收一点闪点）；场内浅湾改成亮青，
-        /// 否则 4.6m 窄水沟在俯视角下会被读成一整条墨蓝/焦油，白色闪点又像浮雪。
+        /// 否则 4.6m 窄水沟在斜俯视角下会被读成一整条墨蓝/焦油，白色闪点又像浮雪。
         /// </summary>
         private static void TuneHarborWater(Material outer, Material inner)
         {
@@ -1116,6 +1128,124 @@ namespace P1.Editor
         }
 
         /// <summary>
+        /// 给四个集装箱材质挂"瓦楞钢板"图族（法线 + RMO + 近白 albedo 调制层）。
+        /// 主图构建链与 ToonStyleInstaller 都调用它，保证两条流程写入同一套参数。
+        /// </summary>
+        public static void ApplyContainerSurfaceMaterials(ArenaStyleSO style)
+        {
+            if (style == null)
+            {
+                style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(ArenaStylePath);
+            }
+
+            string[] containerMaterials =
+            {
+                "Mat_Container_Teal", "Mat_Container_Rust",
+                "Mat_Container_Slate", "Mat_Container_Mustard"
+            };
+
+            var normalTex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/_Project/Art/Textures/Surfaces/Surfaces_Container_N.png");
+            var rmoTex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/_Project/Art/Textures/Surfaces/Surfaces_Container_RMO.png");
+            var albedoTex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/_Project/Art/Textures/Surfaces/Surfaces_Container_Albedo.png");
+
+            float normalStrength = style != null ? style.surfaceNormalStrength : 0.55f;
+            float aoStrength = style != null ? style.surfaceAOStrength : 0.45f;
+
+            foreach (string name in containerMaterials)
+            {
+                var mat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/{name}.mat");
+                if (mat == null) continue;
+
+                if (normalTex != null) mat.SetTexture("_SurfaceN", normalTex);
+                if (rmoTex != null) mat.SetTexture("_SurfaceRMO", rmoTex);
+                if (albedoTex != null) mat.SetTexture("_BaseMap", albedoTex);
+
+                mat.SetFloat("_SurfaceTexelScale", 0.62f);
+                mat.SetFloat("_SurfaceNormalStrength", normalStrength);
+                mat.SetFloat("_SurfaceAOStrength", aoStrength);
+                mat.SetFloat("_SurfaceSmoothnessScale", 0.9f);
+                mat.SetFloat("_BaseMapWorldSpace", 1f);
+                mat.SetFloat("_BaseMapWorldScale", 0.42f);
+                // 几何瓦楞已存在，着色器的颜色条纹只留极轻一层
+                mat.SetFloat("_CorrugationDepth", 0.12f);
+                // 掩体边界线：四个箱体材质必须一致。历史上只有 Slate 恰好落在
+                // shader 默认值 0.85，其余三个是 0 —— 同一排箱子里混着"有描边/无描边"。
+                mat.SetFloat("_EdgeLineStrength", 0.85f);
+                mat.SetFloat("_EdgeLineWidth", 0.05f);
+                EditorUtility.SetDirty(mat);
+            }
+        }
+
+        /// <summary>
+        /// 给混凝土/钢构掩体挂近白 albedo 调制层（骨料、水渍垂流、拼缝、裂缝）。
+        ///
+        /// 背景：掩体墙/挡墙/高台立面的底色是单一 concreteLight，斜俯视角下是一整片
+        /// 纯白大平面 —— 玩家读作"塑料积木"。这一层把面拆出细节，同时因为贴图近白，
+        /// 不会改变既有的风格配色。
+        /// </summary>
+        public static void ApplyConcreteDetailAlbedo()
+        {
+            var albedoTex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/_Project/Art/Textures/Surfaces/Surfaces_Concrete_Albedo.png");
+            if (albedoTex == null)
+            {
+                Debug.LogWarning("[ProjectScaffolder] 未找到 Surfaces_Concrete_Albedo.png，" +
+                                 "请先运行 python3 tools/bake_arena_surface_details.py");
+                return;
+            }
+
+            // 只列主图独占的混凝土材质：Mat_Prop_SteelDark / Mat_Prop_Matte 被港湾与滑板场共用，
+            // 给它们加调制层会把改动外溢到另外两张地图（本轮只动第一张图）。
+            string[] targets =
+            {
+                "Mat_ObstacleWall", "Mat_BoundaryWall",
+                "Mat_Prop_Concrete", "Mat_Prop_ConcreteDark"
+            };
+
+            foreach (string name in targets)
+            {
+                var mat = AssetDatabase.LoadAssetAtPath<Material>($"{MatFolder}/{name}.mat");
+                if (mat == null) continue;
+
+                mat.SetTexture("_BaseMap", albedoTex);
+                mat.SetFloat("_BaseMapWorldSpace", 1f);
+                // 每 2.2m 一个贴图周期：与 shader 的 2m 板缝周期错开，避免节奏同步看出重复
+                mat.SetFloat("_BaseMapWorldScale", 0.4545f);
+                EditorUtility.SetDirty(mat);
+            }
+        }
+
+        /// <summary>
+        /// 木质散件专用材质（Mat_Prop_WoodDetail）：PropLit + Wood 法线/RMO。
+        ///
+        /// 木托盘/木箱/电缆盘是"顶点色上色 + 合并网格"，必须走 PropLit（ObstacleDitherLit 忽略顶点色）。
+        /// 之前它们和混凝土道具共用 Mat_Prop_Matte，法线是混凝土骨料图 —— 木箱表面读成抹灰墙面，
+        /// 加上兜底木色偏亮，整堆读作"纸箱"。
+        /// </summary>
+        public static void ApplyPropWoodDetailMaterial()
+        {
+            var mat = CreateOrUpdatePropMaterial($"{MatFolder}/Mat_Prop_WoodDetail.mat",
+                Color.white, 0.22f, 0f, Color.black, 0f, 2f);
+
+            var normalTex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/_Project/Art/Textures/Surfaces/Surfaces_Wood_N.png");
+            var rmoTex = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/_Project/Art/Textures/Surfaces/Surfaces_Wood_RMO.png");
+
+            if (normalTex != null) mat.SetTexture("_SurfaceN", normalTex);
+            if (rmoTex != null) mat.SetTexture("_SurfaceRMO", rmoTex);
+            // 0.85：一个贴图周期约 1.18m，与 1.2m 托板宽度接近，木纹尺度才对得上
+            mat.SetFloat("_SurfaceTexelScale", 0.85f);
+            mat.SetFloat("_SurfaceNormalStrength", 0.75f);
+            mat.SetFloat("_SurfaceAOStrength", 0.5f);
+            mat.SetFloat("_SurfaceSmoothnessScale", 0.6f);
+            EditorUtility.SetDirty(mat);
+        }
+
+        /// <summary>
         /// 加载 P7-B 所需的全部材质（缺失时退回现有掩体材质），供几何/装饰/氛围共用。
         /// </summary>
         private static ArenaMaterialSet BuildArenaMaterialSet(ArenaStyleSO style)
@@ -1138,6 +1268,7 @@ namespace P1.Editor
                 propMetal = Load("Mat_Prop_Metal.mat"),
                 propEmissive = Load("Mat_Prop_Emissive.mat"),
                 propCloth = Load("Mat_Prop_Cloth.mat"),
+                propWoodDetail = Load("Mat_Prop_WoodDetail.mat"),
                 bannerAtlas = Load("Mat_BannerAtlas.mat"),
                 water = Load("Mat_Water.mat"),
                 skybox = Load("Mat_Skybox.mat"),
@@ -2830,8 +2961,10 @@ namespace P1.Editor
             mat.SetFloat("_Smoothness", 0.38f);
             mat.SetFloat("_Metallic", 0.12f);
             mat.SetFloat("_EnableCorrugation", corrugation);
+            // 瓦楞已经是真实几何（ArenaContainerMeshFactory），着色器的"颜色条纹"退成
+            // 极轻的补充：条纹太强会和几何瓦楞打架，读成双重波纹。频率也按世界米重设。
             mat.SetFloat("_CorrugationScale", 2.5f);
-            mat.SetFloat("_CorrugationDepth", 0.28f);
+            mat.SetFloat("_CorrugationDepth", corrugation > 0.5f ? 0.12f : 0.28f);
             mat.SetFloat("_DitherAlpha", 1.0f);
             mat.color = Linear(baseColor);
             EditorUtility.SetDirty(mat);

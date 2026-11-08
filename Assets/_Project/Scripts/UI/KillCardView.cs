@@ -26,6 +26,12 @@ namespace P1.UI
         [SerializeField] private TMP_Text killerText;
         [SerializeField] private TMP_Text actionTagText;
         [SerializeField] private TMP_Text victimText;
+
+        [Header("受害者武器小图标（P42-B：读出对手配装）")]
+        [SerializeField] private RectTransform victimWeaponIconCircle;
+        [SerializeField] private Image victimWeaponIconImage;
+        [SerializeField] private Image victimWeaponCircleBg;
+
         [SerializeField] private UISpringMotion springMotion;
         [SerializeField] private CanvasGroup canvasGroup;
 
@@ -173,12 +179,47 @@ namespace P1.UI
                 victimText.overflowMode = TextOverflowModes.Truncate;
             }
 
+            if (victimWeaponIconCircle == null)
+            {
+                // 第二行右端的小圆：内嵌受害者主武器图标。
+                // 尺寸 28 而不是主图标 52——它是补充信息，不能和「谁击倒谁」抢视觉权重。
+                var victimCircleGo = new GameObject("VictimWeaponCircle", typeof(RectTransform), typeof(Image));
+                victimCircleGo.transform.SetParent(transform, false);
+                victimWeaponIconCircle = victimCircleGo.GetComponent<RectTransform>();
+                victimWeaponIconCircle.anchorMin = new Vector2(1f, 0.5f);
+                victimWeaponIconCircle.anchorMax = new Vector2(1f, 0.5f);
+                victimWeaponIconCircle.pivot = new Vector2(1f, 0.5f);
+                victimWeaponIconCircle.anchoredPosition = new Vector2(-10f, -20f);
+                victimWeaponIconCircle.sizeDelta = new Vector2(28f, 28f);
+
+                victimWeaponCircleBg = victimCircleGo.GetComponent<Image>();
+                victimWeaponCircleBg.sprite = GetCircleSprite();
+                victimWeaponCircleBg.raycastTarget = false;
+
+                var victimIconGo = new GameObject("VictimWeaponIcon", typeof(RectTransform), typeof(Image));
+                victimIconGo.transform.SetParent(victimWeaponIconCircle, false);
+                var victimIconRect = victimIconGo.GetComponent<RectTransform>();
+                Stretch(victimIconRect, 3f);
+                victimWeaponIconImage = victimIconGo.GetComponent<Image>();
+                victimWeaponIconImage.color = Color.white;
+                victimWeaponIconImage.raycastTarget = false;
+            }
+
             springMotion.SetTheme(theme);
             springMotion.OnPlayedOut -= HandlePlayedOut;
             springMotion.OnPlayedOut += HandlePlayedOut;
         }
 
         public void Bind(KillFeedEvent ev, UIThemeSO themeAsset, Sprite weaponIcon, System.Action<KillCardView> onDismiss)
+        {
+            Bind(ev, themeAsset, weaponIcon, null, onDismiss);
+        }
+
+        /// <summary>
+        /// P42-B 扩展重载：额外传受害者武器图标。旧签名保留（旧调用方按 null 走，行为不变）。
+        /// </summary>
+        public void Bind(KillFeedEvent ev, UIThemeSO themeAsset, Sprite weaponIcon, Sprite victimWeaponIcon,
+            System.Action<KillCardView> onDismiss)
         {
             EnsureBuilt();
             theme = themeAsset;
@@ -228,6 +269,23 @@ namespace P1.UI
                 weaponIconImage.sprite = weaponIcon;
                 weaponIconImage.enabled = weaponIcon != null;
                 weaponIconImage.color = Color.white;
+            }
+
+            // 2b. 受害者武器小圆：读对手配装（无图标时整颗隐藏，卡片布局与旧版一致）
+            bool showVictimIcon = victimWeaponIcon != null;
+            if (victimWeaponIconCircle != null)
+            {
+                victimWeaponIconCircle.gameObject.SetActive(showVictimIcon);
+            }
+
+            if (showVictimIcon)
+            {
+                if (victimWeaponCircleBg != null) victimWeaponCircleBg.color = victimCol;
+                if (victimWeaponIconImage != null)
+                {
+                    victimWeaponIconImage.sprite = victimWeaponIcon;
+                    victimWeaponIconImage.color = Color.white;
+                }
             }
 
             // 3. 文字（击杀卡档 24，移动端走 UITypography ×1.28）
@@ -308,7 +366,11 @@ namespace P1.UI
             }
 
             float victimX = textLeft + tagWidth + tagGap;
-            float victimWidth = Mathf.Max(80f, cardWidth - victimX - rightPadding);
+            // P42-B：第二行右端有受害者武器小圆（28px + 10px 右距 + 6px 间隙）时，
+            // 受害者名要让出这段宽度，否则长名字会压到图标上。
+            bool hasVictimIcon = victimWeaponIconCircle != null && victimWeaponIconCircle.gameObject.activeSelf;
+            float victimRightReserve = rightPadding + (hasVictimIcon ? 44f : 0f);
+            float victimWidth = Mathf.Max(80f, cardWidth - victimX - victimRightReserve);
 
             if (victimText != null)
             {

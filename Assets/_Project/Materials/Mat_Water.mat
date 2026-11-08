@@ -30,9 +30,9 @@ Material:
     - _GlitterThreshold: 0.988
     - _ShoreDistance: 12
     - _WaveNormalStrength: 0.3
-    - _WaveScale: 1
-    - _WaveSpeed: 0.15
-    - _WaveStrength: 0.25
+    - _WaveScale: 0.8
+    - _WaveSpeed: 0.18
+    - _WaveStrength: 0.22
     m_Colors:
     - _DeepColor: {r: 0.0048963088, g: 0.07323897, b: 0.16264722, a: 1}
     - _HorizonColor: {r: 0.47699985, g: 0.67385954, b: 0.78741235, a: 1}

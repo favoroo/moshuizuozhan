@@ -188,17 +188,19 @@ namespace P1.UI
             // 占领百分比弹簧平滑推演
             if (scoreBarRoot != null && scoreBarRoot.gameObject.activeInHierarchy)
             {
-                // 使用 Follow 弹簧预设平滑逼近
+                // 使用 Follow 弹簧预设平滑逼近（弹簧本身 60Hz 步进，保证手感连续）
                 UISpringSettings followSettings = UISpringSettings.Follow;
                 _springPercentA.Step(_targetPercentA, followSettings, dt);
                 _springPercentB.Step(_targetPercentB, followSettings, dt);
-                ApplyScoreBarVisuals();
-            }
 
-            // 几何大胆风：倒计时使用纯色硬切，禁止摆动与抖动
-            if (timerBlobRoot != null)
-            {
-                timerBlobRoot.localScale = Vector3.one;
+                // 视觉落地（TMP 文本重排 + 两条比分条 anchor + UIPillImage 胶囊纹理）按 15Hz 节流：
+                // 旧版每帧写 anchor 会反复触发布局/批次重建，并在条宽跨档时重建胶囊贴图（GC 尖刺）。
+                float now = Time.unscaledTime;
+                if (now >= _nextScoreVisualTime)
+                {
+                    _nextScoreVisualTime = now + 1f / 15f;
+                    ApplyScoreBarVisuals();
+                }
             }
         }
 
@@ -206,6 +208,7 @@ namespace P1.UI
         private float _targetPercentB;
         private Canvas[] _visibilityCanvasChain;
         private float _lastAppliedRatioA = -1f;
+        private float _nextScoreVisualTime;
 
         /// <summary>
         /// 更新双方占领百分比（带平滑弹簧推演）。
@@ -376,7 +379,8 @@ namespace P1.UI
             }
 
             // 进度条宽度比例（只动左右分界，上下/外侧四边内缩保持不变，露出等宽墨黑边框）
-            float ratioA = TopRosterMath.CalculateScoreSplitRatio(valA, valB);
+            // 量化到 0.2%（520px 宽约 1px）：既肉眼无差，又能让 UIPillImage 的纵横比档位稳定复用贴图。
+            float ratioA = Mathf.Round(TopRosterMath.CalculateScoreSplitRatio(valA, valB) * 500f) / 500f;
 
             if (fillBarA != null && fillBarB != null && Mathf.Abs(ratioA - _lastAppliedRatioA) >= 0.0005f)
             {

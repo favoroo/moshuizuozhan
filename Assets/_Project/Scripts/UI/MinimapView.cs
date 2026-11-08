@@ -52,6 +52,8 @@ namespace P1.UI
         private readonly List<ActorMarkerItem> _allyMarkers = new List<ActorMarkerItem>(4);
         private readonly List<ActorMarkerItem> _enemyMarkers = new List<ActorMarkerItem>(4);
         private readonly List<HazardMarkerItem> _hazardMarkers = new List<HazardMarkerItem>(6);
+        /// <summary>风暴云快照复用列表（避免每帧分配）。</summary>
+        private readonly List<StormCloudInfo> _stormInfoScratch = new List<StormCloudInfo>(8);
 
         public const int MaxFlashPoolSize = 64;
         private readonly FlashMarkerItem[] _flashPool = new FlashMarkerItem[MaxFlashPoolSize];
@@ -78,6 +80,8 @@ namespace P1.UI
         private class HazardMarkerItem
         {
             public RectTransform Root;
+            public Image DiscImage;
+            public Image FillImage;
             public Image RingImage;
             public Image IconImage;
             public bool IsActive;
@@ -362,23 +366,55 @@ namespace P1.UI
 
         private HazardMarkerItem CreateHazardMarkerNode(string name)
         {
-            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+            var go = new GameObject(name, typeof(RectTransform));
             go.transform.SetParent(markersContainer, false);
             var rt = go.GetComponent<RectTransform>();
             rt.sizeDelta = new Vector2(30f, 30f);
 
-            var img = go.GetComponent<Image>();
-            img.sprite = GetRingSprite();
-            img.color = new Color(1f, 0.2f, 0.25f, 0.85f);
-            img.raycastTarget = false;
+            // P41 三层读法（对齐 Inkwave minimap 风暴盘）：半透明范围盘 + 剩余寿命倒计时弧 + 闪烁边环
+            var discGo = new GameObject("Disc", typeof(RectTransform), typeof(Image));
+            discGo.transform.SetParent(rt, false);
+            StretchMarkerChild(discGo.GetComponent<RectTransform>());
+            var discImg = discGo.GetComponent<Image>();
+            discImg.sprite = GetCircleSprite();
+            discImg.raycastTarget = false;
+
+            var fillGo = new GameObject("Countdown", typeof(RectTransform), typeof(Image));
+            fillGo.transform.SetParent(rt, false);
+            StretchMarkerChild(fillGo.GetComponent<RectTransform>());
+            var fillImg = fillGo.GetComponent<Image>();
+            fillImg.sprite = GetCircleSprite();
+            fillImg.type = Image.Type.Filled;
+            fillImg.fillMethod = Image.FillMethod.Radial360;
+            fillImg.fillOrigin = (int)Image.Origin360.Top;
+            fillImg.fillAmount = 1f;
+            fillImg.raycastTarget = false;
+
+            var ringGo = new GameObject("Ring", typeof(RectTransform), typeof(Image));
+            ringGo.transform.SetParent(rt, false);
+            StretchMarkerChild(ringGo.GetComponent<RectTransform>());
+            var ringImg = ringGo.GetComponent<Image>();
+            ringImg.sprite = GetRingSprite();
+            ringImg.raycastTarget = false;
+
             go.SetActive(false);
 
             return new HazardMarkerItem
             {
                 Root = rt,
-                RingImage = img,
+                DiscImage = discImg,
+                FillImage = fillImg,
+                RingImage = ringImg,
                 IsActive = false
             };
+        }
+
+        private static void StretchMarkerChild(RectTransform rt)
+        {
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
         }
 
         private void BuildFlashPool()
@@ -918,21 +954,37 @@ namespace P1.UI
         {
             int hIndex = 0;
 
-            // 1. 检查风暴云大招
-            if (InkStormCloudPool.Instance != null && InkStormCloudPool.Instance.TryGetActiveCloudPosition(out Vector3 stormPos))
+            // 1. 风暴云大招：全部云（含飞行中的发生器），队色盘 + 倒计时弧 + 告警边环
+            if (InkStormCloudPool.Instance != null)
             {
-                if (hIndex < _hazardMarkers.Count)
+                int stormCount = InkStormCloudPool.Instance.TryGetActiveClouds(_stormInfoScratch);
+                for (int i = 0; i < stormCount && hIndex < _hazardMarkers.Count; i++)
                 {
+                    StormCloudInfo info = _stormInfoScratch[i];
                     var item = _hazardMarkers[hIndex++];
-                    Vector2 pos = MinimapMath.WorldToMapAnchoredPosition(stormPos, origin, mapSize, containerSize);
+                    Vector2 pos = MinimapMath.WorldToMapAnchoredPosition(info.Position, origin, mapSize, containerSize);
                     item.Root.anchoredPosition = pos;
-                    float mapR = MinimapMath.WorldRadiusToMapRadius(3.4f, mapSize, containerSize);
+                    float mapR = MinimapMath.WorldRadiusToMapRadius(info.Radius, mapSize, containerSize);
                     item.Root.sizeDelta = new Vector2(mapR * 2f, mapR * 2f);
+
+                    Color c = info.Spawned && InkSurfaceController.Instance != null
+                        ? InkSurfaceController.Instance.GetTeamColor(info.Team)
+                        : new Color(0.2f, 0.85f, 1f);
+                    if (item.DiscImage != null)
+                    {
+                        item.DiscImage.color = new Color(c.r, c.g, c.b, info.Spawned ? 0.22f : 0f);
+                    }
+                    if (item.FillImage != null)
+                    {
+                        // 倒计时弧：寿命比例随时间收窄，剩余越少弧越短
+                        item.FillImage.color = new Color(c.r, c.g, c.b, info.Spawned ? 0.30f : 0f);
+                        item.FillImage.fillAmount = Mathf.Clamp01(info.Remaining01);
+                    }
                     if (item.RingImage != null)
                     {
                         // 风暴云危险圈属功能性告警：只允许硬切闪烁（禁用正弦呼吸）
                         float blink = Mathf.Repeat(Time.time * 3f, 1f) < 0.5f ? 1f : 0.55f;
-                        item.RingImage.color = new Color(0.2f, 0.85f, 1f, blink);
+                        item.RingImage.color = new Color(c.r, c.g, c.b, blink);
                     }
                     item.Root.gameObject.SetActive(true);
                 }

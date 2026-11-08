@@ -54,6 +54,37 @@ namespace P1.Core
             return null;
         }
 
+        /// <summary>
+        /// 取某个音效族的**全部变体**，按变体号升序（shot_1, shot_2, ...）。
+        ///
+        /// 变体数量由 tools/bake_sfx.py 决定，且会随配方迭代变化；如果调用方按固定名字
+        /// 逐个列举（旧做法），一旦加了变体，独立包里就只有前几个能播。这里按
+        /// 「族名_纯数字」匹配，自动跟随烘焙产物；循环音的 key_loop_N 因含非数字段不会误匹配。
+        /// </summary>
+        public AudioClip[] GetSfxVariants(string key)
+        {
+            if (string.IsNullOrEmpty(key) || sfxNames == null || sfxClips == null)
+                return null;
+
+            int count = Mathf.Min(sfxNames.Length, sfxClips.Length);
+            var picked = new System.Collections.Generic.List<AudioClip>(4);
+            for (int variant = 1; variant <= 64; variant++)
+            {
+                string wanted = key + "_" + variant;
+                for (int i = 0; i < count; i++)
+                {
+                    if (sfxNames[i] == wanted)
+                    {
+                        if (sfxClips[i] != null)
+                            picked.Add(sfxClips[i]);
+                        break;
+                    }
+                }
+            }
+
+            return picked.Count > 0 ? picked.ToArray() : null;
+        }
+
         /// <summary>按武器类型取配置，找不到返回 null。</summary>
         public WeaponConfigSO GetWeapon(WeaponKind kind)
         {

@@ -45,8 +45,11 @@ Material:
     - _InkGrainStrength: 0.35
     - _ShadeSoftness: 0.1
     - _ShadeThreshold: 0.5
+    - _WallDripIntensity: 1
     - _WallDripStrength: 0.4
+    - _WallEdgeSoftness: 1
     - _WallEnvSpec: 0.8
+    - _WallToneJitter: 1
     - _WallWetness: 0.6
     m_Colors:
     - _EdgeLineColor: {r: 0.0173891, g: 0.013411746, b: 0.027211785, a: 1}

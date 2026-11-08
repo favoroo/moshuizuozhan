@@ -175,6 +175,31 @@ namespace P1.Tests
             Assert.AreEqual(100f, aboveCloud.GetComponent<CombatantHealth>().CurrentHealth, 0.001f, "云层之上不吃雨");
         }
 
+        [Test]
+        public void Storm_DotTick_SkipsInvulnerableTargets()
+        {
+            var invuln = CreateCombatant("StormInvuln", Team.TeamB, new Vector3(0f, 0f, 1f));
+            invuln.GetComponent<CombatantHealth>().IsInvulnerable = true;
+
+            int hits = SpecialCombat.ApplyStormTick(new Vector3(0f, 4f, 0f), Team.TeamA, 3.4f, 17f);
+
+            Assert.AreEqual(100f, invuln.GetComponent<CombatantHealth>().CurrentHealth, 0.001f, "无敌单位不淋雨");
+            Assert.AreEqual(0, hits, "无敌单位不计入命中数（对齐 Slam 白圈语义）");
+        }
+
+        [Test]
+        public void Storm_DotTick_OldSignature_KeepsNoCoverBehavior()
+        {
+            // 旧签名（checkOverheadCover=false）必须保持旧行为：不做掩体视线检查，直接结算。
+            // 带掩体的视线检查归 PlayMode 物理场景测试（Storm_PutsCoverBetween...）。
+            var inside = CreateCombatant("StormLegacySignature", Team.TeamB, new Vector3(0f, 0f, 2f));
+
+            int hits = SpecialCombat.ApplyStormTick(new Vector3(0f, 4f, 0f), Team.TeamA, 3.4f, 17f);
+
+            Assert.AreEqual(83f, inside.GetComponent<CombatantHealth>().CurrentHealth, 0.001f, "旧签名行为不变：每跳 17 伤");
+            Assert.AreEqual(1, hits);
+        }
+
         // ------------------------------------------------------------------ Splat Bomb
 
         [Test]

@@ -23,25 +23,25 @@ namespace P1.UI
     }
 
     /// <summary>
-    /// 勋章英文标题与描述常量。
+    /// 勋章中文标题与幽默描述常量（结算页勋章条直接上屏）。
     /// </summary>
     public static class AwardConstants
     {
-        public const string TurfKing = "TURF KING";
-        public const string TopInker = "TOP INKER";
-        public const string TopSplatter = "TOP SPLATTER";
-        public const string Untouchable = "UNTOUCHABLE";
-        public const string Survivor = "SURVIVOR";
-        public const string PurePainter = "PURE PAINTER";
-        public const string Mvp = "MVP";
+        public const string TurfKing = "涂地之王";
+        public const string TopInker = "本队粉刷匠";
+        public const string TopSplatter = "击杀王";
+        public const string Untouchable = "无人能碰";
+        public const string Survivor = "幸存者";
+        public const string PurePainter = "纯纯艺术家";
+        public const string Mvp = "本场MVP";
 
-        public const string TurfKingDesc = "Most turf inked in the match";
-        public const string TopInkerDesc = "Most turf inked on their team";
-        public const string TopSplatterDesc = "Most splats in the match";
-        public const string UntouchableDesc = "Never got splatted";
-        public const string SurvivorDesc = "Splatted the fewest times";
-        public const string PurePainterDesc = "Top-3 turf without splatting anyone";
-        public const string MvpDesc = "Top all-round score in the match";
+        public const string TurfKingDesc = "全场涂地最多，大地为你改名";
+        public const string TopInkerDesc = "本队涂地最多，队友颜料成了你的陪衬";
+        public const string TopSplatterDesc = "全场击杀最多，对面复活键都被按冒烟了";
+        public const string UntouchableDesc = "整局零阵亡，对面连你的尾气都吃不到";
+        public const string SurvivorDesc = "阵亡最少，走位风骚得让子弹怀疑人生";
+        public const string PurePainterDesc = "一枪没开还进了涂地前三，和平主义者的胜利";
+        public const string MvpDesc = "涂地、击杀、生存全都要，全场没有比你还全面的";
     }
 
     /// <summary>
@@ -319,7 +319,7 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 获取勋章的英文标题。
+        /// 获取勋章的中文标题。
         /// </summary>
         public static string GetTitle(AwardType award)
         {
@@ -337,7 +337,7 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 获取勋章的英文描述。
+        /// 获取勋章的中文幽默描述。
         /// </summary>
         public static string GetDescription(AwardType award)
         {

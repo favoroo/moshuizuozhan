@@ -328,7 +328,7 @@ namespace P1.Environment
                 }
             }
 
-            // 3.4.1 舷墙白色压顶条：把 0.72m 深蓝矮墙的顶边勾成一条白线，俯视角下才读得出"船舷"
+            // 3.4.1 舷墙白色压顶条：把 0.72m 深蓝矮墙的顶边勾成一条白线，斜俯视角下才读得出"船舷"
             for (int side = -1; side <= 1; side += 2)
             {
                 for (int xSide = -1; xSide <= 1; xSide += 2)

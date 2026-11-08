@@ -136,17 +136,26 @@ namespace P1.Editor
                 var s = new TextureImporterSettings();
                 importer.ReadTextureSettings(s);
 
-                bool wantMips = kind == MediaImportPolicy.TextureKind.WorldTexture;
+                bool uiIcon = kind == MediaImportPolicy.TextureKind.UiIconSprite;
+                bool spriteKind = kind == MediaImportPolicy.TextureKind.Sprite
+                                  || kind == MediaImportPolicy.TextureKind.PixelSprite || uiIcon;
+                bool defaultKind = kind == MediaImportPolicy.TextureKind.WorldTexture
+                                   || kind == MediaImportPolicy.TextureKind.NormalMap
+                                   || kind == MediaImportPolicy.TextureKind.MaskMap
+                                   || kind == MediaImportPolicy.TextureKind.BrandTexture;
+                bool wantMips = kind == MediaImportPolicy.TextureKind.WorldTexture
+                                || kind == MediaImportPolicy.TextureKind.NormalMap
+                                || kind == MediaImportPolicy.TextureKind.MaskMap || uiIcon;
                 bool wantPoint = kind == MediaImportPolicy.TextureKind.PixelSprite;
-                bool expectSprite = !wantMips;
 
                 var issues = new List<string>();
-                if (expectSprite && s.textureType != TextureImporterType.Sprite) issues.Add("应为 Sprite");
-                if (wantMips && s.textureType != TextureImporterType.Default) issues.Add("应为 Default");
-                if (expectSprite && !s.alphaIsTransparency) issues.Add("alphaIsTransparency 关");
+                if (spriteKind && s.textureType != TextureImporterType.Sprite) issues.Add("应为 Sprite");
+                if (defaultKind && s.textureType != TextureImporterType.Default) issues.Add("应为 Default");
+                if (spriteKind && !s.alphaIsTransparency) issues.Add("alphaIsTransparency 关");
                 if (s.mipmapEnabled != wantMips) issues.Add(wantMips ? "缺 mip" : "多余 mip");
                 if (wantPoint && s.filterMode != FilterMode.Point) issues.Add("应为 Point");
-                if (!wantPoint && s.filterMode != FilterMode.Bilinear) issues.Add("应为 Bilinear");
+                if (!wantPoint && !uiIcon && s.filterMode != FilterMode.Bilinear) issues.Add("应为 Bilinear");
+                if (uiIcon && s.filterMode != FilterMode.Trilinear) issues.Add("应为 Trilinear");
 
                 string size = tex != null ? tex.width + "x" + tex.height : "?";
                 string line = string.Format(

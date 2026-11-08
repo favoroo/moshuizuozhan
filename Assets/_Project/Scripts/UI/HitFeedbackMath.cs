@@ -30,7 +30,7 @@ namespace P1.UI
 
         /// <summary>
         /// 受击方向角（度）：0 = 画面上方（正前方），+90 = 画面右侧。
-        /// 传入相机水平前向/右向，保证俯视相机旋转后指示弧仍指向真实伤害来源。
+        /// 传入相机水平前向/右向，保证相机旋转后指示弧仍指向真实伤害来源。
         /// </summary>
         public static float SourceAngleDegrees(Vector3 toSource, Vector3 cameraForwardFlat, Vector3 cameraRightFlat)
         {

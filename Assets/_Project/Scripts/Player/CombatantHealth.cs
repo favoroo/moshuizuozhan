@@ -36,6 +36,22 @@ namespace P1.Player
         private bool _motorQueried;
         private float _lastHitSplashTime = -999f;
 
+        // P32 敌方墨覆盖（对齐 INKWAVE actor.js hurtFlash / character-mats.js HURT_FRAG）：
+        // _inkCoverageFlash 是"命中 + 踩敌墨"累积的墨斑量，_inkCoatAmount 是最终推给着色器的覆盖量
+        // （= max(flash, 残血比例)）。两者都逐单位，只能走 MaterialPropertyBlock。
+        private float _inkCoverageFlash;
+        private float _inkCoatAmount;
+        private float _inkCoatWritten;
+        private Color _inkCoatColor;
+        private Team _inkCoatColorTeam;
+        private float _inkCoatSeed;
+        // P32 每个 renderer 的「静止位姿坐标系」：offset = 相对角色根的位置、scale = 世界缩放。
+        // 角色是 ~70 件刚体部件（部分按材质合并），各部件网格的 object space 互不相同；
+        // 直接用 positionOS 求噪声会让左右腿/手臂出现镜像重复的墨斑。这里把顶点还原到
+        // 「角色空间里的静止世界坐标」，墨斑场就跨部件连续、且按米制保持一致尺寸。
+        private Vector3[] _inkPartOffsets;
+        private Vector3[] _inkPartScales;
+
         // P6-B 命中墨花门控：同一单位 50ms 内多次命中只炸一片（霰弹/连发聚合）。
         // P30-C2：距离门控从 40m 放宽到 60m——竞技场对角线约 68m，旧值把中远距离交火的命中反馈全吞掉了；
         // 被节流合并掉的命中改为「最小化墨花」，不再静默丢弃。
@@ -46,7 +62,19 @@ namespace P1.Player
         /// <summary>被节流合并时的最小化墨花强度（单颗小粒子，约为完整墨花的 0.8 倍尺寸基准）。</summary>
         private const float HitSplashMinimalScale = 0.8f;
 
-        private static readonly int BaseColorProp = Shader.PropertyToID("_BaseColor");
+        private static readonly int FlashAmountProp = Shader.PropertyToID("_FlashAmount");
+        private static readonly int InkColorProp = Shader.PropertyToID("_InkColor");
+        private static readonly int InkAmountProp = Shader.PropertyToID("_InkAmount");
+        private static readonly int InkSeedProp = Shader.PropertyToID("_InkSeed");
+        private static readonly int InkPartOffsetProp = Shader.PropertyToID("_InkPartOffset");
+        private static readonly int InkPartScaleProp = Shader.PropertyToID("_InkPartScale");
+        /// <summary>覆盖量低于该值即视为"干净"：不为它写 MPB，让 renderer 留在 GPU instancing 批处理里。</summary>
+        private const float InkCoatZeroThreshold = 0.002f;
+        /// <summary>
+        /// 覆盖量写入 MPB 的量化步长：身体是 ~70 个 renderer 的合并网格，逐帧全量重写会把
+        /// 8 名角色的 MPB 上传变成热路径开销。1/64 ≈ 1.6% 的视觉台阶肉眼不可见。
+        /// </summary>
+        private const float InkCoatWriteQuantum = 1f / 64f;
 
         public Team Team => team;
         public float CurrentHealth => _currentHealth;
@@ -118,6 +146,15 @@ namespace P1.Player
         /// <summary>最近一次伤害来源的武器/技能描述（击杀卡片使用）。</summary>
         public string LastWeaponCause => _lastWeaponCause;
 
+        /// <summary>
+        /// 当前敌方墨覆盖量 0~1（= max(受击/踩敌墨累积, 残血比例)。HUD / 调试 / 测试可读）。
+        /// 由着色器 `_InkAmount` 渲染成身体上的敌墨墨斑。
+        /// </summary>
+        public float InkCoatAmount01 => _inkCoatAmount;
+
+        /// <summary>当前用于渲染墨斑的敌方墨色（未覆盖时为上一次的队色）。</summary>
+        public Color InkCoatColor => _inkCoatColor;
+
         /// <summary>该单位配置的出生锚点（未配置时为 null，越界回收等外部系统只读使用）。</summary>
         public Transform RespawnAnchor => respawnAnchor;
 
@@ -181,6 +218,11 @@ namespace P1.Player
             _initialSpawnRot = transform.rotation;
             _currentHealth = MaxHealth;
 
+            // P32 墨斑种子：让 8 名角色的墨斑形状互不相同（同一 mesh 空间求值，种子不同 → 图案不同）
+            _inkCoatSeed = UnityEngine.Random.value * 64f;
+            _inkCoatColorTeam = team.GetOpponent();
+            _inkCoatColor = ResolveInkColor(_inkCoatColorTeam);
+
             if (bodyRenderers == null || bodyRenderers.Length == 0)
             {
                 Renderer[] all = GetComponentsInChildren<Renderer>(true);
@@ -211,6 +253,37 @@ namespace P1.Player
                     }
                     bodyRenderers = enabledOnly.ToArray();
                 }
+            }
+
+            RebuildInkPartFrames();
+        }
+
+        /// <summary>
+        /// 为每个 body renderer 记录「静止位姿坐标系」（offset = 相对角色根的位置，scale = 世界缩放），
+        /// 供着色器把顶点还原到角色空间并按米制求墨斑噪声。
+        /// 必须在 bodyRenderers 变化后重建（Awake 收集后、部件合并后）。
+        /// </summary>
+        private void RebuildInkPartFrames()
+        {
+            int count = bodyRenderers != null ? bodyRenderers.Length : 0;
+            if (_inkPartOffsets == null || _inkPartOffsets.Length != count)
+            {
+                _inkPartOffsets = new Vector3[count];
+                _inkPartScales = new Vector3[count];
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                Renderer r = bodyRenderers[i];
+                if (r == null)
+                {
+                    _inkPartOffsets[i] = Vector3.zero;
+                    _inkPartScales[i] = Vector3.one;
+                    continue;
+                }
+
+                _inkPartOffsets[i] = transform.InverseTransformPoint(r.transform.position);
+                _inkPartScales[i] = r.transform.lossyScale;
             }
         }
 
@@ -254,6 +327,10 @@ namespace P1.Player
             _currentHealth = MaxHealth;
             _respawnTimer = 0f;
             _hitFlashTimer = 0f;
+            _inkCoverageFlash = 0f;
+            _inkCoatAmount = 0f;
+            _inkCoatColorTeam = team.GetOpponent();
+            _inkCoatColor = ResolveInkColor(_inkCoatColorTeam);
 
             Vector3 targetPos = respawnAnchor != null ? respawnAnchor.position : _initialSpawnPos;
             Quaternion targetRot = respawnAnchor != null ? respawnAnchor.rotation : _initialSpawnRot;
@@ -263,7 +340,7 @@ namespace P1.Player
             if (_cc != null) _cc.enabled = true;
 
             SetVisualsAndCollidersActive(true);
-            ClearHitFlash();
+            WriteBodyBlock();
             _lastAttacker = null;
             _lastWeaponCause = null;
             OnRespawned?.Invoke(this);
@@ -278,9 +355,15 @@ namespace P1.Player
             if (!IsAlive || seconds <= 0f)
                 return;
 
+            bool renewed = _spawnProtectionRemaining <= 0f;
             _spawnProtectionRemaining = Mathf.Max(_spawnProtectionRemaining, seconds);
             _spawnBlinkTimer = 0f;
             _spawnBlinkOn = false;
+
+            // 出生保护生效提示：只给本地玩家。别人的保护音会让人误判自己也有无敌，
+            // 是「为什么我打不动他」这类困惑的常见来源。
+            if (renewed && IsLocalPlayer(this) && AudioManager.Instance != null)
+                AudioManager.Instance.PlaySpawnProtect();
         }
 
         public void Heal(float amount)
@@ -323,7 +406,15 @@ namespace P1.Player
 
             _currentHealth = Mathf.Max(0f, _currentHealth - damage);
             _hitFlashTimer = config != null && config.hitFlashSeconds > 0.01f ? config.hitFlashSeconds : 0.09f;
-            ApplyHitFlash(true);
+
+            // P32 命中即被泼上攻击方的墨：对齐 INKWAVE actor.js hurtFlash += amount/60。
+            // 攻击方为 Neutral（环境伤害）时按「敌方墨」处理，与 hitSplash 的取色口径一致。
+            float coatPerDamage = config != null ? config.inkCoatPerDamage : 0.0167f;
+            _inkCoverageFlash = Mathf.Clamp01(_inkCoverageFlash + damage * coatPerDamage);
+            _inkCoatColorTeam = attackerTeam != Team.Neutral ? attackerTeam : team.GetOpponent();
+            _inkCoatColor = ResolveInkColor(_inkCoatColorTeam);
+            _inkCoatAmount = Mathf.Max(_inkCoverageFlash, 1f - Health01);
+            WriteBodyBlock();
 
             // P6-B 命中反馈统一入口：受击点方向性墨花 + 墨拍身体音。
             // 所有武器（弹丸/光束/滚筒/爆破/手雷/大招/风暴）都经 TakeDamage，因此一处接入全体生效。
@@ -490,7 +581,9 @@ namespace P1.Player
                     KillFeedbackState.StreakWindowSeconds = config != null
                         ? config.killStreakWindowSeconds
                         : 4f;
-                    AudioManager.Instance.PlayKill(KillFeedbackState.RegisterLocalKill());
+                    int streak = KillFeedbackState.RegisterLocalKill();
+                    MatchStatsService.RegisterStreak(_lastAttacker, streak);
+                    AudioManager.Instance.PlayKill(streak);
                 }
                 else if (IsLocalPlayer(this))
                 {
@@ -506,6 +599,8 @@ namespace P1.Player
                 }
             }
 
+            _inkCoverageFlash = 0f;
+            _inkCoatAmount = 0f;
             ClearHitFlash();
             SetVisualsAndCollidersActive(false);
 
@@ -530,13 +625,25 @@ namespace P1.Player
 
         private void Update()
         {
+            // 白闪与墨覆盖共用同一块 MaterialPropertyBlock，本帧有任何状态变化才重写一次
+            bool bodyBlockDirty = false;
+
             if (_hitFlashTimer > 0f)
             {
                 _hitFlashTimer -= Time.deltaTime;
                 if (_hitFlashTimer <= 0f)
                 {
-                    ClearHitFlash();
+                    _hitFlashTimer = 0f;
+                    bodyBlockDirty = true;
                 }
+            }
+
+            // P32 敌方墨覆盖：命中累积 + 踩敌墨累积 + 自然淡去，最终量 = max(累积量, 残血比例)
+            bodyBlockDirty |= TickInkCoat(Time.deltaTime);
+
+            if (bodyBlockDirty)
+            {
+                WriteBodyBlock();
             }
 
             if (_spawnProtectionRemaining > 0f)
@@ -548,10 +655,6 @@ namespace P1.Player
                     // 放大成大团白晕，且发生在无人受击时，看起来像 bug）。
                     // 出生保护的无敌时间与脚下的队色扩散环保留，身体不再闪白。
                     _spawnBlinkOn = false;
-                    if (_hitFlashTimer <= 0f)
-                    {
-                        ClearHitFlash();
-                    }
                 }
             }
 
@@ -568,13 +671,34 @@ namespace P1.Player
                         ResetImmediately();
                         GrantSpawnProtection(SpawnProtectionDuration);
                         PlaySpawnProtectionVfx();
-                        if (AudioManager.Instance != null && team == Team.TeamA)
+                        // 旧实现按 team == TeamA 判定，AI 队友复活也会播玩家向的复活音；
+                        // 改为只认本地玩家，避免「不是我复活了却听到复活音」的误判。
+                        if (AudioManager.Instance != null && IsLocalPlayer(this))
                         {
                             AudioManager.Instance.PlayRespawn();
                         }
                     }
                 }
             }
+            else if (IsLocalPlayer(this))
+            {
+                TickLowHealthHeartbeat();
+            }
+        }
+
+        /// <summary>
+        /// 本地玩家低血心跳：血量比例连续低于阈值时按固定间隔「咚-咚」，回到阈值以上立即停。
+        /// 放在 CombatantHealth 而不是 UI 图层，是为了让「危险」只有这一个真源——
+        /// 此前低血只闪红边（LowHealthVignetteView），声音侧完全缺失。
+        /// </summary>
+        private void TickLowHealthHeartbeat()
+        {
+            const float threshold = 0.35f;
+            if (Health01 <= 0f || Health01 > threshold || IsInvulnerable)
+                return;
+
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayLowHealth();
         }
 
         /// <summary>
@@ -639,6 +763,8 @@ namespace P1.Player
             }
 
             bodyRenderers = list.ToArray();
+            // 合并后的 renderer 是新的：墨斑坐标系必须一起重建，否则新部件拿到的是旧索引的 offset
+            RebuildInkPartFrames();
         }
 
         private void SetVisualsAndCollidersActive(bool active)
@@ -663,33 +789,133 @@ namespace P1.Player
             }
         }
 
-        private void ApplyHitFlash(bool whiteFlash)
+        /// <summary>
+        /// P32 敌方墨覆盖逐帧推进（对齐 INKWAVE actor.js / character-mats.js HURT_FRAG）：
+        /// 1. 踩敌方墨时累积 <c>hurtFlash += dt × inkCoatInEnemyInkRatePerSec</c>（不受敌墨 DOT 底线影响，
+        ///    所以只掉 40 血也能在约 2 秒内糊满全身，读起来比实际伤害更"脏"）；
+        /// 2. 命中累积在 <see cref="TakeDamage"/> 里按伤害量加；
+        /// 3. 离开敌墨后 <c>hurtFlash -= dt × inkCoatDecayPerSec</c>，纯命中墨斑约 1.7s 淡净；
+        /// 4. 最终覆盖量 = max(hurtFlash, 1 - 血量百分比)：残血本身就是"被墨糊住"的读数，
+        ///    在己方墨里回血后自动一起消掉（INKWAVE 的"潜墨洗干净"正是这个副作用，无独立洗墨机制）。
+        /// 返回本帧覆盖量是否变化（供 MPB 重写门控，干净单位不写 MPB、留在 instancing 批处理里）。
+        /// </summary>
+        private bool TickInkCoat(float dt)
+        {
+            InkCharacterMotor motor = Motor;
+            // 出生保护 / 大招无敌期间不累积墨覆盖：与 ApplyEnemyInkBurn、TakeDamage 同一道无敌门。
+            // 否则刚复活就踩进出生点周围的敌墨（例如自己阵亡时的击杀爆墨）会瞬间糊满一身，
+            // 与「无敌且不掉血」的读数自相矛盾。
+            bool inEnemyInk = IsAlive && !IsInvulnerable && motor != null && motor.IsInEnemyInk;
+
+            if (inEnemyInk)
+            {
+                float rate = config != null ? config.inkCoatInEnemyInkRatePerSec : 0.5f;
+                if (_inkCoverageFlash < 1f)
+                {
+                    _inkCoverageFlash = Mathf.Min(1f, _inkCoverageFlash + rate * dt);
+                }
+
+                Team inkTeam = team.GetOpponent();
+                if (inkTeam != _inkCoatColorTeam)
+                {
+                    _inkCoatColorTeam = inkTeam;
+                    _inkCoatColor = ResolveInkColor(inkTeam);
+                }
+            }
+            else if (_inkCoverageFlash > 0f)
+            {
+                float decay = config != null ? config.inkCoatDecayPerSec : 0.6f;
+                _inkCoverageFlash = Mathf.Max(0f, _inkCoverageFlash - decay * dt);
+            }
+
+            float deficit = IsAlive ? 1f - Health01 : 0f;
+            float amount = Mathf.Max(_inkCoverageFlash, deficit);
+            if (amount < InkCoatZeroThreshold)
+            {
+                amount = 0f;
+            }
+
+            // 量化门控：只有跨过 1/64 台阶才重写 MPB（踩敌墨时最多 32 次/秒，而不是逐帧）
+            float quantized = amount <= 0f ? 0f : Mathf.Round(amount / InkCoatWriteQuantum) * InkCoatWriteQuantum;
+            if (Mathf.Approximately(quantized, _inkCoatWritten))
+            {
+                _inkCoatAmount = amount;
+                return false;
+            }
+
+            _inkCoatAmount = amount;
+            return true;
+        }
+
+        /// <summary>取某个队伍的墨水颜色（InkGridConfigSO 是唯一色源；场景未装配时回退到默认队色）。</summary>
+        private static Color ResolveInkColor(Team inkTeam)
+        {
+            if (InkSurfaceController.Instance != null)
+            {
+                return InkSurfaceController.Instance.GetTeamColor(inkTeam);
+            }
+
+            return inkTeam == Team.TeamB
+                ? new Color(0.16f, 0.42f, 1f, 1f)
+                : new Color(1f, 0.45f, 0.08f, 1f);
+        }
+
+        /// <summary>
+        /// 写入角色身体 renderer 的 MaterialPropertyBlock（P32 起白闪与敌墨覆盖共用这一块）。
+        /// 两者同时为 0 时传 null 而不是空 MPB：空块仍会让 renderer 退出 GRD / GPU instancing 合批路径。
+        /// 有值时先 GetPropertyBlock 取回既有属性 —— 蓄力狙发光线圈的 _EmissionColor 由
+        /// CharacterVisualController 写在同一个 renderer 上，直接覆盖会把它抹掉。
+        /// </summary>
+        private void WriteBodyBlock()
         {
             if (bodyRenderers == null) return;
+
+            bool flash = _hitFlashTimer > 0f;
+            bool ink = _inkCoatAmount > InkCoatZeroThreshold;
+            // 记下"已写入的量化值"，供 TickInkCoat 判断是否需要再次重写
+            _inkCoatWritten = ink
+                ? Mathf.Round(_inkCoatAmount / InkCoatWriteQuantum) * InkCoatWriteQuantum
+                : 0f;
+
             if (_propBlock == null) _propBlock = new MaterialPropertyBlock();
+
             for (int i = 0; i < bodyRenderers.Length; i++)
             {
-                var r = bodyRenderers[i];
+                Renderer r = bodyRenderers[i];
                 if (r == null) continue;
-                if (whiteFlash)
+
+                if (!flash && !ink)
                 {
-                    r.GetPropertyBlock(_propBlock);
-                    _propBlock.SetColor(BaseColorProp, Color.white);
-                    r.SetPropertyBlock(_propBlock);
+                    r.SetPropertyBlock(null);
+                    continue;
+                }
+
+                r.GetPropertyBlock(_propBlock);
+                _propBlock.SetFloat(FlashAmountProp, flash ? 1f : 0f);
+                if (ink)
+                {
+                    _propBlock.SetColor(InkColorProp, _inkCoatColor);
+                    _propBlock.SetFloat(InkAmountProp, _inkCoatAmount);
+                    _propBlock.SetFloat(InkSeedProp, _inkCoatSeed);
+                    if (_inkPartOffsets != null && i < _inkPartOffsets.Length)
+                    {
+                        _propBlock.SetVector(InkPartOffsetProp, _inkPartOffsets[i]);
+                        _propBlock.SetVector(InkPartScaleProp, _inkPartScales[i]);
+                    }
                 }
                 else
                 {
-                    // 必须传 null 而不是空 MPB：空 MPB 仍会让 renderer 退出 GRD / GPU instancing
-                    // 的合批路径。ResetImmediately 开局会给每个身体部件清一次闪白，
-                    // 传空块会把全部角色永久踢出批处理；闪白只在受击的 0.09s 内保留 MPB。
-                    r.SetPropertyBlock(null);
+                    // 从"有墨"回到"干净"的重写：显式清零（块已经存在，Shader 端 _InkAmount=0 即恒等）
+                    _propBlock.SetFloat(InkAmountProp, 0f);
                 }
+                r.SetPropertyBlock(_propBlock);
             }
         }
 
         private void ClearHitFlash()
         {
-            ApplyHitFlash(false);
+            _hitFlashTimer = 0f;
+            WriteBodyBlock();
         }
     }
 }

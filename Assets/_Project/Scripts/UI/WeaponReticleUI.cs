@@ -1771,7 +1771,14 @@ namespace P1.UI
                 player.AimTarget != null,
                 kind);
             _farWeight = Mathf.MoveTowards(_farWeight, reticleState.OutOfRange ? 1f : 0f, unscaledDt * 10f);
+            bool wasOnTarget = _targetWeight > 0.5f;
             _targetWeight = Mathf.MoveTowards(_targetWeight, reticleState.OnTarget ? 1f : 0f, unscaledDt * 10f);
+
+            // 准星咬住目标的那一刻给一声极轻的 tick（旧版只有命中才有声）。
+            // 只在 false→true 的边沿触发，AudioManager 侧还有 0.18s 节流兜底，
+            // 扫视多个目标时不会变成连续响。
+            if (!wasOnTarget && _targetWeight > 0.5f && AudioManager.Instance != null)
+                AudioManager.Instance.PlayReticleLock();
 
             // 开火弹跳（P16）：每打出一发，准星刻度短促外扩再回弹。
             // 用 ShotsFired 增量检测，不新增事件订阅；滚筒推地每帧都在结算，排除掉避免持续抖动。

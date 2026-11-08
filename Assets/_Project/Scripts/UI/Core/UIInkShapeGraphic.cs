@@ -60,6 +60,10 @@ namespace P1.UI
 
         [SerializeField] private Color borderColor = new Color(0.078f, 0.078f, 0.078f, 1f);
 
+        [Tooltip("外沿羽化宽度（px）：0 = 硬边（默认，其它 UI 不受影响）；" +
+                 "小尺寸 HUD 徽章 / 胶囊建议 1.5~2，靠一圈顶点 alpha 渐变消掉网格锯齿")]
+        [SerializeField, Range(0f, 4f)] private float edgeFeather = 0f;
+
         [Tooltip("内沿白色墨光透明度（几何风禁用，保持 0）")]
         [SerializeField, Range(0f, 1f)] private float innerRimAlpha = 0f;
 
@@ -115,6 +119,8 @@ namespace P1.UI
         private readonly Vector3[] _rimRing = new Vector3[MaxRingPoints];
         private readonly Vector3[] _glossPolygon = new Vector3[64];
         private readonly Vector3[] _shadowRing = new Vector3[MaxRingPoints];
+        private readonly Vector3[] _featherOuterRing = new Vector3[MaxRingPoints];
+        private readonly Vector3[] _featherInnerRing = new Vector3[MaxRingPoints];
 
         private float _phase1;
         private float _phase2;
@@ -187,6 +193,22 @@ namespace P1.UI
             {
                 if (squash == value) return;
                 squash = value;
+                Refresh();
+            }
+        }
+
+        /// <summary>
+        /// 外沿羽化宽度（px）：0 = 硬边。网格绘制的圆/胶囊原本没有 MSAA，小尺寸下边缘会明显锯齿；
+        /// 开启后沿轮廓外扩一圈顶点做 alpha 渐变（Shadow 同步羽化），代价是每条边多 2×count 个顶点。
+        /// </summary>
+        public float EdgeFeather
+        {
+            get => edgeFeather;
+            set
+            {
+                float clamped = Mathf.Clamp(value, 0f, 4f);
+                if (Mathf.Approximately(edgeFeather, clamped)) return;
+                edgeFeather = clamped;
                 Refresh();
             }
         }
@@ -537,6 +559,7 @@ namespace P1.UI
             }
 
             Vector2 appliedShadow = Vector2.zero;
+            float feather = Mathf.Clamp(edgeFeather, 0f, 4f);
             if (hardShadow && (Mathf.Abs(shadowOffset.x) > 0.01f || Mathf.Abs(shadowOffset.y) > 0.01f))
             {
                 // ① 硬边阴影：整块形状平移复制，实心纯色，零模糊（t-1 唯一允许的立体感来源）。
@@ -551,6 +574,24 @@ namespace P1.UI
                 solidShadow.a = 1f;
                 BuildRing(_shadowRing, count, shadowRect, 0f, perCorner, effectiveRadius);
                 AddPolygonFan(vh, shadowRect.center, _shadowRing, count, solidShadow);
+
+                // 阴影外沿同样羽化，否则硬边阴影会比本体更“毛”
+                if (feather > 0.01f)
+                {
+                    BuildRing(_featherOuterRing, count, shadowRect, -feather * 0.5f, perCorner, effectiveRadius);
+                    BuildRing(_featherInnerRing, count, shadowRect, feather * 0.5f, perCorner, effectiveRadius);
+                    AddRingStripFade(vh, _featherOuterRing, _featherInnerRing, count, solidShadow);
+                }
+            }
+
+            // ①½ 本体外沿羽化：形状轮廓外扩半像素做 alpha 渐隐，抵消 UI 网格没有 MSAA 的锯齿。
+            //     只对显式开启 EdgeFeather 的元素生效（默认 0，其他界面零变化）。
+            if (feather > 0.01f)
+            {
+                Color edgeTint = border > 0.001f ? borderColor : color;
+                BuildRing(_featherOuterRing, count, rect, -feather * 0.5f, perCorner, effectiveRadius);
+                BuildRing(_featherInnerRing, count, rect, feather * 0.5f, perCorner, effectiveRadius);
+                AddRingStripFade(vh, _featherOuterRing, _featherInnerRing, count, edgeTint);
             }
 
             bool drawTail = speechTail || isBubble;
@@ -692,6 +733,34 @@ namespace P1.UI
             for (int i = 0; i < count; i++)
             {
                 vh.AddVert(outer[i], tint, Vector2.zero);
+                vh.AddVert(inner[i], tint, Vector2.zero);
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                int next = (i + 1) % count;
+                int outerA = baseIndex + i * 2;
+                int innerA = outerA + 1;
+                int outerB = baseIndex + next * 2;
+                int innerB = outerB + 1;
+
+                vh.AddTriangle(outerA, innerA, innerB);
+                vh.AddTriangle(outerA, innerB, outerB);
+            }
+        }
+
+        /// <summary>
+        /// 外沿羽化带：外圈 alpha 0、内圈保持原色，用 1px 顶点渐变模拟轮廓抗锯齿。
+        /// 画在本体之前，内半圈会被填充/边框盖住，只留下外侧的柔边。
+        /// </summary>
+        private static void AddRingStripFade(VertexHelper vh, Vector3[] outer, Vector3[] inner, int count,
+            Color tint)
+        {
+            Color transparent = new Color(tint.r, tint.g, tint.b, 0f);
+            int baseIndex = vh.currentVertCount;
+            for (int i = 0; i < count; i++)
+            {
+                vh.AddVert(outer[i], transparent, Vector2.zero);
                 vh.AddVert(inner[i], tint, Vector2.zero);
             }
 

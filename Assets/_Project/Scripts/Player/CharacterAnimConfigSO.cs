@@ -305,6 +305,30 @@ namespace P1.Player
         [Tooltip("落地段：蹲姿回到常态的时长（秒）")]
         public float slamImpactRecoverSeconds = 0.26f;
 
+        [Header("大招 Storm 投掷表演 (Ink Tempest Throw，对齐 Inkwave _poseThrow)")]
+        [Tooltip("引臂段：躯干后仰角（度，负 = 后仰蓄势）")]
+        public float stormCockSpineDeg = -14f;
+        [Tooltip("引臂段：躯干侧倾角（度，向持枪侧压）")]
+        public float stormCockRollDeg = 10f;
+        [Tooltip("引臂段：武器抬起角（度，负 = 抬过肩）")]
+        public float stormCockWeaponPitchDeg = -38f;
+        [Tooltip("引臂段：武器抬起位移（米）")]
+        public float stormCockWeaponLiftMeters = 0.10f;
+        [Tooltip("鞭甩段：躯干前压角（度）")]
+        public float stormWhipSpineDeg = 18f;
+        [Tooltip("鞭甩段：躯干反向侧倾角（度）")]
+        public float stormWhipRollDeg = -12f;
+        [Tooltip("鞭甩段：武器前甩角（度，正 = 甩向身前地面）")]
+        public float stormWhipWeaponPitchDeg = 30f;
+        [Tooltip("鞭甩段：挥臂摆幅加成倍率（叠在步态摆臂上）")]
+        public float stormWhipArmSwingBoost = 2.2f;
+        [Tooltip("随挥段：躯干前倾角（度）")]
+        public float stormFollowSpineDeg = 8f;
+        [Tooltip("随挥段：武器收势角（度）")]
+        public float stormFollowWeaponPitchDeg = 16f;
+        [Tooltip("随挥段：武器下沉位移（米）")]
+        public float stormFollowWeaponLiftMeters = -0.06f;
+
         [Header("惯性倾斜 (Lean Springs，参考 Inkwave character.js L1642-1657)")]
         [Tooltip("加速度量程钳制（m/s²）：起步/刹车帧差分远超此值，钳制后弹簧才有平滑余量")]
         public float leanAccelClamp = 24f;

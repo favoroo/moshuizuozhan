@@ -13,9 +13,9 @@ Unity 第三人称 3D「涂地对战」游戏（玩法参考 Splatoon 涂地模�
 - **平台**：桌面（macOS / Windows）+ Android（横屏 / minSdk 26 / ARM64），双端均已出包
 - **美术**：程序化几何体 + 程序化 UI + 本地合成音频，不依赖第三方美术资源；三渲二 + 卡通描边
 - **核心循环**：战前选枪 → 涂地 / 交火（在己方墨里潜行回墨回血，踩敌墨掉血）→ 按涂地面积攒大招 → 覆盖率结算
-- **已落地**：7 类主武器（Shooter / Roller / Charger / Dualies / Slosher / Blaster / Splatling）+ 2 大招（Slam / Storm）+ 副武器、4v4 Bot、40×56m 集装箱码头竞技场、几何大胆风 HUD、移动端触屏与布局自定义、暂停 / 设置、游戏内检查更新
+- **已落地**：7 类主武器（Shooter / Roller / Charger / Dualies / Slosher / Blaster / Splatling）+ 2 大招（Slam / Storm）+ 副武器、4v4 Bot、3 张 40×56m 地图（货柜码头 / 海鸥港湾 / 霓虹滑板场）、几何大胆风 HUD、移动端触屏与布局自定义、暂停 / 设置、游戏内检查更新
 - **版本**：唯一来源 [GameVersion.cs](Assets/_Project/Scripts/Core/GameVersion.cs) 的 `APP_VERSION`（须与 `PlayerSettings.bundleVersion` 一致）；发版走技能 `p1-release`
-- **主场景**：[PhaseA_Playbox.unity](Assets/_Project/Scenes/PhaseA_Playbox.unity)（**禁止手改 `.unity`**，用 Editor 菜单重建）
+- **玩法场景**：[PhaseA_Playbox.unity](Assets/_Project/Scenes/PhaseA_Playbox.unity)（货柜码头，默认图 / Build Index 0）、[GullHarbor.unity](Assets/_Project/Scenes/GullHarbor.unity)（海鸥港湾）、[NeonSkatepark.unity](Assets/_Project/Scenes/NeonSkatepark.unity)（霓虹滑板场），首页地图卡选择；**禁止手改 `.unity`**，用 Editor 菜单重建
 
 ## 快速定位
 
@@ -45,7 +45,7 @@ Unity 第三人称 3D「涂地对战」游戏（玩法参考 Splatoon 涂地模�
 | 游戏内检查更新 / 版本 | `UI/UpdateManager`、`UI/UpdateDialog`、`Core/GameVersion` | Android 更新安装清单校验走菜单 `P1/构建/12` |
 | 音效 / 循环音 | `Core/AudioManager`、`Weapons/WeaponAudioDriver`、`Player/MovementAudioDriver` | 新增音效后必须重建运行时资源库 |
 | 图标 / 音效 / 主题打包 | `Resources/P1RuntimeAssets.asset` + 菜单 `P1/构建/11` | 生成资产，不手改 `.asset` |
-| 地图 / 掩体 / 遮挡 / 场地坐标 | `Environment/ArenaLayoutV2`（40×56 单一数据源）、`ArenaGeometryBuilder`（菜单 `P1/关卡与地图/…`） | 改布局坐标只改 `ArenaLayoutV2`；重建会重写场景，先确认无人在 Play |
+| 地图 / 掩体 / 遮挡 / 场地坐标 | `Environment/ArenaLayoutV2`（40×56 共享常量源）+ `ArenaLayoutHarbor` / `ArenaLayoutSkatepark`（各图布局）；几何入口 `ArenaGeometryBuilder` / `HarborGeometryBuilder` / `SkateparkGeometryBuilder`（菜单 `P1/关卡与地图/…`） | 共享坐标改 `ArenaLayoutV2`，单图布局改各自 Layout 文件；重建会重写场景，先确认无人在 Play |
 | 场景装配 | `Editor/ProjectScaffolder`（菜单 `P1/构建/…`） | **禁止手改 `.unity`** |
 | 性能采样 / 渲染统计 | `Editor/BuildAndProfilerSuite`、`Core/PerformanceProfilerProbe` | 菜单 `P1/性能/…`；红线取证必须走 Player 包 |
 | 图标 / 字体 / 音效 / BGM | `MediaRaw/` 原稿 + `tools/bake_*.py`，落地 `Art / Audio` | 落地后必须 Refresh + 体检 |
@@ -64,7 +64,8 @@ Assets/_Project/
     Weapons/     7 武器策略（Strategy）+ 弹道与手感配置（InkBallistics、WeaponFeelProfile）+ 弹丸/光束/滚筒/炸弹/风暴云对象池；
                  WeaponController 为对外门面
     AI/          Bot 状态机 BotController、NavGrid 寻路、类人瞄准弹簧 HumanAimSpring、战术决策 BotTactics
-    Environment/ 竞技场几何生成 ArenaGeometryBuilder、布局单一数据源 ArenaLayoutV2（40×56）、场地风格 ArenaStyleSO、
+    Environment/ 竞技场几何生成 ArenaGeometryBuilder / HarborGeometryBuilder / SkateparkGeometryBuilder（按图分发）、
+                 共享布局常量 ArenaLayoutV2（40×56）+ ArenaLayoutHarbor / ArenaLayoutSkatepark（各图布局）、场地风格 ArenaStyleSO、
                  第三人称遮挡 Dither 淡出（OcclusionFader / TopDownOcclusionManager）
     UI/          HUD 视图：计时器、比分、墨水/大招条、小地图、击杀卡、战况条、墨渍特效（镜片 LensInk / 转场 ScreenInkTransition /
                  踩墨警告 InkEdgeWarning）、移动端触屏与布局自定义、检查更新弹窗
@@ -77,7 +78,7 @@ Assets/_Project/
   Materials/  Prefabs/(基本空置，角色/UI 均运行时装配)
   Resources/(特效 Shader 兜底 + P1RuntimeAssets + ContactShadow)
   ScriptableObjects/(调参入口，含 Weapons/、ArenaStyle、CharacterAnimConfig)
-  Scenes/(PhaseA_Playbox 主场景, UIDemo, ComicGallery)  Settings/(URP)
+  Scenes/(PhaseA_Playbox 货柜码头, GullHarbor 海鸥港湾, NeonSkatepark 霓虹滑板场, UIDemo, ComicGallery)  Settings/(URP)
   Art/(Fonts, Sprites/Icons, Textures/Arena|Ink|Surfaces, Meshes/Arena)  Audio/(Music, SFX, Voice)
   Tests/(EditMode, PlayMode)
 Docs/            规范、评审与验收存档（唯一必读：UI-GeometricBold.md）

@@ -579,8 +579,16 @@ namespace P1.Editor
             Color[] colorsFront = { pal.ContainerTeal, pal.ContainerRust, pal.ContainerMustard, pal.ContainerSlate };
             Vector3 cSz = new Vector3(2.44f, 2.59f, 6.06f);
 
-            void AddContainerBox(Vector3 pos, Color col, Quaternion rot)
+            void AddContainerBox(Vector3 pos, Color col, Quaternion rot, bool corrugated)
             {
+                if (corrugated)
+                {
+                    // 近排箱体补竖向瓦楞 + 角件：远景里最抢眼的就是这一圈，
+                    // 纯色块在斜俯视角下会读成"贴了张彩纸的平板"。
+                    AddCorrugatedBackdropContainer(matteComb, metalComb, pos, cSz, col, rot, pal);
+                    return;
+                }
+
                 matteComb.AddBox(pos, cSz, col, rot);
                 // 4 个角柱/角件加深金属描边感
                 float hx = cSz.x * 0.5f;
@@ -594,7 +602,7 @@ namespace P1.Editor
                 metalComb.AddBox(pos + rot * new Vector3(hx, 0f, hz), postSz, postCol, rot);
             }
 
-            void AddStack(Vector3 basePos, float yaw, int tiers, int colOffset, bool isBackRow)
+            void AddStack(Vector3 basePos, float yaw, int tiers, int colOffset, bool isBackRow, bool corrugated)
             {
                 Quaternion rot = Quaternion.Euler(0f, yaw, 0f);
                 for (int t = 0; t < tiers; t++)
@@ -603,7 +611,8 @@ namespace P1.Editor
                     Vector3 worldPos = basePos + rot * localOffset;
                     Color baseCol = colorsFront[(t + colOffset) % colorsFront.Length];
                     Color finalCol = isBackRow ? Color.Lerp(baseCol, pal.SteelDark, 0.35f) : baseCol;
-                    AddContainerBox(worldPos, finalCol, rot);
+                    // 只有最下层做瓦楞：上层箱体被前层遮住大半，做全瓦楞等于白烧顶点。
+                    AddContainerBox(worldPos, finalCol, rot, corrugated && t == 0);
                 }
             }
 
@@ -613,21 +622,21 @@ namespace P1.Editor
             for (int i = 0; i < westZ1.Length; i++)
             {
                 int tiers = (i % 2) + 1;
-                AddStack(new Vector3(-25.5f, 0f, westZ1[i]), (i % 2 == 0 ? 0.5f : -0.5f), tiers, i, false);
+                AddStack(new Vector3(-25.5f, 0f, westZ1[i]), (i % 2 == 0 ? 0.5f : -0.5f), tiers, i, false, true);
             }
             // 第二排 (中排，|x|=30.8m，2-3层)
             float[] westZ2 = { -23f, -16f, -9f, -2f, 5f, 12f, 19f };
             for (int i = 0; i < westZ2.Length; i++)
             {
                 int tiers = (i % 2 == 0) ? 3 : 2;
-                AddStack(new Vector3(-30.8f, 0f, westZ2[i]), (i % 3 - 1) * 1.2f, tiers, i + 1, false);
+                AddStack(new Vector3(-30.8f, 0f, westZ2[i]), (i % 3 - 1) * 1.2f, tiers, i + 1, false, false);
             }
             // 第三排 (后排，|x|=36.0m，压暗派生色，强化进深)
             float[] westZ3 = { -25f, -18f, -11f, -4f, 3f, 10f, 17f, 24f };
             for (int i = 0; i < westZ3.Length; i++)
             {
                 int tiers = (i % 3 == 1) ? 3 : 2;
-                AddStack(new Vector3(-36.0f, 0f, westZ3[i]), 0f, tiers, i + 2, true);
+                AddStack(new Vector3(-36.0f, 0f, westZ3[i]), 0f, tiers, i + 2, true, false);
             }
 
             // ---- 东侧外场三排进深堆场 ----
@@ -636,28 +645,28 @@ namespace P1.Editor
             for (int i = 0; i < eastZ1.Length; i++)
             {
                 int tiers = ((i + 1) % 2) + 1;
-                AddStack(new Vector3(25.5f, 0f, eastZ1[i]), (i % 2 == 0 ? -0.5f : 0.5f), tiers, i + 2, false);
+                AddStack(new Vector3(25.5f, 0f, eastZ1[i]), (i % 2 == 0 ? -0.5f : 0.5f), tiers, i + 2, false, true);
             }
             // 第二排 (中排，|x|=30.8m)
             float[] eastZ2 = { -23f, -16f, -9f, -2f, 5f, 12f, 19f };
             for (int i = 0; i < eastZ2.Length; i++)
             {
                 int tiers = (i % 2 == 1) ? 3 : 2;
-                AddStack(new Vector3(30.8f, 0f, eastZ2[i]), (1 - i % 3) * 1.2f, tiers, i + 3, false);
+                AddStack(new Vector3(30.8f, 0f, eastZ2[i]), (1 - i % 3) * 1.2f, tiers, i + 3, false, false);
             }
             // 第三排 (后排，|x|=36.0m，压暗派生色)
             float[] eastZ3 = { -25f, -18f, -11f, -4f, 3f, 10f, 17f, 24f };
             for (int i = 0; i < eastZ3.Length; i++)
             {
                 int tiers = (i % 3 == 0) ? 3 : 2;
-                AddStack(new Vector3(36.0f, 0f, eastZ3[i]), 0f, tiers, i, true);
+                AddStack(new Vector3(36.0f, 0f, eastZ3[i]), 0f, tiers, i, true, false);
             }
 
             // ---- 北侧延展区 (北墙外前景堆叠，填补北向地平线) ----
-            AddStack(new Vector3(-13.5f, 0f, 33.5f), 90f, 2, 0, false);
-            AddStack(new Vector3(-7.5f,  0f, 34.0f), 88f, 3, 2, false);
-            AddStack(new Vector3(7.5f,   0f, 34.0f), -88f, 3, 1, false);
-            AddStack(new Vector3(13.5f,  0f, 33.5f), -90f, 2, 3, false);
+            AddStack(new Vector3(-13.5f, 0f, 33.5f), 90f, 2, 0, false, true);
+            AddStack(new Vector3(-7.5f,  0f, 34.0f), 88f, 3, 2, false, true);
+            AddStack(new Vector3(7.5f,   0f, 34.0f), -88f, 3, 1, false, true);
+            AddStack(new Vector3(13.5f,  0f, 33.5f), -90f, 2, 3, false, true);
 
             // 堆场过道木质栈板/杂物箱散落 (增加生活气息)
             Vector3[] palletLocs =
@@ -671,6 +680,86 @@ namespace P1.Editor
             {
                 matteComb.AddBox(palletLocs[p] + new Vector3(0f, 0.12f, 0f), new Vector3(1.6f, 0.24f, 1.4f), pal.Wood);
                 matteComb.AddBox(palletLocs[p] + new Vector3(0.1f, 0.55f, 0.1f), new Vector3(1.1f, 0.60f, 1.0f), pal.WoodDark);
+            }
+
+            // 堆场里的油桶与锥桶（远景"有人干活"的痕迹，纯色小件足够，不抢近景）
+            Vector3[] yardBarrels =
+            {
+                new Vector3(-27.4f, -0.15f, -14.2f), new Vector3(-27.4f, -0.15f, 12.4f),
+                new Vector3(27.4f, -0.15f, -4.6f),   new Vector3(27.4f, -0.15f, 16.8f),
+                new Vector3(-24.0f, -0.15f, 19.6f),  new Vector3(24.0f, -0.15f, -20.4f),
+            };
+            for (int i = 0; i < yardBarrels.Length; i++)
+            {
+                Color c = (i % 2 == 0) ? pal.ContainerRust : pal.ContainerTeal;
+                matteComb.AddCylinder(yardBarrels[i], 0.29f, 0.88f, 8, c);
+                metalComb.AddCylinder(yardBarrels[i] + new Vector3(0f, 0.22f, 0f), 0.30f, 0.05f, 8,
+                    Color.Lerp(c, pal.SteelDark, 0.5f));
+            }
+        }
+
+        /// <summary>
+        /// 远景近排集装箱：主体 + 两侧长面/两端短面竖向瓦楞 + 8 个角件 + 顶底边梁。
+        /// 肋距比场内粗（0.62m），远景看不出差别，但顶点数只有场内箱体的一小部分。
+        /// </summary>
+        private static void AddCorrugatedBackdropContainer(
+            MeshCombiner matteComb, MeshCombiner metalComb,
+            Vector3 pos, Vector3 size, Color color, Quaternion rot, BackdropPalette pal)
+        {
+            float hx = size.x * 0.5f;
+            float hy = size.y * 0.5f;
+            float hz = size.z * 0.5f;
+
+            // 主体略微内收，让瓦楞棱脊正好落在标称面上（与场内瓦楞壳同一手法）
+            const float valley = 0.055f;
+            matteComb.AddBox(pos, new Vector3(size.x - valley * 2f, size.y, size.z - valley * 2f), color, rot);
+
+            Color ribColor = Color.Lerp(color, pal.SteelDark, 0.18f);
+            const float pitch = 0.62f;
+
+            // 两侧长面（法线 ±X）竖向瓦楞
+            int ribs = Mathf.Max(2, Mathf.RoundToInt(size.z / pitch));
+            for (int side = -1; side <= 1; side += 2)
+            {
+                for (int i = 0; i < ribs; i++)
+                {
+                    float z = -hz + (i + 0.5f) * (size.z / ribs);
+                    Vector3 p = pos + rot * new Vector3(side * (hx - valley * 0.5f), 0f, z);
+                    matteComb.AddBox(p, new Vector3(valley, size.y - 0.30f, size.z / ribs * 0.55f), ribColor, rot);
+                }
+            }
+
+            // 两端短面（法线 ±Z）竖向瓦楞
+            int ribsEnd = Mathf.Max(2, Mathf.RoundToInt(size.x / pitch));
+            for (int side = -1; side <= 1; side += 2)
+            {
+                for (int i = 0; i < ribsEnd; i++)
+                {
+                    float x = -hx + (i + 0.5f) * (size.x / ribsEnd);
+                    Vector3 p = pos + rot * new Vector3(x, 0f, side * (hz - valley * 0.5f));
+                    matteComb.AddBox(p, new Vector3(size.x / ribsEnd * 0.55f, size.y - 0.30f, valley), ribColor, rot);
+                }
+            }
+
+            // 8 个角件（海运箱最识别的特征）
+            Color cornerCol = Color.Lerp(color, pal.SteelDark, 0.55f);
+            for (int sx = -1; sx <= 1; sx += 2)
+            {
+                for (int sy = -1; sy <= 1; sy += 2)
+                {
+                    for (int sz = -1; sz <= 1; sz += 2)
+                    {
+                        Vector3 p = pos + rot * new Vector3(sx * (hx - 0.06f), sy * (hy - 0.05f), sz * (hz - 0.06f));
+                        metalComb.AddBox(p, new Vector3(0.20f, 0.16f, 0.20f), cornerCol, rot);
+                    }
+                }
+            }
+
+            // 顶底边梁
+            for (int sy = -1; sy <= 1; sy += 2)
+            {
+                metalComb.AddBox(pos + rot * new Vector3(0f, sy * (hy - 0.03f), 0f),
+                    new Vector3(size.x + 0.02f, 0.07f, size.z + 0.02f), cornerCol, rot);
             }
         }
 
@@ -1155,7 +1244,7 @@ namespace P1.Editor
             Color woodDeck = pal.Wood;
 
             // ---- 1. 竞技场脚下的码头大平台（场界外扩 4m，水面从边缘开始）----
-            //     台面不能刷成纯白：在俯视角下会把整圈读成"雪地"，用暖灰压一档。
+            //     台面不能刷成纯白：在斜俯视角下会把整圈读成"雪地"，用暖灰压一档。
             matteComb.AddBox(new Vector3(0f, -0.62f, 0f), new Vector3(48f, 1.2f, 64f), pal.ConcreteMid);
             // 顶板只铺竞技场外的 3.8m 环带：整块 47.6×63.6 顶板与竞技场地面（40×56，顶面 y=0）
             // 完全共面重叠，会在场内整片 z-fighting —— 相机一移动就出现横向白色条带闪烁。
@@ -1291,7 +1380,7 @@ namespace P1.Editor
 
         /// <summary>
         /// 对岸港湾小镇：四段远岸 + 彩色低层建筑（奶油白/薄荷/珊瑚/黄油/港青）+ 屋顶 + 远景山丘。
-        /// 替换集装箱主题的灰色城市剪影，让港湾图在俯视角下也有明确的"海滨小镇"读形。
+        /// 替换集装箱主题的灰色城市剪影，让港湾图在第三人称远眺与俯瞰预览下都有明确的"海滨小镇"读形。
         /// </summary>
         private static void BuildMarinaTown(MeshCombiner matteComb, MeshCombiner metalComb, BackdropPalette pal)
         {

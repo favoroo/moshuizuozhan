@@ -79,6 +79,30 @@ namespace P1.Player
         private AnimSpring1D _slamPushSpring = new AnimSpring1D(0f);
         private AnimSpring1D _slamFovSpring = new AnimSpring1D(0f);
 
+        // ---------------------------------------------------------------- 阵亡观战镜头（对标 INKWAVE death cam）
+        // 旧行为：本地玩家阵亡后身体立即隐藏，但相机仍以「已不可见的尸体」为跟随目标，
+        // 整段复活倒计时就定格在空地上。新行为：先停在阵亡点看击杀爆墨，再转向并环绕击杀者，
+        // 复活那一帧硬切回正常跟随（68m 对角线地图上做长距离混合会扫穿掩体，不做 INKWAVE 的 0.7s 回镜）。
+        private bool _deathCamActive;
+        private float _deathCamTime;
+        private Transform _deathCamKiller;
+        private CombatantHealth _deathCamKillerHealth;
+        private bool _deathCamKillerLocked;
+        private Vector3 _deathCamVictimPosition;
+        private Vector3 _deathCamLastKillerPosition;
+        private Vector3 _deathCamFocus;
+        private Vector3 _deathCamFallbackDirection;
+
+        // 跟随目标的生命值订阅（懒绑定：测试里的纯 Transform 目标没有 CombatantHealth 也安全）
+        private Transform _boundTarget;
+        private CombatantHealth _boundTargetHealth;
+
+        /// <summary>观战机位球探针半径（米）。</summary>
+        private const float DeathCamCollisionRadius = 0.3f;
+
+        /// <summary>观战机位被墙挡住时允许收进的最近距离（米）。</summary>
+        private const float DeathCamMinDistance = 1.4f;
+
         private readonly RaycastHit[] _castHits = new RaycastHit[8];
 
         public Camera CameraComponent => _cam;
@@ -134,6 +158,9 @@ namespace P1.Player
 
         private void OnDestroy()
         {
+            UnbindTargetHealth();
+            UnbindDeathCamKiller();
+
             if (Instance == this)
                 Instance = null;
         }
@@ -263,6 +290,179 @@ namespace P1.Player
 
         /// <summary>相机当前跟随的角色：大招演出只对「被跟随的本地玩家」生效。</summary>
         public Transform FollowTarget => target;
+
+        /// <summary>阵亡观战镜头是否激活（复活/重开那一帧自动退出）。</summary>
+        public bool IsDeathCamActive => _deathCamActive;
+
+        /// <summary>当前观战的击杀者（环境死亡或观战结束时为 null）。</summary>
+        public Transform DeathCamKiller => _deathCamKiller;
+
+        /// <summary>
+        /// 进入阵亡观战：前 0.8s 停在 <paramref name="victimPosition"/> 看击杀爆墨，
+        /// 之后转向并在击杀者周围缓慢环绕（半径 4.2m → 5.5m）。
+        /// 由跟随目标自己的 <see cref="CombatantHealth.OnKilled"/> 触发；也可被调试/测试直接调用。
+        /// </summary>
+        public void BeginDeathCam(Transform killer, Vector3 victimPosition)
+        {
+            if (killer == null)
+                return;
+
+            UnbindDeathCamKiller();
+
+            _deathCamActive = true;
+            _deathCamTime = 0f;
+            _deathCamKiller = killer;
+            _deathCamKillerHealth = killer.GetComponent<CombatantHealth>();
+            _deathCamKillerLocked = false;
+            _deathCamVictimPosition = victimPosition;
+            _deathCamLastKillerPosition = killer.position;
+            _deathCamFocus = victimPosition + Vector3.up * DeathCamMath.LookHeight;
+
+            // 方向退化时保持死亡瞬间的机位方位（否则会凭空甩到世界 +Z）
+            Vector3 fallback = transform.position - victimPosition;
+            fallback.y = 0f;
+            _deathCamFallbackDirection = fallback;
+
+            if (_deathCamKillerHealth != null)
+            {
+                _deathCamKillerHealth.OnKilled += HandleDeathCamKillerKilled;
+            }
+
+            // 接管镜头：蓄力/开火后拉/大招演出/震屏残留全部清零，避免观战第一帧还在抖
+            _shotKickHeat = 0f;
+            _shotDistanceSpring.Reset();
+            _shotRollSpring.Reset();
+            _shotFovSpring.Reset();
+            _slamWeight = 0f;
+            _slamWeightFrom = 0f;
+            _slamWeightTo = 0f;
+            _slamWeightElapsed = 0f;
+            _slamWeightDuration = 0f;
+            _slamStage = 0;
+            _slamPushSpring.Reset();
+            _slamFovSpring.Reset();
+            _trauma = 0f;
+            _shakeRoll = 0f;
+        }
+
+        /// <summary>退出阵亡观战并硬切回正常跟随（复活瞬移回出生点，跨图长距离混合会扫穿掩体）。</summary>
+        public void EndDeathCam()
+        {
+            if (!_deathCamActive)
+                return;
+
+            _deathCamActive = false;
+            _deathCamKiller = null;
+            _deathCamKillerLocked = false;
+            UnbindDeathCamKiller();
+            SnapImmediately();
+        }
+
+        private void UnbindDeathCamKiller()
+        {
+            if (_deathCamKillerHealth != null)
+            {
+                _deathCamKillerHealth.OnKilled -= HandleDeathCamKillerKilled;
+            }
+            _deathCamKillerHealth = null;
+        }
+
+        private void HandleDeathCamKillerKilled(CombatantHealth victim, Team killerTeam)
+        {
+            // 凶手中途阵亡：冻结最后已知位置，不把镜头拉回自己的尸体，也不跟去它的复活点
+            if (victim != null && victim == _deathCamKillerHealth)
+            {
+                _deathCamKillerLocked = true;
+            }
+        }
+
+        /// <summary>
+        /// 推进阵亡观战镜头。位置与朝向都绕开正常跟随的 yaw/pitch/吊臂，
+        /// 复活时 <see cref="EndDeathCam"/> 用 SnapImmediately 重置全部状态。
+        /// </summary>
+        private void StepDeathCam(float dt)
+        {
+            // 暂停 / 终场定格（timeScale=0）：观战镜头也跟着停，不能跳到目标机位
+            if (dt <= 0.0001f)
+                return;
+
+            _deathCamTime += dt;
+
+            // 凶手活着时才更新目标点；中途阵亡/被销毁就停在最后位置
+            if (_deathCamKiller != null && !_deathCamKillerLocked &&
+                (_deathCamKillerHealth == null || _deathCamKillerHealth.IsAlive))
+            {
+                _deathCamLastKillerPosition = _deathCamKiller.position;
+            }
+
+            // BeginDeathCam 保证有击杀者；凶手对象被销毁后仍保留最后已知位置（hasKiller 恒 true）
+            Vector3 desiredFocus = DeathCamMath.ResolveFocusPoint(
+                _deathCamTime, _deathCamVictimPosition, _deathCamLastKillerPosition, true);
+            float lookRate = DeathCamMath.ResolveLookSmoothRate(_deathCamTime);
+            _deathCamFocus = Vector3.Lerp(
+                _deathCamFocus, desiredFocus, DeathCamMath.ExpSmoothFactor(lookRate, dt));
+
+            Vector3 desiredPosition = DeathCamMath.ResolveCameraPosition(
+                _deathCamTime, _deathCamVictimPosition, _deathCamFocus, _deathCamFallbackDirection);
+            desiredPosition = ResolveDeathCamOcclusion(_deathCamFocus, desiredPosition);
+            desiredPosition = ApplyGroundClearance(desiredPosition);
+
+            transform.position = Vector3.Lerp(
+                transform.position, desiredPosition,
+                DeathCamMath.ExpSmoothFactor(DeathCamMath.PositionSmoothRate, dt));
+
+            Vector3 lookDirection = _deathCamFocus - transform.position;
+            if (lookDirection.sqrMagnitude > 0.0001f)
+            {
+                transform.rotation = Quaternion.LookRotation(lookDirection, Vector3.up);
+            }
+
+            if (_cam != null)
+            {
+                float targetFov = DeathCamMath.ResolveFieldOfView(GetBaseFov());
+                _smoothedFov = Mathf.MoveTowards(_smoothedFov, targetFov, 30f * dt);
+                _cam.fieldOfView = _smoothedFov;
+            }
+        }
+
+        /// <summary>
+        /// 观战机位防穿墙：从视线焦点向机位做球探针，被墙挡住就把机位收到命中点前；
+        /// 低于焦点的水平面（甲板/地面）交给 <see cref="ApplyGroundClearance"/>，
+        /// 否则高机位俯视时会被脚下甲板把镜头吸到击杀者脸上。
+        /// </summary>
+        private Vector3 ResolveDeathCamOcclusion(Vector3 focus, Vector3 desired)
+        {
+            Vector3 offset = desired - focus;
+            float distance = offset.magnitude;
+            if (distance < 0.05f)
+                return desired;
+
+            Vector3 direction = offset / distance;
+            int count = Physics.SphereCastNonAlloc(
+                focus, DeathCamCollisionRadius, direction, _castHits, distance,
+                GameLayers.WorldMask, QueryTriggerInteraction.Ignore);
+
+            float allowed = distance;
+            for (int i = 0; i < count; i++)
+            {
+                RaycastHit hit = _castHits[i];
+                Collider col = hit.collider;
+                if (col == null)
+                    continue;
+                if (col.GetComponentInParent<CombatantHealth>() != null)
+                    continue;
+                if (hit.normal.y > 0.7f && hit.point.y < focus.y - 0.8f)
+                    continue;
+
+                float clamped = Mathf.Max(0f, hit.distance - 0.05f);
+                if (clamped < allowed)
+                    allowed = clamped;
+            }
+
+            allowed = Mathf.Max(DeathCamMinDistance, allowed);
+            return focus + direction * allowed;
+        }
+
 
         /// <summary>
         /// Tidal Slam 起跳：缓出到广角机位（枢轴抬高 + 吊臂外拉 + FOV 加宽），
@@ -480,6 +680,13 @@ namespace P1.Player
 
             float dt = Mathf.Max(0f, Time.deltaTime);
 
+            // 阵亡观战：完全接管机位/朝向/FOV，跳过正常跟随（复活那一帧 EndDeathCam 里 SnapImmediately）
+            if (_deathCamActive)
+            {
+                StepDeathCam(dt);
+                return;
+            }
+
             // 开火冲击始终按真实时间回弹：Hitstop 定格期间也要把镜头拉回来，否则会「卡住」
             StepShotKick(Time.unscaledDeltaTime);
             // Slam 演出同理：落地微定格期间镜头推近/震屏要继续播完
@@ -678,6 +885,8 @@ namespace P1.Player
 
         private void ResolveActorRefs()
         {
+            BindTargetHealth();
+
             if (target == null)
             {
                 _motor = null;
@@ -690,6 +899,68 @@ namespace P1.Player
             if (_weapon == null)
                 _weapon = target.GetComponent<WeaponController>();
         }
+
+        /// <summary>
+        /// 订阅跟随目标（本地玩家）的阵亡/复活事件。只在 target 变化时重新绑定：
+        /// 同一具身体的 OnKilled/OnRespawned 已经能覆盖整局，逐帧 GetComponent 没有必要。
+        /// </summary>
+        private void BindTargetHealth()
+        {
+            if (_boundTarget == target)
+                return;
+
+            // 换了一具身体（换地图 / 重开）：观战状态直接作废。
+            // 这里不能走 EndDeathCam（它会 SnapImmediately → ResolveActorRefs → 再次进来），直接清标志位。
+            if (_deathCamActive)
+            {
+                _deathCamActive = false;
+                _deathCamKiller = null;
+                _deathCamKillerLocked = false;
+                UnbindDeathCamKiller();
+            }
+
+            UnbindTargetHealth();
+            _boundTarget = target;
+            _boundTargetHealth = target != null ? target.GetComponent<CombatantHealth>() : null;
+            if (_boundTargetHealth != null)
+            {
+                _boundTargetHealth.OnKilled += HandleFollowTargetKilled;
+                _boundTargetHealth.OnRespawned += HandleFollowTargetRespawned;
+            }
+        }
+
+        private void UnbindTargetHealth()
+        {
+            if (_boundTargetHealth != null)
+            {
+                _boundTargetHealth.OnKilled -= HandleFollowTargetKilled;
+                _boundTargetHealth.OnRespawned -= HandleFollowTargetRespawned;
+            }
+            _boundTargetHealth = null;
+            _boundTarget = null;
+        }
+
+        private void HandleFollowTargetKilled(CombatantHealth victim, Team killerTeam)
+        {
+            if (victim == null || victim != _boundTargetHealth)
+                return;
+
+            // 只有「有存活凶手」的死亡才进观战：踩敌墨 / 越界等环境死亡没有可看的人，保持原机位
+            CombatantHealth killer = victim.LastAttacker;
+            if (killer == null || killer == victim || !killer.IsAlive)
+                return;
+
+            BeginDeathCam(killer.transform, victim.transform.position);
+        }
+
+        private void HandleFollowTargetRespawned(CombatantHealth victim)
+        {
+            if (victim != null && victim == _boundTargetHealth)
+            {
+                EndDeathCam();
+            }
+        }
+
 
         private float GetPivotHeight()
         {

@@ -38,6 +38,8 @@ namespace P1.Core
         private static readonly int InkCoatRoughnessId = Shader.PropertyToID("_P1InkCoatRoughness");
         private static readonly int InkEdgeRimStrengthId = Shader.PropertyToID("_P1InkEdgeRimStrength");
         private static readonly int InkEdgeSmoothStrengthId = Shader.PropertyToID("_P1InkEdgeSmoothStrength");
+        private static readonly int InkBicubicStrengthId = Shader.PropertyToID("_P1InkBicubicStrength");
+        private static readonly int InkShadowChromaId = Shader.PropertyToID("_P1InkShadowChroma");
         private static readonly int InkTopDetailStrengthId = Shader.PropertyToID("_P1InkTopDetailStrength");
         private static readonly int WallDripSpeedId = Shader.PropertyToID("_P1WallDripSpeed");
         private static readonly int WaterReflectionStrengthId = Shader.PropertyToID("_P1WaterReflectionStrength");
@@ -167,6 +169,8 @@ namespace P1.Core
             float coatRough = _style != null ? _style.inkCoatRoughness : 0.06f;
             float edgeRim = _style != null ? _style.inkEdgeRimStrength : 0.8f;
             float edgeSmooth = _style != null ? _style.inkEdgeSmoothStrength : 0.7f;
+            float bicubic = _style != null ? _style.inkBicubicStrength : 1f;
+            float shadowChroma = _style != null ? _style.inkShadowChromaBoost : 0.35f;
             float topDetail = _style != null ? _style.inkTopDetailStrength : 1f;
             float dripSpeed = _style != null ? _style.wallDripSpeed : 1.3f;
             float waterReflect = _style != null ? _style.waterReflectionStrength : 0.8f;
@@ -177,6 +181,8 @@ namespace P1.Core
             Shader.SetGlobalFloat(InkCoatRoughnessId, coatRough);
             Shader.SetGlobalFloat(InkEdgeRimStrengthId, edgeRim);
             Shader.SetGlobalFloat(InkEdgeSmoothStrengthId, edgeSmooth);
+            Shader.SetGlobalFloat(InkBicubicStrengthId, bicubic);
+            Shader.SetGlobalFloat(InkShadowChromaId, shadowChroma);
             Shader.SetGlobalFloat(InkTopDetailStrengthId, topDetail);
             Shader.SetGlobalFloat(WallDripSpeedId, dripSpeed);
             Shader.SetGlobalFloat(WaterReflectionStrengthId, waterReflect);

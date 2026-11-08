@@ -1,4 +1,4 @@
-# CHANGELOG — 墨水作战（P1）
+# CHANGELOG — 墨水大作战（P1）
 
 > 排查知识库：**每条 1~3 行** = 一句话结论 + 根因 / 陷阱（Bug 用 `Fixed:`）+ 关键文件路径。
 > 格式 `## YYYY-MM-DD #序号`（当日从 `#01` 起、**不记时间点**、**新的在最上面**）。
@@ -6,7 +6,129 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-09 #01
+Fixed: Android 发布包构建报 `CS0103: _debugPreviewUntil does not exist`——`SubmergedInkView` / `LowHealthVignetteView` 的字段在 `#if UNITY_EDITOR || DEVELOPMENT_BUILD` 内、`DebugPreview()` 方法却留在外面，编辑器（含测试）能编译、只有 Player 构建才炸；按 `KillFlashView` / `LensInkView` 的既有写法给方法补同一层编译守卫。陷阱：`run_tests.sh fast` 全绿不等于能出包，改完 `#if` 一定要跑一次 Release 构建。文件：`Scripts/UI/{SubmergedInkView,LowHealthVignetteView}.cs`。
+
+## 2026-11-08 #36
+Fixed: 喷墙不再留墨、子弹穿过箱体/地面——`InkProjectilePool.TryCheckImpact` 的「贴脸重叠补判」改造把球扫的世界命中 `found` 丢掉了（只返回 `OverlapCheckDue && TryResolveOverlappedCombatant`），非爆破弹丸因此只认角色命中，墙/地一律穿透，只剩沿途滴墨的 XZ 投影涂到箱顶与地面。恢复「`found` 即按世界命中结算」，重叠补判只作为球扫落空时的补充；`WallInkPlayboxTests` 7/7 通过（含此前判红的 `ProjectileHit_PaintsWallFace`）。文件：`Scripts/Weapons/InkProjectilePool.cs`。
+
+【发布 v0.1.30】含 2026-11-08 `#01`~`#36` 与 2026-11-09 `#01`；APK `moshuizuozhan-v0.1.30-arm64-v8a.apk`。
+
+## 2026-11-08 #35
+【底部双横条放大 + 抗锯齿 + 满能状态环】徽章 28→34 / 图标 24→28 / 轨道 248×14→300×18（移动端 379×87，行高 38、轨道 330×20）；"锯齿/不清晰"的根因是 UI 网格无 MSAA + 128px 图标与 64px 胶囊贴图被硬缩 4~6 倍——新增 `UIInkShapeGraphic.EdgeFeather` 外沿 alpha 羽化（默认 0，只给徽章/轨道开 1.6px）、`UIFlatSprite.Pill` 生成 mip + 三线性、`MediaImportPostprocessor` 新增 `UiIconSprite`（mip + 三线性，`GetVersion=1` 触发既有图标重导入）。满能除徽章反色外新增 `ReadyRing`（徽章外留 2px 缝的 4px 黄环，填充透明，充能隐藏、满能亮起），仍不做闪条/爆闪/脉冲。文件：`Scripts/UI/{HudSpecialGaugeFactory,LiquidOrbView,HudController}.cs`、`Scripts/UI/Core/{UIInkShapeGraphic,UIFlatSprite}.cs`、`Scripts/Editor/MediaImportPostprocessor.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`、`Docs/UI-GeometricBold.md`。
+
+## 2026-11-08 #34
+【撤回满能闪烁】#33 的条身黄↔纸白 1.5Hz 闪 + 条尾爆闪被判定"乱七八糟"：全部撤掉（`UpdateReadyFlash`、`ReadyBurst` 节点、满能 Punch 一并删除），大招满能**只换左端徽章状态**（墨底黄图标 ↔ 黄底墨图标，3px 墨边常驻），条身颜色/长度恒定。约定：HUD 除低墨 / 低血功能性告警外不做任何循环闪或一次性爆点，状态切换只允许"某一构件静默换外观"。文件：`Scripts/UI/{LiquidOrbView,HudSpecialGaugeFactory}.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`、`Docs/UI-GeometricBold.md`。
+
+## 2026-11-08 #33
+【满能状态加强】反馈"大招满了看不出来"：满能待放时**条身整体黄 ↔ 纸白 1.5Hz 硬切闪烁**（进满能同帧先亮一次纸白，释放/失效立即停），徽章继续保持反色（黄底墨图标），条尾一次性爆闪 96→128 并改纸白；只翻 28px 徽章不足以传达"满了"，条身才是主信号。闪烁只在相位翻转时写顶点色（不重建、零 GC），属于低墨/低血同族的功能性状态提示，禁止挪作装饰循环。文件：`Scripts/UI/{LiquidOrbView,HudSpecialGaugeFactory}.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`、`Docs/UI-GeometricBold.md`。
+
+## 2026-11-08 #32
+【底部 HUD 三轮：条内只留徽章 + 横条】按反馈删掉每行右端的「Q」键帽与生命读数芯片（50×26 胶囊把 28 高的细条切成两段，被判"太丑"），轨道拉满整行（桌面 192→248、移动端 214→277，组宽 284/318 不变，右沿 = 行右沿）；满能改由徽章**整体反色**（黄底 + 墨图标 + 墨边）表达，低血告警改为**填充色**红↔纸白 2.2Hz 闪（条长 = 剩余血量，只换色不换长度），条内不再有任何数字/键帽。陷阱：反色必须底色与图标同时翻——只翻底色会让黄图标消失在黄底上（二轮曾因此只敢翻描边）；`ReadyHint` 的硬影补齐逻辑（`EnsureReadyHintHardShadow`）随键帽一起删，留着会对着空节点每帧 `transform.Find`。文件：`Scripts/UI/{HudSpecialGaugeFactory,LiquidOrbView,HudController}.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`、`Docs/UI-GeometricBold.md`。
+
+## 2026-11-08 #31
+【底部 HUD 二轮：双窄横条】两个小圆环改回**两条 284×64 的窄横条**（行高 28 / 轨道 14、行距 8）：左端身份徽章（大招=墨底黄技能图标、生命=绿底墨十字，均 24px 图标 + 色签硬影）+ 墨黑胶囊轨道 + 内缩 2px 的胶囊填充（`UIPillImage`，移动端 318×73 放大）+ 右端槽位（大招「Q」键帽 50×26、生命读数芯片 50×26 墨底纸白边 + 20 号数字）；满能 = 填充铺满 + 徽章 3px 描边翻黄 + 键帽翻黄弹入 + 一次 0.45s 爆闪 + 整行 Punch，生命告警 = 填充/徽章翻红 + 芯片墨底↔红底 2.2Hz 闪 + 掉血 Punch。陷阱：**徽章底色不要翻黄**——技能图标是密集剪影，底色翻黄会被图标吃光导致状态读不出，满能只翻描边；填充不要再用 `UIArcRingGraphic`。另记：Play 期间改 `.cs` 时 Unity 会推迟到退出 Play 才重编译，截图/测试都可能跑旧程序集，改完先 `stop` + `AssetDatabase.Refresh(ForceUpdate)` 再验。文件：`Scripts/UI/{HudSpecialGaugeFactory,LiquidOrbView,HudController}.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`、`Docs/UI-GeometricBold.md`。
+
+## 2026-11-08 #30
+Fixed: 集装箱喷印在另外两个长面上**整片左右镜像**（字反着读、CSC 牌跑到另一端）——`BuildContainerLivery` 把 `right` 硬写成 `(0,0,1)` / `(1,0,0)`，只对一侧成立；改由面法线推导 `right = cross(normal, up)`。Fixed: 木托盘/木箱/电缆盘渲染成惨白"纸箱"——`BuildStructuralDecorations` 用 `new Palette(null)` 兜底色（ArenaStyle 的深木色没传下来），且顶点色按 sRGB 原值直写进 Linear 色彩空间（0.47 当线性用屏幕上变 0.72），两处叠加整堆冲白；散件改自带 `.linear` 转换的中间调木色，并新增 `Mat_Prop_WoodDetail`（PropLit + Wood 法线/RMO，原先复用 `Mat_Prop_Matte` 吃到的是混凝土骨料法线）。文件：`Scripts/Environment/{ArenaClutterBuilder,ArenaGeometryBuilder,ArenaMaterialSet}.cs`、`Scripts/Editor/ProjectScaffolder.cs`。
+
+## 2026-11-08 #29
+Fixed: 武器卡顶部身份色带横向戳出圆角卡片轮廓（选中态更明显，看着像乱画的横线）——`WeaponCardView.RefreshAccentBand` 只按 `-border*2` 重算宽度，把构建期「圆角半径 + 墨框」的内缩量冲掉，色带两端正好压在圆角外缘；改为构建 / 选中 / 取消选中统一走 `ApplyAccentBandGeometry`，内缩量随当前边框重算（半径口径同 RoundedRect 的 `ComicStyle.CornerFor`）。新增 `WeaponSelectPlayTests.WeaponCardView_AccentBand_NeverOverflowsRoundedCorner` 锁住三态几何。文件：`Scripts/UI/WeaponSelect/WeaponCardView.cs`、`Tests/PlayMode/WeaponSelectPlayTests.cs`。
+
+## 2026-11-08 #28
+【底部双环仪表重设计】悬浮「Q」键签改为**常驻停靠在大招环右上角的键帽角标**（充能=墨底纸白字隐入墨底圆，满能=翻黄底墨字+Back-Out 弹入+一次 0.45s `UIBurstGraphic` 爆闪播完自停）；生命环新增右上角**绿底墨十字角标**（`glyph_plus`，告警翻红）——两环各一枚右上角标，身份一眼可辨；两环墨底圆补色签硬影 (2,-3) 离地，低血/踩墨数字红白交替闪（2.2Hz，同低墨告警口径）+ 掉血整环一次 Punch（0.25s 节流），复活倒计时上移 12→34px 给角标让位。陷阱：直接写 `TMP_Text.color` 会被 `UIChunkyText` 重建时的 `fillColor` 冲掉，换色必须走 `SetFillColor`；角标缩放统一走 `HudSpecialGaugeFactory.ApplyRingBadgeLayout`（移动端 ×1.2，字号 Font() 已自动放大）。测试 `HudSpecialGaugePlayTests` 的「释放后键签隐藏」断言改为「键帽常驻翻色」。文件：`Scripts/UI/{HudSpecialGaugeFactory,LiquidOrbView,HudController}.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`、`Docs/UI-GeometricBold.md`、`tools/font_charset.txt`（重跑账本+菜单漫画风/0 补「帽逆」字形）。
+
+## 2026-11-08 #27
+【第一张图（货柜码头）细节精修】集装箱从纯立方体换成真实瓦楞壳：新 `Environment/ArenaContainerMeshFactory.cs` 在 unit 空间生成"棱脊贴标称面、凹槽向内收"的侧壁瓦楞 + 上下横梁台阶 + 顶面纵向压型肋，因此 BoxCollider / InkWallSurface 的墨面 Quad（外扩 1cm）/ OcclusionFader / 静态合批包围盒与旧立方体逐位一致，碰撞、涂墨、遮挡和既有测试断言全不受影响。陷阱：凹槽不能外凸，否则墨面 Quad 会被瓦楞穿透成破面；顶盖必须铺满 ±0.5，只在"肋的起止"留边会留出能看到箱内的缝。配套 `ArenaClutterBuilder.cs`（托盘/油桶/锥桶/缆桩/电缆盘/轮胎堆/护栏/墙面配电箱与卷帘门 + 箱体喷印编号与 CSC 标牌，全部无碰撞无墨面、合并进木/金属/发光三张网格），远景近排集装箱补瓦楞与角件。贴图由新 `tools/bake_arena_surface_details.py` 程序化烘焙 `Surfaces_Container_{N,RMO,Albedo}.png` 与 `Surfaces_Concrete_Albedo.png`；`ObstacleDitherLit` 新增 `_BaseMapWorldSpace/_BaseMapWorldScale`（瓦楞壳 uv0 是整面归一化坐标，直接采样会把长面压成一个贴图周期）。修掉两个既有穿帮：端门加强筋颜色是 `Lerp(boxColor, steelDark, 0.35)`，在芥末黄箱上插值成土黄被读作木条（改深钢灰 + 横条改竖向门板瓦楞）；四个集装箱材质里只有 Slate 的 `_EdgeLineStrength` 落在 shader 默认 0.85、其余三个是 0，同排箱子混着"有描边/无描边"。文件：`Scripts/Environment/{ArenaContainerMeshFactory,ArenaClutterBuilder,ArenaGeometryBuilder}.cs`、`Shaders/ObstacleDitherLit.shader`、`Scripts/Editor/{ProjectScaffolder,ToonStyleInstaller,ArenaDecorationBuilder}.cs`、`tools/bake_arena_surface_details.py`。
+
+## 2026-11-08 #26
+Fixed: 结算页「本局成就」节标压在战报卡下边框上——成就条挂载点（-332 / -330）只按卡行高度算，没给节标自己占的题头带（胶囊 34 高 + 与卡行 6px 缝）留位置。整条下移到 -368 / -370，CTA 按钮跟着下沉并同步 `ApplyResultColumnFit` 的底缘包络（-508 / -504 → -520 / -530）；移动端节标字号封顶 20（×1.28 放大到 28 会把胶囊撑成 47.6，20:9 手机上顶不住）；桌面溢出读数行从卡行下方改挂节标同行右对齐。文件：`Scripts/UI/{MatchFlowUI,ResultAchievementsView}.cs`、`Tests/PlayMode/ResultLayoutPlayTests.cs`。
+
+## 2026-11-08 #25
+【整体流畅度优化】战斗期 GC 尖刺与每帧重建收敛：删掉 `InkSplatAtlas._active` 诊断 List（每帧 O(n²) `RemoveAt` + 持续扩容）与网格每帧 `Clear()`（改 `Clear(false)` 保留顶点布局），弹丸池 `_active` 容量 96→512（旧版 96→384 翻倍即 40~80KB 单帧分配），贴脸 `OverlapSphere` 补判改 4 帧轮转（出生首帧/自由落体仍逐帧），小地图上传 scratch 改为整图一次性预分配，音频淡出不再每帧 Stop+Start 协程；HUD 占领百分比文本 10Hz、比分条 15Hz + 0.2% 量化（避免 `UIPillImage` 胶囊贴图随条宽反复重建）、复活倒计时先比 0.1s 档位再拼字符串、`ReadyHint`/`SpecialReadyPip` 的 `transform.Find` 只解析一次；AI 的 A* 按帧奇偶错峰（7 个 Bot 同相重算会叠加尖刺），遮挡视线球扫 20Hz（Fader 仍逐帧插值）。DrawCall：发裙/墨罐液面不再投影，运行时清掉 P39 遗留的 `MergedStatic_Mat_TankGlass` 合并组（每角色 base+shadow 各 1），并给馒头头补 `RecalculateTangents` 修复 `Kid/Head` 合并校验（下次重建场景生效）。文件：`Scripts/Ink/{InkSplatAtlas,InkSurfaceController}.cs`、`Scripts/Weapons/InkProjectilePool.cs`、`Scripts/UI/{CenterTimerView,HudController,RosterAvatarSlot,WeaponSelect/RespawnLoadoutView}.cs`、`Scripts/AI/BotController.cs`、`Scripts/Environment/TopDownOcclusionManager.cs`、`Scripts/Core/AudioManager.cs`、`Scripts/Player/{CharacterVisualAssembler,CharacterVisualController}.cs`。
+
+## 2026-11-08 #24
+Fixed: `tools/run_tests.sh` 预检只认 `script.recompile_status` 的 `completed` / `idle`，而工程已编译且无改动时 Unity 6 报 `up_to_date` → 预检空转 60s 后误报「编译状态未就绪」。判断里补上 `up_to_date`。
+
+## 2026-11-08 #23
+底部 HUD 由两张纸白大卡（大招 332×88 + 生命 380×88，合计 712 宽）改成两个小圆环：大招环 66px（墨底正圆 + 黄弧 + 技能图标，满能时弧铺满 / 中心圆翻黄 / 图标翻墨 / 环上方弹「Q」键签）、生命环 68px（墨底正圆 + 绿弧 + 环心数字，低血或踩敌墨翻红），整组 150×68 居中、底边 y=56，移动端 72/76、底边 48。陷阱：环状弧**不能**用 `Image.Filled + Radial360` 配运行时生成的圆环精灵——即时 Canvas 重建会把它整块画成不透明矩形（`Simple` 正常、径向失效），改用网格基元 `UIArcRingGraphic`（`Fill01` 顶点起顺时针，带宽 = 直径 × 0.12、外沿留 3px 墨底即自动描边）。顺带下线存活时的「墨水 / 手雷 / HP」长串（只留阵亡复活倒计时，锚在环组上方 12px）；`HealthBarFill` 节点保留但禁绘制（数据载体），实际绘制走同卡 `HealthBarArc`。文件：`Scripts/UI/{HudSpecialGaugeFactory,LiquidOrbView,HudController}.cs`、`Scripts/UI/Core/UIArcRingGraphic.cs`、`Docs/UI-GeometricBold.md`。
+
+## 2026-11-08 #22
+双枪翻滚后不再被锁在原地：删掉翻滚后 0.5s 架枪阶段的移速锁零（`DualiesWeaponStrategy.MoveSpeedMultiplier` 恒 1，`InkCharacterMotor` 删掉 `IsTurretLocked` 的 `CurrentMoveSpeed = 0` 分支），并把架枪态从 `WeaponController.WantsAimFacing` 摘掉——移速一解放，朝向若还钉在准星上，移动输入带不动身体，手感依旧是被钉住（开枪时另有 `_isFiringOrThrowing` 兜朝向）；射速 +20% / 散布清零 / 准星菱形锁定框 / 躯干前压下沉等效果全部保留，`BotController` 同步摘掉该再翻滚闸门。陷阱：`IsTurretLocked` 是历史命名，语义已是「架枪强化」，别按字面当移速锁用。文件：`Scripts/Weapons/{DualiesWeaponStrategy,WeaponController,MainWeaponStrategy,WeaponConfigSO}.cs`、`Scripts/Player/{InkCharacterMotor,DodgeRollPoseSolver}.cs`、`Tests/{EditMode/Weapon*Tests,PlayMode/MotorFeelPlayTests}.cs`。
+
+## 2026-11-08 #21
+蓄力狙蓄力音「太吵」三处整改：烘焙侧锯齿改三角波、整层删 7kHz 气声、粉噪床减半去共振（`tools/bake_sfx.py` `_f_charger_charge`，已重烘并重建 P1RuntimeAssets）；混音侧 `chargerChargeLoopVolume` 0.50→0.38（asset 已同步）；新增 `PlayLoop(kind, multiplier)` 重载（旧签名保留），循环音随 `Charge01` 从 0.40 渐强到 1.0——轻蓄安静、满蓄全量（`WeaponAudioDriver.cs`）。陷阱：`bake_sfx.py` 会做峰值归一化，调音只降层峰值没用，必须改频谱构成。
+
+## 2026-11-08 #20
+Fixed: 结算页「再来一局」按钮在宽屏下溢出屏幕底——根因是整列按 1080 高设计稿从中心绝对定位，而 HUD 画布 `ScaleWithScreenSize(match 0.5)` 在宽屏下纵向单位收缩（~2.1:1 时只剩 ~982），按钮底缘（-508）出界。新增 `MatchFlowUI.ApplyResultColumnFit`：按 resultPanel 实际高度把整列（判定牌/读数板/战报卡/成就条/按钮组）等量上移，间距不动，16:9 位移为 0，Update 里跟随窗口比例重排。文件：`Scripts/UI/MatchFlowUI.cs`。
+
+## 2026-11-08 #19
+【准星 HUD 打磨（用户实测反馈两条）】① `+N m²` 飘字会被墨水罐挡住 → 出生点从中心 +34,-30 下移到 +24,-52（INKWAVE 同位的准星正下偏右），并把 `EnsureInkTankCrosshair` 挪到 `EnsureTurfScore` 之前建——后建者渲染在上，飘字上飘掠过罐体下缘时不再被玻璃底盖住；② 手雷刻度线实色红杠太突兀 → 内收进玻璃宽度（20+4 探出 → 16×2 贴内）、厚度 3→2、配色改常态半透明白 55% / 缺墨时柔红 80%（`s_thresholdIdle/Warn`），不再整条探出罐体。文件：`Scripts/UI/{TurfScoreView,InkTankCrosshairView,HudController}.cs`。
+
+## 2026-11-08 #18
+【开赛扫场镜头（对标 INKWAVE `CameraRig.cinematic`）】新增 `MatchIntroCameraDirector`（运行时自装配，LateUpdate 顺序 200 晚于跟随相机）：Countdown 期间把机位架到敌方半场高空绕场地中心横扫 34°，再二次贝塞尔俯冲到玩家身后，t=1 姿态直接取「跟随相机本帧写出的位姿」作为路径终点 → 放手瞬间零跳变。Countdown 时长改为 `max(introSeconds, introCameraSeconds=3.4s)`（0 = 关闭）；扫场期间 `TopDownOcclusionManager` 停摆并复位全部 fader（高空视线会把整片掩体判成遮挡、网点狂闪），HUD 内容根与移动端触控层让位、Playing 首帧恢复（墨幕转场挂画布根，只关内容根不关画布）。陷阱：`GameObject.Find("HudSafeArea")` 必须在开赛前取（首帧就被 SetActive(false) 后找不到）；Countdown 变长会让"等 Playing"的旧用例多等 3.4 秒，`PlayModeTestKit.ShortenMatchTimers` 必须同步把 `introCameraSeconds` 置 0。文件：`Scripts/Player/{MatchIntroCameraMath,MatchIntroCameraDirector}.cs`、`Scripts/Core/{MatchManager,GameConfigSO}.cs`、`Scripts/UI/{HudController,MobileTouchUI}.cs`、`Tests/{EditMode/MatchIntroCameraMathTests,PlayMode/MatchIntroCameraPlayTests,EditMode/MobileTouchUITests,PlayMode/PlayModeTestKit}.cs`。
+
+## 2026-11-08 #17
+【油漆观感对标 INKWAVE 第二批：墨斑"活"起来 + 图集三次 B 样条重建】写侧生长编排：decorated 墨斑进 `InkSplatAtlas._growing` 每帧重绘（A=Max/R,B=Over 混合幂等；主体 40%→100% ease-out 泛出、射线先行、卫星墨滴错峰落地**越远越晚**、细雾收尾，时长随半径缩放），替换旧片元均匀侵蚀（`_InkGrowActive` 恒 0，`PushWetClockGlobals` 一行可回滚）；旧"死板"根因还有 `MakeSeed` 按 0.125m 位置量化——同点位连喷形状完全相同，加逐墨斑盐解决。着色侧新增 `P1SampleInkAtlasCubic`（16-tap 三次 B 样条 + 解析梯度 + 导数钳 ±8 纹元）接入地面 ForwardLit 与顶面 `P1EvaluateTopInk`，消墨缘法线/接触阴影/两队交界的纹元级马赛克小面片；阴影中保饱和（INK_SHADE 对齐，亮度守恒提色度）。新参数 `ArenaStyleSO.inkBicubicStrength`（0=旧行为回退开关）/`inkShadowChromaBoost`。陷阱：①生长重绘靠 Over 混合"最新获胜"，CommandBuffer 提交顺序必须 [敌队强收尾→新墨→常规重绘]（新落墨时把范围内敌队生长墨斑 ForceFinish，INKWAVE 同款）；②回归底线是 `splatGrowSeconds=0`（测试路径）与 `tn=3` 时 SDF 与旧实现**逐位一致**；③B 样条 tap 会钳到边界纹素，场外屏蔽必须在混合前清零。文件：`Shaders/{InkGround.shader,InkSurfaceOverlay.hlsl,InkWetShading.hlsl}`、`Scripts/Ink/{InkSplatAtlas,InkSurfaceController}.cs`、`Scripts/Environment/ArenaStyleSO.cs`、`Scripts/Core/RenderEnvGlobals.cs`、`Tests/PlayMode/InkAtlasRenderPlayTests.cs`（新增写侧生长回归用例）。
+
+## 2026-11-08 #16
+【墨水量上准星：删底部墨水卡，新增准星旁竖罐（对标 INKWAVE `.iw-tank`，用户点名要这个布局）】新 `InkTankCrosshairView`（根锚画布中心，罐体 20×78 挂准星右 +56,0）：玻璃墨底 + 队伍色液柱（14/s 指数追值）+ 液面亮条随侧移速度倾斜 + 回墨冒气泡 + 手雷耗墨刻度线（不够丢雷时红线）；低墨（沿用 `HudGaugeMath` 迟滞 + 原警报音节奏）= 罐下弹「墨水不足」红签 + 罐框翻红（进入瞬间硬切闪 3 下后稳定红，不循环）；墨水打到 0 边沿整罐 0.35s 衰减抖动；满罐无告警 1.4s 整罐淡出（is-idle），一有消耗立即回来。底部三卡改两卡（大招 + 生命）居中重排——陷阱：`PlaceCard` 对 null 也推进 x（旧语义），墨水卡缺位必须跳过调用而不是传 null，否则两卡整体右偏 348px；`InkTankView` 类保留（旧场景认领路径 + 直接构造的 EditMode 测试不变），工厂 `GaugeCluster.Tank/InkCard` 置 null。文件：`Scripts/UI/{InkTankCrosshairView,InkTankCrosshairMath,HudSpecialGaugeFactory,HudController}.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`、`Tests/EditMode/InkTankCrosshairMathTests.cs`。
+
+## 2026-11-08 #15
+【角色被敌方墨覆盖（对标 INKWAVE `character-mats.js` HURT_FRAG）】命中与踩敌墨会把**攻击方队色**糊上身体：`CharacterToon`/`CharacterToonOutlined` 加 `_InkColor/_InkAmount/_InkSeed/_InkThresholdMax/Min/_InkCurvePower` 程序化噪声墨斑（湿边压暗 + 墨面浓淡 + 压掉该处高光），阈值曲线按本噪声实测分布标定（满覆盖≈52% 表面积，刻意不糊满：整身换敌队色会让 4v4 分不清敌我）；`CombatantHealth` 逐单位共用一块 MPB 驱动：命中 `+伤害/60`、踩敌墨 `+0.5/s`（不受敌墨 DOT 60 血底线影响，2s 就能糊满）、离开 `0.6/s` 淡出、覆盖量 `= max(累积, 1-血量比)`（残血本身读作"被糊住"，回血一起淡掉）、复活清零、出生保护/大招无敌期不累积；新增 `PlayerConfigSO.inkCoat{PerDamage,InEnemyInkRatePerSec,DecayPerSec}`。
+两个坑：① 旧白闪是 MPB 直接改 `_BaseColor`、结束时 `SetPropertyBlock(null)`，会把墨覆盖一起抹掉 → 白闪改由 `_FlashAmount` 在着色器里 lerp 到白，同一块 MPB 才能同时承载两件事；② 角色是 ~70 件刚体部件、各 mesh 的 object space 互不相同，直接用 `positionOS` 求噪声会让左右腿/手臂出现**镜像重复的墨斑**，必须用 MPB 推 `_InkPartOffset/_InkPartScale` 把顶点还原到"角色空间静止世界坐标"（按米制一致、跨部件连续）。文件：`Shaders/{CharacterToon,CharacterToonOutlined}.shader`、`Shaders/CharacterToonCommon.hlsl`、`Scripts/Player/{CombatantHealth,PlayerConfigSO}.cs`、`Tests/PlayMode/{InkCoatPlayTests,InkCoatVisualCapturePlayTests}.cs`。
+
+## 2026-11-08 #14
+【音效播放层：死音效接线 + 远场衰减 + 去重 + 变体自动取全】`blaster_boom`·`slosh_land`·`refill_full`·`charger_charge` 烘了却从没被播放；炸弹/大招/雷/跳跃/翻滚原为全局 2D 满音量（敌人隔整张图和贴脸一样响）→ 新增 `TryEventGain` 距离衰减并给这些方法加 `(worldPos)` 重载；`PlayKill` 在 `uiConfirmClip` 为空时把保底设成 `killClip` 同帧播两遍、炸弹投掷音在 `WeaponController` 与 `InkBombPool` 各播一次、`special_slam` 释放+落地各播一整段，均已修。
+`Team == TeamA`（含 AI 队友）的大招就绪/复活/空墨/回墨/跳跃改 `IsLocalPlayer`；变体数组改按族自动探测（旧版写死前 2~3 个名字，加变体后独立包取不到），`EnsureEditorClips` 补齐 11 个漏填字段；voice 池 12→16。新增 19 个事件音（出生保护/低血心跳/复活滴答/比分反超/终局 10 秒/敌方大招警告/换枪/蓄力取消/撞墙/锁定/暂停/墨花分档/打墙/泵/加特林就绪/风暴风压）。文件：`Scripts/Core/{AudioManager,AudioMixConfigSO,RuntimeAssetLibrary}.cs`、`Docs/Audio-Audit.md`。
+
+## 2026-11-08 #13
+【音效素材全量重做：59→78 族、87→157 文件，每只 5~9 层】根因是 `bake_sfx.py` 的 `_bq()` 为破坏性 in-place 滤波，而 `noise()`/`tone()` 写完直接调它——同一时间段内**后写的层会把之前所有层整段抹掉**（`shot` 末层带通噪声擦掉了前 55ms 的低频体与 chirp），所以「层数越加越薄」；改成「渲染临时段 → 滤波 → 相加」后，同配方同峰值 RMS +59%（ink_hit_ground +77%）。
+同批补上 INKWAVE 的粉/棕噪声、FM 衰减调制指数、非谐分音、共振带通（改成 RBJ 峰值增益 = Q；0dB 形式下 Q6 带通只剩 3% 振幅，层与层配不平）、bloops/plips 墨粒、环形颗粒床、线性循环淡化（等功率会把同相内容在接缝抬到 √2，每 1.8s 一次鼓包）与 `_soft_limit(1.3)`。文件：`tools/bake_sfx.py`、`tools/make_sfx_audition.py`（新增 A/B 试听页生成）。
+
+## 2026-11-08 #12
+【阵亡观战镜头（对标 INKWAVE death cam）：死亡后不再定格在空地】`TopDownCameraFollow` 新增观战模式：跟随目标 `OnKilled` 时若 `LastAttacker` 存活则接管镜头——前 0.8s 停在阵亡点看击杀爆墨，随后转向并在击杀者周围环绕（半径 4.2m→5.5m、高 2.4m、0.07 rad/s 漂移封顶 6s、FOV 收窄 6°），复活 `OnRespawned` 硬切回第三人称（68m 对角线地图上做长距离混合会扫穿掩体，故不做 INKWAVE 的 0.7s 回镜）；曲线抽成纯函数 `Player/DeathCamMath`，`TopDownOcclusionManager` 阵亡期间改投射击杀者，否则观战画面被集装箱糊死。陷阱：①环境死亡（踩敌墨/越界，`LastAttacker == null`）不进观战、保持原机位；②凶手自己中途阵亡要冻结最后已知位置，不能把镜头拉回自己尸体或跟去它的复活点；③`BindTargetHealth` 换目标时不能走 `EndDeathCam`（会 `SnapImmediately → ResolveActorRefs →` 递归），直接清标志位。文件：`Scripts/Player/{TopDownCameraFollow,DeathCamMath}.cs`、`Scripts/Environment/TopDownOcclusionManager.cs`、`Tests/EditMode/DeathCamMathTests.cs`、`Tests/PlayMode/ThirdPersonCameraPlayTests.cs`。
+
+## 2026-11-08 #11
+【涂地飘字改为准星位、删常驻读数卡（用户反馈：INKWAVE 的 +Np 是打在准星旁，左上角卡没有及时反馈感）】`TurfScoreView` 从左上角读数卡改为纯飘字层：根节点锚画布中心，飘字出生在准星右下（中心 +34,-30，同 INKWAVE `.iw-tpops`），大额（≥10m²）染队伍墨色、小额白字，均走 UIChunkyText 果冻字 + `iw-tpop` 关键帧曲线；删掉卡片/墨滴图标/追值滚动/图标 punch 及 `SetMobileLayout`、`ApplyTurfScoreLayout` 全套布局管线与对应 Math 函数，`EnsureTurfScore` 根物体不再挂 `UIInkShapeGraphic`。陷阱：Play 验收时飘字 1s 寿命 ≈ CLI `script.eval` 单条往返延迟，常规抓帧必空——把 `Time.timeScale` 临时压到 0.3 再 flush/capture、完事恢复，才能定格飘字；编辑器被并行 Agent 的测试循环反复抢走 playMode，验收要轮询 `test status` 空窗再动手。文件：`Scripts/UI/{TurfScoreView,TurfScoreMath,HudController}.cs`、`Tests/EditMode/TurfAndLowHealthUiMathTests.cs`。
+
+## 2026-11-08 #10
+【潜入墨水屏幕浸染（对标 INKWAVE swim 段）】潜入己方墨水时屏幕边缘向己方墨色轻微"沉下去" + 缓慢流动焦散光斑：`SubmergedInkView/Math` + `Resources/SubmergedInk.shader` 双 Pass（乘法 `Blend DstColor Zero` 复刻 INKWAVE 的 mix 保场景细节 + 加法焦散），强度 damp(7/s) 平滑、受「屏幕震动」滑杆门控、空闲关 Graphic；`EnsureSubmergedInk` 须排在所有 `SetAsFirstSibling` 视图之前建（最终位于低血暗角之上、不抢 InkEdge=0/LensInk=1 断言位）。陷阱：ShaderLab 共享代码块闭 token 是 `ENDCG` 不是 `CGEND`——解析报「CGINCLUDE/CGPROGRAM and ENDCG tags mismatch」且行号指向 CGINCLUDE 行，极易误判成他人 shader；新代码字符串含新汉字须重跑 `tools/font_charset.py` + 菜单 `P1/画风/漫画风/0`（本次账本 +浸）。文件：`Scripts/UI/{SubmergedInkView,SubmergedInkMath,HudController}.cs`、`Resources/SubmergedInk.shader`、`Tests/EditMode/SubmergedInkTests.cs`、`Tests/PlayMode/SubmergedInkPlayTests.cs`。
+
 【发布 v0.1.29】含 2026-11-07 `#09`~`#24`；APK `moshuizuozhan-v0.1.29-arm64-v8a.apk`。
+
+## 2026-11-08 #09
+【涂地读数卡对标 INKWAVE 重设计（用户反馈「简陋、无及时反馈感」）】`TurfScoreView` 从「标签+数字」卡改为 `.iw-turf` 胶囊语义：墨滴图标（`glyph_drop` 染队色）+ 英雄数字（40 Heavy 果冻字 UIChunkyText）+ 小号 m² 单位；读数改为追值平滑滚动（`TurfScoreMath.StepShown` = `max(6, 差值*7)`，同 INKWAVE `_updTurf`），结算时图标做 scale1.5/rotate-12° punch，飘字换 `iw-tpop` 关键帧（缩放 .5→1.15→1 弹入 + ±8px 抖动 + ≥10m² 染队色 is-big），曲线全部纯函数可 EditMode 断言。陷阱：`UIChunkyText` 默认 `uppercaseLatin` 会把单位 "m²" 强转 "M²"（新增 `SetUppercaseLatin` 开关）；CLI `script.eval` 单条往返 ~1s，与飘字 1s 寿命同量级，Play 截图验收必须后台连续抓帧再挑帧。文件：`Scripts/UI/{TurfScoreView,TurfScoreMath,Core/UIChunkyText}.cs`、`Tests/EditMode/TurfAndLowHealthUiMathTests.cs`。
+
+## 2026-11-08 #08
+【视角描述大扫除 + 命名统一】全库排查「俯视角」陈旧描述：活文档 4 处（media-gen 技能链，含「STYLE.md 空白」过期说明）与代码注释 21 处（4 shader + 11 cs，纯注释/测试文案）统一改第三人称/斜俯视角表述；AGENTS.md 事实修正（玩法场景补 GullHarbor/NeonSkatepark、地图改 3 张、ArenaLayoutV2 降为共享常量源 + Harbor/Skatepark 各自 Layout/Builder）；命名统一为「墨水大作战」（release.py 发布标题、p1-release 模板、本文件标题），仓库/APK 前缀 `moshuizuozhan` 为仓库名保持不动。陷阱：usage-guide 引 GamePlan §4.1 却写成「正交俯视」——引用与被引矛盾时以被引文件为准；判断视角看实现别看类名（TopDownCameraFollow 已是第三人称轨道相机）。文件：`.agents/skills/media-gen/*`、`.agents/skills/p1-release/*`、`MediaRaw/style/STYLE.md`、`Shaders/CharacterToonCommon.hlsl`、`Shaders/InkGround.shader`、`Shaders/InkWetShading.hlsl`、`Scripts/UI/HitFeedbackMath.cs`、`Scripts/Weapons/{WeaponShot,WeaponRollSystem}.cs`、`Scripts/Editor/{ArenaDecorationBuilder,HarborGroundTextureBaker,SkateparkGroundTextureBaker,ProjectScaffolder}.cs`、`Scripts/Environment/{HarborGeometryBuilder,SkateparkGeometryBuilder}.cs`、`Tests/EditMode/{WeaponStrategyTests,ArenaAndOcclusionTests}.cs`、`AGENTS.md`。
+
+## 2026-11-08 #07
+【战斗 HUD 补三条信息闭环（对标 INKWAVE）】①个人涂地读数 + `+N m²` 飘字（左上角 `TurfScoreView`，走新事件 `MatchStatsService.TurfRegistered` 复用既有 `RegisterTurf` 埋点，0.4s 聚合窗口防连发刷屏）；②低血屏幕边缘暗角（`LowHealthVignetteView` + `Resources/LowHealthVignette.shader`：35% 起压暗，20% 以下有限 3 次硬切告警后停在稳定暗角、24% 迟滞去抖，受「屏幕震动」滑杆门控）；③击杀卡补受害者武器小圆标（`KillFeedEvent.VictimWeaponKind/HasVictimWeapon` + `KillCardView.Bind` 重载，旧 `Bind` 签名保留）。陷阱：`EnsureLowHealthVignette` 必须排在 `EnsureLensInk` 之前建，否则 `SetAsFirstSibling` 会把 LensInk / InkEdgeWarning 顶离 0/1 位、两个既有 PlayMode 层级用例判红；涂地事件回调同步跑在涂地热路径上，必须 try/catch。文件：`Scripts/UI/{TurfScoreView,TurfScoreMath,LowHealthVignetteView,LowHealthVignetteMath,KillCardView,KillFeedView,KillFeedEvent,HudController}.cs`、`Scripts/Core/MatchStatsService.cs`、`Resources/LowHealthVignette.shader`、`Tests/EditMode/TurfAndLowHealthUiMathTests.cs`。
+
+## 2026-11-08 #06
+【移除出生禁入圈】玩家反馈敌我出生台前被「空气墙」卡住（滑板场尤甚）。Fixed: 根因是 P16-A 的 `SpawnZone` 在出生线中心 (0,±23.5) 布了半径 6m 圆形推力场，只对敌方角色生效且每帧径向外推，圈前沿伸到 |z|=17.5——比出生甲板前沿（|z|=22.0）还靠外 4.5m，手感即空气墙。整套移除：`SpawnZone.cs` 及两测试文件删除，`MatchManager` 不再创建/配置，`BotController` 涂地目标不再避敌区，`GameConfigSO.spawnZoneRadius/PushSpeed`、`BotConfigSO.spawnZoneAvoidBufferMeters` 字段随功能删除；注意 `GullHarbor/NeonSkatepark.unity` 里序列化过 `SpawnZone_TeamA/B` 对象，需逐个删除保存（已清）。
+
+## 2026-11-08 #05
+【Agent 入口描述去残留】`p1-dev-workflow` SKILL.md 的 description 仍写「俯视角涂地对战」，新 Agent 会据此误判视角；已改为「第三人称」。陷阱：P9 改第三人称轨道相机时**类名 `TopDownCameraFollow`/`TopDownOcclusionManager` 为兼容旧调用方故意保留**，判断视角要看实现（`Scripts/Player/TopDownCameraFollow.cs` 头注释）而非类名。
+
+## 2026-11-08 #04
+【霓虹滑板场远景岸桥去黄重设计】4 座 22-28m 岸桥从整片警示黄改「钢青自动化码头」配色：主结构派生自 `Lerp(SteelDark, ContainerSlate, .5)`（相邻岸桥交替亮一档、最远一座压雾色）、保留白机房+双暗横条、主梁上缘加港青色带（呼应港青集装箱/场内涂鸦）、黄黑警示只留支脚台车；立柱 0.95→0.78m、主梁 2.5×2.1→2.2×1.7 更轻盈；极远 2 座岸桥剪影同步去黄（旧版会在真岸桥正后方读成「重影黄塔」）、HorizonCity 提亮半档雾化。根因：场内已有 2 座黄色英雄塔吊（`SkateparkDetailBuilder.BuildCranes` 刻意统一 mustard），远景岸桥再同色会让北天际线糊成一团黄、与冷色海天相冲。新增菜单 `P1/关卡与地图/重建霓虹滑板场远景 (Skate Backdrop)`：只销毁重建 `_SkateBackdrop` 并覆盖 `skate_backdrop_*.asset`，不整场重建不重烘地面。陷阱：该文件同时 `using System` + `UnityEngine`，裸写 `Object.DestroyImmediate` 报 CS0104 歧义，须写 `UnityEngine.Object`。文件：`Scripts/Editor/SkateparkBackdropBuilder.cs`、`Scenes/NeonSkatepark.unity`、`Art/Meshes/Arena/skate_backdrop_*.asset`。
+
+## 2026-11-08 #03
+【成就目录扩至 37 条 + 成就页签改 t-1 式方块网格】用户反馈两点：①「连杀」口径澄清——原 三连威慑/连杀狂魔 是 4 秒窗口多杀（`KillFeedbackState`），不是「一条命」；新增单条命击杀统计 `MaxLifeKills`（`MatchStatsService.RegisterKill` 内维护、victim 阵亡清零），成就 一命五连/这条命超神/命硬杀穿 三档，另加 复仇（Grudges 账本：被击杀记仇、反杀销账一次）/压哨（剩余 ≤10s，`IsClutchWindow` 纯函数）/杀意泛滥(30杀)/大招永动机/首座奖杯(MVP)/佛系粉刷匠/甩手掌柜/花式阵亡图鉴(生涯阵亡100) 等 13 条，`AchievementCatalog.TotalCount` 改为 `All.Length` 动态。②成就页签从一行一行列表改为分类分节+方块网格（桌面3列/移动2列）：已解锁=分类色实底大色块+硬阴影（击杀红/涂地绿/生存蓝/大招黄/彩蛋墨底/生涯荣誉金 `ComicStyle.Gold` 新增）+反色图标盒与状态签，未解锁=纸灰+描边淡+底部进度条；`HomeInfoOverlay.CreateText` 加 `wrapping` 默认参数（描述两行内换行）。陷阱：①`SettleMatch(in ctx, mvpAwards)` 的 MVP 有两条入口（`ctx.MvpAwards` 新/参数旧），只填其一会「生涯累计了、成就没解锁」——服务内取大者统一；②EditMode 测试 SetUp 会 `PlayerProfile.Reset()` 清掉开发档案成就串，截图前要重写 PlayerPrefs 再 `InvalidateCache`；③跑测试前先 `AssetDatabase.Refresh()`，否则改完代码首跑仍是旧程序集结果。文件：`Scripts/Core/{Achievements,MatchStatsService,PlayerProfile}.cs`、`Scripts/UI/{HomeInfoOverlay,MatchFlowUI}.cs`、`Scripts/UI/Core/ComicStyle.cs`、`Tests/EditMode/{AchievementEvaluatorTests,PlayerProfileTests}.cs`。
+
+## 2026-11-08 #02
+【墨水风暴云（Ink Tempest）整体重做对标 INKWAVE】数值面（6.5s/3.4m/34DPS/1.1m/s）本就对齐不动，表现与判定全面补齐：新增 `Player/StormPoseSolver.cs` 三段投掷姿势（引臂→鞭甩→随挥，0.55s 窗口长于 0.35s 动作锁，`CharacterVisualController` 复用 slam 俯仰/侧倾/武器通道接管）+ 云体重排为 15-puff 双色调积云（深墨腹/浅云顶、castShadow 云影即落点提示、顶部 puff 周期雷光闪烁）+ 双层雨（密雨滴 80/s + 细长亮雨丝 25/s）+ 云底地面圈（出手即落点预警、随云漂移/消散淡出）+ 小地图风暴盘升级为队色盘+寿命倒计时弧（`MinimapView`，走新 `TryGetActiveClouds`，旧 `TryGetActiveCloudPosition` 保留）+ 落地雷声（`tools/bake_sfx.py` 新增 storm_thunder 配方 ×2 变体，AudioManager.PlayStormThunder，已跑菜单 11 入资源库）+ 雨声循环音量随云消散淡出（`AudioManager.SetLoopVolume` 乘法器，StopLoop 复位）+ 判定：`ApplyStormTick` 加向后兼容重载做胸口→云腹 LOS 掩体检查（集装箱顶下躲雨有效、雨穿人群不穿屋顶）并跳过无敌目标、涂地半径改恒定不再随 grow/fade 缩放（与伤害圈一致）。顺手修：`RebuildStrategy` 未刷 `_activeSpecialKind` 导致蓄力狙/爆破/加特林开局 HUD 显示 Slam 图标；Bot 放 Storm 永远朝正前方 9m（改为朝最近敌人地面点）。陷阱：①`Physics.LinecastNonAlloc` 不存在（Unity 从未提供），改用 `RaycastNonAlloc` 沿「胸口→云腹」线段方向查询（起点在受害者胶囊内，queriesHitBackfaces=false 天然不命中自身）；②`VfxPool` 墨滴池只预热 24 颗、雨滴命中还要留 6 颗 reserve，风暴双层雨 ~47 颗并发会被饿成稀稀拉拉——池扩到 72；③共享编辑器里 script.eval 往返延迟 1.5~2s，轮询 `ActiveStormCount` 会误判云「秒消失」，取证须用 `#if UNITY_EDITOR||DEVELOPMENT_BUILD` 的 `[Storm]` Debug.Log 读回（lifespan 实测 6.5s 正常）。文件：`Scripts/Weapons/{InkStormCloudPool,SpecialCombat,WeaponConfigSO,WeaponController}.cs`、`Scripts/Player/{StormPoseSolver,CharacterAnimConfigSO,CharacterVisualController}.cs`、`Scripts/Core/{VfxPool,AudioManager}.cs`、`Scripts/UI/MinimapView.cs`、`Scripts/AI/BotController.cs`、`tools/bake_sfx.py`、`Tests/EditMode/{StormPoseSolverTests,SpecialSystemsTests}.cs`、`Tests/PlayMode/SpecialWeaponsPlayTests.cs`。
+
+## 2026-11-08 #01
+【战绩板块重设计 + 成就系统（参考 Godot/t-1 幽默文案风）】结算页战报卡升级为四列（+最高连杀）+ 回接已退场的 `MatchAwards` 勋章条（中文化幽默描述，金银铜 chips）+「本局成就」解锁卡（`ResultAchievementsView`，最多 3 张+溢出提示）；新增 24 条成就（单局 14 + 生涯 10，`Core/Achievements.cs` 纯静态目录+判定器）与生涯统计落档（`PlayerProfile` 新键：总击杀/大招/单局最佳/已解锁集合，旧档缺键默认 0 天然兼容）；首页战绩浮层加「成就」页签（页签胶囊互换、滚动列表、分类分节+进度条）。陷阱：①成就判定吃的 3 个新数据源要自己搭——`CombatantMatchStats` 加 `MaxStreak`/`SpecialCasts` 字段（`CombatantHealth.Die` 本地击杀分支喂连杀峰值、`WeaponController.TryActivateSpecial` 成功分支喂大招数）+ `MatchStatsService` 记全场首杀（环境死亡不算）；②新增的每局结算状态必须在 `Ready` 与 `Countdown` 两个分支都复位，只清一处第二局成就条就不播（s_SettledThisMatch 同款坑）；③新增 58 个上屏汉字，已跑 `tools/font_charset.py` + 菜单 `P1/画风/漫画风/0` 重烘图集。文件：`Scripts/Core/{Achievements,MatchStatsService,PlayerProfile}.cs`、`Scripts/UI/{MatchFlowUI,ResultAchievementsView,HomeInfoOverlay,HomeInfoContent}.cs`、`Scripts/UI/Core/MatchAwards.cs`、`Scripts/Player/CombatantHealth.cs`、`Scripts/Weapons/WeaponController.cs`、`Tests/EditMode/{AchievementEvaluatorTests,PlayerProfileTests,HomeInfoContentTests}.cs`。
+
+## 2026-11-07 #26
+【Fixed: 滚筒挥击贴脸打不中敌人】弹丸命中走 `Physics.SphereCast`，它不报告「球体起始时已相交」的碰撞体——挥击出射点（身前 0.55m/高 1.15m/命中半径 0.85m）贴脸时已嵌进敌人胶囊（半径 0.45m），球扫整段静默失败，墨滴飞过头顶、隔一段距离才命中；INKWAVE 用「线段-胶囊距离」纯数学判定（重叠即命中，weapons.js `_step`）故无此盲区。修复：球扫未找到角色时用只含角色层的 `OverlapSphere` 补判已重叠敌人（取碰撞体最近点为命中点，更近的世界命中不覆盖），爆破枪等所有弹丸的同类贴脸盲区一并修复。文件：`Scripts/Weapons/InkProjectilePool.cs`。
+
+## 2026-11-07 #25
+【按键布局编辑器：大小/透明度滑条重做为细轨道 + 圆钮】旧版 110×44 通体胶囊轨道配 20×44 竖长条把手，观感笨重；现拖动热区仍为 110×64（透明 Image 吃射线），可见部分改为 26 高 PaperAlt 胶囊轨道（3px 墨框）+ 黄色胶囊填充 + 26 正圆纸白把手（3px 墨边），与设置页音量条同一语言。陷阱：圆钮圆心必须在 [半径, 宽-半径] 内移动，旧公式 `norm*width` 会让把手半截越出轨道两端。文件：`Scripts/UI/MobileLayoutCustomizer.cs`。
 
 ## 2026-11-07 #24
 【准星 P40：7 把武器各自轮廓 + 整体克制化】5 把弹丸武器（小枪/双枪/泼桶/爆破/加特林）此前共用一个轮廓，现按身份各配外壳（双枪双小环+架枪菱形锁定框、泼桶拱形+落点斗、爆破内外双环、加特林 8 段蓄力环），共享中心点与散布刻度；主环 60→44 且不再随散布缩放（同一信息只画一遍）、满蓄 PingPong 循环脉冲改 0.35s 一次性闪光（几何风禁止循环脉冲）、移动端整体 ×1.28 与字号同源、滚筒「像进度条的胶囊」改括号+落点弧（宽度随 rollWidth）、命中标记收细并收进主环内（旧版 44px 冲击环+长条糊成菱形靶心）。陷阱：`OutlinedBar` 长轴沿本地 +Y，绕 Z 转 θ 后方向是 (-sinθ,cosθ)，手算角度拼拱形会转成放射线——新增 `CreateSegment(from,to)` 按端点连段（`WeaponReticleUI`）。文件：`Scripts/UI/{WeaponReticleUI,ReticleStateMath}.cs`、`Tests/EditMode/{ReticleStateMathTests,ReticleAndTrajectoryTests}.cs`。

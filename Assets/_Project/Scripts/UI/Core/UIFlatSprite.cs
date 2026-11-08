@@ -13,6 +13,10 @@ namespace P1.UI
     /// - <see cref="White"/>：1×1 纯白，直角色块/分隔线/全屏特效层用；
     /// - <see cref="Circle"/> / <see cref="Pill"/>：白色正圆/胶囊（两端半圆、半径 = 高度一半），
     ///   进度条、滑轨、圆点用。按纵横比进程内缓存，条形尺寸变化时重新取用即可。
+    ///
+    /// 环状弧不用精灵：`Image.Filled + Radial360` 需要带 alpha 的圆环贴图，运行时精灵在
+    /// 即时 Canvas 重建里会被画成整块矩形（Simple 正常、Radial360 失效），
+    /// 所以环状仪表统一走网格绘制的 <see cref="UIArcRingGraphic"/>。
     /// </summary>
     public static class UIFlatSprite
     {
@@ -58,9 +62,14 @@ namespace P1.UI
             float radius = height * 0.5f;
             float straight = Mathf.Max(0f, width - radius * 2f);
 
-            var texture = new Texture2D(width, height, TextureFormat.ARGB32, false)
+            // mipmap + 三线性：条高 12~20px 时贴图要缩 3~5 倍，没有 mip 的 bilinear 采样
+            // 会把半圆端头采成台阶（HUD 横条「锯齿感」的主因）。
+            var texture = new Texture2D(width, height, TextureFormat.ARGB32, true)
             {
                 name = $"UIFlatPill{key}",
+                filterMode = FilterMode.Trilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                anisoLevel = 0,
             };
             var pixels = new Color32[width * height];
             for (int y = 0; y < height; y++)
@@ -94,7 +103,7 @@ namespace P1.UI
             }
 
             texture.SetPixels32(pixels);
-            texture.Apply(false, true);
+            texture.Apply(true, true); // 生成 mip 链后再释放 CPU 侧像素
 
             var sprite = Sprite.Create(
                 texture,

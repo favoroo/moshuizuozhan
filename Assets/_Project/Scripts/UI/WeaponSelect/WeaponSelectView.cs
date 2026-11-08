@@ -1101,9 +1101,10 @@ namespace P1.UI.WeaponSelect
 
         private void PlaySelectSound()
         {
-            if (AudioManager.Instance != null && AudioManager.Instance.uiClickClip != null)
+            if (AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayOne(AudioManager.Instance.uiClickClip, 0.75f, 0.96f, 1.05f);
+                // 走 AudioManager 的统一节流：直接 PlayOne 会绕过 30ms 窗口，连点叠成爆音
+                AudioManager.Instance.PlayWeaponCardSelect();
             }
         }
 

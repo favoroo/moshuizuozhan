@@ -208,5 +208,72 @@ namespace P1.Tests
 
             Object.Destroy(slamConfig);
         }
+
+        /// <summary>
+        /// 阵亡观战镜头（对标 INKWAVE death cam）：
+        /// 本地玩家被敌方击杀后不再定格在空地，而是把镜头转向击杀者；复活那一帧退出观战、
+        /// 硬切回玩家身后（第三人称跟随）。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator LocalPlayerDeath_DeathCamWatchesKiller_AndRestoresOnRespawn()
+        {
+            SceneManager.LoadScene(SceneName);
+            yield return null;
+            yield return null;
+
+            var player = PlayerController.LocalPlayer;
+            Assert.IsNotNull(player, "场景中应存在本地玩家");
+            var follow = TopDownCameraFollow.Instance;
+            Assert.IsNotNull(follow, "场景中应存在第三人称相机");
+
+            MatchManager match = MatchManager.Instance != null
+                ? MatchManager.Instance
+                : Object.FindAnyObjectByType<MatchManager>();
+            Assert.IsNotNull(match, "场景中应存在 MatchManager");
+            var setPhase = typeof(MatchManager).GetMethod(
+                "SetPhase", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(setPhase, "MatchManager 必须具备 SetPhase 私有方法");
+            setPhase.Invoke(match, new object[] { MatchManager.Phase.Playing });
+
+            // 造一个真实 CombatantHealth 当击杀者（不挂 PlayerController，避免变成第二个本地玩家）
+            var killerGo = new GameObject("DeathCam_Killer", typeof(CombatantHealth));
+            var killerHealth = killerGo.GetComponent<CombatantHealth>();
+            killerGo.transform.position = player.transform.position + new Vector3(2.5f, 0f, 2.5f);
+            killerHealth.Configure(Team.TeamB, player.Health.Config);
+            yield return null;
+            Assert.IsTrue(killerHealth.IsAlive, "前置：击杀者应存活");
+
+            bool killed = player.Health.TakeDamage(
+                999f, Team.TeamB, player.transform.position, killerHealth, "DeathCamTest");
+            Assert.IsTrue(killed, "前置：本地玩家应被击杀");
+            Assert.IsTrue(follow.IsDeathCamActive, "本地玩家被敌方击杀后应进入阵亡观战");
+            Assert.AreEqual(killerGo.transform, follow.DeathCamKiller, "观战对象应是击杀者");
+
+            // 停留 0.8s + 视线转向击杀者：留 2.2s 真实时间（低帧率也够收敛）
+            yield return new WaitForSecondsRealtime(2.2f);
+
+            Camera cam = follow.CameraComponent;
+            Vector3 killerChest = killerGo.transform.position + Vector3.up * 1.1f;
+            Vector3 toKiller = (killerChest - cam.transform.position).normalized;
+            float facing = Vector3.Dot(cam.transform.forward, toKiller);
+            Assert.Greater(facing, 0.9f, $"观战镜头应盯住击杀者，实际点积 {facing:0.00}");
+
+            float distance = Vector3.Distance(cam.transform.position, killerChest);
+            Assert.That(distance, Is.InRange(3f, 9f),
+                $"观战机位应绕在击杀者周围（约 5.5m 半径 + 2.4m 高），实际 {distance:0.00}m");
+
+            // 复活：退出观战并回到本地玩家身后
+            player.Health.ResetImmediately();
+            yield return null;
+            yield return null;
+
+            Assert.IsFalse(follow.IsDeathCamActive, "复活后必须退出阵亡观战");
+            Vector3 toCamera = cam.transform.position - player.transform.position;
+            toCamera.y = 0f;
+            Assert.Less(Vector3.Dot(toCamera.normalized, follow.PlanarForward), -0.5f,
+                "复活后相机应回到玩家身后（第三人称跟随）");
+
+            Object.Destroy(killerGo);
+        }
     }
 }

@@ -318,12 +318,43 @@ Shader "P1/InkGround"
                 if (!inkInPlayableMap)
                     inkSample = float4(0.0, 0.0, 0.0, 0.0);
 
-                // 4 邻域采样：解析覆盖率 / 队伍比例 / 湿润度梯度
+                // 三次 B 样条重建（对齐 INKWAVE paintCubic）：C1 连续覆盖率场 + 解析梯度，
+                // 消除墨缘法线 / 接触阴影 / 队伍交界的纹元级马赛克小面片。桌面与移动端共用；
+                // _P1InkBicubicStrength = 0 时逐位回到双线性旧行为（回退开关）。
+                float bicu = saturate(_P1InkBicubicStrength);
+                float2 gradAmtCubicTexel = float2(0.0, 0.0);   // 每纹元覆盖率梯度（预乘 A 通道）
+                float2 gradTeamCubicTexel = float2(0.0, 0.0);  // 每纹元队伍占比梯度（预乘 R 通道）
+                float2 gradTsCubicTexel = float2(0.0, 0.0);    // 每纹元时间戳梯度（预乘 G 通道）
+                if (bicu > 0.001)
+                {
+                    float4 cubicGradX, cubicGradY;
+                    float2 gradClipX = clamp(ddx(inkUV), -8.0 * texelUV, 8.0 * texelUV);
+                    float2 gradClipY = clamp(ddy(inkUV), -8.0 * texelUV, 8.0 * texelUV);
+                    float4 cubicSample = P1SampleInkAtlasCubicGrad(_GlobalInkAtlasTex, sampler_LinearClamp,
+                        inkUV, texelUV, gradClipX, gradClipY, cubicGradX, cubicGradY);
+                    // 场外强制无墨：B 样条 tap 会钳到边界纹素，必须在混合前清零
+                    if (!inkInPlayableMap)
+                        cubicSample = float4(0.0, 0.0, 0.0, 0.0);
+                    gradAmtCubicTexel = float2(cubicGradX.a, cubicGradY.a);
+                    gradTeamCubicTexel = float2(cubicGradX.r, cubicGradY.r);
+                    gradTsCubicTexel = float2(cubicGradX.g, cubicGradY.g);
+                    inkSample = lerp(inkSample, cubicSample, bicu);
+                }
+
+                // 4 邻域采样：解析覆盖率 / 队伍比例 / 湿润度梯度（线性回退路径；
+                // B 样条全开时邻域梯度改由解析梯度承担，这里用中心值占位）
                 float2 uvOffset = texelUV;
-                float4 sampR = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(uvOffset.x, 0.0)));
-                float4 sampL = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV - float2(uvOffset.x, 0.0)));
-                float4 sampU = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(0.0, uvOffset.y)));
-                float4 sampD = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV - float2(0.0, uvOffset.y)));
+                float4 sampR = inkSample;
+                float4 sampL = inkSample;
+                float4 sampU = inkSample;
+                float4 sampD = inkSample;
+                if (bicu < 0.999)
+                {
+                    sampR = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(uvOffset.x, 0.0)));
+                    sampL = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV - float2(uvOffset.x, 0.0)));
+                    sampU = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(0.0, uvOffset.y)));
+                    sampD = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV - float2(0.0, uvOffset.y)));
+                }
 
                 // R/G/B 均按覆盖率预乘，这里反预乘回真实数据：
                 // G = 最新落墨时间戳 × 覆盖率（InkAtlasStamp Pass 预乘后 Max 混合写入），
@@ -368,11 +399,16 @@ Shader "P1/InkGround"
                 // 世界空间覆盖率梯度（单位：每米），保证任何图集分辨率下法线尺度都正确
                 float2 worldOffset = max(uvOffset * mapSize, float2(1e-5, 1e-5));
                 float2 gradAmt = float2(sampR.a - sampL.a, sampU.a - sampD.a) / (2.0 * worldOffset);
+                // B 样条解析梯度（每纹元 → 每米）：C1 连续场，唇缘法线 / 接触阴影不再逐纹元跳变
+                if (bicu > 0.001)
+                {
+                    float2 texelMeters = max(texelUV * mapSize, float2(1e-5, 1e-5));
+                    gradAmt = lerp(gradAmt, gradAmtCubicTexel / texelMeters, bicu);
+                }
 
-                // 生长动画（片元侧）：新墨斑落墨即以最终形态写入图集，这里按时间戳把可见边缘
-                // 从最终轮廓向外偏移采样（形态学侵蚀）回缩 _InkGrowShrinkMeters，随生长进度松开，
-                // 观感等价旧的「生长期间每帧重画放大墨斑」，但图集只在落墨那一刻写一次。
-                // 额外的一次图集采样只发生在 age < grow*1.6 的新鲜纹素上，空闲时零开销。
+                // 生长动画：P52 起改由写入端编排（InkSplatAtlas._growing 逐帧重绘，主体泛出 /
+                // 射线冲出 / 卫星错峰落地）。下面的片元形态学侵蚀已停用（_InkGrowActive 恒 0），
+                // 代码保留作为回滚路径：InkSurfaceController.PushWetClockGlobals 一行改回即恢复。
                 float amtEff = amt;
                 if (_InkGrowActive > 0.5 && _InkGrowSeconds > 0.001 && inkAgeSec < _InkGrowSeconds * 1.6)
                 {
@@ -388,12 +424,16 @@ Shader "P1/InkGround"
                     }
                 }
 
-                // 梯度修正覆盖率（只在 P1_INK_HIGH）：复用 sampR/L/U/D 邻域采样结果做亚纹素平滑
+                // 梯度修正覆盖率（只在 P1_INK_HIGH）：复用 sampR/L/U/D 邻域采样结果做亚纹素平滑。
+                // B 样条重建本身就是亚纹元精确（C1 连续场），全开时跳过以免双重平滑。
                 #if defined(P1_INK_HIGH)
-                float2 atlasRes = _GlobalInkTexelSize.zw > 1.0 ? _GlobalInkTexelSize.zw : float2(4096.0, 4096.0);
-                float2 subPixelF = frac(inkUV * atlasRes);
-                float amtCorr = saturate(amt + 0.5 * ((sampR.a - sampL.a) * (subPixelF.x - 0.5) + (sampU.a - sampD.a) * (subPixelF.y - 0.5)));
-                amtEff = lerp(amtEff, amtCorr, saturate(_P1InkEdgeSmoothStrength));
+                if (bicu < 0.99)
+                {
+                    float2 atlasRes = _GlobalInkTexelSize.zw > 1.0 ? _GlobalInkTexelSize.zw : float2(4096.0, 4096.0);
+                    float2 subPixelF = frac(inkUV * atlasRes);
+                    float amtCorr = saturate(amt + 0.5 * ((sampR.a - sampL.a) * (subPixelF.x - 0.5) + (sampU.a - sampD.a) * (subPixelF.y - 0.5)));
+                    amtEff = lerp(amtEff, amtCorr, saturate(_P1InkEdgeSmoothStrength));
+                }
                 #endif
 
                 // 场外强制无墨：亚纹素修正会用邻域采样把边界覆盖率带回来，必须在修正后再清一次，
@@ -503,6 +543,13 @@ Shader "P1/InkGround"
                 float tD = saturate(sampD.r / aD);
 
                 float2 gradTeam = float2(tR - tL, tU - tD) * 0.5;
+                // B 样条解析梯度（每纹元，量纲与 2 纹元中心差分一致）：预乘 R/A 按商法则反预乘，
+                // 两队交界缝的方向/法线随连续场平滑，不再逐纹元抖动
+                if (bicu > 0.001)
+                {
+                    float2 gradTeamCubic = (gradTeamCubicTexel - tRaw * gradAmtCubicTexel) / max(amt, 0.2);
+                    gradTeam = lerp(gradTeam, gradTeamCubic, bicu);
+                }
                 float gTl = length(gradTeam);
 
                 float seamShadow = 0.0;
@@ -522,6 +569,11 @@ Shader "P1/InkGround"
                     float tsU = sampU.g / aU;
                     float tsD = sampD.g / aD;
                     float2 gradTs = float2(tsR - tsL, tsU - tsD) * 0.5;
+                    if (bicu > 0.001)
+                    {
+                        float2 gradTsCubic = (gradTsCubicTexel - tsNewest * gradAmtCubicTexel) / max(amt, 0.2);
+                        gradTs = lerp(gradTs, gradTsCubic, bicu);
+                    }
                     gradTs = (frac(gradTs + 0.5) - 0.5) * 2.0;
                     float wetScale = max(0.001, _InkWetClockPeriod) / max(0.25, _InkWetDryingSeconds);
                     float2 gradWet = gradTs * wetScale;
@@ -629,8 +681,8 @@ Shader "P1/InkGround"
                 float specNorm = (specPower + 8.0) / 8.0;
                 float directSpec = pow(NdotH, specPower) * specNorm * (0.04 + 0.08 * wet);
 
-                // 针对俯视角调优的掠射菲涅尔（保证大角度不发白，锁住纯净鲜艳的队伍墨色）。
-                // F0 抬到 0.07~0.11：物理 0.035 在本游戏 40°~50° 俯视角下镜面贡献几乎为零，
+                // 针对第三人称斜俯机位调优的掠射菲涅尔（保证大角度不发白，锁住纯净鲜艳的队伍墨色）。
+                // F0 抬到 0.07~0.11：物理 0.035 在本游戏相机 40°~50° 俯角下镜面贡献几乎为零，
                 // 干墨读作平涂粉漆；抬 F0 是给墨面"常数缎面光泽"的作弊项（对齐 INKWAVE clearcoat F0 0.055+）。
                 float fresnel = pow(1.0 - NdotV, 3.5);
                 float clearcoatF0 = lerp(0.07, 0.11, max(wet, sheen * 0.6));
@@ -646,7 +698,7 @@ Shader "P1/InkGround"
                 float3 R = reflect(-V, finalNormalWS);
                 half glanceDamp = (half)(1.0 - 0.55 * pow(saturate(1.0 - NdotV), 2.0));
                 half3 envSpec = P1InkEnvSpecularFull(R, rough, NdotV, teamCol) * glanceDamp;
-                // 环境反射只在「湿墨 / 缎面余晖」期增强；干墨区不再额外加乘，避免俯视角下
+                // 环境反射只在「湿墨 / 缎面余晖」期增强；干墨区不再额外加乘，避免斜俯视角下
                 // 整片老墨被恒定天空反射抬亮（P31 回归：地面队色读作粉橘色）。
                 envSpec *= (half)(1.0 + 0.85 * wet + 0.55 * sheen);
 
@@ -679,6 +731,10 @@ Shader "P1/InkGround"
                     inkColor = lerp(inkColor, satColor * 0.82, ringMask);
                 }
                 #endif
+
+                // 阴影中保饱和（对齐 INKWAVE INK_SHADE）：漫反射越弱（背光/阴影/暗部色阶），
+                // 亮度守恒地提升色度——暗部墨保持「墨」的鲜艳，而不是塌成灰漆
+                inkColor = P1InkShadowChroma(inkColor, _P1InkShadowChroma * (1.0 - diffuseLight));
 
                 // 扣减重叠交界缝暗影
                 inkColor *= 1.0 - 0.3 * seamShadow * inkMask;
@@ -724,7 +780,7 @@ Shader "P1/InkGround"
             ENDHLSL
         }
 
-        // 高台/斜坡/地面也需要投影：否则俯视角下所有高低差都像贴纸一样「飘」在地面上。
+        // 高台/斜坡/地面也需要投影：否则斜俯视角下所有高低差都像贴纸一样「飘」在地面上。
         Pass
         {
             Name "ShadowCaster"
@@ -1058,6 +1114,7 @@ Shader "P1/InkGround"
                 o.splatA = v.splatA;
                 o.splatB = v.splatB;
                 o.splatDir = v.splatDir;
+                o.splatGrow = v.splatGrow;
                 return o;
             }
 
@@ -1070,8 +1127,10 @@ Shader "P1/InkGround"
                 float2 stretchDir;
                 float stretch01;
                 P1InkSplatDecodeStretch(input.splatDir, stretchDir, stretch01);
-                float sd = P1InkSplatDistanceDir(input.local, radius, input.splatB.x, input.splatB.y,
-                                                 _InkTexelMeters, stretchDir, stretch01);
+                // splatGrow.x = 归一化生长时间 tn：写侧逐帧重绘生长中的墨斑（INKWAVE 同款编排），
+                // tn=3 时与旧「一次性最终形态」逐位一致。
+                float sd = P1InkSplatDistanceDirGrow(input.local, radius, input.splatB.x, input.splatB.y,
+                                                     _InkTexelMeters, stretchDir, stretch01, input.splatGrow.x);
                 float a = P1InkSplatCoverage(sd, _InkTexelMeters);
                 if (a <= 0.003) discard;
 
@@ -1165,6 +1224,7 @@ Shader "P1/InkGround"
                 o.splatA = v.splatA;
                 o.splatB = v.splatB;
                 o.splatDir = v.splatDir;
+                o.splatGrow = v.splatGrow;
                 return o;
             }
 
@@ -1178,8 +1238,8 @@ Shader "P1/InkGround"
                 float2 stretchDir;
                 float stretch01;
                 P1InkSplatDecodeStretch(input.splatDir, stretchDir, stretch01);
-                float sd = P1InkSplatDistanceDir(input.local, radius, input.splatB.x, input.splatB.y,
-                                                 _InkTexelMeters, stretchDir, stretch01);
+                float sd = P1InkSplatDistanceDirGrow(input.local, radius, input.splatB.x, input.splatB.y,
+                                                     _InkTexelMeters, stretchDir, stretch01, input.splatGrow.x);
                 float a = P1InkSplatCoverage(sd, _InkTexelMeters);
                 if (a <= 0.003) discard;
 

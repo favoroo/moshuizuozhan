@@ -294,6 +294,56 @@ namespace P1.Tests
         }
 
         [UnityTest]
+        public IEnumerator InkTempest_OverheadCover_BlocksRainDamage()
+        {
+            yield return LoadPlaybox();
+
+            var player = PlayerController.LocalPlayer;
+            var weapon = player.Weapon;
+
+            _tempConfig = ScriptableObject.CreateInstance<WeaponConfigSO>();
+            _tempConfig.specialKind = SpecialKind.Storm;
+            _tempConfig.specialPointsRequired = 180f;
+            _tempConfig.stormDuration = 4.0f;
+            weapon.EquipWeapon(_tempConfig);
+            weapon.AddSpecialPointsRaw(500);
+
+            Vector3 target = player.transform.position + Vector3.forward * 6f;
+            target.y = 0f;
+
+            Assert.IsTrue(weapon.TryActivateSpecial(target), "风暴云大招应能释放");
+
+            // 等云展开（先展开再立掩体，避免影响发生器的落点贴地射线）
+            var pool = InkStormCloudPool.Instance;
+            float expandDeadline = Time.time + 2f;
+            while ((pool == null || pool.ActiveStormCount == 0 || !pool.TryGetActiveCloudPosition(out _))
+                   && Time.time < expandDeadline)
+            {
+                yield return null;
+            }
+            Assert.IsTrue(pool != null && pool.ActiveStormCount > 0, "云层应已展开");
+
+            // 掩体：被掩护目标头顶 3m 一块薄板（云腹 ≈3.9m，板卡在云与胸口之间）
+            var covered = CreateCombatant("StormCovered", Team.TeamB, new Vector3(target.x, 0f, target.z));
+            var roof = new GameObject("StormCoverRoof");
+            roof.transform.position = new Vector3(target.x, 3f, target.z);
+            var roofCollider = roof.AddComponent<BoxCollider>();
+            roofCollider.size = new Vector3(4f, 0.2f, 4f);
+            _spawned.Add(roof);
+
+            // 露天对照：同一朵云的雨区边缘内（+2.5m），头顶无遮挡，应正常吃 DOT
+            var exposed = CreateCombatant("StormExposed", Team.TeamB,
+                new Vector3(target.x + 2.5f, 0f, target.z));
+
+            yield return new WaitForSeconds(1.6f);
+
+            Assert.GreaterOrEqual(covered.GetComponent<CombatantHealth>().CurrentHealth, 100f,
+                "头顶有掩体的目标不应吃到雨伤（Inkwave LOS：胸口→云腹被挡则豁免）");
+            Assert.Less(exposed.GetComponent<CombatantHealth>().CurrentHealth, 100f,
+                "露天目标应正常吃到 34 DPS 雨伤");
+        }
+
+        [UnityTest]
         public IEnumerator SplatBomb_Spends55Ink_AndKillsWith95SecondFuse()
         {
             yield return LoadPlaybox();

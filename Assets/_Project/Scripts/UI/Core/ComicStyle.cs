@@ -34,6 +34,9 @@ namespace P1.UI
         public static readonly Color Blue = FromHex(0x2456FF);
         public static readonly Color Green = FromHex(0x1FC94F);
 
+        /// <summary>荣誉金（生涯成就专用，与柠檬黄区分）。</summary>
+        public static readonly Color Gold = FromHex(0xF5A623);
+
         /// <summary>墨色半透明版本（弱化文字/分隔线用，避免抢主体）。</summary>
         public static readonly Color InkSoft = new Color(Ink.r, Ink.g, Ink.b, 0.14f);
 

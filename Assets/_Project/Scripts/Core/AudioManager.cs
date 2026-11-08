@@ -78,6 +78,8 @@ namespace P1.Core
         public AudioClip ultReadyClip;
         public AudioClip ultCastClip;
         public AudioClip specialSlamClip;
+        /// <summary>风暴云落地雷声（P41，Inkwave storm_thunder 同构）。</summary>
+        public AudioClip[] stormThunderClips;
 
         [Header("击杀与复活")]
         public AudioClip killClip;
@@ -104,6 +106,10 @@ namespace P1.Core
         [Header("比赛流程提示音（P5-C 无语音版）")]
         public AudioClip goCueClip;
         public AudioClip oneMinuteCueClip;
+        /// <summary>READY 建构音：进入 Ready 阶段（墨幕拉起前）播，和 Countdown 的蓄势音错开。</summary>
+        public AudioClip readyClip;
+        /// <summary>时间到：matchEndClip 缺失时的兜底终场提示。</summary>
+        public AudioClip timesUpClip;
 
         [Header("双段动态 BGM（P5-C）")]
         public AudioClip bgmMainClip;
@@ -119,6 +125,33 @@ namespace P1.Core
         public AudioClip loopStormRainClip;
         public AudioClip loopChargerChargeClip;
 
+        [Header("涂地补充（P-Audio：墨花分档 / 打墙 / 泵）")]
+        public AudioClip[] splatSmallClips;
+        public AudioClip[] splatBigClips;
+        public AudioClip[] inkHitWallClips;
+        public AudioClip[] blasterPumpClips;
+        public AudioClip splatlingReadyClip;
+        public AudioClip stormWindClip;
+
+        [Header("战斗状态提示（P-Audio）")]
+        public AudioClip spawnProtectClip;
+        public AudioClip lowHealthClip;
+        public AudioClip respawnTickClip;
+
+        [Header("战局提示（P-Audio）")]
+        public AudioClip leadGainClip;
+        public AudioClip leadLoseClip;
+        public AudioClip final10sClip;
+        public AudioClip enemySpecialWarnClip;
+
+        [Header("操作反馈（P-Audio）")]
+        public AudioClip weaponSwitchClip;
+        public AudioClip chargeCancelClip;
+        public AudioClip bombBounceClip;
+        public AudioClip[] reticleLockClips;
+        public AudioClip pauseOpenClip;
+        public AudioClip pauseCloseClip;
+
         private AudioSource[] _pool;
         private int _poolCursor;
         private float _lastGroundHitTime;
@@ -129,6 +162,12 @@ namespace P1.Core
         private float _lastHurtTime;
         private float _lastHitMarkerTime;
         private float _lastUiSoundTime;
+        private float _lastLowHealthTime;
+        private float _lastReticleLockTime;
+        private float _lastBombBounceTime;
+        private float _lastInkHitWallTime;
+        private float _lastSpawnProtectTime;
+        private float _lastLeadChangeTime;
 
         private AudioSource _musicMainSource;
         private AudioSource _musicFinalSource;
@@ -154,6 +193,8 @@ namespace P1.Core
             public Coroutine FadeRoutine;
             public bool IsFadingIn;
             public float TargetVolume;
+            /// <summary>调用方附加音量乘法器（1 = 正常）。P41：风暴雨声随云层消散淡出。</summary>
+            public float VolumeMultiplier = 1f;
         }
 
         private readonly Dictionary<LoopSfxKind, LoopChannel> _loopChannels = new Dictionary<LoopSfxKind, LoopChannel>();
@@ -185,7 +226,9 @@ namespace P1.Core
 #if UNITY_EDITOR
             EnsureEditorClips();
 #endif
-            BuildPool(12);
+            // 16 条 voice：8 人混战时炸弹爆炸 + 大招 + 落墨 + 命中会同帧叠十几发，
+            // 12 条会开始截断仍在发声的旧 clip（听感上是「音效被吃掉」）。
+            BuildPool(16);
             BuildMusicSources();
             BuildLoopSources();
         }
@@ -220,6 +263,7 @@ namespace P1.Core
 
             UpdateDuck(Time.unscaledDeltaTime);
             UpdateFinalStage();
+            UpdateFinalTenSeconds();
             ApplyMusicVolume();
         }
 
@@ -320,6 +364,9 @@ namespace P1.Core
                     // 从对局/结算返回主菜单：停掉战斗 BGM 与循环音，保持开局时的安静状态
                     ResetMusicForNewMatch();
                     StopAllLoops();
+                    // READY 建构音（旧版 ready_1 烘了却从未接线）：放在 Ready 而不是 Countdown，
+                    // 免得和墨幕入场的 match_start 蓄势音叠在一起抢拍。
+                    PlayMatchCue(readyClip, 0f);
                     break;
 
                 case MatchManager.Phase.Countdown:
@@ -335,7 +382,9 @@ namespace P1.Core
                     break;
 
                 case MatchManager.Phase.Finished:
-                    PlayMatchCue(matchEndClip);
+                    // match_end 是既定的终场定格音（含裁判双音哨）；times_up 只作兜底，
+                    // 避免两只哨音叠成 flam。
+                    PlayMatchCue(matchEndClip != null ? matchEndClip : timesUpClip);
                     FadeOutMusic(Mix.bgmFadeOutSeconds);
                     StopAllLoops();
                     break;
@@ -369,6 +418,25 @@ namespace P1.Core
             CrossfadeToFinalMusic();
         }
 
+        private bool _final10sCuePlayed;
+
+        /// <summary>最后 10 秒的紧迫提示（旧版只有 1 分钟那一档，末段没有递进）。</summary>
+        private void UpdateFinalTenSeconds()
+        {
+            if (_final10sCuePlayed || !_matchMusicStarted || _match == null)
+                return;
+
+            if (_match.CurrentPhase != MatchManager.Phase.Playing)
+                return;
+
+            if (_match.RemainingSeconds > 10f)
+                return;
+
+            _final10sCuePlayed = true;
+            PlayFinal10s();
+            Duck(Mix.matchCueDuckAmount, 1.2f);
+        }
+
         // ---------------------------------------------------------------- 动态 BGM
 
         private void ResetMusicForNewMatch()
@@ -384,6 +452,7 @@ namespace P1.Core
             _duckHoldUntil = -1f;
             _matchMusicStarted = false;
             _finalStage = false;
+            _final10sCuePlayed = false;
             ApplyMusicVolume();
         }
 
@@ -527,10 +596,36 @@ namespace P1.Core
                 }
 
                 channel.IsFadingIn = false;
-                float newTarget = GetLoopBaseVolume(channel.Kind) * Mix.loopMasterVolume * volume;
+                float newTarget = GetLoopBaseVolume(channel.Kind) * Mix.loopMasterVolume * volume * channel.VolumeMultiplier;
                 channel.TargetVolume = newTarget;
                 channel.Source.volume = newTarget;
             }
+        }
+
+        /// <summary>
+        /// 设置循环音的附加音量乘法器（0~1，P41）：风暴雨声随云层消散淡出用。
+        /// 立即跳变生效（与音效音量变化同一处理）；StopLoop 复位为 1。不改变 PlayLoop 的定价基准。
+        /// </summary>
+        public void SetLoopVolume(LoopSfxKind kind, float multiplier)
+        {
+            EnsureLoopSources();
+            if (!_loopChannels.TryGetValue(kind, out LoopChannel channel) || channel.Source == null)
+                return;
+
+            channel.VolumeMultiplier = Mathf.Clamp01(multiplier);
+            if (!channel.Source.isPlaying)
+                return;
+
+            if (channel.FadeRoutine != null)
+            {
+                StopCoroutine(channel.FadeRoutine);
+                channel.FadeRoutine = null;
+            }
+
+            channel.IsFadingIn = false;
+            float newTarget = GetLoopBaseVolume(channel.Kind) * Mix.loopMasterVolume * GameSettingsService.SfxVolume * channel.VolumeMultiplier;
+            channel.TargetVolume = newTarget;
+            channel.Source.volume = newTarget;
         }
 
         private static void StopSource(AudioSource src)
@@ -726,17 +821,14 @@ namespace P1.Core
         /// </summary>
         public void PlayKill(int streak)
         {
-            PlayOne(killClip, 0.80f, 0.98f, 1.04f);
-
-            int bonus = Mathf.Clamp(Mathf.Max(0, streak) - 1, 0, 3);
-            float chimePitch = 1.02f + 0.05f * bonus;
-            AudioClip chime = uiConfirmClip != null ? uiConfirmClip : killClip;
-            PlayOne(chime, 0.24f + 0.05f * bonus, chimePitch, chimePitch * 1.01f);
+            // 旧实现：uiConfirmClip 为空时把保底设成 killClip，同一帧把击杀音播两遍
+            // （相位叠加成怪音）；现在统一走 PlayKillInternal，缺闪音就只播主音。
+            PlayKillInternal(streak, 1f);
         }
 
         public void PlayDeath()
         {
-            PlayOne(deathClip, 0.75f, 0.96f, 1.02f);
+            PlayOne(deathClip, Mix.deathVolume, 0.96f, 1.02f);
 
             var player = P1.Player.PlayerController.LocalPlayer;
             if (player != null && player.Health != null && !player.Health.IsAlive)
@@ -881,6 +973,16 @@ namespace P1.Core
             PlayOne(clip, 0.50f, 0.95f, 1.05f);
         }
 
+        /// <summary>投掷炸弹（按世界位置衰减）：8 人同时扔雷时不再全场一个响度。</summary>
+        public void PlayBombThrow(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, 24f, out gain))
+                return;
+
+            PlayOne(bombThrowClip, 0.50f * gain, 0.95f, 1.05f);
+        }
+
         public void PlayBombBeep()
         {
             PlayOne(bombBeepClip, 0.40f, 1.0f, 1.0f);
@@ -909,6 +1011,12 @@ namespace P1.Core
                 if (duckMusic)
                     Duck(Mix.ultDuckAmount, 0.55f);
             }
+        }
+
+        /// <summary>风暴云落地雷声（P41）：随机变体，音量对齐 Inkwave storm_thunder 的 0.6。</summary>
+        public void PlayStormThunder()
+        {
+            PlayOne(PickRandom(stormThunderClips), 0.60f, 0.94f, 1.06f);
         }
 
         public void PlayHurt()
@@ -1026,12 +1134,354 @@ namespace P1.Core
             }
         }
 
+        // ---------------------------------------------------------------- 远场衰减与新增事件音（P-Audio）
+
+        /// <summary>一次性事件音的最大可听距离（米）。</summary>
+        private const float EventMaxDistance = 30f;
+
+        private float _lastRefillFullTime;
+
+        /// <summary>
+        /// 世界坐标事件音的衰减：超出 maxDistance 返回 false（不播），否则给 0.22~1 的增益。
+        /// 与 <see cref="PlayInkHitGround(Vector3,float,float)"/> 的平方衰减同族，
+        /// 但保留 0.22 的远处保底——敌人在地图对角放大招仍要听得见方位，只是不该和贴脸一样响。
+        /// </summary>
+        private bool TryEventGain(Vector3 worldPos, float maxDistance, out float gain)
+        {
+            gain = 1f;
+            P1.Player.PlayerController player = P1.Player.PlayerController.LocalPlayer;
+            if (player == null)
+                return true;
+
+            float distance = Vector3.Distance(worldPos, player.transform.position);
+            if (distance > maxDistance)
+                return false;
+
+            float a = 1f - distance / maxDistance;
+            gain = 0.22f + 0.78f * a * a;
+            return true;
+        }
+
+        // ---- 炸弹 ----
+
+        /// <summary>炸弹爆炸（按世界位置衰减；无参重载保持「本地满音量」旧语义）。</summary>
+        public void PlayBombExplode(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, EventMaxDistance, out gain))
+                return;
+
+            PlayOne(bombExplodeClip, 0.85f * gain, 0.96f, 1.04f);
+            if (gain > 0.9f) // 只有贴脸爆炸才压 BGM，远处的别抢我方音乐
+                Duck(Mix.ultDuckAmount * 0.5f, 0.45f);
+        }
+
+        public void PlayBombBeep(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, EventMaxDistance, out gain))
+                return;
+
+            PlayOne(bombBeepClip, 0.40f * gain, 1f, 1f);
+        }
+
+        /// <summary>炸弹撞墙反弹（旧版完全静音）：短促干硬「嗒」，提示「炸弹还在弹」。</summary>
+        public void PlayBombBounce(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, 18f, out gain))
+                return;
+
+            if (Time.unscaledTime - _lastBombBounceTime < Mix.bombBounceThrottleSeconds)
+                return;
+
+            _lastBombBounceTime = Time.unscaledTime;
+            PlayOne(bombBounceClip, Mix.bombBounceVolume * gain, 0.94f, 1.06f);
+        }
+
+        // ---- 大招与击杀 ----
+
+        /// <summary>按世界位置播放施放大招音：远处敌人大招只留方位感，不闪避我方 BGM。</summary>
+        public void PlaySpecialCast(SpecialKind kind, Vector3 worldPos, bool duckMusic = true)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, EventMaxDistance + 6f, out gain))
+                return;
+
+            AudioClip clip = kind == SpecialKind.Slam
+                ? (specialSlamClip != null ? specialSlamClip : ultCastClip)
+                : ultCastClip;
+
+            PlayOne(clip, 0.90f * gain, 0.98f, 1.02f);
+
+            if (duckMusic && gain > 0.9f)
+                Duck(Mix.ultDuckAmount, kind == SpecialKind.Slam ? 0.70f : 0.55f);
+        }
+
+        private void PlayKillInternal(int streak, float gain)
+        {
+            if (killClip != null)
+                PlayOne(killClip, 0.80f * gain, 0.98f, 1.04f);
+
+            // 连杀闪音只在有存在感且配了 ui_confirm 时叠。
+            // 旧版在 uiConfirmClip 为空时回退成 killClip，同一帧把击杀音播两遍（相位叠加成怪音）。
+            if (gain < 0.5f || uiConfirmClip == null)
+                return;
+
+            int bonus = Mathf.Clamp(Mathf.Max(0, streak) - 1, 0, 3);
+            float chimePitch = 1.02f + 0.05f * bonus;
+            PlayOne(uiConfirmClip, (0.24f + 0.05f * bonus) * gain, chimePitch, chimePitch * 1.01f);
+        }
+
+        /// <summary>按世界位置播放击杀音（远处队友击杀不该和自己的击杀一样响）。</summary>
+        public void PlayKill(int streak, Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, EventMaxDistance, out gain))
+                return;
+
+            PlayKillInternal(streak, gain);
+        }
+
+        public void PlayDeath(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, EventMaxDistance, out gain))
+                return;
+
+            PlayOne(deathClip, Mix.deathVolume * gain, 0.96f, 1.02f);
+            if (gain > 0.9f)
+                Duck(Mix.deathDuckAmount, 0.9f);
+        }
+
+        public void PlayStormThunder(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, EventMaxDistance + 10f, out gain))
+                return;
+
+            PlayOne(PickRandom(stormThunderClips), 0.60f * gain, 0.94f, 1.06f);
+        }
+
+        // ---- 移动 ----
+
+        /// <summary>
+        /// 起跳音（按世界位置）：旧版对所有角色都不加判定、按全局 2D 满音量播，
+        /// 8 人同时跳跃时自己的起跳会被别人的盖住。Bot 的跳跃现在按距离衰减。
+        /// </summary>
+        public void PlayJump(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, 22f, out gain))
+                return;
+
+            PlayOne(jumpClip, Mix.jumpVolume * gain, 0.97f, 1.03f);
+        }
+
+        public void PlayDodgeRoll(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, 22f, out gain))
+                return;
+
+            PlayOne(dodgeRollClip, Mix.dodgeRollVolume * gain, 0.92f, 1.08f);
+        }
+
+        // ---- 涂地补充 ----
+
+        /// <summary>
+        /// 墨花分档：impactRadius 越大越重——≥1.8m 走 slosh_land（整桶倾倒的湿重），
+        /// ≥1.2m 走 splat_big，否则 splat_small。
+        /// slosh_land 旧版烘了却从没播；墨斑尺寸是它最自然的落点。
+        /// </summary>
+        public void PlaySplat(Vector3 worldPos, float impactRadius, float volumeScale = 1f)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, InkHitMaxDistance, out gain))
+                return;
+
+            AudioClip[] clips = impactRadius >= 1.8f
+                ? sloshLandClips
+                : (impactRadius >= 1.2f ? splatBigClips : splatSmallClips);
+
+            PlayRandom(clips, Mix.splatVolume * Mathf.Clamp01(volumeScale) * gain, 0.92f, 1.08f);
+        }
+
+        /// <summary>墨水打墙（旧版只有落地一种墨音，打墙听起来像打地）。</summary>
+        public void PlayInkHitWall(Vector3 worldPos, float volumeScale = 1f)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, InkHitMaxDistance, out gain))
+                return;
+
+            if (Time.unscaledTime - _lastInkHitWallTime < 0.04f)
+                return;
+
+            _lastInkHitWallTime = Time.unscaledTime;
+            PlayRandom(inkHitWallClips,
+                Mix.inkHitWallVolume * Mathf.Clamp01(volumeScale) * gain, 0.94f, 1.06f);
+        }
+
+        /// <summary>泼桶落墨重音（旧版烘了 slosh_land 却从没播）。</summary>
+        public void PlaySloshLand(Vector3 worldPos, float volumeScale = 1f)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, EventMaxDistance, out gain))
+                return;
+
+            PlayRandom(sloshLandClips,
+                Mix.sloshLandVolume * Mathf.Clamp01(volumeScale) * gain, 0.94f, 1.06f);
+        }
+
+        /// <summary>爆破枪空爆（旧版烘了 blaster_boom 却从没播）。</summary>
+        public void PlayBlasterBoom(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, EventMaxDistance, out gain))
+                return;
+
+            PlayRandom(blasterBoomClips, Mix.blasterBoomVolume * gain, 0.94f, 1.06f);
+        }
+
+        /// <summary>爆破枪换气泵（跟随射速的机械音，只有本地玩家播）。</summary>
+        public void PlayBlasterPump()
+        {
+            PlayRandom(blasterPumpClips, Mix.blasterPumpVolume, 0.96f, 1.04f);
+        }
+
+        public void PlaySplatlingReady()
+        {
+            PlayOne(splatlingReadyClip, Mix.splatlingReadyVolume, 0.98f, 1.02f);
+        }
+
+        public void PlayStormWind()
+        {
+            PlayOne(stormWindClip, Mix.stormWindVolume, 0.96f, 1.04f);
+        }
+
+        // ---- 状态与战局提示 ----
+
+        /// <summary>出生保护生效：只播给本地玩家（别人的保护音会让人误判自己有无敌）。</summary>
+        public void PlaySpawnProtect()
+        {
+            if (Time.unscaledTime - _lastSpawnProtectTime < 0.5f)
+                return;
+
+            _lastSpawnProtectTime = Time.unscaledTime;
+            PlayOne(spawnProtectClip, Mix.spawnProtectVolume, 0.99f, 1.01f);
+        }
+
+        /// <summary>低血心跳：必须每次音高一致才读得成「危险」，所以不做随机音高。</summary>
+        public void PlayLowHealth()
+        {
+            if (Time.unscaledTime - _lastLowHealthTime < Mix.lowHealthThrottleSeconds)
+                return;
+
+            _lastLowHealthTime = Time.unscaledTime;
+            PlayOne(lowHealthClip, Mix.lowHealthVolume, 1f, 1f);
+        }
+
+        public void PlayRespawnTick()
+        {
+            PlayOne(respawnTickClip, Mix.respawnTickVolume, 0.99f, 1.01f);
+        }
+
+        /// <summary>比分反超提示：leading=true 我方领先（上行），false 被反超（下行）。</summary>
+        public void PlayLeadChange(bool leading)
+        {
+            if (Time.unscaledTime - _lastLeadChangeTime < Mix.leadChangeThrottleSeconds)
+                return;
+
+            _lastLeadChangeTime = Time.unscaledTime;
+            PlayOne(leading ? leadGainClip : leadLoseClip, Mix.leadChangeVolume, 1f, 1f);
+        }
+
+        /// <summary>终局最后 10 秒的紧迫提示（每分钟提示之外的第二档）。</summary>
+        public void PlayFinal10s()
+        {
+            PlayOne(final10sClip, Mix.final10sVolume, 1f, 1f);
+        }
+
+        /// <summary>敌方大招来袭：远处报警，不闪避 BGM、不盖住自己的战斗音。</summary>
+        public void PlayEnemySpecialWarn(Vector3 worldPos)
+        {
+            float gain;
+            if (!TryEventGain(worldPos, EventMaxDistance + 10f, out gain))
+                return;
+
+            PlayOne(enemySpecialWarnClip, Mix.enemySpecialWarnVolume * gain, 1f, 1f);
+        }
+
+        // ---- 操作反馈 ----
+
+        public void PlayWeaponSwitch()
+        {
+            PlayOne(weaponSwitchClip, Mix.weaponSwitchVolume, 0.97f, 1.03f);
+        }
+
+        /// <summary>
+        /// 武器卡片 / 整备换枪的选择音：比普通 UI 点击更响，但**必须走同一节流**。
+        /// 旧实现的两个界面各自直接调 PlayOne(uiClickClip, 0.75f)，绕过了 30ms 节流，
+        /// 连点时会把点击音叠成爆音。
+        /// </summary>
+        public void PlayWeaponCardSelect()
+        {
+            if (Time.unscaledTime - _lastUiSoundTime < Mix.uiThrottleSeconds)
+                return;
+
+            _lastUiSoundTime = Time.unscaledTime;
+            PlayOne(uiClickClip, 0.75f, 0.96f, 1.05f);
+        }
+
+        public void PlayChargeCancel()
+        {
+            PlayOne(chargeCancelClip, Mix.chargeCancelVolume, 0.98f, 1.02f);
+        }
+
+        public void PlayReticleLock()
+        {
+            if (Time.unscaledTime - _lastReticleLockTime < Mix.reticleLockThrottleSeconds)
+                return;
+
+            _lastReticleLockTime = Time.unscaledTime;
+            PlayRandom(reticleLockClips, Mix.reticleLockVolume, 0.99f, 1.01f);
+        }
+
+        public void PlayPause(bool opening)
+        {
+            PlayOne(opening ? pauseOpenClip : pauseCloseClip, Mix.pauseVolume, 1f, 1f);
+        }
+
+        /// <summary>墨罐回满：由 InkCharacterMotor 在「未满 → 满」边沿触发，别每帧刷。</summary>
+        public void PlayRefillFull()
+        {
+            if (Time.unscaledTime - _lastRefillFullTime < 0.8f)
+                return;
+
+            _lastRefillFullTime = Time.unscaledTime;
+            PlayOne(refillFullClip, Mix.refillFullVolume, 0.99f, 1.01f);
+        }
+
         // ---------------------------------------------------------------- 循环音效通道管线
+
+        /// <summary>
+        /// 蓄力狙循环音随蓄力进度的最低音量乘法器（WeaponAudioDriver 按 Charge01 插值用）。
+        /// </summary>
+        public float ChargerChargeRampMinVolume => Mix.chargerChargeRampMinVolume;
 
         /// <summary>
         /// 启动指定类型的循环音效：带淡入包络，同一循环重复 Play 不会叠音或重置播放位置。
         /// </summary>
         public void PlayLoop(LoopSfxKind kind)
+        {
+            PlayLoop(kind, 1f);
+        }
+
+        /// <summary>
+        /// 启动指定类型的循环音效并附加音量乘法器（0~1，2026-11-08）：蓄力狙循环音随蓄力进度渐强用。
+        /// 旧签名保留（等价于 multiplier=1）；StopLoop 仍会复位乘法器；淡入期间重复调用以更新后的乘法器续接。
+        /// </summary>
+        public void PlayLoop(LoopSfxKind kind, float volumeMultiplier)
         {
             if (!isActiveAndEnabled)
                 return;
@@ -1044,11 +1494,13 @@ namespace P1.Core
             if (clip == null)
                 return;
 
+            channel.VolumeMultiplier = Mathf.Clamp01(volumeMultiplier);
+
             if (channel.Source.isPlaying && channel.IsFadingIn)
                 return;
 
             float baseVol = GetLoopBaseVolume(kind);
-            float targetVol = baseVol * Mix.loopMasterVolume * GameSettingsService.SfxVolume;
+            float targetVol = baseVol * Mix.loopMasterVolume * GameSettingsService.SfxVolume * channel.VolumeMultiplier;
 
             if (channel.FadeRoutine != null)
             {
@@ -1084,6 +1536,12 @@ namespace P1.Core
                 && !channel.IsFadingIn && channel.FadeRoutine == null)
                 return;
 
+            // 已在淡出：WeaponAudioDriver 每帧都会对未激活的循环音调 StopLoop，
+            // 旧版每帧 Stop+Start 一次淡出协程（每帧一个迭代器分配），且淡出被无限重置。
+            if (!immediate && !channel.IsFadingIn && channel.TargetVolume <= 0.0001f
+                && channel.FadeRoutine != null)
+                return;
+
             if (channel.FadeRoutine != null)
             {
                 StopCoroutine(channel.FadeRoutine);
@@ -1092,6 +1550,7 @@ namespace P1.Core
 
             channel.IsFadingIn = false;
             channel.TargetVolume = 0f;
+            channel.VolumeMultiplier = 1f;
             if (!immediate && Application.isPlaying && isActiveAndEnabled)
             {
                 channel.FadeRoutine = StartCoroutine(LoopFadeRoutine(channel, 0f, Mix.loopFadeSeconds, true));
@@ -1246,47 +1705,60 @@ namespace P1.Core
         /// 这是独立包（Player Build）里新音效可见的唯一入口；编辑器内随后还会走
         /// <see cref="EnsureEditorClips"/> 做路径兜底。
         /// </summary>
-        private void EnsureRuntimeClips()
+private void EnsureRuntimeClips()
         {
             RuntimeAssetLibrary library = RuntimeAssetLibrary.Load();
             if (library == null)
                 return;
 
-            EnsureClips(ref shotClips, library, "shot_1", "shot_2", "shot_3");
-            EnsureClips(ref inkHitGroundClips, library, "ink_hit_ground_1", "ink_hit_ground_2", "ink_hit_ground_3");
-            EnsureClips(ref hitEnemyClips, library, "hit_enemy_1", "hit_enemy_2");
+            // 变体数组一律按「族名」自动取全（变体数由 tools/bake_sfx.py 决定）；
+            // 单发音效仍按具体文件名取。
+            EnsureVariantSet(ref shotClips, library, "shot");
+            EnsureVariantSet(ref inkHitGroundClips, library, "ink_hit_ground");
+            EnsureVariantSet(ref splatSmallClips, library, "splat_small");
+            EnsureVariantSet(ref splatBigClips, library, "splat_big");
+            EnsureVariantSet(ref inkHitWallClips, library, "ink_hit_wall");
+            EnsureVariantSet(ref hitEnemyClips, library, "hit_enemy");
             EnsureClip(ref inkEmptyClip, library, "ink_empty_1");
             EnsureClip(ref inkRefillClip, library, "ink_refill_1");
 
-            EnsureClips(ref rollerFlickClips, library, "roller_flick_1", "roller_flick_2");
+            EnsureVariantSet(ref rollerFlickClips, library, "roller_flick");
             EnsureClip(ref chargerChargeClip, library, "charger_charge_1");
             EnsureClip(ref chargerFullClip, library, "charger_full_1");
             EnsureClip(ref chargerShotClip, library, "charger_shot_1");
-            EnsureClips(ref blasterShotClips, library, "blaster_shot_1", "blaster_shot_2");
-            EnsureClips(ref blasterBoomClips, library, "blaster_boom_1", "blaster_boom_2");
+            EnsureVariantSet(ref blasterShotClips, library, "blaster_shot");
+            EnsureVariantSet(ref blasterPumpClips, library, "blaster_pump");
+            EnsureVariantSet(ref blasterBoomClips, library, "blaster_boom");
             EnsureClip(ref sloshThrowClip, library, "slosh_throw_1");
-            EnsureClips(ref sloshLandClips, library, "slosh_land_1", "slosh_land_2");
+            EnsureVariantSet(ref sloshLandClips, library, "slosh_land");
+            EnsureClip(ref splatlingReadyClip, library, "splatling_ready_1");
 
             EnsureClip(ref squidInClip, library, "squid_in_1");
             EnsureClip(ref squidOutClip, library, "squid_out_1");
-            EnsureClips(ref swimSplashClips, library, "swim_splash_1", "swim_splash_2");
-            EnsureClips(ref stepDryClips, library, "step_dry_1", "step_dry_2", "step_dry_3");
-            EnsureClips(ref stepInkBubbleClips, library, "step_ink_bubble_1", "step_ink_bubble_2", "step_ink_bubble_3");
-            EnsureClips(ref stepEnemyClips, library, "step_enemy_1", "step_enemy_2", "step_enemy_3");
+            EnsureVariantSet(ref swimSplashClips, library, "swim_splash");
+            EnsureVariantSet(ref stepDryClips, library, "step_dry");
+            EnsureVariantSet(ref stepInkBubbleClips, library, "step_ink_bubble");
+            EnsureVariantSet(ref stepEnemyClips, library, "step_enemy");
             EnsureClip(ref jumpClip, library, "jump_1");
             EnsureClip(ref landClip, library, "land_1");
             EnsureClip(ref dodgeRollClip, library, "dodge_roll_1");
 
             EnsureClip(ref hurtClip, library, "hurt_1");
-            EnsureClips(ref hitMarkerClips, library, "hit_marker_1", "hit_marker_2");
+            EnsureVariantSet(ref hitMarkerClips, library, "hit_marker");
             EnsureClip(ref refillFullClip, library, "refill_full_1");
+            EnsureClip(ref spawnProtectClip, library, "spawn_protect_1");
+            EnsureClip(ref lowHealthClip, library, "low_health_1");
+            EnsureClip(ref respawnTickClip, library, "respawn_tick_1");
 
             EnsureClip(ref bombThrowClip, library, "bomb_throw_1");
             EnsureClip(ref bombBeepClip, library, "bomb_beep_1");
             EnsureClip(ref bombExplodeClip, library, "bomb_explode_1");
+            EnsureClip(ref bombBounceClip, library, "bomb_bounce_1");
             EnsureClip(ref ultReadyClip, library, "ult_ready_1");
             EnsureClip(ref ultCastClip, library, "ult_cast_1");
             EnsureClip(ref specialSlamClip, library, "special_slam_1");
+            EnsureVariantSet(ref stormThunderClips, library, "storm_thunder");
+            EnsureClip(ref stormWindClip, library, "storm_wind_1");
 
             EnsureClip(ref killClip, library, "kill_1");
             EnsureClip(ref deathClip, library, "death_1");
@@ -1296,9 +1768,16 @@ namespace P1.Core
             EnsureClip(ref matchStartClip, library, "match_start_1");
             EnsureClip(ref goCueClip, library, "go_horn_1");
             EnsureClip(ref oneMinuteCueClip, library, "one_minute_1");
+            EnsureClip(ref readyClip, library, "ready_1");
             EnsureClip(ref matchEndClip, library, "match_end_1");
+            EnsureClip(ref timesUpClip, library, "times_up_1");
             EnsureClip(ref resultWinClip, library, "result_win_1");
             EnsureClip(ref resultLoseClip, library, "result_lose_1");
+            EnsureClip(ref final10sClip, library, "final_10s_1");
+            EnsureClip(ref leadGainClip, library, "lead_gain_1");
+            EnsureClip(ref leadLoseClip, library, "lead_lose_1");
+            EnsureClip(ref enemySpecialWarnClip, library, "enemy_special_warn_1");
+
             EnsureClip(ref uiClickClip, library, "ui_click_1");
             EnsureClip(ref uiHoverClip, library, "ui_hover_1");
             EnsureClip(ref uiConfirmClip, library, "ui_confirm_1");
@@ -1307,6 +1786,11 @@ namespace P1.Core
             EnsureClip(ref uiSliderClip, library, "ui_slider_1");
             EnsureClip(ref uiErrorClip, library, "ui_error_1");
             EnsureClip(ref lowInkWarningClip, library, "low_ink_warning_1");
+            EnsureClip(ref pauseOpenClip, library, "pause_open_1");
+            EnsureClip(ref pauseCloseClip, library, "pause_close_1");
+            EnsureClip(ref weaponSwitchClip, library, "weapon_switch_1");
+            EnsureClip(ref chargeCancelClip, library, "charge_cancel_1");
+            EnsureVariantSet(ref reticleLockClips, library, "reticle_lock");
 
             EnsureClip(ref loopRollerClip, library, "roll_loop_1");
             EnsureClip(ref loopSplatlingSpinClip, library, "splatling_spin_loop_1");
@@ -1314,7 +1798,22 @@ namespace P1.Core
             EnsureClip(ref loopClimbClip, library, "climb_loop_1");
             EnsureClip(ref loopEnemyInkSizzleClip, library, "enemy_ink_sizzle_loop_1");
             EnsureClip(ref loopStormRainClip, library, "storm_rain_loop_1");
-            EnsureClip(ref loopChargerChargeClip, library, "charger_charge_1");
+            // 蓄力循环改用真正的无缝循环件：旧版指向一次性 wav，循环接缝会「咔」
+            EnsureClip(ref loopChargerChargeClip, library, "charger_charge_loop_1");
+        }
+
+        /// <summary>
+        /// 按族名回填整个变体数组。变体数由烘焙脚本决定，调用方不该写死名字，
+        /// 否则一加变体，独立包里就只播前几个（旧做法的实际症状）。
+        /// </summary>
+        private static void EnsureVariantSet(ref AudioClip[] clips, RuntimeAssetLibrary library, string key)
+        {
+            if (clips != null && clips.Length > 0)
+                return;
+
+            AudioClip[] resolved = library.GetSfxVariants(key);
+            if (resolved != null && resolved.Length > 0)
+                clips = resolved;
         }
 
         private static void EnsureClip(ref AudioClip clip, RuntimeAssetLibrary library, string name)
@@ -1341,68 +1840,118 @@ namespace P1.Core
         }
 
 #if UNITY_EDITOR
-        private void EnsureEditorClips()
+private void EnsureEditorClips()
         {
+            // 循环音效：优先取真正的 *_loop_* 件（蓄力循环也一样）
             if (loopRollerClip == null) loopRollerClip = LoadClip("roll_loop_1");
             if (loopSplatlingSpinClip == null) loopSplatlingSpinClip = LoadClip("splatling_spin_loop_1");
             if (loopSwimClip == null) loopSwimClip = LoadClip("swim_loop_1");
             if (loopClimbClip == null) loopClimbClip = LoadClip("climb_loop_1");
             if (loopEnemyInkSizzleClip == null) loopEnemyInkSizzleClip = LoadClip("enemy_ink_sizzle_loop_1");
             if (loopStormRainClip == null) loopStormRainClip = LoadClip("storm_rain_loop_1");
-            if (loopChargerChargeClip == null) loopChargerChargeClip = LoadClip("charger_charge_1");
+            if (loopChargerChargeClip == null) loopChargerChargeClip = LoadClip("charger_charge_loop_1");
 
-            if (rollerFlickClips == null || rollerFlickClips.Length == 0)
-                rollerFlickClips = LoadClips("roller_flick_1", "roller_flick_2");
+            // 变体数组按族自动取全（旧版只填了前 2~3 个，新增变体在编辑器里也听不到）
+            EnsureEditorVariants(ref shotClips, "shot");
+            EnsureEditorVariants(ref inkHitGroundClips, "ink_hit_ground");
+            EnsureEditorVariants(ref splatSmallClips, "splat_small");
+            EnsureEditorVariants(ref splatBigClips, "splat_big");
+            EnsureEditorVariants(ref inkHitWallClips, "ink_hit_wall");
+            EnsureEditorVariants(ref hitEnemyClips, "hit_enemy");
+            EnsureEditorVariants(ref rollerFlickClips, "roller_flick");
+            EnsureEditorVariants(ref blasterShotClips, "blaster_shot");
+            EnsureEditorVariants(ref blasterPumpClips, "blaster_pump");
+            EnsureEditorVariants(ref blasterBoomClips, "blaster_boom");
+            EnsureEditorVariants(ref sloshLandClips, "slosh_land");
+            EnsureEditorVariants(ref swimSplashClips, "swim_splash");
+            EnsureEditorVariants(ref stepDryClips, "step_dry");
+            EnsureEditorVariants(ref stepInkBubbleClips, "step_ink_bubble");
+            EnsureEditorVariants(ref stepEnemyClips, "step_enemy");
+            EnsureEditorVariants(ref hitMarkerClips, "hit_marker");
+            EnsureEditorVariants(ref stormThunderClips, "storm_thunder");
+            EnsureEditorVariants(ref reticleLockClips, "reticle_lock");
+
+            // 单发音效：旧版这里漏了 shot/ink_hit/hit_enemy/ink_empty/ink_refill/
+            // kill/death/respawn/ult_ready/ult_cast/ui_click，场景没序列化时编辑器里就是哑的。
+            if (inkEmptyClip == null) inkEmptyClip = LoadClip("ink_empty_1");
+            if (inkRefillClip == null) inkRefillClip = LoadClip("ink_refill_1");
             if (chargerChargeClip == null) chargerChargeClip = LoadClip("charger_charge_1");
             if (chargerFullClip == null) chargerFullClip = LoadClip("charger_full_1");
             if (chargerShotClip == null) chargerShotClip = LoadClip("charger_shot_1");
-            if (blasterShotClips == null || blasterShotClips.Length == 0)
-                blasterShotClips = LoadClips("blaster_shot_1", "blaster_shot_2");
-            if (blasterBoomClips == null || blasterBoomClips.Length == 0)
-                blasterBoomClips = LoadClips("blaster_boom_1", "blaster_boom_2");
             if (sloshThrowClip == null) sloshThrowClip = LoadClip("slosh_throw_1");
-            if (sloshLandClips == null || sloshLandClips.Length == 0)
-                sloshLandClips = LoadClips("slosh_land_1", "slosh_land_2");
+            if (splatlingReadyClip == null) splatlingReadyClip = LoadClip("splatling_ready_1");
 
             if (squidInClip == null) squidInClip = LoadClip("squid_in_1");
             if (squidOutClip == null) squidOutClip = LoadClip("squid_out_1");
-            if (swimSplashClips == null || swimSplashClips.Length == 0)
-                swimSplashClips = LoadClips("swim_splash_1", "swim_splash_2");
-            if (stepDryClips == null || stepDryClips.Length == 0)
-                stepDryClips = LoadClips("step_dry_1", "step_dry_2", "step_dry_3");
-            if (stepInkBubbleClips == null || stepInkBubbleClips.Length == 0)
-                stepInkBubbleClips = LoadClips("step_ink_bubble_1", "step_ink_bubble_2", "step_ink_bubble_3");
-            if (stepEnemyClips == null || stepEnemyClips.Length == 0)
-                stepEnemyClips = LoadClips("step_enemy_1", "step_enemy_2", "step_enemy_3");
             if (jumpClip == null) jumpClip = LoadClip("jump_1");
             if (landClip == null) landClip = LoadClip("land_1");
             if (dodgeRollClip == null) dodgeRollClip = LoadClip("dodge_roll_1");
 
             if (hurtClip == null) hurtClip = LoadClip("hurt_1");
-            if (hitMarkerClips == null || hitMarkerClips.Length == 0)
-                hitMarkerClips = LoadClips("hit_marker_1", "hit_marker_2");
             if (refillFullClip == null) refillFullClip = LoadClip("refill_full_1");
+            if (spawnProtectClip == null) spawnProtectClip = LoadClip("spawn_protect_1");
+            if (lowHealthClip == null) lowHealthClip = LoadClip("low_health_1");
+            if (respawnTickClip == null) respawnTickClip = LoadClip("respawn_tick_1");
 
             if (bombThrowClip == null) bombThrowClip = LoadClip("bomb_throw_1");
             if (bombBeepClip == null) bombBeepClip = LoadClip("bomb_beep_1");
             if (bombExplodeClip == null) bombExplodeClip = LoadClip("bomb_explode_1");
+            if (bombBounceClip == null) bombBounceClip = LoadClip("bomb_bounce_1");
+            if (ultReadyClip == null) ultReadyClip = LoadClip("ult_ready_1");
+            if (ultCastClip == null) ultCastClip = LoadClip("ult_cast_1");
             if (specialSlamClip == null) specialSlamClip = LoadClip("special_slam_1");
+            if (stormWindClip == null) stormWindClip = LoadClip("storm_wind_1");
+
+            if (killClip == null) killClip = LoadClip("kill_1");
+            if (deathClip == null) deathClip = LoadClip("death_1");
+            if (respawnClip == null) respawnClip = LoadClip("respawn_1");
 
             // 比赛流程提示音：场景引用缺省时按文件名兜底（编辑器内），保证无语音版本仍能出声
             if (countdownTickClip == null) countdownTickClip = LoadClip("countdown_tick_1");
             if (matchStartClip == null) matchStartClip = LoadClip("match_start_1");
             if (goCueClip == null) goCueClip = LoadClip("go_horn_1");
             if (oneMinuteCueClip == null) oneMinuteCueClip = LoadClip("one_minute_1");
+            if (readyClip == null) readyClip = LoadClip("ready_1");
             if (matchEndClip == null) matchEndClip = LoadClip("match_end_1");
+            if (timesUpClip == null) timesUpClip = LoadClip("times_up_1");
             if (resultWinClip == null) resultWinClip = LoadClip("result_win_1");
             if (resultLoseClip == null) resultLoseClip = LoadClip("result_lose_1");
+            if (final10sClip == null) final10sClip = LoadClip("final_10s_1");
+            if (leadGainClip == null) leadGainClip = LoadClip("lead_gain_1");
+            if (leadLoseClip == null) leadLoseClip = LoadClip("lead_lose_1");
+            if (enemySpecialWarnClip == null) enemySpecialWarnClip = LoadClip("enemy_special_warn_1");
 
+            if (uiClickClip == null) uiClickClip = LoadClip("ui_click_1");
             if (uiHoverClip == null) uiHoverClip = LoadClip("ui_hover_1");
             if (uiConfirmClip == null) uiConfirmClip = LoadClip("ui_confirm_1");
             if (uiToggleClip == null) uiToggleClip = LoadClip("ui_toggle_1");
             if (uiBackClip == null) uiBackClip = LoadClip("ui_back_1");
             if (uiSliderClip == null) uiSliderClip = LoadClip("ui_slider_1");
             if (uiErrorClip == null) uiErrorClip = LoadClip("ui_error_1");
+            if (lowInkWarningClip == null) lowInkWarningClip = LoadClip("low_ink_warning_1");
+            if (pauseOpenClip == null) pauseOpenClip = LoadClip("pause_open_1");
+            if (pauseCloseClip == null) pauseCloseClip = LoadClip("pause_close_1");
+            if (weaponSwitchClip == null) weaponSwitchClip = LoadClip("weapon_switch_1");
+            if (chargeCancelClip == null) chargeCancelClip = LoadClip("charge_cancel_1");
+        }
+
+        /// <summary>编辑器兜底：按族名探测 &lt;key&gt;_1.._64 直到缺号，取全变体。</summary>
+        private static void EnsureEditorVariants(ref AudioClip[] clips, string key)
+        {
+            if (clips != null && clips.Length > 0)
+                return;
+
+            var list = new System.Collections.Generic.List<AudioClip>();
+            for (int i = 1; i <= 64; i++)
+            {
+                AudioClip clip = LoadClip(key + "_" + i);
+                if (clip == null)
+                    break;
+                list.Add(clip);
+            }
+
+            if (list.Count > 0)
+                clips = list.ToArray();
         }
 
         private static AudioClip LoadClip(string name)

@@ -287,9 +287,9 @@ namespace P1.UI.WeaponSelect
             _button.onClick.RemoveAllListeners();
             _button.onClick.AddListener(() => _onSelect?.Invoke(_index));
 
-            // 3.5 顶部武器身份色带（5px 常态 / 8px 选中，画在 3px 墨框内侧，绝不盖住边框）。
-            // 圆角化：色带内缩到圆角直线段内并改胶囊短划。
-            float cardRadius = ComicStyle.CornerFor(_rectTransform.sizeDelta.x, _rectTransform.sizeDelta.y);
+            // 3.5 顶部武器身份色带（5px 常态 / 8px 选中，画在墨框内侧，绝不盖住边框）。
+            // 圆角化：色带内缩到圆角直线段内并改胶囊短划。宽度只由 ApplyAccentBandGeometry 决定，
+            // 选中态刷新若另写一套尺寸就会戳出圆角轮廓（色带横线溢出的根因）。
             var bandGo = new GameObject("AccentBand", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             bandGo.transform.SetParent(transform, false);
             bandGo.transform.SetAsFirstSibling();
@@ -297,8 +297,7 @@ namespace P1.UI.WeaponSelect
             _accentBandRect.anchorMin = new Vector2(0f, 1f);
             _accentBandRect.anchorMax = new Vector2(1f, 1f);
             _accentBandRect.pivot = new Vector2(0.5f, 1f);
-            _accentBandRect.sizeDelta = new Vector2(-(cardRadius + CardBorderWidth) * 2f, AccentBandHeight);
-            _accentBandRect.anchoredPosition = new Vector2(0f, -CardBorderWidth);
+            ApplyAccentBandGeometry(CardBorderWidth, AccentBandHeight);
 
             _accentBand = bandGo.GetComponent<UIInkShapeGraphic>();
             _accentBand.Shape = UIInkShape.Pill;
@@ -692,10 +691,37 @@ namespace P1.UI.WeaponSelect
 
             float border = _isSelected ? CardBorderWidthSelected : CardBorderWidth;
             float height = _isSelected ? AccentBandHeightSelected : AccentBandHeight;
-            _accentBandRect.sizeDelta = new Vector2(-border * 2f, height);
-            _accentBandRect.anchoredPosition = new Vector2(0f, -border);
+            ApplyAccentBandGeometry(border, height);
             _accentBand.color = GetWeaponAccentColor(_kind);
             _accentBand.Refresh();
+        }
+
+        /// <summary>
+        /// 身份色带几何的唯一出处（构建与选中/取消选中刷新共用）：
+        /// 横向内缩量 = 卡片圆角半径 + 墨框，色带才落在圆角直线段内，不会像直角色带那样戳出卡片轮廓。
+        /// 选中态只放大墨框与色带高度，内缩量必须跟着边框一起重算，否则选中卡会比其他卡多探出一截。
+        /// </summary>
+        private void ApplyAccentBandGeometry(float border, float height)
+        {
+            if (_accentBandRect == null) return;
+            float radius = ResolveCardCornerRadius();
+            _accentBandRect.sizeDelta = new Vector2(-(radius + border) * 2f, height);
+            _accentBandRect.anchoredPosition = new Vector2(0f, -border);
+        }
+
+        /// <summary>
+        /// 卡片圆角半径，口径与 <see cref="UIInkShapeGraphic"/> 的 RoundedRect 自适应半径一致
+        /// （ComicStyle.CornerFor 按短边计算），色带内缩量以此为准。
+        /// </summary>
+        private float ResolveCardCornerRadius()
+        {
+            if (_rectTransform == null) return ComicStyle.CornerPanel;
+            Vector2 size = _rectTransform.sizeDelta;
+            if (size.x < 1f || size.y < 1f)
+            {
+                size = _rectTransform.rect.size;
+            }
+            return ComicStyle.CornerFor(size.x, size.y);
         }
 
         private void RefreshSelectedVisuals()

@@ -119,7 +119,7 @@ namespace P1.Tests.EditMode
             Assert.IsNotNull(centerPlatform, "场景中必须存在 HighGround_Center 中央争夺高台");
 
             float height = centerPlatform.transform.localScale.y;
-            Assert.LessOrEqual(height, 1.201f, "中央争夺高台高度必须 ≤ 1.2m，避免严重遮挡俯视角");
+            Assert.LessOrEqual(height, 1.201f, "中央争夺高台高度必须 ≤ 1.2m，避免严重遮挡第三人称视野");
             Assert.GreaterOrEqual(height, 0.8f, "中央高台需保持合理的高低差战术争夺感");
 
             // 中心必须位于竞技场正中央 (0,0)

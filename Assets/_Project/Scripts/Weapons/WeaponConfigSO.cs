@@ -205,7 +205,7 @@ namespace P1.Weapons
         [Tooltip("最大连续翻滚次数")]
         public int dualiesMaxRolls = 2;
 
-        [Tooltip("翻滚后原地站桩架枪持续时间（秒）")]
+        [Tooltip("翻滚后架枪强化持续时间（秒）：射速 +20%、散布清零；不锁移速，可自由移动")]
         public float dualiesTurretDuration = 0.5f;
 
         [Tooltip("架枪状态下的开火间隔（秒）：射速提升 20%")]
@@ -362,20 +362,20 @@ namespace P1.Weapons
         public float stormDps = 34f;
         [Tooltip("云层水平漂移速度（米/秒）")]
         public float stormDriftSpeed = 1.1f;
-        [Tooltip("云层悬浮高度（米）")]
-        public float stormCloudHeight = 4.0f;
+        [Tooltip("云层悬浮高度（米）：INKWAVE 用 4.6，本项目云体更高取 4.5")]
+        public float stormCloudHeight = 4.5f;
         [Tooltip("发生器最远投掷距离（米）")]
         public float stormThrowDistance = 9f;
         [Tooltip("发生器飞行时间（秒）")]
         public float stormThrowFlightDuration = 0.45f;
         [Tooltip("发生器抛物线弧高（米）")]
         public float stormThrowArcHeight = 3.2f;
-        [Tooltip("雨点生成间隔（秒）")]
-        public float stormRainInterval = 0.06f;
+        [Tooltip("雨点生成间隔（秒）：INKWAVE 0.045 ≈ 22.2 滴/s，2~3s 内饱和自身投影")]
+        public float stormRainInterval = 0.045f;
         [Tooltip("单颗雨点的最小涂地半径（米）")]
-        public float stormRainSplatRadiusMin = 0.42f;
+        public float stormRainSplatRadiusMin = 0.45f;
         [Tooltip("单颗雨点的最大涂地半径（米）")]
-        public float stormRainSplatRadiusMax = 0.72f;
+        public float stormRainSplatRadiusMax = 0.8f;
         [Tooltip("DOT 结算间隔（秒）：34 DPS 按 0.5s 一次结算 17 点")]
         public float stormDamageTickInterval = 0.5f;
         [Tooltip("云层展开时间（秒）")]
@@ -865,13 +865,13 @@ namespace P1.Weapons
             config.stormRadius = 3.4f;
             config.stormDps = 34f;
             config.stormDriftSpeed = 1.1f;
-            config.stormCloudHeight = 4.0f;
+            config.stormCloudHeight = 4.5f;
             config.stormThrowDistance = 9f;
             config.stormThrowFlightDuration = 0.45f;
             config.stormThrowArcHeight = 3.2f;
-            config.stormRainInterval = 0.06f;
-            config.stormRainSplatRadiusMin = 0.42f;
-            config.stormRainSplatRadiusMax = 0.72f;
+            config.stormRainInterval = 0.045f;
+            config.stormRainSplatRadiusMin = 0.45f;
+            config.stormRainSplatRadiusMax = 0.8f;
             config.stormDamageTickInterval = 0.5f;
             config.stormGrowTime = 0.5f;
             config.stormFadeTime = 0.6f;

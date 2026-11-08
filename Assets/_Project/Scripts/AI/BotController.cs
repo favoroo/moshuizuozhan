@@ -49,6 +49,9 @@ namespace P1.AI
         private readonly List<Vector3> _path = new List<Vector3>();
         private int _pathIndex;
         private float _repathTimer;
+        /// <summary>A* 错帧相位：7 个 Bot 的 0.55s 重算周期容易同相，按帧奇偶拆成两批，避免同帧叠加尖刺。</summary>
+        private int _repathPhase;
+        private static int _repathPhaseCounter;
         private Vector3 _moveTarget;
         private bool _hasMoveTarget;
         private float _paintGoalTimer;
@@ -160,6 +163,7 @@ namespace P1.AI
             _paintSweepPhase = Random.Range(0f, 10f);
             _aimPhaseA = Random.Range(0f, 20f);
             _aimPhaseB = Random.Range(0f, 20f);
+            _repathPhase = _repathPhaseCounter++ & 1;
             _aim.Reset(transform.eulerAngles.y);
 
             if (_baseConfig == null) _baseConfig = config;
@@ -688,9 +692,11 @@ namespace P1.AI
             {
                 move *= 0.3f;   // 蓄力时脚步放慢，符合蓄力狙手感
             }
-            else if (kind == WeaponKind.Dualies && _weapon.RollsRemaining > 0 && !_weapon.IsRollingDodge && !_weapon.IsTurretLocked)
+            else if (kind == WeaponKind.Dualies && _weapon.RollsRemaining > 0 && !_weapon.IsRollingDodge)
             {
-                // 双枪 Bot：近身受迫或对枪中有概率向移动方向战术翻滚并就地架枪
+                // 双枪 Bot：近身受迫或对枪中有概率向移动方向战术翻滚，翻滚后自带架枪强化
+                //（架枪强化已不锁移速，不再像旧版那样把它当成「正在站桩、别打断」的再翻滚闸门，
+                //  与玩家侧一致：翻滚结束即可接第二段连滚）
                 if ((dist < preferred - 0.6f || (wantFire && Random.value < 0.04f)) && move.sqrMagnitude > 0.01f)
                 {
                     _weapon.TryDodgeRoll(move);
@@ -729,7 +735,7 @@ namespace P1.AI
                 int near = CountEnemiesWithin(config != null ? config.specialSearchRange : 7.5f);
                 if (near >= (config != null ? config.specialMinEnemies : 1))
                 {
-                    if (_weapon.TryActivateSpecial())
+                    if (_weapon.TryActivateSpecial(ResolveSpecialThrowPoint()))
                     {
                         _specialRetryTimer = 1f;
                         return;
@@ -767,6 +773,34 @@ namespace P1.AI
                 if ((c.transform.position - transform.position).sqrMagnitude <= sq) count++;
             }
             return count;
+        }
+
+        /// <summary>
+        /// Bot 大招落点（P41）：Storm 云丢向最近敌人（钳制到最大投掷距离），
+        /// 旧的无参重载朝正前方扔 9m，敌人就在身边时云会飘到空地。Slam 忽略落点，不受影响。
+        /// 找不到敌人时回退正前方（与旧行为一致）。
+        /// </summary>
+        private Vector3 ResolveSpecialThrowPoint()
+        {
+            var all = CombatantHealthRegistry.All;
+            CombatantHealth nearest = null;
+            float nearestSq = float.MaxValue;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var c = all[i];
+                if (c == null || !c.IsAlive || !c.Team.IsOpponentOf(_health.Team)) continue;
+                float sq = (c.transform.position - transform.position).sqrMagnitude;
+                if (sq < nearestSq)
+                {
+                    nearestSq = sq;
+                    nearest = c;
+                }
+            }
+
+            if (nearest == null)
+                return transform.position + transform.forward * 9f;
+
+            return nearest.transform.position;
         }
 
         // ---------- 残血战术撤退 ----------
@@ -1274,10 +1308,6 @@ namespace P1.AI
                 // 上一轮确认过「在墙后 / 缺口对面、A* 到不了」的区域，短期内不再选
                 if (IsPaintBlacklisted(target)) continue;
 
-                // P16-A: 过滤掉敌方出生禁入圈内 + 额外缓冲的候选目标，避免压家贴边抖动
-                float avoidBuffer = config != null ? config.spawnZoneAvoidBufferMeters : 2f;
-                if (SpawnZone.IsInEnemySpawnZone(target, myTeam, avoidBuffer)) continue;
-
                 float dist = FlatDistance(target);
                 if (dist < 4f || dist > 28f) continue;
 
@@ -1485,12 +1515,12 @@ namespace P1.AI
             _repathTimer -= Time.deltaTime;
             if (_repathTimer <= 0f || _path.Count == 0)
             {
-                _repathTimer = config != null ? config.repathInterval : 0.55f;
                 var arena = ArenaNavigator.Instance;
 
                 if (arena == null || arena.Grid == null)
                 {
                     // 没有导航服务（子场景 / 测试）：保留直线兜底，否则 Bot 完全不会移动
+                    _repathTimer = config != null ? config.repathInterval : 0.55f;
                     _path.Clear();
                     _path.Add(goal);
                     _pathIndex = 0;
@@ -1498,19 +1528,29 @@ namespace P1.AI
                     return true;
                 }
 
-                // 墨水加权：己方墨道 0.5 / 中性 1.0 / 敌方 3.0
-                if (!arena.TryFindPath(transform.position, goal, _path, _health.Team, _pathWeights))
+                // 错帧：最多延后 1 帧再跑 A*（有旧路径时先沿旧路径走）。
+                if (((Time.frameCount + _repathPhase) & 1) != 0)
                 {
-                    _path.Clear();
-                    _pathIndex = 0;
-                    _pathFailures++;
-                    _pathRetryTimer = BotRecoveryPolicy.RetryDelay(_pathFailures);
-                    _repathTimer = _pathRetryTimer;
-                    return false;
+                    if (_path.Count == 0) return false;
                 }
+                else
+                {
+                    _repathTimer = config != null ? config.repathInterval : 0.55f;
 
-                _pathFailures = 0;
-                _pathIndex = 0;
+                    // 墨水加权：己方墨道 0.5 / 中性 1.0 / 敌方 3.0
+                    if (!arena.TryFindPath(transform.position, goal, _path, _health.Team, _pathWeights))
+                    {
+                        _path.Clear();
+                        _pathIndex = 0;
+                        _pathFailures++;
+                        _pathRetryTimer = BotRecoveryPolicy.RetryDelay(_pathFailures);
+                        _repathTimer = _pathRetryTimer;
+                        return false;
+                    }
+
+                    _pathFailures = 0;
+                    _pathIndex = 0;
+                }
             }
 
             if (_path.Count == 0) return false;

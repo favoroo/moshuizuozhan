@@ -6,7 +6,9 @@ namespace P1.Weapons
     /// Twinfin Dualies（双枪）：
     /// 1. 双手交替射击：12 发/秒高射速，单发 30 伤害，枪口左右轻微错开；
     /// 2. 战术翻滚：射击或机动中可触发战术翻滚（最多 2 连滚），耗墨 7，位移 2.8m 并沿途留墨；
-    /// 3. 架枪模式：翻滚后原地站桩 0.5s（移速清零），射速提升 20%（约 15 发/秒），弹道散布清零。
+    /// 3. 架枪强化：翻滚后 0.5s 射速提升 20%（约 15 发/秒）、弹道散布清零。
+    ///    期间<strong>不再锁定移速</strong>：旧实现把移速清零「站桩」，翻滚后想立刻脱身却被钉住 0.5s，
+    ///    操作反馈极差；现在锁的只有开火参数与表现层姿态（准星锁定框 / 架枪躯干下沉）。
     /// </summary>
     public sealed class DualiesWeaponStrategy : MainWeaponStrategy
     {
@@ -32,7 +34,8 @@ namespace P1.Weapons
 
         public override bool IsTurretLocked => _turretTimer > 0f;
 
-        public override float MoveSpeedMultiplier => IsTurretLocked ? 0f : 1f;
+        // 架枪强化不锁移速（P40 修正）：翻滚结束即可继续走位，只有射速与散布吃到增益。
+        public override float MoveSpeedMultiplier => 1f;
 
         public override int RollsRemaining => _rollsLeft;
 
@@ -185,7 +188,7 @@ namespace P1.Weapons
                 if (_dodgeTimer <= 0f)
                 {
                     _dodgeTimer = 0f;
-                    // 翻滚结束立刻进入原地架枪站桩模式
+                    // 翻滚结束立刻进入架枪强化（射速 +20% / 散布清零），但不再锁住移动
                     _turretTimer = Config != null ? Mathf.Max(0.05f, Config.dualiesTurretDuration) : 0.5f;
                     host.PaintGround(host.Position, 0.65f);
                 }

@@ -114,6 +114,8 @@ MonoBehaviour:
   inkCoatRoughness: 0.06
   inkEdgeRimStrength: 0.8
   inkEdgeSmoothStrength: 0.7
+  inkBicubicStrength: 1
+  inkShadowChromaBoost: 0.35
   inkTopDetailStrength: 1
   wallDripSpeed: 1.3
   waterReflectionStrength: 0.5

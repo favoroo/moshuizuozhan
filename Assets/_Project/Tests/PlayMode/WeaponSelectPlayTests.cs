@@ -199,6 +199,57 @@ namespace P1.Tests
 
         [UnityTest]
         [Category("UI")]
+        public IEnumerator WeaponCardView_AccentBand_NeverOverflowsRoundedCorner()
+        {
+            // 不依赖场景里的 WeaponSelectView（单条过滤运行时会话里没有它），直接装配一张卡：
+            // 这里要验的是卡片的身份色带几何，常态与选中态都必须内缩到圆角直线段内。
+            var cardGo = new GameObject("AccentBandTestCard", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(UIInkShapeGraphic), typeof(Button), typeof(UISpringMotion), typeof(WeaponCardView));
+            _createdObjects.Add(cardGo);
+            var card = cardGo.GetComponent<WeaponCardView>();
+            card.Initialize(0, WeaponKind.Shooter, CreateConfig(WeaponKind.Shooter, "测试喷枪"), null, null, Team.TeamA, null);
+
+            yield return null;
+
+            // 1. 常态：3px 墨框 + 5px 色带。
+            AssertAccentBandInsideRoundedCard(card, "常态");
+
+            // 2. 选中态会重算边框与色带高度（3px/5px → 4px/8px），内缩量必须同步重算。
+            card.SetSelected(true, animate: false);
+            yield return null;
+            AssertAccentBandInsideRoundedCard(card, "选中态");
+
+            // 3. 取消选中必须回到常态尺寸，而不是停留在选中态的加宽值。
+            card.SetSelected(false, animate: false);
+            yield return null;
+            AssertAccentBandInsideRoundedCard(card, "取消选中后");
+
+            Object.Destroy(cardGo);
+        }
+
+        /// <summary>
+        /// 断言单张卡的顶部身份色带完全落在卡片圆角的直线段内：
+        /// 横向内缩量必须 ≥ 圆角半径 + 当前墨框宽度（口径同 Docs/UI-GeometricBold.md「卡片身份色带」）。
+        /// </summary>
+        private static void AssertAccentBandInsideRoundedCard(WeaponCardView card, string phase)
+        {
+            var cardRect = (RectTransform)card.transform;
+            var band = cardRect.Find("AccentBand") as RectTransform;
+            Assert.IsNotNull(band, $"{phase}：每张武器卡都应有顶部身份色带");
+
+            float radius = ComicStyle.CornerFor(cardRect.rect.width, cardRect.rect.height);
+            float border = card.IsSelected ? WeaponCardView.CardBorderWidthSelected : WeaponCardView.CardBorderWidth;
+            float bandWidth = cardRect.rect.width + band.sizeDelta.x;
+            float inset = (cardRect.rect.width - bandWidth) * 0.5f;
+
+            Assert.GreaterOrEqual(inset + 0.01f, radius + border,
+                $"{phase}：{card.name} 的身份色带必须内缩到圆角直线段内（实际 {inset:0.#}px，要求 ≥ {radius + border:0.#}px），否则横线会溢出卡片轮廓");
+            Assert.AreEqual(-border, band.anchoredPosition.y, 0.01f,
+                $"{phase}：{card.name} 的身份色带应紧贴墨框内侧");
+        }
+
+        [UnityTest]
+        [Category("UI")]
         public IEnumerator WeaponSelectView_LoadoutCard_ReplacesFlatTab_AndShowsCurrentWeapon()
         {
             yield return null;

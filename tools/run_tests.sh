@@ -48,8 +48,10 @@ preflight() {
         out="$("$U" command script.recompile_status 2>&1 | tail -1)"
         state="$(envelope_field "$out" 'd.get("status")')"
         failed="$(envelope_field "$out" 'd.get("compilationFailed")')"
-        # 等编译/域重载真正结束：期间启动 test run 会被管线直接拒绝
-        if [ "$state" = "completed" ] || [ "$state" = "idle" ]; then
+        # 等编译/域重载真正结束：期间启动 test run 会被管线直接拒绝。
+        # up_to_date = 工程已编译且无待编译改动（Unity 6 的这个终态也必须认，
+        # 否则「刚跑过一次再跑」会卡满 60s 并误报未就绪）。
+        if [ "$state" = "completed" ] || [ "$state" = "idle" ] || [ "$state" = "up_to_date" ]; then
             if [ "$failed" = "True" ]; then
                 say "✗ 编译失败：此时跑测试只会得到误报，请先修复编译错误。"
                 "$U" command console.get --tail 40 --level error 2>&1 \

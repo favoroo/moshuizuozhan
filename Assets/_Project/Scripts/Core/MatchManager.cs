@@ -6,10 +6,12 @@ using UnityEngine;
 namespace P1.Core
 {
     /// <summary>
-    /// 比赛流程状态机：Ready → Countdown(开赛墨幕动画) → Playing(2/3/5 分钟，首页可选) → FinishFreeze → Result → Restart。
+    /// 比赛流程状态机：Ready → Countdown(开赛墨幕动画 + P41 高空扫场镜头) → Playing(2/3/5 分钟，首页可选)
+    /// → FinishFreeze → Result → Restart。
     /// 负责计时、结算取数、清场重开，并向 UI 广播阶段变化。
-    /// Countdown 已不再做 3-2-1 数字倒数，而是只播一次入场演出（墨幕涌满 → 虹膜撕开露出战场），
-    /// 演完立刻进入 Playing；阶段名保留是为了 WeaponSelect / HUD 复位 / 移动端触控等既有订阅方不必改动。
+    /// Countdown 已不再做 3-2-1 数字倒数，而是只播一次入场演出（墨幕涌满 → 虹膜撕开露出战场，
+    /// 同时相机从敌方半场高空巡场 → 俯冲到玩家身后）；演完立刻进入 Playing；
+    /// 阶段名保留是为了 WeaponSelect / HUD 复位 / 移动端触控等既有订阅方不必改动。
     /// </summary>
     [DefaultExecutionOrder(-30)]
     public class MatchManager : MonoBehaviour
@@ -27,6 +29,10 @@ namespace P1.Core
                  "不要改短于 0.86（墨幕动画固定 0.86s，短于它会在动画未结束时解锁操作）；<0 = 回退旧 3-2-1 倒计时")]
         [SerializeField] private float introSeconds = 0.86f;
 
+        [Tooltip("开赛扫场镜头时长（秒，P41）：高空巡场 → 俯冲到玩家身后，Countdown 总时长取它与 introSeconds 的较大值。" +
+                 "0 = 关闭扫场（只剩墨幕入场）。镜头组件见 MatchIntroCameraDirector")]
+        [SerializeField] private float introCameraSeconds = 3.4f;
+
         [SerializeField] private float finishFreezeSeconds = 1.6f;
         [SerializeField] private float resultRollSeconds = 1.4f;
 
@@ -42,12 +48,14 @@ namespace P1.Core
         public float FinalCoverageA => _finalA;
         public float FinalCoverageB => _finalB;
         public float ResultRollSeconds => resultRollSeconds;
+
+        /// <summary>开赛扫场镜头时长（秒，0 = 关闭）。<see cref="Player.MatchIntroCameraDirector"/> 与 Countdown 共用。</summary>
+        public float IntroCameraSeconds => Mathf.Max(0f, introCameraSeconds);
+
         public bool PlayerWon => _finalA >= _finalB;
         public GameConfigSO Config => gameConfig;
 
         private OutOfBoundsGuard _boundsGuard;
-        private SpawnZone _spawnZoneA;
-        private SpawnZone _spawnZoneB;
 
         public event Action<Phase> PhaseChanged;
 
@@ -100,8 +108,6 @@ namespace P1.Core
             _remaining = ResolveMatchDurationSeconds();
             EnsureRuntimeGuards();
             if (_boundsGuard != null) _boundsGuard.Configure(gameConfig);
-            if (_spawnZoneA != null) _spawnZoneA.Configure(Team.TeamA, gameConfig);
-            if (_spawnZoneB != null) _spawnZoneB.Configure(Team.TeamB, gameConfig);
         }
 
         private void EnsureRuntimeGuards()
@@ -114,24 +120,6 @@ namespace P1.Core
                     _boundsGuard = gameObject.AddComponent<OutOfBoundsGuard>();
                 }
                 _boundsGuard.Configure(gameConfig);
-            }
-
-            if (_spawnZoneA == null)
-            {
-                _spawnZoneA = SpawnZone.FindZone(Team.TeamA);
-                if (_spawnZoneA == null)
-                {
-                    _spawnZoneA = SpawnZone.CreateZone(Team.TeamA, transform, gameConfig);
-                }
-            }
-
-            if (_spawnZoneB == null)
-            {
-                _spawnZoneB = SpawnZone.FindZone(Team.TeamB);
-                if (_spawnZoneB == null)
-                {
-                    _spawnZoneB = SpawnZone.CreateZone(Team.TeamB, transform, gameConfig);
-                }
             }
         }
 
@@ -190,8 +178,11 @@ namespace P1.Core
         {
             ResetWorld();
             _remaining = ResolveMatchDurationSeconds();
-            // 开赛演出：默认走新的墨幕入场（0.86s，与动画同长）；负值才回退旧的 3-2-1 倒计时。
-            _countdown = introSeconds >= 0f ? introSeconds : countdownSeconds;
+            // 开赛演出：墨幕入场（0.86s）与 P41 高空扫场镜头（3.4s）同时起步，Countdown 取两者较长者。
+            // 墨幕先撕开露出「高空巡场中的场地」，镜头再俯冲到玩家身后；演完才进入 Playing 解锁操作。
+            // 负值才回退旧的 3-2-1 倒计时（此时扫场仍生效，但不再有数字提示音）。
+            float inkIntro = introSeconds >= 0f ? introSeconds : countdownSeconds;
+            _countdown = Mathf.Max(inkIntro, IntroCameraSeconds);
             _finalA = 0f;
             _finalB = 0f;
             SetPhase(Phase.Countdown);

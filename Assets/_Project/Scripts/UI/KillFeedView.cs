@@ -123,8 +123,10 @@ namespace P1.UI
 
             KillCardView card = GetOrCreateCard();
             Sprite icon = ResolveWeaponIcon(ev);
+            // P42-B：受害者主武器小图标（不知道武器时传 null，卡片自动省略）
+            Sprite victimIcon = ev.HasVictimWeapon ? ResolveVictimWeaponIcon(ev) : null;
 
-            card.Bind(ev, theme, icon, OnCardDismissed);
+            card.Bind(ev, theme, icon, victimIcon, OnCardDismissed);
             _activeCards.Add(card);
 
             RearrangeCards();
@@ -201,6 +203,38 @@ namespace P1.UI
             if (icon != null) return icon;
 
             return ev.WeaponKind switch
+            {
+                WeaponKind.Roller => rollerIcon,
+                WeaponKind.Charger => chargerIcon,
+                WeaponKind.Dualies => dualiesIcon,
+                WeaponKind.Slosher => slosherIcon,
+                WeaponKind.Blaster => blasterIcon,
+                WeaponKind.Splatling => splatlingIcon,
+                _ => shooterIcon
+            };
+        }
+
+        /// <summary>
+        /// 受害者主武器图标（P42-B）：受害者只可能是被主武器/技能击倒的一方，
+        /// 这里只按 <see cref="KillFeedEvent.VictimWeaponKind"/> 取主武器图标，不涉及副武器/大招分支。
+        /// </summary>
+        public Sprite ResolveVictimWeaponIcon(KillFeedEvent ev)
+        {
+            string iconKey = ev.VictimWeaponKind switch
+            {
+                WeaponKind.Roller => "weapon_roller",
+                WeaponKind.Charger => "weapon_charger",
+                WeaponKind.Dualies => "weapon_dualies",
+                WeaponKind.Slosher => "weapon_slosher",
+                WeaponKind.Blaster => "weapon_blaster",
+                WeaponKind.Splatling => "weapon_splatling",
+                _ => "weapon_shooter"
+            };
+
+            Sprite icon = UIIconLibrary.Get(iconKey);
+            if (icon != null) return icon;
+
+            return ev.VictimWeaponKind switch
             {
                 WeaponKind.Roller => rollerIcon,
                 WeaponKind.Charger => chargerIcon,

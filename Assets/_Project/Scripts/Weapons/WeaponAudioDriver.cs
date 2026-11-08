@@ -15,6 +15,9 @@ namespace P1.Weapons
         private WeaponController _weapon;
         private CombatantHealth _health;
         private bool _wasChargerFull;
+        private bool _wasSplatlingReady;
+        private float _chargerChargeAtRelease;
+        private float _lastBlasterPumpTime;
         private int _lastShotFrame = -1;
 
         private void Awake()
@@ -75,6 +78,20 @@ namespace P1.Weapons
             }
 
             AudioManager.Instance.PlayWeaponShot(_weapon.CurrentWeaponKind, _weapon.LastShotStrength01);
+
+            // 蓄力狙射出去的那一刻：这一发不算「取消」，清掉待判定量
+            if (_weapon.CurrentWeaponKind == WeaponKind.Charger)
+                _chargerChargeAtRelease = 0f;
+
+            // 爆破枪换气泵（旧版烘了 blaster_pump 却从没接线）：
+            // 每发之后的机械循环声给「这把枪有机构」的重量感。
+            // 0.30s 下限避免高频泼洒时叠成噪声墙。
+            if (_weapon.CurrentWeaponKind == WeaponKind.Blaster
+                && Time.unscaledTime - _lastBlasterPumpTime >= 0.30f)
+            {
+                _lastBlasterPumpTime = Time.unscaledTime;
+                AudioManager.Instance.PlayBlasterPump();
+            }
         }
 
         private void Update()
@@ -98,20 +115,33 @@ namespace P1.Weapons
                 AudioManager.Instance.StopLoop(LoopSfxKind.Roller);
             }
 
-            // 2. 加特林蓄力旋转循环音
+            // 2. 加特林蓄力旋转循环音 + 蓄力到位的一声机械「咔哒」
             if (isAlive && kind == WeaponKind.Splatling && _weapon.IsCharging)
             {
                 AudioManager.Instance.PlayLoop(LoopSfxKind.SplatlingSpin);
+
+                if (_weapon.Charge01 >= 0.999f && !_wasSplatlingReady)
+                {
+                    _wasSplatlingReady = true;
+                    AudioManager.Instance.PlaySplatlingReady();
+                }
             }
             else
             {
                 AudioManager.Instance.StopLoop(LoopSfxKind.SplatlingSpin);
+                if (!_weapon.IsCharging)
+                {
+                    _wasSplatlingReady = false;
+                }
             }
 
             // 3. 蓄力狙蓄力循环音与蓄满清脆叮音
+            //    循环音随蓄力进度渐强（玩家反馈全程满量太吵）：轻蓄只给底噪，满蓄才到全量
             if (isAlive && kind == WeaponKind.Charger && _weapon.IsCharging)
             {
-                AudioManager.Instance.PlayLoop(LoopSfxKind.ChargerCharge);
+                float chargeRamp = Mathf.Lerp(
+                    AudioManager.Instance.ChargerChargeRampMinVolume, 1f, _weapon.Charge01);
+                AudioManager.Instance.PlayLoop(LoopSfxKind.ChargerCharge, chargeRamp);
 
                 if (_weapon.Charge01 >= 0.999f && !_wasChargerFull)
                 {
@@ -121,6 +151,8 @@ namespace P1.Weapons
                         AudioManager.Instance.PlayOne(AudioManager.Instance.chargerFullClip, 0.65f);
                     }
                 }
+
+                _chargerChargeAtRelease = _weapon.Charge01;
             }
             else
             {
@@ -128,6 +160,13 @@ namespace P1.Weapons
                 if (!_weapon.IsCharging)
                 {
                     _wasChargerFull = false;
+
+                    // 蓄力取消（旧版完全静音）：蓄了但没射就松手/切枪，给一声「泄气」，
+                    // 而不是让蓄力循环音凭空消失。射出去的由 HandleFired 负责，这里只处理「没射」。
+                    if (_chargerChargeAtRelease > 0.15f)
+                        AudioManager.Instance.PlayChargeCancel();
+
+                    _chargerChargeAtRelease = 0f;
                 }
             }
         }

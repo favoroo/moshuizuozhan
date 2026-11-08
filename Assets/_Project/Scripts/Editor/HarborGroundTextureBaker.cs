@@ -248,7 +248,7 @@ namespace P1.Editor
                 color = Color.Lerp(color, yellow ? pal.HazardYellow : pal.HazardDark, 0.8f);
             }
 
-            // 3.1 水线整条黄安全边 + 港青步道带：让 4.6m 水沟在俯视角有明确的沿口读形。
+            // 3.1 水线整条黄安全边 + 港青步道带：让 4.6m 水沟在斜俯视角有明确的沿口读形。
             if (ax <= ArenaLayoutHarbor.WaterHalfX + 0.2f)
             {
                 float edge = Mathf.Abs(az - (ArenaLayoutHarbor.WaterOuterZ + 0.30f));

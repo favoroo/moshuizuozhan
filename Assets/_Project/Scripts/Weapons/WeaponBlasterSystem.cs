@@ -100,6 +100,9 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
+                // 空爆重音（旧版烘了 blaster_boom 却从没播，空爆听起来和普通落墨一样）
+                AudioManager.Instance.PlayBlasterBoom(burstCenter);
+                AudioManager.Instance.PlaySplat(groundPoint, paintRadius, 1.2f);
                 AudioManager.Instance.PlayInkHitGround(groundPoint, 1.1f, paintRadius);
             }
 

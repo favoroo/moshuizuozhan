@@ -86,7 +86,7 @@ namespace P1.Editor
                     AsphaltCrack = new Color(0.09f, 0.09f, 0.10f, 1f),
 
                     // 3. 碗池底面：必须比甲板暗，才能读成「下沉的坑」。
-                    // 旧值 0.615 比周围混凝土地面（~0.41）亮 50%，俯视/斜视下整个碗池读作
+                    // 旧值 0.615 比周围混凝土地面（~0.41）亮 50%，俯瞰/斜视下整个碗池读作
                     // 一块凸起的白色圆台（叠加旧版被水面灌满，更强化「转盘」观感）。
                     BowlBase = new Color(0.345f, 0.355f, 0.365f, 1f),
                     BowlSeam = new Color(0.235f, 0.245f, 0.255f, 1f),
@@ -394,7 +394,7 @@ namespace P1.Editor
                 c = Color.Lerp(c, pal.BowlRimDark, scuffLine * (scuffN - 0.70f) * 0.90f);
             }
 
-            // 4. 池底贴壁环境光遮蔽：越靠池壁越暗。俯视时这是「坑」而不是「白圆台」的关键读形。
+            // 4. 池底贴壁环境光遮蔽：越靠池壁越暗。俯瞰时这是「坑」而不是「白圆台」的关键读形。
             //    用椭圆归一化距离而不是矩形距离，避免四角出现方形暗块。
             if (isFloor)
             {
@@ -422,7 +422,7 @@ namespace P1.Editor
             float nz = z / ArenaLayoutSkatepark.BowlCopingRadiusZ;
             float ellipse = Mathf.Sqrt(nx * nx + nz * nz);
             // 池沿：白色 coping 线 + 外侧一圈很淡的黄色安全线。
-            // 旧版池沿是一条高饱和黄实线，配合被水灌满的亮池底，俯视读作「转盘跑道」。
+            // 旧版池沿是一条高饱和黄实线，配合被水灌满的亮池底，俯瞰读作「转盘跑道」。
             if (Mathf.Abs(ellipse - 1f) < 0.0065f)
             {
                 color = Color.Lerp(color, pal.MarkingWhite, 0.82f);

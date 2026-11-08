@@ -2052,6 +2052,10 @@ namespace P1.UI.Menus
             HitstopService.Cancel();
             HitstopService.IsPaused = true;
 
+            // 暂停音必须在 AudioListener.pause = true 之前播，否则它自己也被静音
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayPause(true);
+
             Time.timeScale = 0f;
             AudioListener.pause = true;
 
@@ -2082,6 +2086,10 @@ namespace P1.UI.Menus
             AudioListener.pause = false;
             HitstopService.IsPaused = false;
             HitstopService.Cancel();
+
+            // 恢复音在解除静音之后播
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayPause(false);
 
             Time.timeScale = 1f;
 

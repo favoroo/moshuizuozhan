@@ -70,10 +70,15 @@ namespace P1.Weapons
             /// <summary>拖尾墨雾尺寸倍率。</summary>
             public float TrailPuffScale;
             public bool IsLocalOwner;
+            /// <summary>出生重叠补判的分帧相位：非首帧/非自由落体时按 4 帧轮转查询，避免每弹每帧双物理查询。</summary>
+            public int OverlapPhase;
         }
 
-        private readonly List<ActiveProjectile> _active = new List<ActiveProjectile>(96);
+        // 容量直接按「8 人加特林弹雨 + 抛物线落滴」峰值预留：旧版 96 起、命中/落滴并发时
+        // 在战斗中 List 反复翻倍（96→384 每次 40~80KB 单帧分配，正是 GC 尖刺来源之一）。
+        private readonly List<ActiveProjectile> _active = new List<ActiveProjectile>(512);
         private readonly Queue<Transform> _pool = new Queue<Transform>(96);
+        private int _spawnSequence;
         // 弹丸每帧要做命中过滤：collider→角色缓存把每弹每帧的 GetComponentInParent 降为一次性。
         private readonly Dictionary<Collider, CombatantHealth> _combatantCache = new Dictionary<Collider, CombatantHealth>(64);
         private const int PrewarmCount = 96;
@@ -83,6 +88,8 @@ namespace P1.Weapons
         private Material _sharedMat;
         private MaterialPropertyBlock _propBlock;
         private readonly RaycastHit[] _hitBuffer = new RaycastHit[8];
+        /// <summary>出生重叠补判用的角色层缓冲（全场最多 8 名角色，留余量）。</summary>
+        private readonly Collider[] _combatantOverlapBuffer = new Collider[12];
         private Mesh _cometMesh;
 
         private static readonly int BaseColorProp = Shader.PropertyToID("_BaseColor");
@@ -311,7 +318,8 @@ namespace P1.Weapons
                 TrailSatelliteChance = feel.TrailSatelliteChance,
                 TrailPuffLifetime = feel.TrailPuffLifetime,
                 TrailPuffScale = feel.TrailPuffScale,
-                IsLocalOwner = isLocalOwner
+                IsLocalOwner = isLocalOwner,
+                OverlapPhase = _spawnSequence++ & 3
             };
 
             _active.Add(proj);
@@ -545,7 +553,8 @@ namespace P1.Weapons
                 // 命中的是可涂墙面的侧立面（impactNormal.y <= 0.55f）时涂在墙面上；
                 // 命中顶面（如高台顶、集装箱顶、木箱顶等）走顶面图集涂墨
                 InkWallSurface wall = InkWallSurface.FindForCollider(hit.collider);
-                if (wall != null && impactNormal.y <= 0.55f)
+                bool hitVerticalWall = wall != null && impactNormal.y <= 0.55f;
+                if (hitVerticalWall)
                 {
                     int wallChanged = PaintWallStretchBlob(wall, impactPos, impactNormal, incomingDir, splatRadius, p.EndSplatStretch, p.Team);
                     if (wallChanged > 0)
@@ -560,7 +569,12 @@ namespace P1.Weapons
 
                 if (AudioManager.Instance != null)
                 {
-                    AudioManager.Instance.PlayInkHitGround(impactPos, 0.75f, splatRadius);
+                    // 打墙与打地必须是两种音色：墙没有体积，用「啪」；地面用湿墨花。
+                    // 旧版只有落地音，打墙听起来像打在棉花上。
+                    if (hitVerticalWall)
+                        AudioManager.Instance.PlayInkHitWall(impactPos, 0.9f);
+                    else
+                        AudioManager.Instance.PlayInkHitGround(impactPos, 0.75f, splatRadius);
                 }
             }
 
@@ -923,11 +937,101 @@ namespace P1.Weapons
                 p.IsBlaster ? ImpactFilter.ActorsOnly : ImpactFilter.Any,
                 ref bestHit, ref bestCombatant);
             if (!p.IsBlaster)
-                return found;
+            {
+                // 角色命中优先（含贴脸重叠补判）。
+                if (bestCombatant != null)
+                    return true;
+
+                // 球扫已经命中墙面 / 地面 / 掩体：必须按世界命中结算。
+                // 旧写法只把「角色重叠补判」的结果当返回值，把 found（世界命中）丢掉了，
+                // 于是非爆破弹丸直接穿过墙与地面，墙面永远涂不上墨（只剩沿途滴墨的 XZ 投影）。
+                if (found)
+                    return true;
+
+                // 球扫没扫到任何东西时，再补一次「出生/悬停已重叠」判定
+                // （贴脸挥击出生盲区，见 TryResolveOverlappedCombatant）。
+                return OverlapCheckDue(in p) && TryResolveOverlappedCombatant(in p, ref bestHit, ref bestCombatant);
+            }
 
             // 几何体：细射线。两段取更近者，避免大球体把「墙前一点点的地面/墙角」判成命中。
             CollectClosestImpact(in p, dir, stepDist, BlasterWorldHitRadius, ImpactFilter.WorldOnly, ref bestHit, ref bestCombatant);
+            if (bestCombatant == null && OverlapCheckDue(in p) && TryResolveOverlappedCombatant(in p, ref bestHit, ref bestCombatant))
+                return true;
+
             return bestCombatant != null || bestHit.collider != null;
+        }
+
+        /// <summary>出生首帧（RangeTraveled==0）与自由落体阶段需要逐帧补判，其余按相位 4 帧轮转。</summary>
+        private static bool OverlapCheckDue(in ActiveProjectile p)
+        {
+            return p.RangeTraveled <= 0.0001f || p.Dropping || ((Time.frameCount + p.OverlapPhase) & 3) == 0;
+        }
+
+        /// <summary>
+        /// 球扫的出生重叠盲区补判（对齐 INKWAVE weapons.js _step 的「线段-胶囊距离」语义，重叠即命中）：
+        /// <c>Physics.SphereCast</c> 不报告球体起始时已相交的碰撞体——滚筒挥击贴脸释放时，出射点
+        /// （身前 0.55m / 高 1.15m，命中半径 0.85m）已经嵌进敌人胶囊（半径 0.45m），球扫整段静默失败，
+        /// 墨滴飞过头顶，隔一段距离才命中。这里在球扫未找到角色时，用只含角色层的 OverlapSphere
+        /// 补判「已重叠」的敌人，命中点取碰撞体上离弹丸最近的点；若已有更近的世界命中则不覆盖。
+        /// 顺带覆盖「敌人走进悬停墨滴」导致球扫起始即重叠而漏判的情况。
+        /// </summary>
+        private bool TryResolveOverlappedCombatant(
+            in ActiveProjectile p,
+            ref RaycastHit bestHit,
+            ref CombatantHealth bestCombatant)
+        {
+            int count = Physics.OverlapSphereNonAlloc(
+                p.Position, p.HitRadius, _combatantOverlapBuffer, GameLayers.CombatantMask, QueryTriggerInteraction.Ignore);
+            if (count <= 0)
+                return false;
+
+            Vector3 pos = p.Position;
+            float bestDist = bestHit.collider != null ? bestHit.distance : float.MaxValue;
+            Vector3 bestPoint = Vector3.zero;
+            Vector3 bestNormal = Vector3.up;
+            bool found = false;
+
+            for (int i = 0; i < count; i++)
+            {
+                Collider col = _combatantOverlapBuffer[i];
+                if (col == null)
+                    continue;
+                if (p.OwnerRoot != null && col.transform.IsChildOf(p.OwnerRoot.transform))
+                    continue;
+
+                CombatantHealth combatant = ResolveCombatant(col);
+                if (combatant == null || combatant.Team == p.Team || !combatant.IsAlive)
+                    continue;
+
+                Vector3 closest = col.ClosestPoint(pos);
+                float dist = Vector3.Distance(closest, pos);
+                // 出生点已在胶囊内部时 ClosestPoint 返回原点，改用胸口位置兜底，
+                // 保证受击特效 / 击杀卡有合理落点。
+                if (dist < 0.02f)
+                {
+                    closest = combatant.transform.position + Vector3.up * 0.9f;
+                    dist = Vector3.Distance(closest, pos);
+                }
+
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    bestPoint = closest;
+                    bestNormal = (pos - closest).sqrMagnitude > 0.0001f ? (pos - closest).normalized : Vector3.up;
+                    bestCombatant = combatant;
+                    found = true;
+                }
+            }
+
+            if (!found)
+                return false;
+
+            // RaycastHit.collider 为只读且在此路径不可达（combatant 命中分支不会查世界碰撞体），保持 null。
+            bestHit = default;
+            bestHit.point = bestPoint;
+            bestHit.normal = bestNormal;
+            bestHit.distance = bestDist;
+            return true;
         }
 
         /// <summary>本次球扫收哪一类命中：任意 / 只收角色 / 只收几何体。</summary>

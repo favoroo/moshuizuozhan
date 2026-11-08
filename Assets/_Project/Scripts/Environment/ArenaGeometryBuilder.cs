@@ -159,14 +159,14 @@ namespace P1.Environment
             AddOrientedInkWallSurface(eastNorthRamp, inkCfg, inkWallMat);
 
             // 4. 外侧战术绕后走廊与集装箱掩体群（贴住侧翼台外沿、重叠 0.05m，死缝消除，外走廊拓宽至 2.10m）
-            CreateCover(arenaRoot.transform, "Container_Flank_West_01_Teal", new Vector3(-ArenaLayoutV2.ContainerFlankX, 0.9f, -3.2f), new Vector3(2.2f, 1.8f, 4.6f),
+            CreateContainer(arenaRoot.transform, "Container_Flank_West_01_Teal", new Vector3(-ArenaLayoutV2.ContainerFlankX, 0.9f, -3.2f), new Vector3(2.2f, 1.8f, 4.6f),
                 containerTealMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
-            CreateCover(arenaRoot.transform, "Container_Flank_West_02_Rust", new Vector3(-ArenaLayoutV2.ContainerFlankX, 0.9f, 4.5f), new Vector3(2.2f, 1.8f, 3.8f),
+            CreateContainer(arenaRoot.transform, "Container_Flank_West_02_Rust", new Vector3(-ArenaLayoutV2.ContainerFlankX, 0.9f, 4.5f), new Vector3(2.2f, 1.8f, 3.8f),
                 containerRustMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
-            CreateCover(arenaRoot.transform, "Container_Flank_East_01_Teal", new Vector3(ArenaLayoutV2.ContainerFlankX, 0.9f, 3.2f), new Vector3(2.2f, 1.8f, 4.6f),
+            CreateContainer(arenaRoot.transform, "Container_Flank_East_01_Teal", new Vector3(ArenaLayoutV2.ContainerFlankX, 0.9f, 3.2f), new Vector3(2.2f, 1.8f, 4.6f),
                 containerTealMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
-            CreateCover(arenaRoot.transform, "Container_Flank_East_02_Rust", new Vector3(ArenaLayoutV2.ContainerFlankX, 0.9f, -4.5f), new Vector3(2.2f, 1.8f, 3.8f),
+            CreateContainer(arenaRoot.transform, "Container_Flank_East_02_Rust", new Vector3(ArenaLayoutV2.ContainerFlankX, 0.9f, -4.5f), new Vector3(2.2f, 1.8f, 3.8f),
                 containerRustMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             // 5. 中场两侧战术集装箱与经典掩体墙（兼容现有 WallInkPlayboxTests）
@@ -180,14 +180,14 @@ namespace P1.Environment
                 new Vector3(ArenaLayoutV2.CoverWallWidth, 1.8f, 1.4f),
                 wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
-            CreateCover(arenaRoot.transform, "Container_Mid_SW_Mustard", new Vector3(-ArenaLayoutV2.ContainerMidX, 0.9f, -5.5f), new Vector3(2.2f, 1.8f, 4.2f),
+            CreateContainer(arenaRoot.transform, "Container_Mid_SW_Mustard", new Vector3(-ArenaLayoutV2.ContainerMidX, 0.9f, -5.5f), new Vector3(2.2f, 1.8f, 4.2f),
                 containerMustardMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
-            CreateCover(arenaRoot.transform, "Container_Mid_NE_Mustard", new Vector3(ArenaLayoutV2.ContainerMidX, 0.9f, 5.5f), new Vector3(2.2f, 1.8f, 4.2f),
+            CreateContainer(arenaRoot.transform, "Container_Mid_NE_Mustard", new Vector3(ArenaLayoutV2.ContainerMidX, 0.9f, 5.5f), new Vector3(2.2f, 1.8f, 4.2f),
                 containerMustardMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
-            CreateCover(arenaRoot.transform, "Container_Mid_SE_Slate", new Vector3(ArenaLayoutV2.ContainerMidX, 0.9f, -5.5f), new Vector3(2.2f, 1.8f, 4.2f),
+            CreateContainer(arenaRoot.transform, "Container_Mid_SE_Slate", new Vector3(ArenaLayoutV2.ContainerMidX, 0.9f, -5.5f), new Vector3(2.2f, 1.8f, 4.2f),
                 containerSlateMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
-            CreateCover(arenaRoot.transform, "Container_Mid_NW_Slate", new Vector3(-ArenaLayoutV2.ContainerMidX, 0.9f, 5.5f), new Vector3(2.2f, 1.8f, 4.2f),
+            CreateContainer(arenaRoot.transform, "Container_Mid_NW_Slate", new Vector3(-ArenaLayoutV2.ContainerMidX, 0.9f, 5.5f), new Vector3(2.2f, 1.8f, 4.2f),
                 containerSlateMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             // 6. 双方出生前沿战术掩体墙（z=±11.2 保留为进入中场的最后一道掩体）
@@ -219,9 +219,9 @@ namespace P1.Environment
                 wallMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             // 7.2 延长区集装箱：每半场两组，贴墙外走廊对齐 2.05m；Rust 与 Teal 沿 Z 重叠 0.1m，消除 0.4m 竖缝
-            CreateCoverPair(arenaRoot.transform, "Container_Extension_Teal", new Vector3(ArenaLayoutV2.ExtensionContainerX, 0.9f, 16.5f), new Vector3(2.4f, 1.8f, 4.6f),
+            CreateContainerPair(arenaRoot.transform, "Container_Extension_Teal", new Vector3(ArenaLayoutV2.ExtensionContainerX, 0.9f, 16.5f), new Vector3(2.4f, 1.8f, 4.6f),
                 containerTealMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
-            CreateCoverPair(arenaRoot.transform, "Container_Extension_Rust", new Vector3(ArenaLayoutV2.ExtensionContainerX, 0.9f, 21.2f), new Vector3(2.4f, 1.8f, 4.6f),
+            CreateContainerPair(arenaRoot.transform, "Container_Extension_Rust", new Vector3(ArenaLayoutV2.ExtensionContainerX, 0.9f, 21.2f), new Vector3(2.4f, 1.8f, 4.6f),
                 containerRustMat, inkCfg, inkWallMat, blockedColliders, 0.35f, true);
 
             // 7.3 延长区花坛与木箱：低矮掩体，保持中路快速推进的节奏（木箱 1.2m 可跳，不再是 1.4m 差 5cm）
@@ -519,6 +519,51 @@ namespace P1.Environment
         }
 
         /// <summary>
+        /// 创建瓦楞集装箱掩体：外壳换成 <see cref="ArenaContainerMeshFactory"/> 生成的瓦楞网格，
+        /// 其余（BoxCollider / InkWallSurface / OcclusionFader / blockedColliders / 世界 AABB UV 烘焙）
+        /// 与 <see cref="CreateCover"/> 完全一致 —— 碰撞、涂墨、遮挡与测试断言都不变。
+        ///
+        /// 网格写在 unit 空间、凹槽向内收，因此 1cm 外扩的墨面 Quad 始终压在棱脊外侧，
+        /// 涂满墨时瓦楞不会穿出墨面。
+        /// </summary>
+        public static GameObject CreateContainer(
+            Transform parent,
+            string name,
+            Vector3 pos,
+            Vector3 scale,
+            Material mat,
+            InkGridConfigSO inkCfg,
+            Material inkWallMat,
+            List<Collider> blockedColliders,
+            float minAlpha = 0.35f,
+            bool enableWallInk = true)
+        {
+            var go = CreateCover(parent, name, pos, scale, mat, inkCfg, inkWallMat, blockedColliders, minAlpha, enableWallInk);
+            ApplyCorrugatedShell(go, scale);
+            return go;
+        }
+
+        /// <summary>
+        /// 把已建好的立方体盒换成瓦楞外壳（保留 Collider / 墨面 / 遮挡组件）。
+        /// 供几何构建器与滑板场/港湾等其它变体复用。
+        /// </summary>
+        public static void ApplyCorrugatedShell(GameObject box, Vector3 scale)
+        {
+            if (box == null) return;
+
+            var mf = box.GetComponent<MeshFilter>();
+            if (mf == null) return;
+
+            Mesh shell = ArenaContainerMeshFactory.Build(scale);
+            if (shell == null) return;
+
+            // 瓦楞壳的 uv0 是整面归一化坐标（供踢脚线/压顶读 uv.y），
+            // 所以盒体世界 AABB 必须在新网格上重新烘焙一遍，否则掩体边界线会失效。
+            mf.sharedMesh = shell;
+            BakeBoxBoundsUV(box, scale);
+        }
+
+        /// <summary>
         /// 创建一组原点 180° 点对称的掩体（A 在传入坐标，B 在 (-x, y, -z)）。
         /// 仅用于 P7-B 新增结构，避免破坏旧对象命名与测试锚点。
         /// </summary>
@@ -536,6 +581,25 @@ namespace P1.Environment
         {
             CreateCover(parent, namePrefix + "_A", pos, scale, mat, inkCfg, inkWallMat, blockedColliders, minAlpha, enableWallInk);
             CreateCover(parent, namePrefix + "_B", new Vector3(-pos.x, pos.y, -pos.z), scale, mat, inkCfg, inkWallMat, blockedColliders, minAlpha, enableWallInk);
+        }
+
+        /// <summary>
+        /// 创建一组原点 180° 点对称的瓦楞集装箱（A 在传入坐标，B 在 (-x, y, -z)）。
+        /// </summary>
+        private static void CreateContainerPair(
+            Transform parent,
+            string namePrefix,
+            Vector3 pos,
+            Vector3 scale,
+            Material mat,
+            InkGridConfigSO inkCfg,
+            Material inkWallMat,
+            List<Collider> blockedColliders,
+            float minAlpha,
+            bool enableWallInk)
+        {
+            CreateContainer(parent, namePrefix + "_A", pos, scale, mat, inkCfg, inkWallMat, blockedColliders, minAlpha, enableWallInk);
+            CreateContainer(parent, namePrefix + "_B", new Vector3(-pos.x, pos.y, -pos.z), scale, mat, inkCfg, inkWallMat, blockedColliders, minAlpha, enableWallInk);
         }
 
         /// <summary>
@@ -639,6 +703,8 @@ namespace P1.Environment
             var pal = new Palette(null);
             var metalBuf = new MeshBuffer();
             var concreteBuf = new MeshBuffer();
+            var woodBuf = new MeshBuffer();
+            var emissiveBuf = new MeshBuffer();
 
             // 1. 集装箱结构装饰（角柱、顶部边轨、底部裙边、端门与锁杆）
             BuildContainerDecorations(metalBuf, pal);
@@ -658,12 +724,30 @@ namespace P1.Environment
             // 6. 中央女儿墙顶面小压顶条
             BuildParapetDecorations(metalBuf, pal);
 
-            // 7. 合并网格并挂接至 arenaRoot（无碰撞、无墨面、仅渲染与阴影）
+            // 7. 场内"生活痕迹"散件（托盘、油桶、锥桶、电缆盘、轮胎、护栏、墙面设备）。
+            //    全部贴墙/贴箱根/贴死角，无碰撞、无墨面，合并进木/金属/发光三张网格。
+            ArenaClutterBuilder.Build(woodBuf, metalBuf, emissiveBuf);
+
+            // 7.1 集装箱喷印（编号 / 标牌 / 品牌条）：把"刷了漆的大盒子"读成"真集装箱"
+            ArenaClutterBuilder.BuildContainerLivery(arenaRoot, concreteBuf, pal);
+
+
+            // 8. 合并网格并挂接至 arenaRoot（无碰撞、无墨面、仅渲染与阴影）
             Material metalMat = mats?.propMetal ?? mats?.steelDark ?? mats?.steel ?? mats?.wall;
             AttachDecorMesh(arenaRoot, "Decor_Structural_Metal", metalBuf.ToMesh("Decor_Structural_Metal_Mesh"), metalMat);
 
             Material concreteMat = mats?.propMatte ?? mats?.concrete ?? mats?.wall;
             AttachDecorMesh(arenaRoot, "Decor_Structural_Concrete", concreteBuf.ToMesh("Decor_Structural_Concrete_Mesh"), concreteMat);
+
+            // 木质散件必须走 PropLit 系（顶点色生效）：
+            // ObstacleDitherLit 完全忽略顶点色、只用材质 _BaseColor，木托盘会被刷成一整块深棕近黑。
+            // 材质用 Mat_Prop_WoodDetail（Wood 法线/RMO）：复用 propMatte 会吃到混凝土法线，
+            // 木箱/托盘读成"纸箱/石膏块"。
+            Material woodMat = mats?.propWoodDetail ?? mats?.propMatte ?? mats?.concrete ?? concreteMat;
+            AttachDecorMesh(arenaRoot, "Decor_Structural_Wood", woodBuf.ToMesh("Decor_Structural_Wood_Mesh"), woodMat);
+
+            Material emissiveMat = mats?.propEmissive ?? metalMat;
+            AttachDecorMesh(arenaRoot, "Decor_Structural_Emissive", emissiveBuf.ToMesh("Decor_Structural_Emissive_Mesh"), emissiveMat);
         }
 
         private static void AttachDecorMesh(GameObject parent, string name, Mesh mesh, Material mat)
@@ -715,7 +799,10 @@ namespace P1.Environment
             float d = 0.018f; // 凸出量 1.8cm ≤ 2cm 防 z-fight
 
             Color steelDark = pal.SteelDark;
-            Color doorTrimColor = Color.Lerp(boxColor, steelDark, 0.35f);
+            // 端门硬件（门缝条 / 加强筋 / 锁杆）统一走深钢灰。
+            // 历史写法是 `Lerp(boxColor, steelDark, 0.35)`：在芥末黄箱上插值出的是土黄，
+            // 斜俯视角下一排横条读成"钉在箱子上的木条"，完全不像钢制门锁件。
+            Color doorTrimColor = Color.Lerp(steelDark, Color.black, 0.18f);
 
             // 1. 四角竖向角柱（凸出立面 ≤ 2cm）
             float postW = 0.08f;
@@ -762,7 +849,7 @@ namespace P1.Environment
                 metalBuf.AddBox(skirtPos, new Vector3(innerW, 0.07f, d), steelDark);
             }
 
-            // 4. 两端短边端门（门框竖条 + 门缝横条 + 竖向锁杆）
+            // 4. 两端短边端门（门缝竖条 + 竖向门板瓦楞 + 竖向锁杆）
             for (int sz = -1; sz <= 1; sz += 2)
             {
                 float zEnd = c.z + sz * (l * 0.5f + d);
@@ -770,26 +857,22 @@ namespace P1.Environment
                 // 中央门缝竖条
                 metalBuf.AddBox(new Vector3(c.x, c.y, zEnd), new Vector3(0.06f, h - 0.16f, 0.015f), doorTrimColor);
 
-                // 横向加强筋条
-                float ribSpan = innerW * 0.44f;
-                float ribXOffset = innerW * 0.25f;
-                for (int ry = -1; ry <= 1; ry += 2)
-                {
-                    float yRib = c.y + ry * (h * 0.22f);
-                    metalBuf.AddBox(new Vector3(c.x - ribXOffset, yRib, zEnd), new Vector3(ribSpan, 0.045f, 0.015f), doorTrimColor);
-                    metalBuf.AddBox(new Vector3(c.x + ribXOffset, yRib, zEnd), new Vector3(ribSpan, 0.045f, 0.015f), doorTrimColor);
-                }
+                // 门扇瓦楞：**不再单独补几何**。
+                // 瓦楞壳（ArenaContainerMeshFactory）四个侧面都做了竖瓦楞，±Z 端面本来就有肋，
+                // 再叠一层会出现"双层瓦楞"；而且装饰层用的是 Palette 兜底色、
+                // 与箱体材质 _BaseColor 不同源，大面积色块会明显偏色。
+                // 端门只保留"门缝 + 锁杆 + 铰链"这些箱壳做不出来的硬件。
 
                 // 2 根竖向锁杆与把手
                 for (int sx = -1; sx <= 1; sx += 2)
                 {
                     float rodX = c.x + sx * 0.30f;
-                    metalBuf.AddBox(new Vector3(rodX, c.y, zEnd + 0.008f), new Vector3(0.035f, h - 0.16f, 0.025f), steelDark);
+                    metalBuf.AddBox(new Vector3(rodX, c.y, zEnd + 0.012f), new Vector3(0.035f, h - 0.16f, 0.025f), steelDark);
                     // 门锁把手
-                    metalBuf.AddBox(new Vector3(rodX - sx * 0.05f, c.y - 0.10f, zEnd + 0.022f), new Vector3(0.12f, 0.025f, 0.025f), steelDark);
+                    metalBuf.AddBox(new Vector3(rodX - sx * 0.05f, c.y - 0.10f, zEnd + 0.028f), new Vector3(0.12f, 0.025f, 0.025f), steelDark);
                     // 锁杆固定座
-                    metalBuf.AddBox(new Vector3(rodX, c.y + h * 0.38f, zEnd + 0.012f), new Vector3(0.05f, 0.04f, 0.03f), steelDark);
-                    metalBuf.AddBox(new Vector3(rodX, c.y - h * 0.38f, zEnd + 0.012f), new Vector3(0.05f, 0.04f, 0.03f), steelDark);
+                    metalBuf.AddBox(new Vector3(rodX, c.y + h * 0.38f, zEnd + 0.016f), new Vector3(0.05f, 0.04f, 0.03f), steelDark);
+                    metalBuf.AddBox(new Vector3(rodX, c.y - h * 0.38f, zEnd + 0.016f), new Vector3(0.05f, 0.04f, 0.03f), steelDark);
                 }
             }
         }
@@ -1232,7 +1315,7 @@ namespace P1.Environment
             }
         }
 
-        private readonly struct Palette
+        internal readonly struct Palette
         {
             public readonly Color Steel;
             public readonly Color SteelDark;
@@ -1247,6 +1330,8 @@ namespace P1.Environment
             public readonly Color HazardDark;
             public readonly Color TeamAPad;
             public readonly Color TeamBPad;
+            public readonly Color Wood;
+            public readonly Color WoodDark;
 
             public Palette(ArenaStyleSO s)
             {
@@ -1263,10 +1348,12 @@ namespace P1.Environment
                 HazardDark = s != null ? s.hazardDark : new Color(0.16f, 0.16f, 0.16f, 1f);
                 TeamAPad = s != null ? s.teamAPad : new Color(1.00f, 0.48f, 0.08f, 1f);
                 TeamBPad = s != null ? s.teamBPad : new Color(0.15f, 0.35f, 1.00f, 1f);
+                Wood = s != null ? s.wood : new Color(0.72f, 0.58f, 0.42f, 1f);
+                WoodDark = s != null ? s.woodDark : new Color(0.48f, 0.36f, 0.24f, 1f);
             }
         }
 
-        private sealed class MeshBuffer
+        internal sealed class MeshBuffer
         {
             public readonly List<Vector3> Vertices = new List<Vector3>(2048);
             public readonly List<Vector3> Normals = new List<Vector3>(2048);
@@ -1322,10 +1409,98 @@ namespace P1.Environment
                         c + new Vector3(-h.x, h.y, -h.z), c + new Vector3(-h.x, h.y, h.z), color, trs);
             }
 
+            /// <summary>
+            /// 以 center 为轴心、绕 center 旋转的盒子（细节散件用）。
+            /// 内部走"局部坐标 + TRS"约定：TRS 带 center 平移，顶点从原点算起。
+            /// </summary>
+            public void AddBox(Vector3 center, Vector3 size, Color color, Quaternion rotation)
+            {
+                AddBox(Vector3.zero, size, color, Matrix4x4.TRS(center, rotation, Vector3.one));
+            }
+
+            /// <summary>
+            /// 圆台/圆柱（含顶底盖）。baseCenter 是底面圆心，向上生长 height。
+            /// 细节散件（油桶、锥桶、系缆桩、轮胎）都用它拼，避免额外的 GameObject。
+            /// </summary>
+            public void AddCylinder(Vector3 baseCenter, float radius, float height, int segments, Color color,
+                Matrix4x4? trs = null, bool topCap = true)
+            {
+                AddCone(baseCenter, radius, radius, height, segments, color, trs, topCap);
+            }
+
+            /// <summary>
+            /// 圆台：底面半径 bottomRadius、顶面半径 topRadius，向上生长 height。
+            /// </summary>
+            public void AddCone(Vector3 baseCenter, float bottomRadius, float topRadius, float height,
+                int segments, Color color, Matrix4x4? trs = null, bool topCap = true)
+            {
+                int segs = Mathf.Max(3, segments);
+                float y0 = baseCenter.y;
+                float y1 = baseCenter.y + height;
+                Vector3 topCenter = new Vector3(baseCenter.x, y1, baseCenter.z);
+                Vector3 bottomCenter = new Vector3(baseCenter.x, y0, baseCenter.z);
+
+                for (int i = 0; i < segs; i++)
+                {
+                    float a0 = i * Mathf.PI * 2f / segs;
+                    float a1 = (i + 1) * Mathf.PI * 2f / segs;
+                    float c0 = Mathf.Cos(a0), s0 = Mathf.Sin(a0);
+                    float c1 = Mathf.Cos(a1), s1 = Mathf.Sin(a1);
+
+                    Vector3 b0 = new Vector3(baseCenter.x + c0 * bottomRadius, y0, baseCenter.z + s0 * bottomRadius);
+                    Vector3 b1 = new Vector3(baseCenter.x + c1 * bottomRadius, y0, baseCenter.z + s1 * bottomRadius);
+                    Vector3 t0 = new Vector3(baseCenter.x + c0 * topRadius, y1, baseCenter.z + s0 * topRadius);
+                    Vector3 t1 = new Vector3(baseCenter.x + c1 * topRadius, y1, baseCenter.z + s1 * topRadius);
+
+                    // 侧面（外法线朝外）：绕序 b0 → b1 → t1 → t0
+                    AddQuad(b0, b1, t1, t0, color, trs);
+
+                    // 顶盖：三角 b1 → b0 → topCenter 朝 +Y
+                    if (topCap && topRadius > 0.0005f)
+                    {
+                        AddTriangle(b1, b0, topCenter, color, trs);
+                    }
+
+                    // 底盖：三角 b0 → b1 → bottomCenter 朝 -Y
+                    if (bottomRadius > 0.0005f)
+                    {
+                        AddTriangle(b0, b1, bottomCenter, color, trs);
+                    }
+                }
+            }
+
+            private void AddTriangle(Vector3 v0, Vector3 v1, Vector3 v2, Color color, Matrix4x4? trs = null)
+            {
+                if (trs.HasValue)
+                {
+                    v0 = trs.Value.MultiplyPoint3x4(v0);
+                    v1 = trs.Value.MultiplyPoint3x4(v1);
+                    v2 = trs.Value.MultiplyPoint3x4(v2);
+                }
+
+                // 与 AddQuad 同一绕序约定：逆时针（从法线一侧看）为正面，法线 = cross(v1-v0, v2-v0)
+                Vector3 normal = Vector3.Cross(v1 - v0, v2 - v0);
+                normal = normal.sqrMagnitude > 1e-12f ? normal.normalized : Vector3.up;
+                int start = Vertices.Count;
+
+                Vertices.Add(v0); Vertices.Add(v1); Vertices.Add(v2);
+                Normals.Add(normal); Normals.Add(normal); Normals.Add(normal);
+                UVs.Add(new Vector2(0f, 0f)); UVs.Add(new Vector2(1f, 0f)); UVs.Add(new Vector2(0.5f, 1f));
+                Colors.Add(color); Colors.Add(color); Colors.Add(color);
+
+                Triangles.Add(start); Triangles.Add(start + 1); Triangles.Add(start + 2);
+            }
+
             public Mesh ToMesh(string meshName)
             {
                 if (Vertices.Count == 0) return null;
                 var mesh = new Mesh { name = meshName };
+                // 场内脏细节 + 结构装饰合并后金属网格会逼近 6.5 万顶点上限；
+                // 超过 UInt16 索引范围时 SetTriangles 会直接抛异常（整张网格丢失）。
+                if (Vertices.Count > 65535)
+                {
+                    mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+                }
                 mesh.SetVertices(Vertices);
                 mesh.SetNormals(Normals);
                 mesh.SetUVs(0, UVs);

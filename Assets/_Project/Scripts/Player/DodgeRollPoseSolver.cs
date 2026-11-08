@@ -53,7 +53,7 @@ namespace P1.Player
     /// INKWAVE 的配方（character.js <c>_poseDodge</c> / weapons.js <c>dodgeVel</c>）：
     /// 一整圈前滚翻绕 <c>up × 滚向</c> 轴、快出缓停 <c>1-(1-u)^2.4</c>，
     /// 配合蜷身（win(0,0.1,0.62,0.96)：0.1s 内抱团、0.62s 起展开）、纵向压扁与落地归位，
-    /// 滚完身体恰好转回单位姿态、直接接 0.5s 架枪站桩。
+    /// 滚完身体恰好转回单位姿态、直接接 0.5s 架枪强化（射速 +20% / 散布清零，不锁移速）。
     ///
     /// 本类只输出权重 / 角度 / 轴向；变换应用（KidRoot 旋转、pivot 补偿、蜷身姿势混合）
     /// 由 <see cref="CharacterVisualController"/> 完成，角度与量级走参数结构便于调参。

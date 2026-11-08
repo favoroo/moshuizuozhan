@@ -1,6 +1,6 @@
 ---
 name: media-gen
-description: 为 P1（Unity 俯视角涂地对战游戏）生成与落地分媒体素材：游戏美术图（UI/HUD 图标、墨点溅射遮罩、可平铺地面贴图、标题关键视觉，支持参考图锁画风与抠透明底）、中文播报/台词语音（TTS）、BGM 配乐，以及本地烘焙音效 SFX。凡需要生成、编辑、批量产出、风格化一致的游戏图/语音/音乐/音效素材，或需要把素材落地进 Unity（导入设置、体检）时，必须使用本技能。
+description: 为 P1（Unity 第三人称涂地对战游戏）生成与落地分媒体素材：游戏美术图（UI/HUD 图标、墨点溅射遮罩、可平铺地面贴图、标题关键视觉，支持参考图锁画风与抠透明底）、中文播报/台词语音（TTS）、BGM 配乐，以及本地烘焙音效 SFX。凡需要生成、编辑、批量产出、风格化一致的游戏图/语音/音乐/音效素材，或需要把素材落地进 Unity（导入设置、体检）时，必须使用本技能。
 ---
 
 # media-gen：P1 Unity 素材生成与落地
@@ -14,8 +14,9 @@ Unity 侧的导入设置由项目内 `MediaImportPostprocessor.cs` 按路径自�
 
 1. **生成美术前先读 `MediaRaw/style/STYLE.md`**（项目风格档案）：
    拿 `STYLE_PREFIX` 风格前缀拼进提示词、拿锚图路径传 `-r`。
-   **本项目的 STYLE.md 目前是空白的**——画风按 `Docs/GamePlan.md` 推迟到 M6。
-   空档案 = 禁止生成正式素材；先走 [工作流 1 风格锚定](references/workflow-style-lock.md)
+   本项目的 STYLE.md 已回填（2026-10-29，基准 = INKWAVE 街头潮流风，含 `STYLE_PREFIX` 与锚图），
+   正式素材必须按档案执行。若档案再次缺失 `STYLE_PREFIX` 或锚图 = 禁止生成正式素材；
+   先走 [工作流 1 风格锚定](references/workflow-style-lock.md)
    并与用户确认画风。唯一例外是冒烟测试（中性主体、产物标注为测试件）。
 2. **不要手搓 curl**，一律用脚本（返回形状不固定、代理陷阱、重试逻辑都已封装）。
 3. **生成前先查台账**：`grep 关键词 MediaRaw/manifest.jsonl`，能复用就不重新生成。

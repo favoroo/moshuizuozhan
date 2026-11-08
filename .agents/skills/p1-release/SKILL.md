@@ -62,7 +62,7 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
    —— 读 GameVersion.cs → 查 tag → 不存在直接用当前版本(预升未发布);已存在则 +1 写回 GameVersion.cs 并同步 ProjectSettings
 ② 执行构建:           python3 -u .agents/skills/p1-release/release.py build --version X.Y.Z
    —— 编辑器开着会自动走 Pipeline 菜单构建（带重载状态感知与构建进度日志）；产物必须通过包内版本校验
-③ 提交改动:           git add -A && git commit -m "<type>(<scope>): 发布墨水作战 vX.Y.Z"
+③ 提交改动:           git add -A && git commit -m "<type>(<scope>): 发布墨水大作战 vX.Y.Z"
    —— 纯修复版本用 fix(ui)/fix(gameplay)，含新内容用 feat(release)
 ④ 撰写 Release 说明存为临时文件，执行发布:
    python3 -u .agents/skills/p1-release/release.py publish --version X.Y.Z --notes-file /tmp/notes.md
@@ -102,7 +102,7 @@ description: P1 涂地对战游戏的 Git 提交存档、双平台推送与版�
 模板（不含 SHA-256 行）：
 
 ```markdown
-## 墨水作战 vX.Y.Z
+## 墨水大作战 vX.Y.Z
 
 ### 新增内容
 - 首页新增检查更新与游戏内下载安装

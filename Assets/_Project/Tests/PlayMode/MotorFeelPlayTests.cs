@@ -259,13 +259,13 @@ namespace P1.Tests
         }
 
         /// <summary>
-        /// 双枪「翻滚 → 架枪站桩」阶段（<c>lockT</c>，移速锁 0）身体必须继续面向准星：
-        /// 对齐 INKWAVE weapons.js <c>_dualies</c>（<c>lockT &gt; 0</c> 每帧 <c>a.fireFacing = 0.5</c>）。
-        /// 旧实现只在按住扳机的帧朝准星，架枪期间移动输入会让身体原地转圈，
-        /// 而枪已经钉在原地、弹道仍沿准星飞出。
+        /// 双枪「翻滚 → 架枪强化」阶段不得锁住移动（P40 修正）：
+        /// 旧实现架枪 0.5s 内 <c>MoveSpeedMultiplier = 0</c>（照搬 INKWAVE <c>lockT</c> 的原地站桩），
+        /// 翻滚完想立刻脱身却被钉在原点，操作反馈极差；现在只有射速 +20% / 散布清零与
+        /// 表现层姿态（准星锁定框、躯干下沉）保留，移动立刻恢复可控。
         /// </summary>
         [UnityTest]
-        public IEnumerator DualiesTurretLock_KeepsBodyFacingAim_WhileMovingBackward()
+        public IEnumerator DualiesTurretStance_DoesNotFreezeMovement_AfterRoll()
         {
             yield return LoadPlaybox();
             var player = PlayerController.LocalPlayer;
@@ -292,24 +292,28 @@ namespace P1.Tests
 
             Assert.IsTrue(weapon.TryDodgeRoll(Vector3.forward), "应能触发双枪战术翻滚");
 
-            // 翻滚（0.3s）+ 架枪站桩（0.5s）期间持续朝准星反方向输入移动
+            // 推进到架枪强化窗口（翻滚 0.3s 内持续朝准星反方向输入移动）
             float start = Time.time;
-            bool sawTurret = false;
-            float turretAngle = 180f;
-            while (Time.time - start < 0.9f)
+            while (!weapon.IsTurretLocked && Time.time - start < 2f)
             {
                 motor.SetFrameIntent(Vector3.back, aim, false, false, false);
                 yield return null;
-                if (weapon.IsTurretLocked)
-                {
-                    sawTurret = true;
-                    Assert.IsTrue(weapon.WantsAimFacing, "架枪站桩属于开火姿态，武器应要求身体朝准星");
-                    turretAngle = Vector3.Angle(player.transform.forward, aim);
-                }
+            }
+            Assert.IsTrue(weapon.IsTurretLocked, "翻滚结束应进入架枪强化状态");
+
+            // 架枪窗口内持续反向移动：移速不得归零，位移必须真实发生
+            float maxSpeed = 0f;
+            Vector3 from = player.transform.position;
+            while (weapon.IsTurretLocked && Time.time - start < 3f)
+            {
+                motor.SetFrameIntent(Vector3.back, aim, false, false, false);
+                yield return null;
+                maxSpeed = Mathf.Max(maxSpeed, motor.CurrentMoveSpeed);
             }
 
-            Assert.IsTrue(sawTurret, "翻滚结束应进入架枪站桩状态");
-            Assert.Less(turretAngle, 25f, $"架枪站桩时移动输入不应把身体转离准星（实际偏离 {turretAngle:F1}°）");
+            Assert.Greater(maxSpeed, 2f, "架枪强化期间移速不得被锁零（旧实现恒为 0，翻滚后被钉在原地）");
+            float moved = Vector3.Distance(from, player.transform.position);
+            Assert.Greater(moved, 0.2f, $"架枪强化期间移动输入应真实带走角色（实际位移 {moved:F2}m）");
             weapon.EquipWeapon(originalConfig);
             Object.Destroy(dualiesConfig);
         }

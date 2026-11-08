@@ -439,12 +439,12 @@ namespace P1.Tests
             Assert.IsFalse(inkBg.activeSelf, "与横向墨水条重复的旧墨水条必须在移动端被隐藏");
             Assert.IsFalse(specBg.activeSelf, "与横向大招条重复的旧大招条必须在移动端被隐藏");
 
-            // t-1 收尾：底部改成三张并排独立卡，旧面板退化成不可见容器但矩形与三卡区同尺寸；
-            // 宽 1076 居中后左右各留 422px 给摇杆与操作键，因此不能再收窄成 360。
-            Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripWidth, panelRt.sizeDelta.x, 0.01f,
-                "旧面板容器应与三卡区同宽（332+332+380+16×2）");
+            // 双环化：底部改成两个小圆环（大招 72 + 生命 76），旧面板退化成不可见容器但矩形与环组同尺寸；
+            // 整组 166 宽居中，左右留给摇杆与操作键，因此不能再按旧卡片区 1076 断言。
+            Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripWidthMobile, panelRt.sizeDelta.x, 0.01f,
+                "旧面板容器应与移动端环组同宽（72+18+76）");
             Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripHeightMobile, panelRt.sizeDelta.y, 0.01f,
-                "移动端底部信息条应隐藏键盘提示行后收矮");
+                "移动端底部容器应跟随环组高度（76）");
             Assert.AreEqual(P1.UI.HudSpecialGaugeFactory.StripBottomYMobile, panelRt.anchoredPosition.y, 0.01f);
 
             Object.DestroyImmediate(canvasGo);
@@ -559,10 +559,21 @@ namespace P1.Tests
             // 1. Ready 阶段必须隐藏
             Assert.IsFalse(touchUI.IsShown, "Ready 首页阶段触控操作层必须隐藏，绝不遮挡开始比赛与选枪按钮");
 
-            // 2. Countdown 与 Playing 阶段必须显示
+            // 2. Countdown 与 Playing 阶段必须显示（扫场关闭的基线行为）
+            var introCameraField = typeof(MatchManager).GetField("introCameraSeconds", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.IsNotNull(introCameraField, "MatchManager.introCameraSeconds 字段缺失");
+            introCameraField.SetValue(match, 0f);
+
             var setPhaseMethod = typeof(MatchManager).GetMethod("SetPhase", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Countdown });
             Assert.IsTrue(touchUI.IsShown, "Countdown 倒计时阶段触控按键必须显示");
+
+            // 2b. P41：扫场镜头启用时，Countdown 期间不露摇杆/开火键（否则会盖住电影机位）；
+            //     进入 Playing 必须恢复显示，否则手机上无法操作。
+            introCameraField.SetValue(match, 3.4f);
+            setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Ready });
+            setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Countdown });
+            Assert.IsFalse(touchUI.IsShown, "开赛扫场镜头期间触控层必须隐藏，不能盖住电影机位");
 
             setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Playing });
             Assert.IsTrue(touchUI.IsShown, "Playing 游玩阶段触控按键必须显示");
@@ -575,6 +586,7 @@ namespace P1.Tests
             Assert.IsFalse(touchUI.IsShown, "Result 结算阶段触控按键必须隐藏，避免遮挡结算比分");
 
             // 4. 在 Ready 阶段打开自定义键位后应临时显示，关闭后应恢复隐藏
+            introCameraField.SetValue(match, 0f);
             setPhaseMethod.Invoke(match, new object[] { MatchManager.Phase.Ready });
             Assert.IsFalse(touchUI.IsShown);
 

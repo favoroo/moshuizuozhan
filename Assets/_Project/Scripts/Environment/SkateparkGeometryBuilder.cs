@@ -347,7 +347,7 @@ namespace P1.Environment
                 Vector3 outward = new Vector3(Mathf.Cos(aMid), 0f, Mathf.Sin(aMid)).normalized;
 
                 // 平整收口压带：用深色混凝土而不是浅灰，让唯一的高亮留在 coping 管上。
-                // 旧版 0.34m 浅灰压带 + 浅灰 coping + 烘焙白线叠成 3 圈白环，俯视读作「转盘跑道」。
+                // 旧版 0.34m 浅灰压带 + 浅灰 coping + 烘焙白线叠成 3 圈白环，俯瞰读作「转盘跑道」。
                 CreateDecorRotated(parent, $"Skatepark_Bowl_RimBand_{i}",
                     new Vector3(x, 0.015f, z) + outward * (rimBandWidth * 0.45f),
                     new Vector3(rimBandWidth, 0.03f, segLen),
@@ -930,7 +930,7 @@ namespace P1.Environment
         {
             Quaternion rot = Quaternion.Euler(0f, yaw, 0f);
             float half = size * 0.5f;
-            // 四条边交替黄/黑短块，俯视读成"工地边缘"
+            // 四条边交替黄/黑短块，俯瞰读成"工地边缘"
             for (int side = -1; side <= 1; side += 2)
             {
                 for (int i = 0; i < 4; i++)

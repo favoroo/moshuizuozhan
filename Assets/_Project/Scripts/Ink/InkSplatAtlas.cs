@@ -18,10 +18,12 @@ namespace P1.Ink
     ///   G = 覆盖此纹素的「最新落墨时间戳 × 覆盖率」（预乘，Max 混合，最新墨斑获胜）。
     ///   预乘与 R/B 同一约定：双线性 / mip 过滤下片元 G/A 恒等于真实时间戳。
     ///
-    /// 时间驱动的外观演化全部改为「存时刻、片元现算」：
-    ///   烘干与生长动画由 InkGround 片元按 (_InkWetClockNorm − G) 现算，
-    ///   因此图集只在有新墨斑（或需清屏 / 内容变化后重建 mip）时才增量绘制，
-    ///   不再有任何周期性整图重绘（旧版：15Hz 全屏烘干 Pass + 生长期间每帧重画墨斑 + 定期 mip 重建）。
+    /// 时间驱动的外观演化：
+    ///   烘干由 InkGround 片元按 (_InkWetClockNorm − G) 现算（图集在墨变干全过程保持不变）；
+    ///   生长动画（P52）改回写入端编排（对齐 INKWAVE paint.js growing）：decorated 墨斑落墨后
+    ///   进入 _growing 队列逐帧重绘（主体从 40% 泛出 → 射线冲出 → 卫星错峰落地 → 细雾收尾，
+    ///   A=Max / R,B=Over 混合下重绘幂等），寿命 1.75×扩散时长；拖尾（PlainKind）与
+    ///   growSeconds=0 仍是一次性写最终形态。图集依旧不做任何周期性整图重绘。
     /// </summary>
     public sealed class InkSplatAtlas : IDisposable
     {
@@ -59,11 +61,25 @@ namespace P1.Ink
             public float BirthTime;   // Time.time 时基，与片元 _InkWetClockNorm 一致（暂停时湿度同步冻结）
 
             /// <summary>
+            /// 写侧生长时长（秒）：decorated 墨斑进入 <see cref="_growing"/> 逐帧重绘，
+            /// tn = age / SpreadSeconds；0 = 一次性写最终形态（拖尾 / 关闭生长 / 测试路径）。
+            /// 对齐 INKWAVE paint.js：扩散时长随半径缩放（大墨斑更"重"，泛出更久）。
+            /// </summary>
+            public float SpreadSeconds;
+
+            /// <summary>
             /// 方向性拉伸：单位拉伸方向 × 强度（世界 XZ；长度 0~1 即强度，零向量 = 不拉伸）。
             /// 打包成两个 float 直接进顶点 TEXCOORD2，着色器无需反解三角函数；
             /// 只影响视觉图集，玩法网格（<see cref="InkGrid"/>）判定仍是正圆。
             /// </summary>
             public Vector2 Stretch;
+        }
+
+        /// <summary>写侧生长中的墨斑：每帧按 tn 重绘（A=Max / R,B=Over 混合下幂等）。</summary>
+        private struct GrowingSplat
+        {
+            public Splat Splat;
+            public bool ForceFinish;   // 敌队新墨压顶：立即以最终形态收尾（保证重叠区显示最新队伍）
         }
 
         private static readonly float[] KindReach = { 1.9f, 2.3f, 2.5f, 2.7f, 2.75f };
@@ -86,13 +102,24 @@ namespace P1.Ink
         private readonly Material _splatMaterial;
         private readonly Mesh _quadMesh;
         private readonly Mesh _instantQuadMesh;
+        // 写侧生长重绘网格：常规重绘与「敌队压顶强收尾」各一张——
+        // 同一 CommandBuffer 内按 [收尾(最终形态) → pending(新墨) → 常规重绘] 的顺序提交，
+        // 保证 R 通道 Over 混合下重叠区永远显示最新的队伍。
+        private readonly Mesh _growFinishQuadMesh;
+        private readonly Mesh _growQuadMesh;
         private readonly CommandBuffer _cmd = new CommandBuffer { name = "InkSplatAtlas" };
 
         private readonly List<Splat> _pending = new List<Splat>(PendingCapacity);
         // 有效待绘制区间 = [_pendingHead, _pending.Count)：绘制后只推进头指针，避免每帧搬运整个 List
         private int _pendingHead;
-        // 仅作 ActiveSplatCount 诊断计数用：只记录「已真正提交绘制」且在生长窗口内的墨斑
-        private readonly List<Splat> _active = new List<Splat>(256);
+
+        // 写侧生长队列（对齐 INKWAVE paint.js 的 growing）：decorated 墨斑落墨进入，
+        // Advance() 每帧重绘其 quad（A=Max / R,B=Over 混合幂等），寿命 1.75×扩散时长；
+        // 敌队新墨压顶时 ForceFinish 立即收尾。平滑尾迹（PlainKind）与 growSeconds=0 不进队列。
+        private readonly List<GrowingSplat> _growing = new List<GrowingSplat>(64);
+        // 重绘分类暂存（每帧 Clear 复用容量，零 GC）：收尾（画 tn=3 并移除）与常规重绘
+        private readonly List<GrowingSplat> _growFinishScratch = new List<GrowingSplat>(64);
+        private readonly List<GrowingSplat> _growDrawScratch = new List<GrowingSplat>(64);
 
         private readonly List<Vector3> _verts;
         private readonly List<Vector4> _uv0;
@@ -100,6 +127,8 @@ namespace P1.Ink
         // TEXCOORD2 = 方向性拉伸（单位方向 × 强度）。与 splatA/splatB 分开一个通道，
         // 避免改动既有通道的位宽与语义（stretch = 0 时整条链路逐位退化为旧行为）。
         private readonly List<Vector2> _uv2;
+        // TEXCOORD3 = 生长时间 tn（3 = 最终形态；<3 时写入端 SDF 走 INKWAVE 式时间编排）。
+        private readonly List<Vector4> _uv3;
         private readonly int[] _indices;
 
         // ---- 单帧绘制预算与缓冲容量（config.maxSplatsPerFrame 接线）----
@@ -134,6 +163,9 @@ namespace P1.Ink
 
         /// <summary>累计落墨次数（诊断用）。</summary>
         public int TotalSplatCount { get; private set; }
+
+        /// <summary>最近一次落墨时刻（诊断用；写侧生长以 _growing 队列为准）。</summary>
+        public float LastSplatTime => _lastSplatTime;
 
         /// <summary>因队列满（单帧落墨超过 <see cref="PendingCapacity"/>）被丢弃的最旧墨斑数（诊断用）。</summary>
         public int PendingDroppedCount { get; private set; }
@@ -179,8 +211,11 @@ namespace P1.Ink
             return over > 0 ? over : 0;
         }
 
-        /// <summary>当前处于生长窗口内的墨斑数量（诊断用；动画本身由片元按时间戳驱动）。</summary>
-        public int ActiveSplatCount => _active.Count;
+        /// <summary>
+        /// 当前处于生长窗口内 / 待绘制的墨斑数量（诊断用）。旧实现维护一份每帧增删的
+        /// 诊断 List，O(n²) 清理且容量会持续扩容产生 GC；现改为 O(1) 计数。
+        /// </summary>
+        public int ActiveSplatCount => PendingSplatCount + _growing.Count;
 
         public RenderTexture Atlas => _atlas;
         public Vector2 MapSize => _mapSize;
@@ -221,6 +256,7 @@ namespace P1.Ink
             _uv0 = new List<Vector4>(_quadCapacity * QuadVerts);
             _uv1 = new List<Vector4>(_quadCapacity * QuadVerts);
             _uv2 = new List<Vector2>(_quadCapacity * QuadVerts);
+            _uv3 = new List<Vector4>(_quadCapacity * QuadVerts);
             _indices = new int[_quadCapacity * 6];
 
             int size = Mathf.Clamp(resolution, 128, 8192);
@@ -311,6 +347,8 @@ namespace P1.Ink
 
             _quadMesh = BuildQuadMesh();
             _instantQuadMesh = BuildQuadMesh();
+            _growFinishQuadMesh = BuildQuadMesh();
+            _growQuadMesh = BuildQuadMesh();
 
             for (int q = 0; q < _quadCapacity; q++)
             {
@@ -336,6 +374,8 @@ namespace P1.Ink
             DestroyObject(_splatMaterial);
             DestroyObject(_quadMesh);
             DestroyObject(_instantQuadMesh);
+            DestroyObject(_growFinishQuadMesh);
+            DestroyObject(_growQuadMesh);
 
             if (_atlas != null)
             {
@@ -345,7 +385,7 @@ namespace P1.Ink
 
             _pending.Clear();
             _pendingHead = 0;
-            _active.Clear();
+            _growing.Clear();
         }
 
         private static void DestroyObject(UnityEngine.Object obj)
@@ -367,7 +407,7 @@ namespace P1.Ink
 
             _pending.Clear();
             _pendingHead = 0;
-            _active.Clear();
+            _growing.Clear();
             _needsClear = true;
             _needsMips = true;
             _lastSplatTime = float.NegativeInfinity;
@@ -411,6 +451,11 @@ namespace P1.Ink
             float kind = decorated ? ClassifyKind(radius) : PlainKind;
             float reach = decorated ? KindReach[(int)kind] : PlainReach;
             float birth = Time.time;
+            // 写侧生长时长：随半径缩放（对齐 INKWAVE 0.085+min(0.22, r*0.075) 的量级），
+            // 仅 decorated 墨斑进入逐帧重绘队列；拖尾 / 关闭生长（含测试）一次性写最终形态。
+            float spreadSeconds = decorated && _growSeconds > 0.001f
+                ? _growSeconds * (1f + 0.9f * Mathf.Min(radius, 3f))
+                : 0f;
             var splat = new Splat
             {
                 CenterXZ = centerXZ,
@@ -420,8 +465,37 @@ namespace P1.Ink
                 Kind = kind,
                 Reach = reach,
                 BirthTime = birth,
+                SpreadSeconds = spreadSeconds,
                 Stretch = PackStretch(directionXZ, stretch01)
             };
+
+            // 最新墨在上（INKWAVE paint.js 同款规则）：范围内敌队仍在生长的墨斑立即收尾。
+            // 本帧 Advance 按 [收尾(最终形态) → 新墨 → 其余生长重绘] 顺序提交，
+            // R 通道 Over 混合下重叠区永远显示最新落墨的队伍（与玩法网格一致）。
+            if (_growing.Count > 0)
+            {
+                float myReach = radius * reach;
+                for (int i = 0; i < _growing.Count; i++)
+                {
+                    GrowingSplat g = _growing[i];
+                    if (g.Splat.Team == splat.Team)
+                        continue;
+                    float rs = g.Splat.Radius * KindReach[Mathf.Clamp((int)g.Splat.Kind, 0, KindReach.Length - 1)] + myReach;
+                    Vector2 d = g.Splat.CenterXZ - centerXZ;
+                    if (d.sqrMagnitude <= rs * rs)
+                        g.ForceFinish = true;
+                    _growing[i] = g;
+                }
+            }
+
+            if (spreadSeconds > 0.0001f)
+            {
+                // decorated 墨斑走写侧生长：不再进 pending（Advance 每帧按 tn 重绘）。
+                _growing.Add(new GrowingSplat { Splat = splat });
+                TotalSplatCount++;
+                _lastSplatTime = birth;
+                return;
+            }
 
             int drop = PendingOverflowDropCount(PendingSplatCount + 1, _pendingCapacity);
             if (drop > 0)
@@ -456,19 +530,18 @@ namespace P1.Ink
         }
 
         /// <summary>
-        /// 是否仍有墨斑处于生长窗口（growSeconds × 1.6）内。
-        /// InkSurfaceController 据此开启地面片元的生长侵蚀；窗口结束或 growSeconds=0 时恒为 false。
+        /// 是否仍有墨斑处于写侧生长队列中（decorated 墨斑逐帧重绘期间）。
+        /// 生长动画已由写入端编排（P52）；InkSurfaceController 不再用它驱动地面片元侵蚀。
         /// </summary>
         public bool HasGrowingSplats()
         {
-            return _growSeconds > 0.001f &&
-                   Time.time - _lastSplatTime < _growSeconds * 1.6f + 0.05f;
+            return _growing.Count > 0;
         }
 
         /// <summary>
-        /// 每帧调用一次（LateUpdate）：仅当本帧有新落墨（或需要清屏 / 内容变化后重建 mip）时才提交绘制。
-        /// 烘干与生长动画都在地面片元里按时间戳现算，空闲帧零 GPU 提交、零命令缓冲构建。
-        /// 单帧最多消费 <see cref="PerFrameBudget"/> 枚待绘制墨斑，剩余的留到后续帧继续画（不丢墨）。
+        /// 每帧调用一次（LateUpdate）：仅当本帧有新落墨 / 生长重绘（或需要清屏 / 内容变化后重建 mip）时才提交绘制。
+        /// 单帧最多消费 <see cref="PerFrameBudget"/> 枚，pending（首画）优先于 growing（重绘），剩余的留到后续帧（不丢墨）。
+        /// 提交顺序 [生长收尾(最终形态) → pending 新墨 → 常规生长重绘]：R 通道 Over 混合下重叠区永远显示最新队伍。
         /// </summary>
         public void Advance()
         {
@@ -483,24 +556,43 @@ namespace P1.Ink
             PlanDrawBatch(PendingSplatCount, _perFrameBudget, out int drawCount, out _);
             bool hasDraw = drawCount > 0;
 
-            // 只把「本帧真正提交绘制」的墨斑计入诊断队列（生长动画由片元按时间戳驱动，这里不重绘）
-            int head = _pendingHead;
-            for (int i = 0; i < drawCount; i++)
-                _active.Add(_pending[head + i]);
-
-            if (_active.Count > 0)
+            // ---- 写侧生长队列分类（单趟原地压缩，零 GC）----
+            // 收尾（ForceFinish 或 age ≥ 1.75×扩散时长）：画 tn=3 最终形态并移除；
+            // 常规重绘：按当前 tn 重画一帧。两者共享 pending 之后的剩余预算，收尾优先。
+            _growFinishScratch.Clear();
+            _growDrawScratch.Clear();
+            int growBudget = _perFrameBudget - drawCount;
+            if (growBudget > 0 && _growing.Count > 0)
             {
-                float life = _growSeconds * 1.6f;
-                for (int i = _active.Count - 1; i >= 0; i--)
+                int w = 0;
+                for (int i = 0; i < _growing.Count; i++)
                 {
-                    if (now - _active[i].BirthTime >= life)
-                        _active.RemoveAt(i);
+                    GrowingSplat g = _growing[i];
+                    float spread = Mathf.Max(0.001f, g.Splat.SpreadSeconds);
+                    bool finished = g.ForceFinish || now - g.Splat.BirthTime >= spread * 1.75f;
+                    if (finished)
+                    {
+                        if (_growFinishScratch.Count < growBudget)
+                        {
+                            _growFinishScratch.Add(g);
+                            continue;   // 本帧画最终形态并移出队列
+                        }
+                    }
+                    else if (_growDrawScratch.Count < growBudget - _growFinishScratch.Count)
+                    {
+                        _growDrawScratch.Add(g);
+                    }
+                    _growing[w] = g;
+                    w++;
                 }
+                if (w < _growing.Count)
+                    _growing.RemoveRange(w, _growing.Count - w);
             }
+            bool hasGrowDraw = _growFinishScratch.Count > 0 || _growDrawScratch.Count > 0;
 
             // mip 只在图集内容有变化时重建（旧版每 0.25s 无条件重建）
             bool wantMips = _atlas.useMipMap && _needsMips && now >= _nextMipTime;
-            if (!_needsClear && !hasDraw && !wantMips)
+            if (!_needsClear && !hasDraw && !hasGrowDraw && !wantMips)
                 return;
 
             _cmd.Clear();
@@ -512,16 +604,34 @@ namespace P1.Ink
                 _needsClear = false;
             }
 
+            _cmd.SetRenderTarget(_atlas);
+
+            if (_growFinishScratch.Count > 0)
+            {
+                // 敌队压顶强收尾：先画它们的最终形态，本帧稍后画的新墨才能压在上面
+                BuildGrowingMesh(_growFinishScratch, _growFinishQuadMesh);
+                _cmd.DrawMesh(_growFinishQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _paintPassIndex);
+                _cmd.DrawMesh(_growFinishQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _stampPassIndex);
+            }
+
             if (hasDraw)
             {
-                // preAge = 0：时间戳即真实落墨时刻，片元据此做生长侵蚀。
+                // preAge = 0：时间戳即真实落墨时刻，片元据此现算湿润度。
                 // 同一 mesh 连续两次 DrawMesh（Paint 写 R/B/A，Stamp 写 G），记录期间不修改 mesh，
                 // 满足「record 与 execute 之间不得复用/清空同一 Mesh」的约束。
                 BuildMesh(_pending, _pendingHead, drawCount, 0f, _quadMesh);
-                _cmd.SetRenderTarget(_atlas);
                 _cmd.DrawMesh(_quadMesh, Matrix4x4.identity, _splatMaterial, 0, _paintPassIndex);
                 _cmd.DrawMesh(_quadMesh, Matrix4x4.identity, _splatMaterial, 0, _stampPassIndex);
                 ConsumePending(drawCount);
+                _needsMips = true;
+            }
+
+            if (_growDrawScratch.Count > 0)
+            {
+                // 生长中的墨斑逐帧重绘（A=Max / R,B=Over 幂等）：主体泛出、射线冲出、卫星错峰落地
+                BuildGrowingMesh(_growDrawScratch, _growQuadMesh);
+                _cmd.DrawMesh(_growQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _paintPassIndex);
+                _cmd.DrawMesh(_growQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _stampPassIndex);
                 _needsMips = true;
             }
 
@@ -586,9 +696,27 @@ namespace P1.Ink
                 _cmd.SetRenderTarget(_atlas);
                 _cmd.DrawMesh(_instantQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _paintPassIndex);
                 _cmd.DrawMesh(_instantQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _stampPassIndex);
-                for (int i = 0; i < drawCount; i++)
-                    _active.Add(_pending[_pendingHead + i]);
                 ConsumePending(drawCount);
+                _needsMips = true;
+                did = true;
+            }
+
+            // 写侧生长队列里的墨斑立即以最终形态收尾（编辑模式没有逐帧 Advance）
+            if (_growing.Count > 0)
+            {
+                _cmd.SetRenderTarget(_atlas);
+                int growCount = Mathf.Min(_growing.Count, _quadCapacity);
+                for (int i = 0; i < growCount; i++)
+                {
+                    GrowingSplat g = _growing[i];
+                    g.ForceFinish = true;
+                    _growDrawScratch.Add(g);
+                }
+                BuildGrowingMesh(_growDrawScratch, _growQuadMesh);
+                _cmd.DrawMesh(_growQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _paintPassIndex);
+                _cmd.DrawMesh(_growQuadMesh, Matrix4x4.identity, _splatMaterial, 0, _stampPassIndex);
+                _growDrawScratch.Clear();
+                _growing.Clear();
                 _needsMips = true;
                 did = true;
             }
@@ -605,36 +733,73 @@ namespace P1.Ink
             BuildMesh(splats, 0, splats.Count, preAgeSeconds, targetMesh);
         }
 
-        /// <summary>绘制 <paramref name="splats"/> 的 [<paramref name="start"/>, start+<paramref name="count"/>) 区间。</summary>
+        /// <summary>绘制 <paramref name="splats"/> 的 [<paramref name="start"/>, start+<paramref name="count"/>) 区间（最终形态 tn=3）。</summary>
         private void BuildMesh(List<Splat> splats, int start, int count, float preAgeSeconds, Mesh targetMesh)
         {
             _verts.Clear();
             _uv0.Clear();
             _uv1.Clear();
             _uv2.Clear();
+            _uv3.Clear();
 
             int end = Mathf.Clamp(start + count, start, splats.Count);
             for (int i = start; i < end; i++)
             {
                 Splat s = splats[i];
-                AddQuad(s, SplatTimestamp(s.BirthTime - preAgeSeconds));
+                AddQuad(s, SplatTimestamp(s.BirthTime - preAgeSeconds), 3f);
             }
 
+            CommitMesh(targetMesh);
+        }
+
+        /// <summary>
+        /// 构建写侧生长重绘网格：每枚墨斑按 (now − BirthTime) / SpreadSeconds 求当前 tn，
+        /// ForceFinish / 到期收尾的墨斑由调用方钳到最终形态（AddQuad 收到 tn≥3 即最终形态）。
+        /// </summary>
+        private void BuildGrowingMesh(List<GrowingSplat> growing, Mesh targetMesh)
+        {
+            _verts.Clear();
+            _uv0.Clear();
+            _uv1.Clear();
+            _uv2.Clear();
+            _uv3.Clear();
+
+            int count = Mathf.Min(growing.Count, _quadCapacity);
+            for (int i = 0; i < count; i++)
+            {
+                Splat s = growing[i].Splat;
+                float spread = Mathf.Max(0.001f, s.SpreadSeconds);
+                float tn = growing[i].ForceFinish
+                    ? 3f
+                    : Mathf.Min((Time.time - s.BirthTime) / spread, 3f);
+                AddQuad(s, SplatTimestamp(s.BirthTime), tn);
+            }
+
+            CommitMesh(targetMesh);
+        }
+
+        /// <summary>提交顶点/UV/索引缓冲到网格（容量防御 clamp 与 Clear 顺序约束见旧注释）。</summary>
+        private void CommitMesh(Mesh targetMesh)
+        {
             // 必须先 Clear：上一帧的索引缓冲可能引用比本帧更多的顶点，直接 SetVertices 会报
             // "Mesh.vertices is too small"，并且在测试里会被判为运行时错误。
             // 同时限制 quadCount：_indices 只为 _quadCapacity 个 quad 预留，超出会索引越界
             //（调用方已按 _perFrameBudget ≤ _quadCapacity 分批，这里的 clamp 只是防御）。
             int quadCount = Mathf.Min(_verts.Count / QuadVerts, _quadCapacity);
-            targetMesh.Clear();
+            // Clear(false) 只清空顶点/索引数据、保留顶点布局，避免每帧重设 Layout 的原生开销；
+            // 索引缓冲仍会先失效，规避上一帧引用更多顶点导致的 "Mesh.vertices is too small"。
+            targetMesh.Clear(false);
             targetMesh.SetVertices(_verts);
             targetMesh.SetUVs(0, _uv0);
             targetMesh.SetUVs(1, _uv1);
             // TEXCOORD2 = 方向性拉伸（单位方向 × 强度）。缺省全零 → 着色器走无拉伸路径。
             targetMesh.SetUVs(2, _uv2);
+            // TEXCOORD3 = 生长时间 tn（x 分量有效；3 = 最终形态）。
+            targetMesh.SetUVs(3, _uv3);
             targetMesh.SetIndices(_indices, 0, quadCount * 6, MeshTopology.Triangles, 0, false);
         }
 
-        private void AddQuad(Splat s, float birthTs01)
+        private void AddQuad(Splat s, float birthTs01, float growTn)
         {
             float uvX = (s.CenterXZ.x - _originXZ.x) / _mapSize.x;
             float uvY = (s.CenterXZ.y - _originXZ.y) / _mapSize.y;
@@ -646,15 +811,18 @@ namespace P1.Ink
             _verts.Add(new Vector3(-1f, 1f, 0f));
 
             // splatA = (中心UV, 半径, 队伍)；splatB = (种子, 种类, 归一化落墨时间戳, 覆盖倍数)；
-            // splatDir = 单位拉伸方向 × 强度（世界 XZ，长度 0 = 不拉伸，见 InkSurfaceOverlay.P1InkSplatDistanceDir）
+            // splatDir = 单位拉伸方向 × 强度（世界 XZ，长度 0 = 不拉伸，见 InkSurfaceOverlay.P1InkSplatDistanceDir）；
+            // splatGrow.x = 归一化生长时间 tn（3 = 最终形态，与旧实现逐位一致）
             var a = new Vector4(uvX, uvY, s.Radius, s.Team);
             var b = new Vector4(s.Seed, s.Kind, birthTs01, s.Reach);
             Vector2 dir = s.Stretch;
+            var grow = new Vector4(growTn, 0f, 0f, 0f);
             for (int i = 0; i < QuadVerts; i++)
             {
                 _uv0.Add(a);
                 _uv1.Add(b);
                 _uv2.Add(dir);
+                _uv3.Add(grow);
             }
         }
 
@@ -682,6 +850,10 @@ namespace P1.Ink
             return 4f;
         }
 
+        // 逐墨斑递增的种子盐：位置量化（0.125m）+ 半径量化的 hash 在同点位连喷时会重复
+        //（同一格内 N 发子弹形状完全一样 → 读作"死板"），加盐保证每枚墨斑构型唯一。
+        private static int _seedSalt;
+
         private static float MakeSeed(Vector2 center, float radius)
         {
             int qx = Mathf.RoundToInt(center.x * 8f);
@@ -689,7 +861,7 @@ namespace P1.Ink
             int qr = Mathf.RoundToInt(radius * 16f);
             unchecked
             {
-                uint h = (uint)(qx * 73856093) ^ (uint)(qz * 19349663) ^ (uint)(qr * 83492791);
+                uint h = (uint)(qx * 73856093) ^ (uint)(qz * 19349663) ^ (uint)(qr * 83492791) ^ (uint)_seedSalt++;
                 h ^= h >> 13;
                 h *= 0x85ebca6b;
                 h ^= h >> 16;

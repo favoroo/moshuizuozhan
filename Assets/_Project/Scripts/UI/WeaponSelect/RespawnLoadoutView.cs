@@ -67,6 +67,8 @@ namespace P1.UI.WeaponSelect
         private bool _built;
 
         private TextMeshProUGUI _countdownText;
+        /// <summary>倒计时文本上一次的 0.1s 档位：先比档位再决定是否构造字符串（每帧调用零 GC）。</summary>
+        private int _lastCountdownKey = int.MinValue;
         private TextMeshProUGUI _summaryText;
         private readonly UIInkShapeGraphic[] _slotBackgrounds = new UIInkShapeGraphic[RespawnLoadoutMath.SlotCount];
         private readonly Image[] _slotIcons = new Image[RespawnLoadoutMath.SlotCount];
@@ -425,6 +427,14 @@ namespace P1.UI.WeaponSelect
         {
             if (_countdownText == null) return;
 
+            // 先按 0.1s 档位判等：旧版每帧都先 FormatCountdown（插值 + 装箱）再比较文案，
+            // 阵亡整备的 4~8 秒里持续产生 GC；现在只有档位变化才构造字符串。
+            int key = seconds <= RespawnLoadoutMath.ImminentRespawnSeconds
+                ? -2
+                : Mathf.CeilToInt(seconds * 10f);
+            if (key == _lastCountdownKey) return;
+            _lastCountdownKey = key;
+
             string label = RespawnLoadoutMath.FormatCountdown(seconds);
             if (!string.Equals(_countdownText.text, label, StringComparison.Ordinal))
             {
@@ -467,9 +477,10 @@ namespace P1.UI.WeaponSelect
 
         private void PlaySelectSound()
         {
-            if (AudioManager.Instance != null && AudioManager.Instance.uiClickClip != null)
+            if (AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayOne(AudioManager.Instance.uiClickClip, 0.75f, 0.96f, 1.05f);
+                // 走 AudioManager 的统一节流：直接 PlayOne 会绕过 30ms 窗口，连点叠成爆音
+                AudioManager.Instance.PlayWeaponCardSelect();
             }
         }
 

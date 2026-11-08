@@ -46,6 +46,14 @@ namespace P1.Tests
 
             intro.SetValue(match, introSeconds);
             freeze.SetValue(match, finishFreezeSeconds);
+
+            // P41 开赛扫场镜头：Countdown 现在取 max(introSeconds, introCameraSeconds)，
+            // 不一起压缩的话所有"等 Playing"的用例都得多等 3.4s。置 0 = 关闭扫场。
+            FieldInfo cameraIntro = type.GetField("introCameraSeconds", PrivateInstance);
+            if (cameraIntro != null)
+            {
+                cameraIntro.SetValue(match, 0f);
+            }
         }
 
         /// <summary>轮询等待比赛进入指定阶段；超时用游戏内秒计（受 timeScale 影响）。</summary>

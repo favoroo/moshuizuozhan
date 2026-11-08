@@ -1190,7 +1190,7 @@ def cmd_publish(args) -> None:
     # 与 Release 创建 + APK 上传并行，避免串行等待数分钟。
     push_tags_both(tag)
 
-    rel_name = f'墨水作战 {tag}'
+    rel_name = f'墨水大作战 {tag}'
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
         branch_fut = ex.submit(push_branch_both, branch)
         rel_ids = create_release(tag, rel_name, notes, tokens)
@@ -1201,7 +1201,7 @@ def cmd_publish(args) -> None:
     prune_old_assets(tokens, keep_gh=args.keep_gh, keep_gitee=args.keep_gitee)
 
     log('================================================================')
-    log(f'🎉 墨水作战 {tag} 双端正式发布成功！')
+    log(f'🎉 墨水大作战 {tag} 双端正式发布成功！')
     log(f'  GitHub: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/tag/{tag}')
     log(f'  Gitee:  https://gitee.com/{GITEE_OWNER}/{GITEE_REPO}/releases/tag/{tag}')
     log(f'  APK:    {meta["apk_name"]} ({meta["size"]} 字节)')

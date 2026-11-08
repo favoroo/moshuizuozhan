@@ -49,6 +49,8 @@ namespace P1.UI
         private bool _wasAlive = true;
         private bool _wasSpecialReady;
         private bool _hasBoundTarget;
+        /// <summary>SpecialReadyPip 只解析一次：找不到也不再每帧 transform.Find（8 槽 × 60Hz 的字符串查找）。</summary>
+        private bool _specialReadyPipSearched;
         private int _lastDisplayedSecs = -1;
         private float _lastRingFill = -1f;
         private float _lastRingUpdateTime;
@@ -306,8 +308,9 @@ namespace P1.UI
 
             // 大招就绪：几何风不再用旋转金环，改为右上角黄色方块硬切显示
             if (specialReadyRing != null) specialReadyRing.Intensity = 0f;
-            if (specialReadyPip == null)
+            if (!_specialReadyPipSearched && specialReadyPip == null)
             {
+                _specialReadyPipSearched = true;
                 var pip = transform.Find("SpecialReadyPip");
                 if (pip != null) specialReadyPip = pip.GetComponent<UIInkShapeGraphic>();
             }

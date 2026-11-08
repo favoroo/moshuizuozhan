@@ -37,6 +37,12 @@ namespace P1.Environment
         public Material propMetal;
         public Material propEmissive;
         public Material propCloth;
+        /// <summary>
+        /// 木质散件专用（PropLit + Wood 法线/RMO，顶点色生效）。
+        /// 复用 propMatte 会让木托盘吃到混凝土法线，读成"纸箱/石膏块"。
+        /// 允许为 null，构建器回退 propMatte。
+        /// </summary>
+        public Material propWoodDetail;
         public Material bannerAtlas;
         public Material water;
         public Material skybox;

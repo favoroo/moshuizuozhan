@@ -33,6 +33,22 @@ Shader "P1/CharacterToonOutlined"
         _DetailNormalMap  ("Detail Normal (optional)", 2D) = "bump" {}
         _DetailNormalStrength ("Detail Normal Strength", Range(0, 1)) = 0.0
 
+        // P32 敌方墨覆盖 + 受击闪白：运行时由 CombatantHealth 经 MaterialPropertyBlock 逐单位推送
+        // （8 名角色共用同一份材质资产，覆盖量必须逐实例，故不能写进材质）。默认全 0 → 与旧观感逐像素一致。
+        [Header(Ink Coat P32)]
+        _InkColor         ("Ink Color (enemy ink)", Color) = (0,0,0,1)
+        _InkAmount        ("Ink Coverage Amount", Range(0,1)) = 0
+        _InkSeed          ("Ink Splotch Seed", Float) = 0
+        // 覆盖曲线按本噪声实测分布标定（见 CharacterToonCommon.hlsl）：满覆盖约 52% 表面积，
+        // 保留本队色可辨认；三个值都是美术可调档位，不要随手改回 0.47/1.0。
+        _InkThresholdMax  ("Ink Coverage Threshold Max (clean)", Range(0.2,1)) = 0.77
+        _InkThresholdMin  ("Ink Coverage Threshold Min (full ink)", Range(0.2,1)) = 0.505
+        _InkCurvePower    ("Ink Coverage Curve Power", Range(0.1,2)) = 0.55
+        _FlashAmount      ("Hit Flash Amount", Range(0,1)) = 0
+        // 逐 renderer 的静止位姿坐标系（运行时 MPB 推送，不需要在材质上编辑）
+        [HideInInspector] _InkPartOffset ("__inkPartOffset", Vector) = (0,0,0,0)
+        [HideInInspector] _InkPartScale  ("__inkPartScale", Vector) = (1,1,1,0)
+
         // 蛋形身体描边属性（仅 Outlined 材质独有，用于反向法线外扩 Pass）
         _OutlineWidth     ("Outline Width (Object Space)", Float) = 0.012
         _OutlineColor     ("Outline Color", Color) = (0.09,0.10,0.13,1)

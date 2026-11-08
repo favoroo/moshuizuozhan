@@ -207,10 +207,10 @@ namespace P1.Weapons
         /// <summary>双枪翻滚方向相对触发瞬间角色前方的分量（-1 后 ~ +1 前）。</summary>
         public virtual float DodgeForward => 1f;
 
-        /// <summary>双枪翻滚后的原地架枪状态（移速锁定、射速提升 20%、散布清零）。</summary>
+        /// <summary>双枪翻滚后的架枪强化状态（射速提升 20%、散布清零；不锁移速，可自由移动）。</summary>
         public virtual bool IsTurretLocked => false;
 
-        /// <summary>武器对移动速度的系数（正常 1.0，架枪 0.0，加特林蓄力/扫射减速）。</summary>
+        /// <summary>武器对移动速度的系数（正常 1.0，泼桶前摇 0.7，加特林蓄力/扫射减速）。</summary>
         public virtual float MoveSpeedMultiplier => 1f;
 
         /// <summary>

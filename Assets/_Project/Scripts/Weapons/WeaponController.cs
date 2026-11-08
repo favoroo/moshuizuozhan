@@ -70,6 +70,8 @@ namespace P1.Weapons
         private bool _isPerformingSpecial;
         private float _specialActionLock;
         private float _specialInvulnGrace;
+        /// <summary>Storm 投掷表演计时（-1 = 不在表演中）。比 0.35s 动作锁长，控制权恢复后身体继续完成随挥。</summary>
+        private float _stormThrowElapsed = -1f;
         private SpecialKind _activeSpecialKind = SpecialKind.Slam;
         private int _slamPhase;              // 0 = 升空, 1 = 滞空, 2 = 下砸
         private float _slamPhaseElapsed;
@@ -162,6 +164,15 @@ namespace P1.Weapons
         /// <summary>Slam 整段演出已过秒数（从起跳开始累加），供预警圈等按总进度取值。</summary>
         public float SlamElapsed => _specialElapsed;
 
+        /// <summary>
+        /// Storm 投掷表演是否进行中（-1 关闭）。窗口比 0.35s 动作锁长：
+        /// 控制权恢复后角色一边恢复移动一边完成随挥收势，观感是「扔完顺势收」。
+        /// </summary>
+        public bool IsStormThrowing => _stormThrowElapsed >= 0f;
+
+        /// <summary>Storm 投掷表演已过秒数，视觉层按它采样 <c>StormPoseSolver</c>。</summary>
+        public float StormThrowElapsed => Mathf.Max(0f, _stormThrowElapsed);
+
         /// <summary>Slam 起跳时锁定的落点中心（预警圈/伤害/涂地同源），测试与调试可观测。</summary>
         public Vector3 SpecialGroundCenter => _specialGroundCenter;
 
@@ -207,7 +218,7 @@ namespace P1.Weapons
         /// <summary>双枪是否处于战术翻滚中。</summary>
         public bool IsRollingDodge => _strategy != null && _strategy.IsRollingDodge;
 
-        /// <summary>双枪是否处于翻滚后的站桩架枪状态（移速锁定、射速提升 20%、散布清零）。</summary>
+        /// <summary>双枪是否处于翻滚后的架枪强化状态（射速提升 20%、散布清零；<strong>不锁移速</strong>，可自由移动）。</summary>
         public bool IsTurretLocked => _strategy != null && _strategy.IsTurretLocked;
 
         /// <summary>双枪当前战术翻滚的方向向量。</summary>
@@ -224,17 +235,18 @@ namespace P1.Weapons
 
         /// <summary>
         /// 武器是否处于「开火姿态」而要求身体持续朝准星（对齐 INKWAVE weapons.js <c>firingPose()</c>）：
-        /// 蓄力中 / 加特林扫射中 / 滚筒推地与挥击前摇 / 泼桶前摇 / 双枪翻滚与架枪站桩。
+        /// 蓄力中 / 加特林扫射中 / 滚筒推地与挥击前摇 / 泼桶前摇 / 双枪翻滚。
         /// 这些状态下枪口方向即弹道（或涂地矩形）方向，即使扳机已松开（加特林扫射、挥击/泼洒前摇
-        /// 走完才出手）也不能让身体转回移动方向，否则会出现「枪口朝后、子弹朝前」的错位；
-        /// 双枪架枪更是把枪钉在原地（移速 0），身体跟着移动输入原地打转同样读不通。
+        /// 走完才出手）也不能让身体转回移动方向，否则会出现「枪口朝后、子弹朝前」的错位。
+        /// 双枪翻滚后的架枪强化不在其列：它已不锁移速，若再把朝向钉在准星上，移动输入带不动身体，
+        /// 依旧是「被定住」的手感；开枪时另由 <c>_isFiringOrThrowing</c> 兜住朝向。
         /// 由 <see cref="P1.Player.InkCharacterMotor"/> 的朝向仲裁消费（玩家与 Bot 共用）。
         /// </summary>
         public bool WantsAimFacing =>
             IsCharging || IsStreaming || IsRolling || IsFlicking || IsWindingUp ||
-            IsRollingDodge || IsTurretLocked;
+            IsRollingDodge;
 
-        /// <summary>当前武器对角色移动速度的影响倍率（架枪 0，泼桶前摇 0.7，滚筒推地渐入，常规 1.0；
+        /// <summary>当前武器对角色移动速度的影响倍率（泼桶前摇 0.7，滚筒推地渐入，常规 1.0；
         /// 加特林/蓄力狙的动态移速走 <see cref="FiringMoveSpeedOverride"/> 绝对值）。</summary>
         public float MoveSpeedMultiplier => _strategy != null ? _strategy.MoveSpeedMultiplier : 1f;
 
@@ -272,7 +284,7 @@ namespace P1.Weapons
             bool rolled = _strategy.TryPerformDodgeRoll(moveDirection, this);
             if (rolled && AudioManager.Instance != null)
             {
-                AudioManager.Instance.PlayDodgeRoll();
+                AudioManager.Instance.PlayDodgeRoll(transform.position);
             }
             return rolled;
         }
@@ -415,8 +427,16 @@ namespace P1.Weapons
             if (loadout == null || index < 0 || index >= loadout.Length || loadout[index] == null)
                 return false;
 
+            bool changed = index != equippedIndex;
             equippedIndex = index;
             EquipWeapon(loadout[index]);
+
+            // 局内换枪反馈（旧版完全静音，只有 UI 卡片点击有音）：只给本地玩家播。
+            if (changed && AudioManager.Instance != null
+                && _health != null && P1.Player.CombatantHealth.IsLocalPlayer(_health))
+            {
+                AudioManager.Instance.PlayWeaponSwitch();
+            }
             return true;
         }
 
@@ -424,6 +444,9 @@ namespace P1.Weapons
         {
             _strategy = WeaponStrategyFactory.Create(config);
             RefreshWeaponFeel();
+            // 装备/换装即刷新大招种类：否则 Storm 武器（蓄力狙/爆破/加特林）开局 HUD 显示 Slam 图标，
+            // 要等首次释放才纠正（P41 顺手修复）。释放路径在 RebuildStrategy 之外显式赋值，不受影响。
+            _activeSpecialKind = config != null ? config.specialKind : SpecialKind.Slam;
             _triggerHeldThisFrame = false;
             _triggerHeldLastFrame = false;
             _triggerSuppressedThisFrame = false;
@@ -565,7 +588,9 @@ namespace P1.Weapons
             if (!_wasSpecialReady && _specialPoints >= req)
             {
                 _wasSpecialReady = true;
-                if (_health.Team == Team.TeamA && AudioManager.Instance != null)
+                // 旧判定是 TeamA：AI 队友攒满大招也会给玩家播「就绪」音，抢自己的提示。
+                // 只有本地玩家的大招就绪才该响，所以改走 IsLocalPlayer。
+                if (AudioManager.Instance != null && P1.Player.CombatantHealth.IsLocalPlayer(_health))
                 {
                     AudioManager.Instance.PlayUltReady();
                 }
@@ -765,11 +790,8 @@ namespace P1.Weapons
                     _addSpecialPointsFromWallDelegate);
             }
 
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.PlayBombThrow();
-            }
-
+            // 投掷音由 InkBombPool.Spawn 统一播（它拿得到投出位置做距离衰减）。
+            // 旧版这里也播一次 → 每次扔雷其实响了两遍，相位叠成更糊的一声。
             return true;
         }
 
@@ -811,9 +833,22 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
-                // 只有玩家自己的大招压 BGM；Bot 大招保留音效但不打断玩家音乐
-                AudioManager.Instance.PlaySpecialCast(_activeSpecialKind, _playerController != null);
+                // 按世界位置衰减：远处敌人的大招只留方位感，也不闪避我方 BGM
+                AudioManager.Instance.PlaySpecialCast(_activeSpecialKind, transform.position, _playerController != null);
+
+                // 敌方大招来袭警告（旧版完全静音）：只有敌对阵营施放才报警，按距离衰减。
+                // 本地玩家自己的大招不报——那就是自己按的。
+                P1.Player.PlayerController local = P1.Player.PlayerController.LocalPlayer;
+                if (local != null && local.Health != null && _health != null
+                    && _health.Team != local.Health.Team
+                    && !P1.Player.CombatantHealth.IsLocalPlayer(_health))
+                {
+                    AudioManager.Instance.PlayEnemySpecialWarn(transform.position);
+                }
             }
+
+            // 成就统计：大招释放次数（含 Bot，结算时按参战者各自读取）
+            MatchStatsService.RegisterSpecialCast(_health);
 
             return _activeSpecialKind == SpecialKind.Storm
                 ? StartStormSpecial(targetGroundPoint)
@@ -844,6 +879,7 @@ namespace P1.Weapons
         private bool StartStormSpecial(Vector3 targetGroundPoint)
         {
             _specialActionLock = config != null ? Mathf.Max(0f, config.stormThrowLockDuration) : 0.35f;
+            _stormThrowElapsed = 0f;
 
             InkStormCloudPool pool = InkStormCloudPool.EnsureInstance();
             if (pool != null)
@@ -853,7 +889,7 @@ namespace P1.Weapons
 
             if (TopDownCameraFollow.Instance != null)
             {
-                TopDownCameraFollow.Instance.AddTrauma(0.12f);
+                TopDownCameraFollow.Instance.AddTrauma(0.18f);
             }
 
             return true;
@@ -930,6 +966,14 @@ namespace P1.Weapons
             if (_specialActionLock > 0f)
             {
                 _specialActionLock = Mathf.Max(0f, _specialActionLock - dt);
+            }
+
+            // Storm 投掷表演计时：超过 solver 总时长后交还步态层
+            if (_stormThrowElapsed >= 0f)
+            {
+                _stormThrowElapsed += dt;
+                if (_stormThrowElapsed > StormPoseSolver.TotalDuration)
+                    _stormThrowElapsed = -1f;
             }
 
             // 砸地落地后的短暂无敌余韵（Inkwave: invuln 0.3s）
@@ -1159,10 +1203,10 @@ namespace P1.Weapons
 
             if (AudioManager.Instance != null)
             {
-                if (AudioManager.Instance.specialSlamClip != null)
-                {
-                    AudioManager.Instance.PlayOne(AudioManager.Instance.specialSlamClip, 0.95f, 0.98f, 1.02f);
-                }
+                // 落点音由墨花 + 落墨两层承担。旧版这里又播了一遍 special_slam
+                // （释放时已经播过整段「下落啸叫 + 砸地」），同一只 clip 隔 0.3s 再响一次，
+                // 听感是砸地糊成一团。改成按落点位置播墨花分档。
+                AudioManager.Instance.PlaySplat(_specialGroundCenter, effectivePaintRadius, 1.6f);
                 AudioManager.Instance.PlayInkHitGround(
                     _specialGroundCenter, 2f, effectivePaintRadius);
             }
@@ -1256,6 +1300,7 @@ namespace P1.Weapons
             _specialActionLock = 0f;
             _slamPhase = 0;
             _slamPhaseElapsed = 0f;
+            _stormThrowElapsed = -1f;
 
             // 异常收尾（终场哨/取消）把镜头快速拉回；正常落地（stage=3 恢复段）由 PlaySlamImpact 自己收尾
             LocalSlamCamera()?.EndSlamPresentation(transform);
@@ -1635,7 +1680,11 @@ namespace P1.Weapons
 
         void IWeaponRuntimeHost.ReportShotFeedback()
         {
-            if (GetComponent<WeaponAudioDriver>() == null && TeamId == Team.TeamA && AudioManager.Instance != null)
+            // 旧判定 TeamA：AI 队友走这条兜底路径时会以「本地满音量」播开火音，
+            // 8 人混战里分不清哪一声是自己。改为只认本地玩家（队友/Bot 由远场通道负责）。
+            if (GetComponent<WeaponAudioDriver>() == null
+                && _health != null && P1.Player.CombatantHealth.IsLocalPlayer(_health)
+                && AudioManager.Instance != null)
             {
                 AudioManager.Instance.PlayWeaponShot(CurrentWeaponKind);
             }
@@ -1655,7 +1704,9 @@ namespace P1.Weapons
                 EmptyFeedbackStamp++;
             }
 
-            if (TeamId == Team.TeamA && AudioManager.Instance != null)
+            // 空墨「咔哒」也只有本地玩家该听见：旧判定 TeamA 让 AI 队友的空打音
+            // 以满音量盖在自己的射击声上。
+            if (_health != null && P1.Player.CombatantHealth.IsLocalPlayer(_health) && AudioManager.Instance != null)
             {
                 AudioManager.Instance.PlayInkEmpty();
             }

@@ -332,6 +332,10 @@ namespace P1.UI
                     SetVisible(false);
                     break;
                 case MatchManager.Phase.Countdown:
+                    // P41：开赛扫场镜头期间不露摇杆/开火键，否则电影机位被按键盖住；
+                    // 进入 Playing 后本方法会再次调用，触屏层正常出现。
+                    SetVisible(ShouldShowTouchUi() && !IsIntroSweepActive());
+                    break;
                 case MatchManager.Phase.Playing:
                     SetVisible(ShouldShowTouchUi());
                     break;
@@ -340,6 +344,13 @@ namespace P1.UI
                     SetVisible(false);
                     break;
             }
+        }
+
+        private bool IsIntroSweepActive()
+        {
+            return _match != null
+                && _match.IntroCameraSeconds > 0.01f
+                && _match.CurrentPhase == MatchManager.Phase.Countdown;
         }
 
         private void HandleCustomizerClosed()

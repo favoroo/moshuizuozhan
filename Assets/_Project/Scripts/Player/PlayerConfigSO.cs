@@ -91,6 +91,14 @@ namespace P1.Player
         [Tooltip("离开敌墨后「受击槽」（踩墨惩罚强度 0~1）每秒恢复量。2.0 = 约 0.5 秒完全摆脱敌墨惩罚状态")]
         public float enemyInkRecoveryRatePerSec = 2.0f;
 
+        [Header("敌方墨覆盖 (P32 对齐 Inkwave HURT_FRAG)")]
+        [Tooltip("每 1 点伤害累积的墨覆盖量（1.0 = 满身覆盖）。对齐 Inkwave hurtFlash += amount/60")]
+        public float inkCoatPerDamage = 0.0167f;
+        [Tooltip("踩在敌方墨上时每秒累积的墨覆盖量（对齐 Inkwave dt*0.5）：约 2 秒糊满，即使敌墨 DOT 已被底线保护")]
+        public float inkCoatInEnemyInkRatePerSec = 0.5f;
+        [Tooltip("墨覆盖量每秒自然淡去速度（对齐 Inkwave dt*0.6）：纯命中墨斑约 1.7 秒淡净")]
+        public float inkCoatDecayPerSec = 0.6f;
+
         [Header("潜墨隐匿 (Stealth)")]
         [Tooltip("潜行时水平速度低于该值 (m/s) 即进入隐匿：对敌方完全隐形，己方半透明")]
         public float stealthSpeedThreshold = 1.5f;

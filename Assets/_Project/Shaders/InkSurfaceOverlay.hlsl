@@ -127,8 +127,12 @@ float2 P1InkSplatStretchLocal(float2 p0, float2 dir, float stretch01)
 // inkTexelMeters = 图集纹素边长（米），由调用方从 UnityPerMaterial._InkTexelMeters 传入。
 // stretchDir = 单位拉伸方向（世界 XZ），stretch01 = 0..1 拉伸强度（已乘全局倍率并 clamp）。
 //   stretch01 = 0 时 p 原样使用、射线/卫星/细雾角度沿用旧公式 → 与旧实现逐位一致（回归安全）。
-float P1InkSplatDistanceDir(float2 p0, float radius, float seed, float kind, float inkTexelMeters,
-                            float2 stretchDir, float stretch01)
+// tn = 归一化生长时间（落墨后 age / 扩散时长；3 = 最终形态，与旧实现逐位一致）。
+// 时间编排对齐 INKWAVE paint.js PAINT_FS：
+//   主体从 40% 半径 ease-out 泛出（1-pow(1-tn,4)），射线先于主体冲满（tn*1.4），
+//   卫星墨滴各自错峰落地（tl = 0.28+0.95*h2，越远越晚），细雾最后出现。
+float P1InkSplatDistanceDirGrow(float2 p0, float radius, float seed, float kind, float inkTexelMeters,
+                                float2 stretchDir, float stretch01, float tn)
 {
     float r = radius;
     float4 ks = P1InkSplatKindShape(kind);
@@ -150,9 +154,12 @@ float P1InkSplatDistanceDir(float2 p0, float radius, float seed, float kind, flo
         spread = lerp(6.2831853, P1_INK_STRETCH_CONE, saturate(stretch01 * 1.2));
     }
 
-    float sd = length(p) - r * P1InkSplatWob(atan2(p.y, p.x), seed);
+    // ---- 主体：从 40% 半径强 ease-out 泛出（tn=3 时 grow=1，与旧最终形态逐位一致）----
+    float bodyGrow = lerp(0.4, 1.0, 1.0 - pow(1.0 - saturate(tn), 4.0));
+    float sd = length(p) - r * bodyGrow * P1InkSplatWob(atan2(p.y, p.x), seed);
 
-    // ---- 射线：短锥形墨刺，末端收成一颗小墨珠（全长）----
+    // ---- 射线：短锥形墨刺，末端收成一颗小墨珠（先于主体冲满全长）----
+    float rayGrow = 1.0 - pow(1.0 - saturate(tn * 1.4), 3.0);
     [loop]
     for (int i = 0; i < 10; i++)
     {
@@ -166,7 +173,7 @@ float P1InkSplatDistanceDir(float2 p0, float radius, float seed, float kind, flo
             : (fi + 0.35 + 0.6 * h1) / ks.x * 6.2831 + seed * 6.2831;
         float2 u = float2(cos(a), sin(a));
         float edge = r * P1InkSplatWob(a, seed);
-        float len = r * (0.07 + (big ? 0.5 : 0.34) * h2 * h2 * h2);
+        float len = r * (0.07 + (big ? 0.5 : 0.34) * h2 * h2 * h2) * rayGrow;
         float wB = r * (0.055 + 0.06 * h3);
         float tipR = max(r * (0.012 + 0.012 * h3), inkTexelMeters * 0.45);
         float2 tip = u * (edge + len) + float2(-u.y, u.x) * len * 0.18 * (h1 - 0.5);
@@ -175,7 +182,7 @@ float P1InkSplatDistanceDir(float2 p0, float radius, float seed, float kind, flo
         sd = P1InkSplatSmin(sd, ray, r * 0.06);
     }
 
-    // ---- 卫星墨滴：被飞行方向拉长（全部落地）----
+    // ---- 卫星墨滴：被飞行方向拉长，各自错峰落地（越远越晚）----
     [loop]
     for (int j = 0; j < 12; j++)
     {
@@ -184,11 +191,15 @@ float P1InkSplatDistanceDir(float2 p0, float radius, float seed, float kind, flo
         float h1 = P1InkSplatHsh(seed * 13.1 + fj * 7.7);
         float h2 = P1InkSplatHsh(seed * 5.3 + fj * 3.1);
         float h3 = P1InkSplatHsh(seed * 9.9 + fj * 1.7);
+        // 每颗卫星有自己的落地时刻：h2 同时驱动距离（越远）与时刻（越晚）→ 远者后落
+        float landT = 0.28 + 0.95 * h2;
+        float land = smoothstep(landT, landT + 0.2, tn);
+        if (land <= 0.0) continue;
         // 拉伸时卫星滴与前向锥对齐（不再绕整圈），并沿各自飞行线拉成短 streak
         float a2 = stretched ? dirAngle + (h1 - 0.5) * spread : h1 * 6.2831;
         float2 u = float2(cos(a2), sin(a2));
         float dist = r * (1.1 + (big ? 1.05 : 0.8) * h2 * h2);
-        float rad = r * (0.028 + 0.085 * h3) * (1.0 - 0.4 * h2) * (big ? 0.8 : 1.0);
+        float rad = r * (0.028 + 0.085 * h3) * (1.0 - 0.4 * h2) * (big ? 0.8 : 1.0) * land;
         float2 q = p - u * dist;
         if (stretched)
         {
@@ -199,7 +210,7 @@ float P1InkSplatDistanceDir(float2 p0, float radius, float seed, float kind, flo
         sd = P1InkSplatSmin(sd, length(q) - rad, rad * 0.8);
     }
 
-    // ---- 细雾：比玩法网格更细的妆点，永远不计入涂地（全部出现）----
+    // ---- 细雾：比玩法网格更细的妆点，永远不计入涂地（最后出现）----
     [loop]
     for (int k = 0; k < 14; k++)
     {
@@ -208,12 +219,20 @@ float P1InkSplatDistanceDir(float2 p0, float radius, float seed, float kind, flo
         float h1 = P1InkSplatHsh(seed * 17.9 + fk * 4.13);
         float h2 = P1InkSplatHsh(seed * 2.71 + fk * 8.09);
         float h3 = P1InkSplatHsh(seed * 6.47 + fk * 3.37);
+        if (tn < 0.45 + 0.95 * h2) continue;
         float a3 = stretched ? dirAngle + (h1 - 0.5) * spread * 1.15 : h1 * 6.2831;
         float2 u = float2(cos(a3), sin(a3));
         float rad = max(r * (0.011 + 0.02 * h3), inkTexelMeters * 0.9);
         sd = min(sd, length(p - u * r * (1.3 + 1.2 * h2)) - rad);
     }
     return sd;
+}
+
+// 旧签名（无生长时间）：tn=3 等价于旧最终形态，算术路径逐位一致（回归安全）。
+float P1InkSplatDistanceDir(float2 p0, float radius, float seed, float kind, float inkTexelMeters,
+                            float2 stretchDir, float stretch01)
+{
+    return P1InkSplatDistanceDirGrow(p0, radius, seed, kind, inkTexelMeters, stretchDir, stretch01, 3.0);
 }
 
 // 旧签名（无方向性拉伸）：等价于 stretch = 0 的新实现，内部走与旧版完全相同的算术路径。
@@ -244,6 +263,7 @@ struct P1InkAtlasAttributes
     float4 splatA     : TEXCOORD0;  // xy = 中心图集 UV, z = 半径(米), w = 队伍(0/1)
     float4 splatB     : TEXCOORD1;  // x = 随机种子, y = 种类, z = 归一化落墨时间戳, w = 四边面覆盖倍数
     float2 splatDir   : TEXCOORD2;  // 单位拉伸方向 × 强度（世界 XZ，长度 0 = 不拉伸；见 P1InkSplatDistanceDir）
+    float4 splatGrow  : TEXCOORD3;  // x = 归一化生长时间 tn（3 = 最终形态，与旧实现逐位一致）
 };
 
 struct P1InkAtlasVaryings
@@ -253,6 +273,7 @@ struct P1InkAtlasVaryings
     float4 splatA     : TEXCOORD1;
     float4 splatB     : TEXCOORD2;
     float2 splatDir   : TEXCOORD3;  // 同 P1InkAtlasAttributes.splatDir（四顶点同值，插值恒等）
+    float4 splatGrow  : TEXCOORD4;  // 同 P1InkAtlasAttributes.splatGrow（四顶点同值，插值恒等）
 };
 
 // 解包顶点携带的 (方向 × 强度)：返回单位方向 + 已乘全局倍率并 clamp 到 0..1 的强度。
@@ -336,6 +357,24 @@ bool P1EvaluateTopInk(
     float2 inkUV = saturate((positionWS.xz - mapOrigin) / mapSize);
 
     float4 inkSample = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, inkUV);
+
+    // 三次 B 样条重建（与 InkGround ForwardLit 同款）：C1 连续场 + 解析梯度，
+    // 顶面墨缘观感与地面一致；_P1InkBicubicStrength = 0 时逐位回到双线性旧行为。
+    float bicu = saturate(_P1InkBicubicStrength);
+    float2 gradAmtCubicTexel = float2(0.0, 0.0);
+    if (bicu > 0.001)
+    {
+        float2 texelUVs = _GlobalInkTexelSize.xy > 1e-6 ? _GlobalInkTexelSize.xy : float2(1.0 / 4096.0, 1.0 / 4096.0);
+        float4 cubicGradX, cubicGradY;
+        float4 cubicSample = P1SampleInkAtlasCubicGrad(_GlobalInkAtlasTex, sampler_LinearClamp,
+            inkUV, texelUVs,
+            clamp(ddx(inkUV), -8.0 * texelUVs, 8.0 * texelUVs),
+            clamp(ddy(inkUV), -8.0 * texelUVs, 8.0 * texelUVs),
+            cubicGradX, cubicGradY);
+        gradAmtCubicTexel = float2(cubicGradX.a, cubicGradY.a);
+        inkSample = lerp(inkSample, cubicSample, bicu);
+    }
+
     float amt = inkSample.a;
     if (amt < 0.02)
         return false;
@@ -364,6 +403,9 @@ bool P1EvaluateTopInk(
     float amtX = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(texelUV.x, 0.0))).a;
     float amtZ = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, saturate(inkUV + float2(0.0, texelUV.y))).a;
     gradAmt = float2(amtX - amt, amtZ - amt);
+    // B 样条解析梯度（每纹元，量纲同前向差分）：顶面 lip 法线与接触阴影偏向随连续场平滑
+    if (bicu > 0.001)
+        gradAmt = lerp(gradAmt, gradAmtCubicTexel, bicu);
 
     float gradLen = length(gradAmt);
     if (gradLen > 0.0001)
@@ -456,6 +498,9 @@ bool P1EvaluateTopInk(
 
     half3 envTint = lerp(half3(1.0, 1.0, 1.0), saturate(teamCol * 2.2), 0.80);
     half3 finalClearcoat = (directTerm + envSpec * envTint) * (half)clearcoatStrength;
+
+    // 阴影中保饱和（与地面同一套 INK_SHADE 语言）：亮度守恒地提升色度
+    inkColor = P1InkShadowChroma(inkColor, _P1InkShadowChroma * (1.0 - diffuseLight));
 
     // 胶质内发光
     float effectiveGlow = (inkGlow > 0.0) ? inkGlow : _GlobalInkGlow;

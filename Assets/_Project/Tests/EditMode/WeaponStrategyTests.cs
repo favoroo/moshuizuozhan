@@ -279,7 +279,7 @@ namespace P1.Tests
             Assert.AreEqual(0.5f, sweep.HitInterval, 0.0001f);
             Assert.AreEqual(0.34f, sweep.PaintRadius, 0.0001f);
             // P41 涂带前伸：墨带远端必须越过脚下、铺到滚筒触地处（ drumAhead≈0.6m + 半鼓径），
-            // 否则滚筒滚过未涂色地面，俯视角读作悬空（INKWAVE 涂点=玩家前方 0.75m）。
+            // 否则滚筒滚过未涂色地面，第三人称斜视角读作悬空（INKWAVE 涂点=玩家前方 0.75m）。
             Assert.AreEqual(0.7f, sweep.PaintLead, 0.0001f, "涂带前伸 0.7m 覆盖滚筒触地位置");
             Assert.AreEqual(0f, sweep.From.z, 0.001f);
             Assert.AreEqual(0.5f, sweep.To.z, 0.001f);
@@ -490,7 +490,7 @@ namespace P1.Tests
             Assert.AreEqual(8f, dualies.dualiesRollInkCost, 0.001f, "翻滚耗墨 8");
             Assert.AreEqual(2.8f, dualies.dualiesRollDistance, 0.001f, "翻滚距离 2.8m");
             Assert.AreEqual(1.5f, dualies.dualiesRollBurstSpeedMultiplier, 0.001f, "翻滚爆发倍率 1.5（快出缓停曲线）");
-            Assert.AreEqual(0.5f, dualies.dualiesTurretDuration, 0.001f, "站桩架枪 0.5s");
+            Assert.AreEqual(0.5f, dualies.dualiesTurretDuration, 0.001f, "架枪强化持续 0.5s");
             Assert.AreEqual(0.0664f, dualies.dualiesTurretFireInterval, 0.001f, "架枪射速提升 20%");
             Assert.AreEqual(0f, dualies.dualiesTurretSpreadDegrees, 0.001f, "架枪散布清零");
 
@@ -592,8 +592,8 @@ namespace P1.Tests
             // 推进 0.3s，翻滚结束
             strategy.Tick(0.31f, true, aim, host);
             Assert.IsFalse(strategy.IsRollingDodge, "0.3s 后翻滚结束");
-            Assert.IsTrue(strategy.IsTurretLocked, "翻滚后立刻进入架枪站桩模式");
-            Assert.AreEqual(0f, strategy.MoveSpeedMultiplier, 0.001f, "架枪期间移速清零（站桩）");
+            Assert.IsTrue(strategy.IsTurretLocked, "翻滚后立刻进入架枪强化状态");
+            Assert.AreEqual(1f, strategy.MoveSpeedMultiplier, 0.001f, "架枪强化不锁移速：翻滚结束即可继续走位");
             Assert.AreEqual(0f, strategy.SpreadDegrees, 0.001f, "架枪期间弹道散布清零");
 
             // 架枪期间开火：射速提升 20%（间隔 0.0664s，即约 15 发/秒）
@@ -608,9 +608,9 @@ namespace P1.Tests
 
             // 松开扳机且架枪时间走完，翻滚次数恢复为 2
             strategy.Tick(0.25f, false, aim, host);
-            Assert.IsFalse(strategy.IsTurretLocked, "架枪计时走完退出锁定");
+            Assert.IsFalse(strategy.IsTurretLocked, "架枪计时走完退出强化态");
             Assert.AreEqual(2, strategy.RollsRemaining, "退出架枪后翻滚额度回复到 2");
-            Assert.AreEqual(1f, strategy.MoveSpeedMultiplier, 0.001f, "恢复正常移速");
+            Assert.AreEqual(1f, strategy.MoveSpeedMultiplier, 0.001f, "移速全程保持满值");
         }
 
         [Test]

@@ -6,12 +6,20 @@ namespace P1.Core
 {
     /// <summary>
     /// 单个战斗单位的对局统计数据（击杀、阵亡、涂地面积）。
+    /// MaxStreak / SpecialCasts / MaxLifeKills / RevengeKills / ClutchKill 供成就系统使用；
+    /// 旧调用方不读这些字段，默认 0/false，向后兼容。CurrentLifeKills 是内部推算用累计，不参与结算。
     /// </summary>
     public struct CombatantMatchStats
     {
         public int Kills;
         public int Deaths;
         public float TurfSquareMeters;
+        public int MaxStreak;
+        public int SpecialCasts;
+        public int MaxLifeKills;      // 单条命（两次阵亡之间）最高击杀数
+        public int CurrentLifeKills;  // 当前这条命已击杀数（阵亡即清零）
+        public int RevengeKills;      // 复仇击杀：击杀过「本局击杀过自己的人」的次数
+        public bool ClutchKill;       // 压哨击杀：比赛剩余 ≤ ClutchWindowSeconds 时完成击杀
     }
 
     /// <summary>
@@ -26,8 +34,37 @@ namespace P1.Core
         private static readonly Dictionary<CombatantHealth, CombatantMatchStats> Stats =
             new Dictionary<CombatantHealth, CombatantMatchStats>(DefaultCapacity);
 
+        // 复仇账本：victim → 「本局击杀过 victim 的敌人」集合；victim 反杀后销账（一次恩怨只报一次）。
+        private static readonly Dictionary<CombatantHealth, HashSet<CombatantHealth>> Grudges =
+            new Dictionary<CombatantHealth, HashSet<CombatantHealth>>(DefaultCapacity);
+
+        // 全场首杀：只认有击杀者的阵亡（环境死亡不算首杀）；Result 阶段保留供结算读取。
+        private static CombatantHealth _firstKillKiller;
+        private static bool _hasFirstKill;
+
+        /// <summary>压哨击杀判定窗口：比赛剩余时间 ≤ 该值（秒）时完成击杀即算压哨。</summary>
+        public const float ClutchWindowSeconds = 10f;
+
+        /// <summary>压哨窗口纯函数（EditMode 可直接断言；remainingSeconds 已被 MatchManager 钳 ≥ 0）。</summary>
+        public static bool IsClutchWindow(float remainingSeconds)
+        {
+            return remainingSeconds >= 0f && remainingSeconds <= ClutchWindowSeconds;
+        }
+
+        /// <summary>
+        /// 任意单位涂地面积增量事件：(painter, deltaSquareMeters)。
+        /// 只在该次涂地有效（delta &gt; 0）时触发，HUD 据此出「+N m²」飘字，无需逐帧轮询统计字典。
+        /// </summary>
+        public static event System.Action<CombatantHealth, float> TurfRegistered;
+
         private static bool _damageAppliedSubscribed;
         private static MatchStatsRunner _runner;
+
+        /// <summary>本局是否已产生全场首杀（有击杀者）。</summary>
+        public static bool HasFirstKill => _hasFirstKill;
+
+        /// <summary>全场首杀的击杀者（<see cref="HasFirstKill"/> 为 false 时返回 null）。</summary>
+        public static CombatantHealth FirstKillKiller => _hasFirstKill ? _firstKillKiller : null;
 
         static MatchStatsService()
         {
@@ -44,6 +81,10 @@ namespace P1.Core
             }
 
             Stats.Clear();
+            Grudges.Clear();
+
+            _firstKillKiller = null;
+            _hasFirstKill = false;
 
             if (_runner != null)
             {
@@ -104,11 +145,16 @@ namespace P1.Core
         {
             EnsureSubscribedToDamageApplied();
             Stats.Clear();
+            Grudges.Clear();
+            _firstKillKiller = null;
+            _hasFirstKill = false;
         }
 
         /// <summary>
         /// 登记击杀与死亡。
         /// killer != null 时 killer.Kills++；victim != null 时 victim.Deaths++。
+        /// 第一笔有击杀者的击杀同时记为全场首杀（环境死亡不算）。
+        /// 同步维护：单条命击杀数（victim 阵亡清零自身）、复仇账本、压哨击杀标记。
         /// </summary>
         public static void RegisterKill(CombatantHealth killer, CombatantHealth victim)
         {
@@ -116,27 +162,54 @@ namespace P1.Core
 
             if (killer != null)
             {
-                if (Stats.TryGetValue(killer, out CombatantMatchStats kStats))
+                if (!_hasFirstKill)
                 {
-                    kStats.Kills++;
-                    Stats[killer] = kStats;
+                    _hasFirstKill = true;
+                    _firstKillKiller = killer;
                 }
-                else
+
+                // 单条命击杀数：两次阵亡之间的击杀累计（与 4 秒窗口的 MaxStreak 口径不同）
+                Stats.TryGetValue(killer, out CombatantMatchStats kStats);
+                kStats.Kills++;
+                kStats.CurrentLifeKills++;
+                if (kStats.CurrentLifeKills > kStats.MaxLifeKills)
                 {
-                    Stats[killer] = new CombatantMatchStats { Kills = 1 };
+                    kStats.MaxLifeKills = kStats.CurrentLifeKills;
                 }
+
+                // 复仇：击杀过「本局击杀过自己的人」，销账后同一条恩怨不再重复记
+                if (victim != null && Grudges.TryGetValue(killer, out HashSet<CombatantHealth> debts) && debts.Remove(victim))
+                {
+                    kStats.RevengeKills++;
+                }
+
+                // 压哨击杀：仅在 Playing 阶段、剩余时间进窗口时记（编辑器/无比赛对象时静默跳过）
+                MatchManager match = MatchManager.Instance;
+                if (match != null && match.CurrentPhase == MatchManager.Phase.Playing
+                    && IsClutchWindow(match.RemainingSeconds))
+                {
+                    kStats.ClutchKill = true;
+                }
+
+                Stats[killer] = kStats;
             }
 
             if (victim != null)
             {
-                if (Stats.TryGetValue(victim, out CombatantMatchStats vStats))
+                Stats.TryGetValue(victim, out CombatantMatchStats vStats);
+                vStats.Deaths++;
+                vStats.CurrentLifeKills = 0; // 阵亡：这条命到此为止
+                Stats[victim] = vStats;
+
+                // 被击杀（非自杀）时记下这笔账，供之后的复仇判定
+                if (killer != null && killer != victim)
                 {
-                    vStats.Deaths++;
-                    Stats[victim] = vStats;
-                }
-                else
-                {
-                    Stats[victim] = new CombatantMatchStats { Deaths = 1 };
+                    if (!Grudges.TryGetValue(victim, out HashSet<CombatantHealth> debts))
+                    {
+                        debts = new HashSet<CombatantHealth>();
+                        Grudges[victim] = debts;
+                    }
+                    debts.Add(killer);
                 }
             }
         }
@@ -160,6 +233,41 @@ namespace P1.Core
             {
                 Stats[painter] = new CombatantMatchStats { TurfSquareMeters = squareMeters };
             }
+
+            TurfRegistered?.Invoke(painter, squareMeters);
+        }
+
+        /// <summary>
+        /// 登记连杀峰值（只保留最大值）。streak &lt;= 0 或 combatant 为 null 时忽略。
+        /// </summary>
+        public static void RegisterStreak(CombatantHealth combatant, int streak)
+        {
+            EnsureSubscribedToDamageApplied();
+
+            if (combatant == null || streak <= 0)
+                return;
+
+            Stats.TryGetValue(combatant, out CombatantMatchStats current);
+            if (streak > current.MaxStreak)
+            {
+                current.MaxStreak = streak;
+                Stats[combatant] = current;
+            }
+        }
+
+        /// <summary>
+        /// 登记一次大招释放。combatant 为 null 时忽略。
+        /// </summary>
+        public static void RegisterSpecialCast(CombatantHealth combatant)
+        {
+            EnsureSubscribedToDamageApplied();
+
+            if (combatant == null)
+                return;
+
+            Stats.TryGetValue(combatant, out CombatantMatchStats current);
+            current.SpecialCasts++;
+            Stats[combatant] = current;
         }
 
         /// <summary>
@@ -216,6 +324,9 @@ namespace P1.Core
         {
             EnsureSubscribedToDamageApplied();
             Stats.Clear();
+            Grudges.Clear();
+            _firstKillKiller = null;
+            _hasFirstKill = false;
         }
 
         /// <summary>

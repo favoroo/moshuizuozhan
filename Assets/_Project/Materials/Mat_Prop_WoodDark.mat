@@ -37,6 +37,8 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _BaseMapWorldScale: 0.5
+    - _BaseMapWorldSpace: 0
     - _CorrugationDepth: 0.28
     - _CorrugationScale: 2.5
     - _DetailNoiseStrength: 0.04

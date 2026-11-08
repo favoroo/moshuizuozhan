@@ -17,6 +17,9 @@ MonoBehaviour:
   weaponConfig: {fileID: 11400000, guid: 26c06a9b589584b409cd88da00b45c29, type: 2}
   matchDurationSeconds: 120
   finalWarningSeconds: 30
+  killRewardSpecialPoints: 70
+  killRewardEnergyTransferFraction: 0.5
+  killRewardInk: 25
   tpsPivotHeight: 1.45
   tpsPivotHeightSwimming: 1.05
   tpsPivotSmoothTime: 0.06
@@ -39,6 +42,13 @@ MonoBehaviour:
   tpsSubAimDistanceKick: 0.35
   tpsSpeedFovKick: 3.5
   tpsSpeedFovStartSpeed: 6
+  matchIntroOverviewHeight: 25
+  matchIntroOverviewBackDistance: 19
+  matchIntroOverviewSideOffset: 9
+  matchIntroSweepDegrees: 34
+  matchIntroFovBonus: 12
+  matchIntroDiveStart01: 0.5
+  matchIntroArcLift: 7
   slamCameraPivotRise: 2
   slamCameraDistanceBonus: 3
   slamCameraFovBonus: 4
@@ -64,5 +74,3 @@ MonoBehaviour:
   outOfBoundsMarginX: 0.3
   outOfBoundsMarginZ: 0.3
   outOfBoundsMinY: -6
-  spawnZoneRadius: 6
-  spawnZonePushSpeed: 8

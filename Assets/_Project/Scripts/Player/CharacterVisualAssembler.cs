@@ -529,6 +529,11 @@ namespace P1.Player
                 partName == "BellRim" ||
                 partName == "PumpSlide" ||
                 partName.StartsWith("DrumCap") ||
+                // 触须发裙贴着发根，发根主束已投出同一轮廓；12 根发件里 6 根是裙段，
+                // 继续逐根投影只增加阴影 pass 的 draw（每角色 -6），远处几乎看不出差异。
+                partName.StartsWith("Tentacle_Hair_Skirt") ||
+                // 墨罐液面在罐体内部，永远看不到自己的投影。
+                partName == "LiquidFill" ||
                 partName.StartsWith("ClampDisc"))
             {
                 return false;
@@ -657,6 +662,9 @@ namespace P1.Player
                     computedNormals[i] = computedNormals[i].normalized;
             }
             mesh.SetNormals(computedNormals);
+            // 头部与 Ear/Double 等 Primitive 合并时，属性一致性检查要求两者都有切线；
+            // 旧版这里缺 tangents，导致 Kid/Head 组（馒头头 + 双耳）永久合并失败（每角色多 2 draw）。
+            mesh.RecalculateTangents();
             mesh.RecalculateBounds();
             _mochiHeadMesh = mesh;
             return mesh;
@@ -2617,6 +2625,42 @@ namespace P1.Player
             }
         }
 
+        /// <summary>
+        /// 已烘焙场景的运行时视觉性能收拾（每个角色 Start 一次，零帧内开销）：
+        /// 1. 清掉旧版装配残留的 <c>MergedStatic_Mat_TankGlass</c> 合并组及其已禁用的
+        ///    <c>GlassChamber</c> 源件——P39 移除储液罐玻璃后源码不再生成它们，但旧场景里仍有
+        ///    8 组合并网格（每角色 base+shadow 各 1 draw）。只销毁合并组不够：<see cref="MergeBodyRuntime"/>
+        ///    会从禁用的 GlassChamber 源件重新合并出一份玻璃，必须连源件一起移除才能保持 P39 观感；
+        /// 2. 按当前 <see cref="ShouldCastShadow"/> 规则重刷非合并部件的阴影投射，
+        ///    让不重新烘焙场景也能拿到「发裙/液面不投影」的优化（合并组仍按多数规则跳过）。
+        /// </summary>
+        public static void ApplyRuntimeVisualPerfPass(Transform visualRoot)
+        {
+            if (visualRoot == null)
+                return;
+
+            var all = visualRoot.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < all.Length; i++)
+            {
+                Transform t = all[i];
+                if (t == null) continue;
+                string n = t.name;
+                bool staleMergedGlass = n.StartsWith(MergedPartPrefix) && n.Contains("TankGlass");
+                if (!staleMergedGlass && n != "GlassChamber")
+                    continue;
+
+                // GlassChamber 是无子节点的叶子件；与合并组一起销毁可同时去掉 base 与 shadow 两条 draw，
+                // 并阻止 Start 末尾的 MergeBodyRuntime 把已禁用的源件重新合并回场景。
+                // Destroy 是延迟到帧尾执行的：先清空 sharedMaterial，避免同一帧的合并扫描把
+                // 「已标记销毁但尚未移除」的 GlassChamber 当成可合并部件重新生成一份玻璃。
+                var staleRenderer = t.GetComponent<MeshRenderer>();
+                if (staleRenderer != null) staleRenderer.sharedMaterial = null;
+                UnityEngine.Object.Destroy(t.gameObject);
+            }
+
+            ApplyShadowCastingRules(visualRoot);
+        }
+
         private static Transform[] Skips(params Transform[] items)
         {
             if (items == null || items.Length == 0)
@@ -2743,13 +2787,18 @@ namespace P1.Player
                 var mergedRend = mergedGo.AddComponent<MeshRenderer>();
                 mergedRend.sharedMaterial = groupMats[g];
 
-                // 阴影行为按组内多数决定（与武器合并一致）；ApplyShadowCastingRules 按前缀跳过合并产物
+                // 阴影行为按组内多数决定（与武器合并一致）；ApplyShadowCastingRules 按前缀跳过合并产物。
+                // 例外：头部组（馒头头 + 双耳）按多数会因两耳不投影而关掉整个头影，
+                // 而头部是角色最重要的投影源，含 MochiHead 的组强制保留投影。
                 int castCount = 0;
+                bool containsHeadCore = false;
                 for (int i = 0; i < members.Count; i++)
                 {
-                    if (ShouldCastShadow(members[i].gameObject.name)) castCount++;
+                    string memberName = members[i].gameObject.name;
+                    if (ShouldCastShadow(memberName)) castCount++;
+                    if (memberName == "MochiHead") containsHeadCore = true;
                 }
-                mergedRend.shadowCastingMode = castCount * 2 >= members.Count
+                mergedRend.shadowCastingMode = containsHeadCore || castCount * 2 >= members.Count
                     ? UnityEngine.Rendering.ShadowCastingMode.On
                     : UnityEngine.Rendering.ShadowCastingMode.Off;
 

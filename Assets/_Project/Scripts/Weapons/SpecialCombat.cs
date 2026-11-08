@@ -23,6 +23,18 @@ namespace P1.Weapons
         /// <summary>风暴云允许的最大「云下」落差（米）：防止雨点穿过地面/集装箱底打到下一层。</summary>
         public const float DefaultStormMaxDropBelow = 8f;
 
+        /// <summary>覆盖检查的射线起点高度（米）：INKWAVE 从胸口（脚底 +1.2m）向云底检查视线。</summary>
+        public const float StormCoverChestHeight = 1.2f;
+
+        /// <summary>覆盖检查射线终点相对云心的高度偏移（米）：负值 = 云腹下方一点，对齐 Inkwave cloudY - 0.6。</summary>
+        public const float StormCoverBellyOffset = -0.6f;
+
+        /// <summary>覆盖检查 LinecastNonAlloc 缓冲大小。</summary>
+        private const int StormCoverHitsCapacity = 8;
+
+        /// <summary>覆盖检查共享缓冲（static 方法共用，单线程调用无竞争）。</summary>
+        private static readonly RaycastHit[] StormCoverHits = new RaycastHit[StormCoverHitsCapacity];
+
         public static float HorizontalDistance(Vector3 a, Vector3 b)
         {
             float dx = a.x - b.x;
@@ -185,6 +197,7 @@ namespace P1.Weapons
 
         /// <summary>
         /// 风暴云单次 DOT 结算：只命中所属队伍之外、位于云层下方且水平距离在半径内的战斗单位。
+        /// 旧签名保留（不做掩体检查）——EditMode 纯逻辑测试与历史调用方继续走此入口。
         /// </summary>
         public static int ApplyStormTick(
             Vector3 cloudCenter,
@@ -194,6 +207,23 @@ namespace P1.Weapons
             CombatantHealth attacker = null,
             float maxDropBelow = DefaultStormMaxDropBelow)
         {
+            return ApplyStormTick(cloudCenter, team, radius, tickDamage, attacker, maxDropBelow, false);
+        }
+
+        /// <summary>
+        /// 带掩体检查的风暴云 DOT 结算（P41 对齐 Inkwave）：从受害者胸口向云腹做视线检查，
+        /// 中途被世界碰撞体（集装箱/屋檐）挡住的目标淋不到雨。战斗单位自身胶囊被过滤——
+        /// 雨可以穿过人群，但穿不过屋顶。
+        /// </summary>
+        public static int ApplyStormTick(
+            Vector3 cloudCenter,
+            Team team,
+            float radius,
+            float tickDamage,
+            CombatantHealth attacker,
+            float maxDropBelow,
+            bool checkOverheadCover)
+        {
             if (tickDamage <= 0f)
                 return 0;
 
@@ -201,12 +231,16 @@ namespace P1.Weapons
             if (!MatchManager.CombatSettlementAllowed)
                 return 0;
 
+            Vector3 bellyPoint = new Vector3(cloudCenter.x, cloudCenter.y + StormCoverBellyOffset, cloudCenter.z);
             int hits = 0;
             var all = CombatantHealthRegistry.All;
             for (int i = 0; i < all.Count; i++)
             {
                 CombatantHealth victim = all[i];
                 if (victim == null || !victim.IsAlive || !victim.Team.IsOpponentOf(team))
+                    continue;
+                // 无敌单位不淋雨也不计数（对齐 Slam 的白圈语义；TakeDamage 本来也会拒绝）。
+                if (victim.IsInvulnerable)
                     continue;
 
                 Vector3 victimPos = victim.transform.position;
@@ -218,10 +252,39 @@ namespace P1.Weapons
                 if (HorizontalDistance(cloudCenter, victimPos) > radius)
                     continue;
 
+                if (checkOverheadCover && IsStormCovered(victimPos, bellyPoint))
+                    continue;
+
                 victim.TakeDamage(tickDamage, team, victimPos, attacker);
                 hits++;
             }
             return hits;
+        }
+
+        /// <summary>
+        /// 胸口→云腹视线是否被头顶掩体（非战斗单位的世界碰撞体）挡住。
+        /// 用 RaycastNonAlloc 沿「胸口→云腹」线段查询（Unity 没有 LinecastNonAlloc）：
+        /// 起点在受害者自身胶囊内，queriesHitBackfaces=false 不会命中自身；途中胶囊命中按
+        /// 「战斗单位」过滤 —— 雨穿过人群，不穿过屋顶。
+        /// </summary>
+        private static bool IsStormCovered(Vector3 victimPos, Vector3 bellyPoint)
+        {
+            Vector3 chest = new Vector3(victimPos.x, victimPos.y + StormCoverChestHeight, victimPos.z);
+            Vector3 target = new Vector3(victimPos.x, bellyPoint.y, victimPos.z);
+            Vector3 delta = target - chest;
+            float distance = delta.magnitude;
+            if (distance < 0.01f)
+                return false;
+
+            int count = Physics.RaycastNonAlloc(chest, delta / distance, StormCoverHits, distance, GameLayers.WorldMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < count; i++)
+            {
+                Collider hit = StormCoverHits[i].collider;
+                // 战斗单位（自己/队友/敌人）的胶囊不算掩体：雨穿过人群，不穿过屋顶。
+                if (hit != null && hit.GetComponentInParent<CombatantHealth>() == null)
+                    return true;
+            }
+            return false;
         }
     }
 }

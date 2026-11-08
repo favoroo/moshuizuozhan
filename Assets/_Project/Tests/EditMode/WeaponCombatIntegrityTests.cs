@@ -474,20 +474,20 @@ namespace P1.Tests
             Assert.That(motor.CurrentMoveSpeed, Is.GreaterThan(2.8f / 0.3f),
                 "爆发段首帧速度必须高于旧的匀速翻滚速度");
 
-            // 3) 推进武器时钟至翻滚结束、进入站桩架枪 (TurretLock)
+            // 3) 推进武器时钟至翻滚结束、进入架枪强化 (TurretLock)
             weapon.LateUpdateForTesting(0.31f);
             Assert.IsFalse(weapon.IsRollingDodge);
             Assert.IsTrue(weapon.IsTurretLocked);
 
             updateMethod.Invoke(motor, null);
-            Assert.AreEqual(0f, motor.CurrentMoveSpeed, 0.001f, "架枪期间 Motor 移速必须锁定为 0（原地站桩）");
+            Assert.AreEqual(6.0f, motor.CurrentMoveSpeed, 0.01f, "架枪强化不再锁移速：翻滚结束即可正常移动");
 
             // 4) 推进武器时钟退出架枪
             weapon.LateUpdateForTesting(0.55f);
             Assert.IsFalse(weapon.IsTurretLocked);
 
             updateMethod.Invoke(motor, null);
-            Assert.AreEqual(6.0f, motor.CurrentMoveSpeed, 0.01f, "退出架枪后恢复正常移速");
+            Assert.AreEqual(6.0f, motor.CurrentMoveSpeed, 0.01f, "退出架枪后移速保持正常");
         }
 
         [Test]

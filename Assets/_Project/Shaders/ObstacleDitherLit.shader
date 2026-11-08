@@ -49,6 +49,11 @@ Shader "P1/ObstacleDitherLit"
         // P31 可选 albedo 细节层：默认 white 不贴图，与旧版纯色行为一致（向后兼容）
         [Header(Albedo Detail P31)]
         _BaseMap ("Albedo Map (optional)", 2D) = "white" {}
+        // 集装箱瓦楞壳的 uv0 是"整面归一化坐标"（跨整面 0..1，供踢脚线/压顶读 uv.y），
+        // 直接拿它采样 albedo 会把 4.6m 长面压成 1 个贴图周期。开这个开关后
+        // albedo 改走世界空间双轴投影（_BaseMapWorldScale 米/周期），与法线贴图同一套投影。
+        [Toggle] _BaseMapWorldSpace ("Albedo Uses World Projection", Float) = 0
+        _BaseMapWorldScale ("Albedo World Scale (periods/m)", Float) = 0.5
 
         [Header(Dither Occlusion Settings)]
         _DitherAlpha ("Dither Alpha", Range(0.0, 1.0)) = 1.0
@@ -163,6 +168,8 @@ Shader "P1/ObstacleDitherLit"
                 float _SurfaceAOStrength;
                 float _SurfaceSmoothnessScale;
                 float4 _BaseMap_ST;
+                float _BaseMapWorldSpace;
+                float _BaseMapWorldScale;
             CBUFFER_END
 
             static const float4x4 _BayerMatrix4x4 = float4x4(
@@ -217,7 +224,21 @@ Shader "P1/ObstacleDitherLit"
 #if UNITY_WEBGL && !UNITY_EDITOR
                 half3 surfaceColor = _BaseColor.rgb;
 #else
-                float2 baseUV = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+                // _BaseMapWorldSpace = 1 时走世界空间双轴投影：集装箱瓦楞壳的 uv0 是整面归一化
+                // 坐标（跨整面 0..1），用它采样 albedo 会把 4.6m 长面压成一个贴图周期。
+                float2 baseUV;
+                if (_BaseMapWorldSpace > 0.5)
+                {
+                    baseUV = (abs(geomN.y) > 0.5)
+                        ? input.positionWS.xz * _BaseMapWorldScale
+                        : (abs(geomN.x) > abs(geomN.z)
+                            ? input.positionWS.zy * _BaseMapWorldScale
+                            : input.positionWS.xy * _BaseMapWorldScale);
+                }
+                else
+                {
+                    baseUV = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+                }
                 half3 surfaceColor = _BaseColor.rgb *
                     SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUV).rgb;
 #endif
@@ -437,6 +458,8 @@ Shader "P1/ObstacleDitherLit"
                 float _SurfaceAOStrength;
                 float _SurfaceSmoothnessScale;
                 float4 _BaseMap_ST;
+                float _BaseMapWorldSpace;
+                float _BaseMapWorldScale;
             CBUFFER_END
 
             static const float4x4 _BayerMatrix4x4 = float4x4(
@@ -549,6 +572,8 @@ Shader "P1/ObstacleDitherLit"
                 float _SurfaceAOStrength;
                 float _SurfaceSmoothnessScale;
                 float4 _BaseMap_ST;
+                float _BaseMapWorldSpace;
+                float _BaseMapWorldScale;
             CBUFFER_END
 
             static const float4x4 _BayerMatrix4x4 = float4x4(

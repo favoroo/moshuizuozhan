@@ -8,14 +8,16 @@ using UnityEngine.UI;
 namespace P1.UI
 {
     /// <summary>
-    /// 底部横向大招条（P14-H：由旧的右上角大招球改成血条上方的横向纯色条）。
+    /// 底部大招横条（2026-11 第四轮：放大 + 抗锯齿，满能改「徽章反色 + 外圈状态环」）。
     ///
-    /// 结构：左侧「技能图标徽章」+ 中间横向充能条 + 右侧百分比。
-    /// 充能中条与徽章都是纸白；充满瞬间三者一起硬切成黄色（徽章 / 满条 / 「Q 释放」提示），
-    /// 没有任何旋转环、爆闪、液面晃动或脉冲震颤——几何大胆风只做 ≤100ms 的状态切换。
+    /// 结构：左端身份徽章（正圆 + 技能图标）+ 墨黑胶囊轨道 + 黄色胶囊填充，轨道拉满整行。
+    /// 充能中 = 墨底徽章 + 黄图标 + 黄填充 + 外圈隐藏；
+    /// 满能 = **填充铺满 + 徽章静默反色（黄底墨图标）+ 外圈 <see cref="ReadyRing"/> 亮黄环**，
+    /// 不闪条身、不爆闪、不 Pop——满能只允许「徽章换状态」。
     ///
-    /// 保留旧公开 API（SetCharge / IsReady / ReadyBurstCount / SpecialIconSprite / DisplayedSpecialKind），
-    /// HudController 与测试无需改调用方式。
+    /// 保留旧公开 API（SetCharge / IsReady / ReadyBurstCount / SpecialIconSprite / DisplayedSpecialKind /
+    /// SetArcRing / SetBurst / Configure 旧签名），HudController 与测试无需改调用方式；
+    /// 百分比读数与 Q 键帽均已下线（条长本身就是读数，满能靠徽章反色 + 状态环表达）。
     /// </summary>
     [AddComponentMenu("P1/UI/Liquid Orb View")]
     public class LiquidOrbView : MonoBehaviour
@@ -26,23 +28,29 @@ namespace P1.UI
         [SerializeField] private UIThemeSO theme;
         [SerializeField] private HudGaugeStyleSO style;
 
-        [Header("横向充能条")]
+        [Header("横条填充（UIPillImage；旧环形弧字段保留兼容）")]
         [SerializeField] private Image barFill;
         [SerializeField] private TMP_Text percentLabel;
+        [SerializeField] private UIArcRingGraphic arcRing;
 
-        [Header("技能图标徽章")]
+        [Header("左端身份徽章 + 技能图标")]
         [SerializeField] private UIInkShapeGraphic iconPlate;
         [SerializeField] private RectTransform specialIconRoot;
         [SerializeField] private Image specialIcon;
         [SerializeField] private Image specialIconShadow;
 
-        [Header("满能提示")]
+        [Header("满能状态环（徽章外圈；仅满能显示）")]
+        [SerializeField] private UIInkShapeGraphic readyRing;
+
+        [Header("满能反馈（Q 键帽 + 一次性爆闪 + 整行 Punch）")]
         [SerializeField] private RectTransform readyHint;
         [SerializeField] private UIInkShapeGraphic readyHintPill;
         [SerializeField] private TMP_Text readyHintLabel;
         [SerializeField] private UISpringMotion readyHintMotion;
+        [SerializeField] private UIBurstGraphic readyBurst;
+        [SerializeField] private UISpringMotion rowMotion;
 
-        [Header("卡片外壳（t-1：纸白卡 → 满能整卡翻黄）")]
+        [Header("旧卡片外壳（横条化后不再传入，仅兼容字段）")]
         [SerializeField] private UIInkShapeGraphic cardBackground;
         [SerializeField] private UIInkShapeGraphic cardRail;
 
@@ -52,9 +60,9 @@ namespace P1.UI
         private float _charge01;
         private int _displayedPercent = -1;
         private bool _ready;
-        private bool _wired;
         private bool _iconApplied;
         private bool _readyHintEnabled = true;
+        private UIChunkyText _hintLabelChunky;
         private SpecialKind _specialKind = SpecialKind.Slam;
 
         /// <summary>大招是否处于满能待放状态。</summary>
@@ -62,11 +70,17 @@ namespace P1.UI
 
         public float Charge01 => _charge01;
 
-        /// <summary>横向充能条填充图（0..1 由 fillAmount 驱动）。</summary>
+        /// <summary>横条填充（胶囊 Image；<see cref="SetCharge"/> 直接驱动 fillAmount）。</summary>
         public Image BarFill => barFill;
 
-        /// <summary>技能图标徽章（满能时翻黄）。</summary>
+        /// <summary>遗留：环形充能弧（横条化后恒为 null，仅保留兼容字段）。</summary>
+        public UIArcRingGraphic ArcRing => arcRing;
+
+        /// <summary>左端身份徽章（满能时翻黄）。</summary>
         public UIInkShapeGraphic IconPlate => iconPlate;
+
+        /// <summary>满能状态环（徽章外圈；充能时隐藏）。</summary>
+        public UIInkShapeGraphic ReadyRing => readyRing;
 
         /// <summary>当前显示的技能图标（供测试/调试读取）。</summary>
         public Sprite SpecialIconSprite => specialIcon != null ? specialIcon.sprite : null;
@@ -96,10 +110,11 @@ namespace P1.UI
                 readyHintLabel.text = hintText;
             }
 
-            EnsureWiring();
             ApplyTeamColors();
 
-            if (readyHint != null) readyHint.gameObject.SetActive(false);
+            // 兼容旧装配：旧场景若还传了「Q」键帽就按旧规则常驻（新装配一律传 null，条内不再有键帽）；
+            // 移动端由 SetReadyHintEnabled(false) 隐藏。
+            if (readyHint != null) readyHint.gameObject.SetActive(true);
             if (percentLabel != null) percentLabel.gameObject.SetActive(true);
         }
 
@@ -113,6 +128,32 @@ namespace P1.UI
             ApplyTeamColors();
         }
 
+        /// <summary>
+        /// 装配满能状态环（徽章外圈的黄环 + 墨边，由工厂在装配时传入）。
+        /// 只由满能状态驱动显隐；不做旋转 / 缩放 / 循环脉冲（几何风禁止装饰性动画）。
+        /// </summary>
+        public void ConfigureReadyRing(UIInkShapeGraphic ring)
+        {
+            readyRing = ring;
+            if (readyRing != null)
+            {
+                readyRing.raycastTarget = false;
+                readyRing.Shape = UIInkShape.Pill;
+                readyRing.SpeechTail = false;
+                readyRing.BorderWidth = HudSpecialGaugeFactory.ReadyRingBand;
+                readyRing.BorderColor = ComicStyle.Yellow;
+                readyRing.HardShadow = false;
+                readyRing.ShadowOffset = Vector2.zero;
+                readyRing.Halftone = false;
+                readyRing.GlossAlpha = 0f;
+                readyRing.DrawGloss = false;
+                readyRing.InnerRimAlpha = 0f;
+                readyRing.color = Color.clear; // 只画环带（填充透明），不遮挡徽章
+            }
+
+            RefreshReadyRing();
+        }
+
         public void SetTheme(UIThemeSO themeAsset)
         {
             theme = themeAsset;
@@ -120,14 +161,39 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 卡片外壳绑定（t-1 底部三卡）：未满能 = 纸白卡 + 行动黄色带；满能 = 整卡翻黄。
-        /// 新增入口，旧的 <see cref="Configure"/> 签名与调用方零变化。
+        /// 旧卡片外壳绑定（t-1 底部三卡）：横条化后工厂不再传卡片，这里保留签名只为兼容，
+        /// 传 null 时静默（满能的整卡翻色改由左端徽章承担）。
         /// </summary>
         public void SetCardChrome(UIInkShapeGraphic background, UIInkShapeGraphic rail)
         {
             cardBackground = background;
             cardRail = rail;
             ApplyTeamColors();
+        }
+
+        /// <summary>遗留：装配环形充能弧（横条化后工厂不再创建环弧；传入时仍会驱动 Fill01 以便旧场景可用）。</summary>
+        public void SetArcRing(UIArcRingGraphic ring)
+        {
+            arcRing = ring;
+            if (arcRing != null)
+            {
+                arcRing.raycastTarget = false;
+                arcRing.Fill01 = _charge01;
+            }
+            ApplyTeamColors();
+        }
+
+        /// <summary>装配满能爆闪（一次性冲击波；进入满能瞬间 <see cref="UIBurstGraphic.Play"/>，播完自停）。</summary>
+        public void SetBurst(UIBurstGraphic burst)
+        {
+            readyBurst = burst;
+            if (readyBurst != null) readyBurst.raycastTarget = false;
+        }
+
+        /// <summary>装配整行动效（满能瞬间一记 Punch；横条化后由工厂传入）。</summary>
+        public void SetRowMotion(UISpringMotion motion)
+        {
+            rowMotion = motion;
         }
 
         public void SetStyle(HudGaugeStyleSO styleAsset)
@@ -143,12 +209,13 @@ namespace P1.UI
             _charge01 = clamped;
 
             if (barFill != null) barFill.fillAmount = clamped;
+            if (arcRing != null) arcRing.Fill01 = clamped; // 旧环形布局兼容
 
             SetReady(isReady);
             ApplyPercent();
         }
 
-        /// <summary>切换队伍（横向条用纸白→黄色表达充能，这里仅保留接口兼容）。</summary>
+        /// <summary>切换队伍（横条用行动黄表达充能，这里仅保留接口兼容）。</summary>
         public void SetTeam(Team team)
         {
             _team = team;
@@ -170,8 +237,8 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 移动端紧凑布局：隐藏键盘「Q 释放」提示（触控大招键本身有就绪反馈），
-        /// 读数回到百分比。重复调用幂等。
+        /// 移动端紧凑布局：隐藏键盘「Q 释放」键帽（触控大招键本身有就绪反馈）。
+        /// 重复调用幂等。
         /// </summary>
         public void SetCompactBottomLayout(bool compact)
         {
@@ -183,22 +250,6 @@ namespace P1.UI
         {
             _readyHintEnabled = enabled;
             RefreshReadyWidgets();
-        }
-
-        private void EnsureWiring()
-        {
-            if (_wired) return;
-            _wired = true;
-
-            if (readyHintMotion != null)
-            {
-                readyHintMotion.OnPlayedOut += HandleHintPlayedOut;
-            }
-        }
-
-        private void HandleHintPlayedOut()
-        {
-            if (readyHint != null && !_ready) readyHint.gameObject.SetActive(false);
         }
 
         private void Awake()
@@ -228,7 +279,6 @@ namespace P1.UI
         private void Start()
         {
             EnsureSubCanvas();
-            EnsureWiring();
         }
 
         private void LateUpdate()
@@ -246,43 +296,42 @@ namespace P1.UI
 
         private void SetReady(bool ready)
         {
-            if (ready == _ready)
+            if (ready != _ready)
             {
-                RefreshReadyWidgets();
-                return;
-            }
+                _ready = ready;
 
-            _ready = ready;
-            HudGaugeStyleSO resolved = HudGaugeStyleSO.Resolve(style);
-
-            if (ready)
-            {
-                ReadyBurstCount++;
-
-                if (readyHint != null && _readyHintEnabled && readyHintMotion != null)
+                if (ready)
                 {
-                    readyHint.gameObject.SetActive(true);
-                    readyHintMotion.PlayIn(resolved.readyHintDelay);
+                    ReadyBurstCount++;
+                    // 满能只做静默换状态：徽章反色 + 外圈状态环亮起（RefreshReadyRing）。
+                    // 不做条身闪烁、不做爆闪、不做 Pop/Punch——用户明确要求「图标稍微变一下状态就行」。
                 }
+
+                ApplyTeamColors();
             }
 
-            ApplyTeamColors();
             RefreshReadyWidgets();
+            RefreshReadyRing();
         }
 
-        /// <summary>右侧读数列：未满能显示百分比；桌面端满能时硬切成黄底黑字「Q 释放」。</summary>
+        /// <summary>满能状态环显隐：满能露出黄环 + 墨边，充能 / 释放后立即收起。</summary>
+        private void RefreshReadyRing()
+        {
+            if (readyRing != null && readyRing.gameObject.activeSelf != _ready)
+            {
+                readyRing.gameObject.SetActive(_ready);
+            }
+        }
+
+        /// <summary>
+        /// 「Q」键帽常驻右槽：是否显示只由 <see cref="_readyHintEnabled"/>（移动端隐藏）决定，
+        /// 充能/满能状态靠翻色表达（见 <see cref="ApplyTeamColors"/>）。
+        /// </summary>
         private void RefreshReadyWidgets()
         {
-            bool showHint = _ready && _readyHintEnabled;
-
-            if (readyHint != null && readyHint.gameObject.activeSelf != showHint)
+            if (readyHint != null && readyHint.gameObject.activeSelf != _readyHintEnabled)
             {
-                readyHint.gameObject.SetActive(showHint);
-            }
-
-            if (percentLabel != null && percentLabel.gameObject.activeSelf == showHint)
-            {
-                percentLabel.gameObject.SetActive(!showHint);
+                readyHint.gameObject.SetActive(_readyHintEnabled);
             }
         }
 
@@ -324,18 +373,26 @@ namespace P1.UI
 
         private void ApplyTeamColors()
         {
-            // 卡片语言（t-1）：纸白卡 + 行动黄身份色带；满能整卡翻黄、色带与墨框反过来用墨黑，
-            // 形成一眼可读的「硬切就绪」。条永远铺行动黄（纸白轨道上才有对比）。
+            // 横条仪表（2026-11 四轮）：填充恒为行动黄；满能时左端徽章**整体反色**——
+            // 充能 = 墨底黄图标，满能 = 黄底墨图标 + 墨边 + 外圈 ReadyRing（3px 墨边常驻，反色后依然读得出圆盘轮廓）。
+            // 反色是硬切，不做旋转环 / 呼吸缩放。
             if (barFill != null) barFill.color = ComicStyle.Yellow;
+            if (arcRing != null) arcRing.color = ComicStyle.Yellow;
+
             if (iconPlate != null)
             {
-                // 与墨水卡同构：墨底徽章 + 4px 身份色边框 + 身份色图标。
-                // 满能时整卡翻黄，墨底留在黄卡上仍是一块清晰的重心，边框改用纸白勾出轮廓。
-                iconPlate.color = ComicStyle.Ink;
-                iconPlate.BorderWidth = HudSpecialGaugeFactory.CardBadgeBorderWidth;
-                iconPlate.BorderColor = _ready ? ComicStyle.Paper : ComicStyle.Yellow;
+                iconPlate.color = _ready ? ComicStyle.Yellow : ComicStyle.Ink;
+                iconPlate.BorderColor = ComicStyle.Ink;
             }
 
+            if (readyRing != null)
+            {
+                // 满能环只画 4px 黄色环带（填充透明）：徽章外留 2px 缝，满能时一眼可见
+                readyRing.color = Color.clear;
+                readyRing.BorderColor = ComicStyle.Yellow;
+            }
+
+            // 旧卡片外壳（t-1）：横条化后工厂传 null，保留兼容分支
             if (cardBackground != null)
             {
                 cardBackground.color = _ready ? ComicStyle.Yellow : ComicStyle.Paper;
@@ -343,25 +400,40 @@ namespace P1.UI
             }
             if (cardRail != null) cardRail.color = _ready ? ComicStyle.Ink : ComicStyle.Yellow;
 
-            if (specialIcon != null) specialIcon.color = ComicStyle.Yellow;
+            if (specialIcon != null)
+            {
+                // 图标与徽章底色始终互为反色：充能 = 墨底黄图标，满能 = 黄底墨图标
+                specialIcon.color = _ready ? ComicStyle.Ink : ComicStyle.Yellow;
+            }
             if (specialIconShadow != null) specialIconShadow.enabled = false;
 
-            // 纸白卡片：读数与提示文字用墨色；满能时百分比已被「Q 释放」替换
+            // 旧横条布局的百分读数（横条化后为 null）：纸白卡上必须是墨字
             if (percentLabel != null) percentLabel.color = ComicStyle.Ink;
 
             if (readyHintPill != null)
             {
-                readyHintPill.Shape = UIInkShape.Pill; // 圆角化：满能提示签保持胶囊
+                readyHintPill.Shape = UIInkShape.Pill;
                 readyHintPill.SpeechTail = false;
-                readyHintPill.HardShadow = false;
-                // 满能卡整块是黄的：小签反过来用墨底白字（t-1 的墨块语言），对比最强
-                readyHintPill.color = _ready ? ComicStyle.Ink : ComicStyle.Yellow;
-                readyHintPill.BorderColor = _ready ? ComicStyle.Paper : ComicStyle.Ink;
+                readyHintPill.BorderWidth = ComicStyle.BorderThin;
+                // 「Q」键帽在横条右槽：充能 = 墨底纸白字（与轨道同色，读作条的端头）；
+                // 满能 = 翻黄底墨字 + 硬影离地，与徽章同一身份色。
+                readyHintPill.color = _ready ? ComicStyle.Yellow : ComicStyle.Ink;
+                readyHintPill.BorderColor = _ready ? ComicStyle.Ink : ComicStyle.Paper;
+                // 色签档硬影由工厂在装配时一次性写入（键帽已下线，不再有后续补影）
             }
 
             if (readyHintLabel != null)
             {
-                readyHintLabel.color = _ready ? ComicStyle.Paper : ComicStyle.Ink;
+                // 走 UIChunkyText.SetFillColor：doubleLayer=false 时它会同步 source.color，
+                // 直接写 TMP.color 会在下次重建时被 chunky 的 fillColor 冲掉
+                if (_hintLabelChunky == null && readyHintLabel != null)
+                {
+                    _hintLabelChunky = readyHintLabel.GetComponent<UIChunkyText>();
+                }
+
+                Color labelColor = _ready ? ComicStyle.Ink : ComicStyle.Paper;
+                if (_hintLabelChunky != null) _hintLabelChunky.SetFillColor(labelColor);
+                else readyHintLabel.color = labelColor;
             }
         }
 
@@ -374,11 +446,6 @@ namespace P1.UI
 
             _displayedPercent = percent;
             percentLabel.text = percent >= 100 ? "100%" : $"{percent}%";
-        }
-
-        private void OnDestroy()
-        {
-            if (readyHintMotion != null) readyHintMotion.OnPlayedOut -= HandleHintPlayedOut;
         }
     }
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using P1.Environment;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -14,7 +15,9 @@ namespace P1.Editor
     /// 1. 远景去除近景高耸大绿丘，天际线保持开阔通透，远景山丘仅在极远边界（z>130m 或 |x|>100m）保留低平灰绿轮廓（高度<6m）；
     /// 2. 东侧海滨城市整体向东平移 10-14m（最近建筑立面 x≥44m），留出 >14m 宽阔海滨街道缓冲带；最高楼降至 ~22m；采用深砖红/深棕/暖灰与米白浅灰配色，剔除鲑鱼粉；
     /// 3. 南侧工业仓储区（立式储罐/锯齿形厂房/拖头卡车）全部南撤至 z≤-48m 且 x≥30m，彻底清空俯视相机前景，露出宽广湛蓝的西南港池；
-    /// 4. 4 座 22-28m 黄色集装箱岸桥面板改用简洁现代的“纯白面板 + 2 道深色横条纹（Dark Stencil Bars）”，彻底消除反向镜像字母瑕疵，保留全套黄黑斜纹警示防撞台车；
+    /// 4. 4 座 22-28m 集装箱岸桥改用「钢青自动化码头」配色：深钢青门架/主梁 + 纯白机房（2 道深色横条纹）
+    ///    + 港青品牌色带 + 黄黑警示防撞台车。不再使用整片警示黄 —— 场内已有 2 座黄色英雄塔吊，
+    ///    远景岸桥若同色会与英雄地标抢戏，整个北天际线糊成一团黄；深钢青与港池水色/蓝色集装箱同族，整体更协调。
     /// 5. 严格遵守安全包络线：任何远景几何均不进入 x∈[-24, 24], z∈[-32, 32]，绝不遮挡俯视对局全景。
     ///
     /// 性能与架构契约：
@@ -110,6 +113,59 @@ namespace P1.Editor
             }
 
             return backdropRoot;
+        }
+
+        /// <summary>
+        /// 在霓虹滑板场场景中只重建远景（不整场重建，不重烘地面/材质）：
+        /// 销毁旧 _SkateBackdrop，按当前画风与 SP 材质重新合并网格并覆盖同名网格资产后保存场景。
+        /// 供远景观感迭代使用，避免每次都跑整场「生成新地图」。
+        /// </summary>
+        [MenuItem("P1/关卡与地图/重建霓虹滑板场远景 (Skate Backdrop)", false, 33)]
+        public static void RebuildSkateparkBackdropInOpenScene()
+        {
+            const string skateScenePath = "Assets/_Project/Scenes/NeonSkatepark.unity";
+            const string skateStylePath = "Assets/_Project/ScriptableObjects/ArenaStyle_NeonSkatepark.asset";
+            const string matFolder = "Assets/_Project/Materials";
+
+            var active = EditorSceneManager.GetActiveScene();
+            if (!string.Equals(active.path, skateScenePath, StringComparison.Ordinal))
+            {
+                if (active.isDirty)
+                {
+                    EditorSceneManager.SaveScene(active);
+                }
+                EditorSceneManager.OpenScene(skateScenePath, OpenSceneMode.Single);
+            }
+
+            GameObject old = GameObject.Find("_SkateBackdrop");
+            if (old != null)
+            {
+                UnityEngine.Object.DestroyImmediate(old);
+            }
+
+            ArenaStyleSO style = AssetDatabase.LoadAssetAtPath<ArenaStyleSO>(skateStylePath);
+            Material Load(string file) => AssetDatabase.LoadAssetAtPath<Material>($"{matFolder}/{file}");
+            var mats = new ArenaMaterialSet
+            {
+                water = Load("Mat_SP_Water.mat"),
+                propMatte = Load("Mat_Prop_Matte.mat"),
+                propMetal = Load("Mat_Prop_Metal.mat"),
+                concrete = Load("Mat_SP_Concrete.mat"),
+                steel = Load("Mat_SP_Steel.mat"),
+                glass = Load("Mat_SP_Glass.mat"),
+            };
+
+            GameObject root = Build(null, style, mats, "skate_backdrop");
+            if (root == null)
+            {
+                Debug.LogWarning("[SkateparkBackdrop] buildBackdrop=false 或构建失败，远景未生成。");
+                return;
+            }
+
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorSceneManager.SaveScene(scene);
+            Debug.Log($"[SkateparkBackdrop] 霓虹滑板场远景已重建并保存：{scene.path}");
         }
         #endregion
 
@@ -437,11 +493,12 @@ namespace P1.Editor
         }
         #endregion
 
-        #region 模块 3：巨型亮黄色岸桥（纯白面板 + 双暗横条，无镜像反字）
+        #region 模块 3：集装箱岸桥（钢青门架 + 纯白机房 + 港青色带，无镜像反字）
         /// <summary>
-        /// 4 座高 22-28m 亮黄色集装箱门式起重机（岸桥）：
-        /// 位于 z=47..66m，顶部机房改为现代极简“纯白面板 + 2 道深色横条纹”，
-        /// 彻底消除字母镜像瑕疵；支脚台车保留醒目黄黑斜纹防撞条，部分小车悬空吊运集装箱。
+        /// 4 座高 22-28m 集装箱门式起重机（岸桥）：
+        /// 位于 z=47..66m，「钢青自动化码头」配色 —— 深钢青门架/主梁/塔架，白机房 + 双暗横条，
+        /// 主梁上缘一道港青品牌色带；黄黑警示只保留在支脚台车（小面积工业点缀），
+        /// 部分小车悬空吊运集装箱。
         /// </summary>
         private static void BuildGantryCranes(MeshCombiner metalComb, MeshCombiner matteComb, MeshCombiner glassComb, BackdropPalette pal)
         {
@@ -460,6 +517,12 @@ namespace P1.Editor
                 var cfg = craneConfigs[k];
                 Vector3 origin = cfg.pos;
                 Quaternion rot = Quaternion.Euler(0f, cfg.yaw, 0f);
+
+                // 相邻岸桥在主色与亮面板色之间交替，避免一排同色读成复制粘贴；
+                // 最远一座（k=3）再向雾色压暗半档，强化纵深。
+                Color structure = (k % 2 == 0) ? pal.CraneSteelMain : Color.Lerp(pal.CraneSteelMain, pal.Steel, 0.30f);
+                Color panel = (k % 2 == 0) ? pal.CraneSteelPanel : Color.Lerp(pal.CraneSteelPanel, pal.Steel, 0.30f);
+                if (k == 3) structure = Color.Lerp(structure, pal.HorizonCity, 0.18f);
 
                 float spanX = 8.6f;
                 float spanZ = 9.2f;
@@ -480,43 +543,48 @@ namespace P1.Editor
                     metalComb.AddHazardBogie(origin + rot * footOffsets[f], bogieSz, pal.HazardYellow, pal.HazardDark, rot);
                 }
 
-                // 2. 门架倾斜立柱
+                // 2. 门架倾斜立柱（0.78m 截面，比旧 0.95m 纤细，避免远景读成粗黄砖柱）
                 float legLen = portalH - 1.1f;
-                Vector3 legSz = new Vector3(0.95f, legLen, 0.95f);
+                Vector3 legSz = new Vector3(0.78f, legLen, 0.78f);
                 for (int f = 0; f < footOffsets.Length; f++)
                 {
                     Vector3 legCenter = footOffsets[f] + new Vector3(0f, legLen * 0.5f + 0.55f, 0f);
-                    metalComb.AddBox(origin + rot * legCenter, legSz, pal.HazardYellow, rot);
+                    metalComb.AddBox(origin + rot * legCenter, legSz, structure, rot);
                 }
 
                 // 3. 门梁与 X 型剪刀撑
-                metalComb.AddBox(origin + rot * new Vector3(0f, portalH, -spanZ * 0.5f), new Vector3(spanX + 1.2f, 1.2f, 1.1f), pal.HazardYellow, rot);
-                metalComb.AddBox(origin + rot * new Vector3(0f, portalH, spanZ * 0.5f),  new Vector3(spanX + 1.2f, 1.2f, 1.1f), pal.HazardYellow, rot);
-                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, portalH, 0f), new Vector3(1.1f, 1.2f, spanZ), pal.HazardYellow, rot);
-                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f,  portalH, 0f), new Vector3(1.1f, 1.2f, spanZ), pal.HazardYellow, rot);
+                metalComb.AddBox(origin + rot * new Vector3(0f, portalH, -spanZ * 0.5f), new Vector3(spanX + 1.2f, 1.1f, 1.0f), structure, rot);
+                metalComb.AddBox(origin + rot * new Vector3(0f, portalH, spanZ * 0.5f),  new Vector3(spanX + 1.2f, 1.1f, 1.0f), structure, rot);
+                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, portalH, 0f), new Vector3(1.0f, 1.1f, spanZ), structure, rot);
+                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f,  portalH, 0f), new Vector3(1.0f, 1.1f, spanZ), structure, rot);
 
-                Vector3 braceSz = new Vector3(0.38f, 0.38f, spanZ * 1.28f);
-                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, portalH * 0.5f + 0.5f, 0f), braceSz, pal.HazardYellow, rot * Quaternion.Euler(38f, 0f, 0f));
-                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, portalH * 0.5f + 0.5f, 0f), braceSz, pal.HazardYellow, rot * Quaternion.Euler(-38f, 0f, 0f));
-                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f,  portalH * 0.5f + 0.5f, 0f), braceSz, pal.HazardYellow, rot * Quaternion.Euler(38f, 0f, 0f));
-                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f,  portalH * 0.5f + 0.5f, 0f), braceSz, pal.HazardYellow, rot * Quaternion.Euler(-38f, 0f, 0f));
+                Vector3 braceSz = new Vector3(0.34f, 0.34f, spanZ * 1.28f);
+                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, portalH * 0.5f + 0.5f, 0f), braceSz, structure, rot * Quaternion.Euler(38f, 0f, 0f));
+                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.5f, portalH * 0.5f + 0.5f, 0f), braceSz, structure, rot * Quaternion.Euler(-38f, 0f, 0f));
+                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f,  portalH * 0.5f + 0.5f, 0f), braceSz, structure, rot * Quaternion.Euler(38f, 0f, 0f));
+                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.5f,  portalH * 0.5f + 0.5f, 0f), braceSz, structure, rot * Quaternion.Euler(-38f, 0f, 0f));
 
                 // 4. 门架上部 A 字塔架 (延伸至 apexH 25-28m)
                 float aFrameH = apexH - portalH;
-                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.30f, portalH + aFrameH * 0.5f, 0f), new Vector3(0.75f, aFrameH, 0.75f), pal.HazardYellow, rot * Quaternion.Euler(0f, 0f, 6.5f));
-                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.30f,  portalH + aFrameH * 0.5f, 0f), new Vector3(0.75f, aFrameH, 0.75f), pal.HazardYellow, rot * Quaternion.Euler(0f, 0f, -6.5f));
-                metalComb.AddBox(origin + rot * new Vector3(0f, apexH, 0f), new Vector3(spanX * 0.70f, 1.0f, 1.4f), pal.HazardYellow, rot);
+                metalComb.AddBox(origin + rot * new Vector3(-spanX * 0.30f, portalH + aFrameH * 0.5f, 0f), new Vector3(0.70f, aFrameH, 0.70f), structure, rot * Quaternion.Euler(0f, 0f, 6.5f));
+                metalComb.AddBox(origin + rot * new Vector3(spanX * 0.30f,  portalH + aFrameH * 0.5f, 0f), new Vector3(0.70f, aFrameH, 0.70f), structure, rot * Quaternion.Euler(0f, 0f, -6.5f));
+                metalComb.AddBox(origin + rot * new Vector3(0f, apexH, 0f), new Vector3(spanX * 0.70f, 0.9f, 1.3f), structure, rot);
 
-                // 5. 主悬臂箱梁 (伸展 34m)
+                // 5. 主悬臂箱梁 (伸展 34m，2.2x1.7 截面比旧 2.5x2.1 轻盈)
                 float boomLength = 34.0f;
                 float boomZOffset = 2.0f;
                 float boomY = portalH + 2.0f;
                 Vector3 boomCenter = origin + rot * new Vector3(0f, boomY, boomZOffset);
-                metalComb.AddBox(boomCenter, new Vector3(2.5f, 2.1f, boomLength), pal.HazardYellow, rot);
+                metalComb.AddBox(boomCenter, new Vector3(2.2f, 1.7f, boomLength), panel, rot);
+
+                // 港青品牌色带：沿主梁两侧上缘各一道，呼应场内港青集装箱与「霓虹海滨」主题
+                Vector3 boomStripeSz = new Vector3(0.08f, 0.34f, boomLength - 3.0f);
+                metalComb.AddBox(origin + rot * new Vector3(1.14f, boomY + 0.45f, boomZOffset), boomStripeSz, pal.CraneAccent, rot);
+                metalComb.AddBox(origin + rot * new Vector3(-1.14f, boomY + 0.45f, boomZOffset), boomStripeSz, pal.CraneAccent, rot);
 
                 // 走台护栏
-                metalComb.AddBox(origin + rot * new Vector3(-1.2f, boomY + 1.35f, boomZOffset), new Vector3(0.12f, 0.75f, boomLength), pal.SteelDark, rot);
-                metalComb.AddBox(origin + rot * new Vector3(1.2f,  boomY + 1.35f, boomZOffset), new Vector3(0.12f, 0.75f, boomLength), pal.SteelDark, rot);
+                metalComb.AddBox(origin + rot * new Vector3(-1.05f, boomY + 1.30f, boomZOffset), new Vector3(0.12f, 0.75f, boomLength), pal.SteelDark, rot);
+                metalComb.AddBox(origin + rot * new Vector3(1.05f,  boomY + 1.30f, boomZOffset), new Vector3(0.12f, 0.75f, boomLength), pal.SteelDark, rot);
 
                 // 塔顶前后斜拉索
                 Vector3 towerApex = origin + rot * new Vector3(0f, apexH, 0f);
@@ -1100,7 +1168,9 @@ namespace P1.Editor
             {
                 Vector3 fp = farCranePos[fc];
                 float cH = 28.0f;
-                Color silhouetteCol = Color.Lerp(pal.HazardYellow, pal.HorizonCity, 0.70f);
+                // 极远岸桥剪影：与新岸桥同族的钢青色，压入雾色 —— 旧版带黄，
+                // 会在真岸桥正后方读成「重影黄塔」。
+                Color silhouetteCol = Color.Lerp(pal.CraneSteelMain, pal.HorizonCity, 0.78f);
 
                 metalComb.AddBox(fp + new Vector3(-3.5f, cH * 0.5f, 0f), new Vector3(0.7f, cH, 0.7f), silhouetteCol);
                 metalComb.AddBox(fp + new Vector3(3.5f,  cH * 0.5f, 0f), new Vector3(0.7f, cH, 0.7f), silhouetteCol);
@@ -1202,6 +1272,11 @@ namespace P1.Editor
             public readonly Color WindowGlass;
             public readonly Color WindowLit;
 
+            // 「钢青自动化岸桥」配色（远景重设计）：不再与场内黄色英雄塔吊抢戏
+            public readonly Color CraneSteelMain;
+            public readonly Color CraneSteelPanel;
+            public readonly Color CraneAccent;
+
             public BackdropPalette(ArenaStyleSO s, ArenaMaterialSet mats)
             {
                 ConcreteLight = s != null ? s.concreteLight : new Color(0.80f, 0.78f, 0.72f, 1f);
@@ -1234,11 +1309,17 @@ namespace P1.Editor
                 CreamWhite      = new Color(0.85f, 0.84f, 0.80f, 1f); // 建筑米白
 
                 IndustrialPipeGreen = new Color(0.24f, 0.46f, 0.40f, 1f);
-                HorizonCity    = Color.Lerp(SteelDark, ConcreteMid, 0.35f);
+                HorizonCity    = Color.Lerp(Color.Lerp(SteelDark, ConcreteMid, 0.35f), OfficeLightGray, 0.30f);
                 // 极远地貌加深雾化与去饱和
                 HorizonHill    = Color.Lerp(Color.Lerp(Foliage, SteelDark, 0.65f), ConcreteMid, 0.25f);
                 WindowGlass    = new Color(0.18f, 0.25f, 0.32f, 1f);
                 WindowLit      = new Color(1.00f, 0.88f, 0.54f, 1f);
+
+                // 岸桥钢青三色：主结构 = SteelDark→港蓝容器中线，面板亮一档，色带 = 港青集装箱色。
+                // 全部由画风 SO 派生，跟随 ArenaStyle_NeonSkatepark 调色自动变化。
+                CraneSteelMain  = Color.Lerp(SteelDark, ContainerSlate, 0.50f);
+                CraneSteelPanel = Color.Lerp(Steel, ContainerSlate, 0.40f);
+                CraneAccent     = ContainerTeal;
             }
         }
         #endregion

@@ -19,7 +19,7 @@ namespace P1.UI
     /// 5. 选中项展示 3px 纯黄描边 + 四角方块几何标记与实时读数角标；
     /// 6. 面板采用直角黑底白字纯色大色块（无阴影无网点）；t-1 控件下限：
     ///    设置类按钮高 ≥64、字号 ≥20，顶栏/属性舱/辅助卡统一 960 宽居中（高 88/88/152），
-    ///    滑轨 110x44；顶栏不再横贯全屏，给顶部两角的按键留出拖拽空间；
+    ///    滑轨 110x64 热区（可见部分 26 高细胶囊轨道 + 26 正圆把手）；顶栏不再横贯全屏，给顶部两角的按键留出拖拽空间；
     ///    所有按钮走 UIJellyButton/UISpringMotion 的 0ms scale 0.97 + 0.1s Cubic-Out 回弹；
     /// 7. 额外提供 2/3/4 指方案、左开火键、开火转视角、固定摇杆与辅助瞄准档位，手动编辑会把方案标记为自定义。
     /// </summary>
@@ -33,7 +33,8 @@ namespace P1.UI
         private const float PanelWidth = 960f;
         private const float InspectorHeight = 88f;
         private const float SliderTrackWidth = 110f;
-        private const float SliderTrackHeight = 44f;
+        private const float SliderHitHeight = 64f;   // 拖动热区高度（可见轨道只有 26 高）
+        private const float SliderHandleSize = 26f;  // 正圆把手直径，与轨道同高
 
         /// <summary>辅助卡：两行 64 高按钮 + 内边距。规范给的 112 高塞不下两行 64，故取 152。</summary>
         private const float AuxCardHeight = 152f;
@@ -289,7 +290,7 @@ namespace P1.UI
             // 竖分割线
             CreateSeparator(_inspectorCard.transform, new Vector2(372f, 0f), new Vector2(2f, 40f));
 
-            // 大小调节 Slider 组（滑轨收窄到 110x44，把手 20x44）
+            // 大小调节 Slider 组（细胶囊轨道 + 圆钮：与设置页音量条同一视觉）
             var scaleLabel = CreateTextMesh("ScaleLabel", _inspectorCard, "大小", controlFont, ComicStyle.Paper,
                 theme.ResolveFont(false, "大小"), TextAlignmentOptions.Left);
             var scaleLabelRt = scaleLabel.rectTransform;
@@ -306,10 +307,10 @@ namespace P1.UI
             scaleRt.anchorMax = new Vector2(0f, 0.5f);
             scaleRt.pivot = new Vector2(0f, 0.5f);
             scaleRt.anchoredPosition = new Vector2(454f, 0f);
-            scaleRt.sizeDelta = new Vector2(SliderTrackWidth, SliderTrackHeight);
+            scaleRt.sizeDelta = new Vector2(SliderTrackWidth, SliderHitHeight);
 
             _scaleSlider = TouchSlider.Create(scaleSliderGo, MobileLayoutConfig.MinScale, MobileLayoutConfig.MaxScale, 1.0f,
-                new Vector2(20f, SliderTrackHeight));
+                new Vector2(SliderHandleSize, SliderHandleSize));
             _scaleSlider.OnValueChanged += OnScaleSliderChanged;
 
             _scaleValueText = CreateTextMesh("ScaleValue", _inspectorCard, "100%", readoutFont, ComicStyle.Yellow,
@@ -341,10 +342,10 @@ namespace P1.UI
             alphaRt.anchorMax = new Vector2(0f, 0.5f);
             alphaRt.pivot = new Vector2(0f, 0.5f);
             alphaRt.anchoredPosition = new Vector2(730f, 0f);
-            alphaRt.sizeDelta = new Vector2(SliderTrackWidth, SliderTrackHeight);
+            alphaRt.sizeDelta = new Vector2(SliderTrackWidth, SliderHitHeight);
 
             _alphaSlider = TouchSlider.Create(alphaSliderGo, MobileLayoutConfig.MinAlpha, MobileLayoutConfig.MaxAlpha, 1.0f,
-                new Vector2(20f, SliderTrackHeight));
+                new Vector2(SliderHandleSize, SliderHandleSize));
             _alphaSlider.OnValueChanged += OnAlphaSliderChanged;
 
             _alphaValueText = CreateTextMesh("AlphaValue", _inspectorCard, "90%", readoutFont, ComicStyle.Yellow,
@@ -1425,26 +1426,34 @@ namespace P1.UI
         }
     }
 
-    /// <summary>几何大胆风轻量触控滑动条组件（纯色方块轨道 + 方形把手）。</summary>
+    /// <summary>
+    /// 几何大胆风轻量触控滑动条组件：
+    /// 可见部分是「细胶囊轨道 + 黄色胶囊进度 + 正圆纸白把手」——与设置页音量条同一套语言；
+    /// 外层 RectTransform 仍是整块拖动热区（调用方给 ≥64 高），透明底只吃射线、不参与视觉。
+    /// </summary>
     public class TouchSlider : MonoBehaviour, IPointerDownHandler, IDragHandler
     {
         public event Action<float> OnValueChanged;
 
+        private const float TrackHeight = 26f; // 可见轨道厚度：细横条
+        private const float TrackInset = 3f;   // 填充四周内缩，给轨道墨框留边
+
         private float _min;
         private float _max;
         private float _current;
+        private float _handleRadius = 13f;
         private RectTransform _rectTransform;
         private RectTransform _handle;
-        private Image _fillImage;
+        private RectTransform _fillRect;
 
         public static TouchSlider Create(GameObject go, float min, float max, float current)
         {
-            return Create(go, min, max, current, new Vector2(16f, 28f));
+            return Create(go, min, max, current, new Vector2(TrackHeight, TrackHeight));
         }
 
         /// <summary>
-        /// 带把手尺寸的重载：设置类界面传 24x64 的把手，配合 64 高滑轨满足触控下限（≥64）。
-        /// 旧签名保留，默认仍是小把手（HUD/旧调用零行为变化）。
+        /// 带把手尺寸的重载：把手一律画成正圆，直径取 handleSize 的较小边（旧签名保留）。
+        /// 旧调用传 16x28 只会得到更小的圆钮，不再渲染成竖长条方块。
         /// </summary>
         public static TouchSlider Create(GameObject go, float min, float max, float current, Vector2 handleSize)
         {
@@ -1455,36 +1464,77 @@ namespace P1.UI
 
             slider._rectTransform = go.GetComponent<RectTransform>();
 
-            // 滑轨底色（圆角化：胶囊黑底）
-            var bgImg = go.AddComponent<UIPillImage>();
-            bgImg.color = ComicStyle.FromHex(0x181818);
-            bgImg.raycastTarget = true;
+            // 0. 拖动热区：透明 Image 吃整块射线（可见轨道只有 26 高，热区保持调用方给的 64 高）
+            var hitArea = go.AddComponent<Image>();
+            hitArea.color = Color.clear;
+            hitArea.raycastTarget = true;
 
-            // 亮黄胶囊填充条（宽度随值变化，UIPillImage 自动跟随轮廓）
-            var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(UIPillImage));
-            fillGo.transform.SetParent(go.transform, false);
+            // 1. 细胶囊轨道：纸白次级底 + 3px 墨框（与设置页音量条一致）
+            var trackGo = new GameObject("Track", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            trackGo.transform.SetParent(go.transform, false);
+            var trackRt = trackGo.GetComponent<RectTransform>();
+            trackRt.anchorMin = new Vector2(0f, 0.5f);
+            trackRt.anchorMax = new Vector2(1f, 0.5f);
+            trackRt.pivot = new Vector2(0.5f, 0.5f);
+            trackRt.sizeDelta = new Vector2(0f, TrackHeight);
+            trackRt.anchoredPosition = Vector2.zero;
+
+            var trackShape = trackGo.GetComponent<UIInkShapeGraphic>();
+            trackShape.Shape = UIInkShape.Pill;
+            trackShape.BorderWidth = ComicStyle.BorderThin;
+            trackShape.BorderColor = ComicStyle.Ink;
+            trackShape.color = ComicStyle.PaperAlt;
+            trackShape.HardShadow = false;
+            trackShape.Halftone = false;
+            trackShape.raycastTarget = false;
+
+            // 2. 黄色胶囊填充条：四周内缩 3px，宽度随值变化
+            var fillAreaGo = new GameObject("Fill Area", typeof(RectTransform));
+            fillAreaGo.transform.SetParent(go.transform, false);
+            var fillAreaRt = fillAreaGo.GetComponent<RectTransform>();
+            fillAreaRt.anchorMin = new Vector2(0f, 0.5f);
+            fillAreaRt.anchorMax = new Vector2(1f, 0.5f);
+            fillAreaRt.sizeDelta = new Vector2(-TrackInset * 2f, TrackHeight - TrackInset * 2f);
+            fillAreaRt.anchoredPosition = Vector2.zero;
+
+            var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
+            fillGo.transform.SetParent(fillAreaGo.transform, false);
             var fillRt = fillGo.GetComponent<RectTransform>();
-            fillRt.anchorMin = new Vector2(0f, 0f);
-            fillRt.anchorMax = new Vector2(0f, 1f);
+            fillRt.anchorMin = Vector2.zero;
+            fillRt.anchorMax = Vector2.one;
             fillRt.offsetMin = Vector2.zero;
             fillRt.offsetMax = Vector2.zero;
 
-            slider._fillImage = fillGo.GetComponent<Image>();
-            slider._fillImage.color = ComicStyle.Yellow;
-            slider._fillImage.raycastTarget = false;
+            var fillShape = fillGo.GetComponent<UIInkShapeGraphic>();
+            fillShape.Shape = UIInkShape.Pill;
+            fillShape.BorderWidth = 0f;
+            fillShape.color = ComicStyle.Yellow;
+            fillShape.HardShadow = false;
+            fillShape.Halftone = false;
+            fillShape.raycastTarget = false;
+            slider._fillRect = fillRt;
 
-            // 胶囊把手（默认 16x28；设置类界面传 24x64，圆角化后两端全圆）
-            var handleGo = new GameObject("Handle", typeof(RectTransform), typeof(UIPillImage));
+            // 3. 正圆把手：直径 = handleSize 短边，纸白 + 3px 墨边；left-center 锚点，中心随值移动
+            float diameter = Mathf.Max(8f, Mathf.Min(handleSize.x, handleSize.y));
+            var handleGo = new GameObject("Handle", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
             handleGo.transform.SetParent(go.transform, false);
             var handleRt = handleGo.GetComponent<RectTransform>();
-            handleRt.sizeDelta = handleSize;
+            handleRt.sizeDelta = new Vector2(diameter, diameter);
             handleRt.anchorMin = new Vector2(0f, 0.5f);
             handleRt.anchorMax = new Vector2(0f, 0.5f);
+            handleRt.pivot = new Vector2(0.5f, 0.5f);
 
-            var handleImg = handleGo.GetComponent<Image>();
-            handleImg.color = ComicStyle.Paper;
-            handleImg.raycastTarget = false;
+            var handleShape = handleGo.GetComponent<UIInkShapeGraphic>();
+            handleShape.Shape = UIInkShape.Pill;
+            handleShape.CornerRadius = ComicStyle.CornerBubble; // 等宽等高 = 正圆
+            handleShape.BorderWidth = ComicStyle.BorderThin;
+            handleShape.BorderColor = ComicStyle.Ink;
+            handleShape.color = ComicStyle.Paper;
+            handleShape.Halftone = false;
+            handleShape.raycastTarget = false;
+
             slider._handle = handleRt;
+            slider._handleRadius = diameter * 0.5f;
 
             slider.UpdateVisual();
             return slider;
@@ -1528,17 +1578,18 @@ namespace P1.UI
         private void UpdateVisual()
         {
             float norm = Mathf.Clamp01((_current - _min) / (_max - _min));
-            float width = _rectTransform != null ? _rectTransform.rect.width : 160f;
+            float width = _rectTransform != null ? _rectTransform.rect.width : 110f;
 
-            if (_fillImage != null)
+            if (_fillRect != null)
             {
-                var rt = _fillImage.rectTransform;
-                rt.anchorMax = new Vector2(norm, 1f);
+                _fillRect.anchorMax = new Vector2(norm, 1f);
             }
 
             if (_handle != null)
             {
-                _handle.anchoredPosition = new Vector2(norm * width, 0f);
+                // 圆形把手圆心在 [半径, 宽-半径] 之间移动，两端都不会越出轨道
+                float travel = Mathf.Max(0f, width - _handleRadius * 2f);
+                _handle.anchoredPosition = new Vector2(_handleRadius + travel * norm, 0f);
             }
         }
     }

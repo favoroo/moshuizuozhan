@@ -74,6 +74,7 @@ MonoBehaviour:
   dualiesRollInkCost: 8
   dualiesRollDuration: 0.3
   dualiesRollDistance: 2.8
+  dualiesRollBurstSpeedMultiplier: 1.5
   dualiesMaxRolls: 2
   dualiesTurretDuration: 0.5
   dualiesTurretFireInterval: 0.0664
@@ -138,13 +139,13 @@ MonoBehaviour:
   stormRadius: 3.4
   stormDps: 34
   stormDriftSpeed: 1.1
-  stormCloudHeight: 4
+  stormCloudHeight: 4.5
   stormThrowDistance: 9
   stormThrowFlightDuration: 0.45
   stormThrowArcHeight: 3.2
-  stormRainInterval: 0.06
-  stormRainSplatRadiusMin: 0.42
-  stormRainSplatRadiusMax: 0.72
+  stormRainInterval: 0.045
+  stormRainSplatRadiusMin: 0.45
+  stormRainSplatRadiusMax: 0.8
   stormDamageTickInterval: 0.5
   stormGrowTime: 0.5
   stormFadeTime: 0.6

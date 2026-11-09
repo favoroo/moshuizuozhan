@@ -47,8 +47,8 @@ MonoBehaviour:
   shadowStrength: 0.94
   shadeThreshold: 0.5
   shadeSoftness: 0.1
-  shadowTint: {r: 0.48, g: 0.5, b: 0.64, a: 1}
-  shadowFloor: 0.5
+  shadowTint: {r: 0.44, g: 0.48, b: 0.62, a: 1}
+  shadowFloor: 0.4
   rimColor: {r: 0.75, g: 0.86, b: 1, a: 1}
   rimStrength: 0.18
   rimPower: 3
@@ -57,8 +57,8 @@ MonoBehaviour:
   specSoftness: 0.04
   inkShadeThreshold: 0.48
   inkShadeSoftness: 0.1
-  inkShadowFloor: 0.62
-  characterShadowFloor: 0.55
+  inkShadowFloor: 0.5
+  characterShadowFloor: 0.46
   fogEnabled: 1
   fogColor: {r: 0.62, g: 0.74, b: 0.86, a: 1}
   fogStartDistance: 65
@@ -76,9 +76,10 @@ MonoBehaviour:
   bloomIntensity: 0.45
   bloomThreshold: 1.05
   colorSaturation: 14
-  colorContrast: 16
+  colorContrast: 18
+  colorVibrance: 0.3
   vignetteIntensity: 0.18
-  postExposure: 0.12
+  postExposure: -0.1
   ssaoIntensity: 0.9
   sceneOutlineEnabled: 1
   outlineColor: {r: 0.14, g: 0.12, b: 0.18, a: 1}

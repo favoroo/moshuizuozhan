@@ -216,7 +216,7 @@ namespace P1.Editor
             }
 
             WriteStylePresetV2(style);
-            ApplyEnvironmentMaterials(style, groundShadowFloor: 0.55f, inkGlow: 0.10f);
+            ApplyEnvironmentMaterials(style, groundShadowFloor: 0.55f, inkGlow: 0.04f);
             ApplyInkwaveAssets(style);
             ApplyCharacterMaterials(style);
             ApplyPostProcessStyle(style);
@@ -299,7 +299,7 @@ namespace P1.Editor
 
             WriteStylePresetSoftCartoon(style);
             WriteScenePolishDeltas(style);
-            ApplyEnvironmentMaterials(style, groundShadowFloor: 0.55f, inkGlow: 0.10f);
+            ApplyEnvironmentMaterials(style, groundShadowFloor: 0.55f, inkGlow: 0.04f);
             ApplyInkwaveAssets(style);
             ApplyCharacterMaterials(style);
             ApplyAlbedoDetailMaps(style);
@@ -650,8 +650,12 @@ namespace P1.Editor
             style.bloomThreshold = 1.05f;
             style.colorSaturation = 14f;
             style.colorContrast = 16f;
+            // INKWAVE 式 vibrance：中性表面提彩、队色墨保护（详见 ArenaAtmosphereBuilder.ApplyPostProcess）
+            style.colorVibrance = 0.30f;
             style.vignetteIntensity = 0.12f;
-            style.postExposure = 0.12f;
+            // +0.12 EV 会把本来就接近 1 的浅灰地面/队色墨再往上推，清漆高光撞白后明暗层次被洗平；
+            // 改到 -0.05 EV 留出 headroom（2026-11-09 质感调优）。
+            style.postExposure = -0.05f;
             style.ssaoIntensity = 1.15f;
 
             style.sceneOutlineEnabled = true;
@@ -925,6 +929,16 @@ namespace P1.Editor
                     if (radius != null)
                     {
                         radius.floatValue = 0.55f;
+                        modified = true;
+                    }
+
+                    // 本项目所有场景材质都是自定义 Toon shader，没有人采样 _ScreenSpaceOcclusionTexture；
+                    // AfterOpaque=0（默认）时 SSAO 只作用于 URP Lit，等于白渲染。改成 AfterOpaque
+                    // 让 AO 作为全屏乘算落到最终颜色，地面/掩体/墨面才真正吃到接触遮蔽。
+                    SerializedProperty afterOpaque = so.FindProperty("m_Settings.AfterOpaque");
+                    if (afterOpaque != null)
+                    {
+                        afterOpaque.boolValue = true;
                         modified = true;
                     }
 

@@ -6,6 +6,23 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-09 #08
+【移动端地面细节 + 全距离落地感】移动端原先被 `P1_INK_HIGH` 整档关掉，`ArenaGround_N/RMO`（板缝凹槽、气泡坑、油污 AO、粗糙度）三张材质里明明挂着却从不采样——拆出 `P1_INK_GROUNDMAPS` 与 `P1_INK_HIGH` 同组互斥（`#pragma multi_compile _ P1_INK_HIGH P1_INK_GROUNDMAPS`），`RenderEnvGlobals.EnsureTier` 在移动端只开这一档；亚纹素墨缘、碎墨、B 样条仍只留给桌面。
+新增「掩体落地接触遮蔽」：`InkSurfaceController.RebuildGroundContactMask` 在 `SealNarrowSlits` **之前**取不可涂格（否则死缝会在地面留下莫名暗线），两遍可分离盒式模糊（半径 `groundContactAORadiusMeters`）烘成 R8 遮蔽场，InkGround 按**计分场地矩形**乘到地面基底色——不能用 `inkUV`（图集比计分场四周多 1.5m 边距，会整体外扩失准）；纹理四周留 1 texel 白边，否则场外 74×84m 码头基座会被 Clamp 拉出一条暗带。
+补的是实时阴影（shadowDistance 48m 外）与 SSAO（屏幕空间 0.6m）都覆盖不到的远景箱底/墙脚；冻结 `timeScale` A/B 实测遮蔽场开/关 3.93% 像素变化、平均压暗 6.7 灰阶，`P1_INK_GROUNDMAPS` 对无贴图档 56.4% 像素变化。文件：`Shaders/InkGround.shader`、`Scripts/Ink/{InkSurfaceController,InkGridConfigSO}.cs`、`Scripts/Core/RenderEnvGlobals.cs`。
+
+## 2026-11-09 #07
+【移动端画质同步】把 #05 的质感调优补齐到 Android（其余项都落在共用资产上，只有 SSAO 缺）：`Mobile_Renderer` 原本完全没挂 SSAO，新增 feature 用 `Source=Depth` + `Downsample=1` + 4 采样 + 高斯模糊——刻意不用 PC 的 DepthNormals 源：那要每帧多跑一遍几何 prepass，移动端 DrawCalls 预算 150 下比 AO 本身更贵，Depth 源只多一次深度拷贝（法线由片元从深度重建）。`Mobile_RPAsset` 调色模式 LDR→HDR，否则同一份 Neutral tonemap + -0.10 EV 在移动端先裁高光再调色，两端对比不一致。
+Fixed: 两个 RPAsset 的 SSAO *变体剔除* 标记与实际档位对不上（PC 用 `Samples=Low` 却把 `_SAMPLE_COUNT_LOW` 剔了）——这些是 `multi_compile_local`，编辑器永远编满，**只有出包才暴露**；`SSAO.hlsl` 的 `#else` 恰好等于 Low、`_SOURCE_DEPTH_NORMALS` 被剔只会静默退化成深度重建，两种症状都不报错。剔除标记改为按各端实际档位保留（`VisualPolishTools.ApplySsaoPrefilters`）。
+切 Mobile 画质冻结 `timeScale` 做 A/B 验证 AO 确实落地（AO 开/关像素有差、两帧都关则逐像素一致）。文件：`Scripts/Editor/VisualPolishTools.cs`、`Settings/{Mobile_Renderer,Mobile_RPAsset,PC_RPAsset}.asset`。
+
+## 2026-11-09 #06
+【更新说明去校验码】Release 正文不再出现 `**SHA-256**: …` 行——`release.py publish` 删掉自动追加逻辑（校验值只留在 `build/release-meta.json` 与终端汇报），玩家看不懂哈希。配套 `UpdateNotesMarkdown` 增加 `ChecksumRx` 整行丢弃，已发布的老 Release 在游戏内弹窗里也不再露出校验码（GitHub/Gitee 网页正文仍是历史原文）。文件：`.agents/skills/p1-release/{release.py,SKILL.md}`、`Scripts/UI/UpdateNotesMarkdown.cs`、`Tests/EditMode/UpdateSystemTests.cs`。
+
+## 2026-11-09 #05
+【画面质感调优】对标 INKWAVE 的「留 headroom + 找体积」：曝光 +0.12→-0.10 EV、ColorCurves 补 satVsSat vibrance（中性提彩/队色墨保护）、阴影下限地面 0.36 / 道具 0.40 / 角色 0.46（发平主因是 shadowFloor 把暗部抬到 0.46~0.55）；墨面加保色相软肩 `P1InkHeadroom`（max 通道越 0.9 整体回收，不让队色 R 先撞白）+ 墨缘背光侧压暗 + 单斑色调差 0.93~1.06→0.88~1.12，三图 `_InkGlow` 0.2/0.1→0.04、场景 `inkGlow` 0.2→0.06；图集开 mipmap（0.5→0.2s）消远景摩尔纹；新增菜单 `P1/画风/8. 应用质感调优档` 幂等落地（78 个共享 Toon 材质 + 三张地面材质）。
+Fixed: SSAO 一直是白渲染——所有场景走自定义 Toon shader，无人采样 `_ScreenSpaceOcclusionTexture`，`AfterOpaque=0` 时 SSAO 只作用于 URP Lit；PC_Renderer 改 `AfterOpaque=1`（0.85/0.6）并给 `CharacterToon(Outlined)` 补 DepthNormals pass（原先角色像素读到的是身后地面法线）。陷阱：`EditorUtility.SetDirty(组件)` 不会把场景标脏，改 `InkSurfaceController.inkGlow` 后必须 `MarkSceneDirty` 再保存，否则退出 Play 静默回到旧值。文件：`Scripts/Editor/{VisualPolishTools(新),ArenaAtmosphereBuilder,ToonStyleInstaller}.cs`、`Environment/ArenaStyleSO.cs`、`Ink/InkGridConfigSO.cs`、`Shaders/{InkWetShading.hlsl,InkGround,InkSurfaceOverlay.hlsl,CharacterToon*}`、`Materials/*.mat`、`tools/font_charset.txt`。
+
 ## 2026-11-09 #04
 【UI 手感整体优化】点击音收口到 `UIJellyButton.PlayClickFeedback`（根因：`UISoundBinder.AutoBindScene` 只在 `AfterSceneLoad` 跑一次，本项目 UI 几乎全是运行时装配，后建按钮永远挂不上 → 9 个界面里 7 个静音）；涂地飘字补 `Toggle` 音（仅 ≥10m² 且 0.26s 自节流）、倒计时 30s 红切与最后 10 秒滴答补音；准星墨边加粗到与白芯持平（`MakeRingSprite` 各环 outline=core、`BarOutline` 1.2→2.4），亮地面「白芯只占 33% 笔画、对比度 2.62:1」改为 50% 深色轮廓；菜单补 `PlayOut()` 退出转场（原先一律 `SetActive(false)` 硬切），`UpdateDialog` 补上「建了 motion 从未 `PlayIn()`」的入场。
 Fixed: 暂停面板的响应式缩放与 `UISpringMotion` 抢同一 `localScale`——矮屏（20:9 横屏）入场结束会把缩放覆盖回 1、面板底部按钮出屏；改为新增 `PausePanelScale` 父容器承载缩放（与 `UpdateDialog`/`PrivacyConsentDialog` 同方案），`PauseMenuPlayTests` 相应改为按名字递归查找、不写死层级。陷阱：Play 期间改 `.cs` 不会重编译（`Resume(bool)` 一度报「无此重载」、dll 比源码旧两小时），必须先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 dll 时间戳才验得了新代码。文件：`Scripts/UI/Core/UIJellyButton.cs`、`Scripts/UI/{WeaponReticleUI,TurfScoreView,CenterTimerView,UpdateDialog,PrivacyConsentDialog,MobileLayoutCustomizer,MatchFlowUI,MapSelectOverlay,HomeInfoOverlay}.cs`、`Scripts/UI/Menus/PauseMenuOverlay.cs`、`Tests/PlayMode/PauseMenuPlayTests.cs`。
@@ -18,6 +35,8 @@ Fixed: 移动端底部生命值条全黑——`MobileTouchUI.Awake` 抢在 `HudC
 
 ## 2026-11-09 #01
 Fixed: Android 发布包构建报 `CS0103: _debugPreviewUntil does not exist`——`SubmergedInkView` / `LowHealthVignetteView` 的字段在 `#if UNITY_EDITOR || DEVELOPMENT_BUILD` 内、`DebugPreview()` 方法却留在外面，编辑器（含测试）能编译、只有 Player 构建才炸；按 `KillFlashView` / `LensInkView` 的既有写法给方法补同一层编译守卫。陷阱：`run_tests.sh fast` 全绿不等于能出包，改完 `#if` 一定要跑一次 Release 构建。文件：`Scripts/UI/{SubmergedInkView,LowHealthVignetteView}.cs`。
+
+【发布 v0.1.31】含 2026-11-09 `#02`~`#08`；APK `moshuizuozhan-v0.1.31-arm64-v8a.apk`。
 
 ## 2026-11-08 #36
 Fixed: 喷墙不再留墨、子弹穿过箱体/地面——`InkProjectilePool.TryCheckImpact` 的「贴脸重叠补判」改造把球扫的世界命中 `found` 丢掉了（只返回 `OverlapCheckDue && TryResolveOverlappedCombatant`），非爆破弹丸因此只认角色命中，墙/地一律穿透，只剩沿途滴墨的 XZ 投影涂到箱顶与地面。恢复「`found` 即按世界命中结算」，重叠补判只作为球扫落空时的补充；`WallInkPlayboxTests` 7/7 通过（含此前判红的 `ProjectileHit_PaintsWallFace`）。文件：`Scripts/Weapons/InkProjectilePool.cs`。

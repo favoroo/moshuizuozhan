@@ -112,9 +112,15 @@ Material:
     - _DstBlendAlpha: 0
     - _EmissionStrength: 0
     - _EnvironmentReflections: 1
+    - _FlashAmount: 0
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
+    - _InkAmount: 0
+    - _InkCurvePower: 0.55
+    - _InkSeed: 0
+    - _InkThresholdMax: 0.77
+    - _InkThresholdMin: 0.505
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
@@ -126,7 +132,7 @@ Material:
     - _ScreenSpaceReflectionsContributeTransparent: 1
     - _ShadeSoftness: 0.06
     - _ShadeThreshold: 0.5
-    - _ShadowFloor: 0.55
+    - _ShadowFloor: 0.46
     - _Smoothness: 0.45
     - _SmoothnessTextureChannel: 0
     - _SpecSoftness: 0.04
@@ -142,8 +148,11 @@ Material:
     - _BaseColor: {r: 0.16, g: 0.42, b: 1, a: 1}
     - _Color: {r: 0.16, g: 0.42, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - _InkColor: {r: 0, g: 0, b: 0, a: 1}
+    - _InkPartOffset: {r: 0, g: 0, b: 0, a: 0}
+    - _InkPartScale: {r: 1, g: 1, b: 1, a: 0}
     - _RimColor: {r: 1, g: 1, b: 1, a: 1}
-    - _ShadowTint: {r: 0.19599415, g: 0.21404114, b: 0.3672465, a: 1}
+    - _ShadowTint: {r: 0.16264722, g: 0.19599415, b: 0.34239164, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

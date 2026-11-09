@@ -51,7 +51,7 @@ Material:
     m_Floats:
     - _ClearcoatStrength: 1.4
     - _CoffeeRingStrength: 0.45
-    - _ContactShadowStrength: 0.45
+    - _ContactShadowStrength: 0.6
     - _DitherAlpha: 1
     - _DryGloss: 0.52
     - _EdgeSoftness: 0.9
@@ -64,13 +64,13 @@ Material:
     - _GroundAOStrength: 0.6
     - _GroundNormalStrength: 0.35
     - _GroundTexStrength: 1
-    - _InkGlow: 0.2
+    - _InkGlow: 0.04
     - _InkGrainScale: 1.6
     - _InkGrainStrength: 0.35
     - _InkRoughVarStrength: 0.5
     - _InkShadeSoftness: 0.1
     - _InkShadeThreshold: 0.48
-    - _InkShadowFloor: 0.62
+    - _InkShadowFloor: 0.5
     - _InkTexelMeters: 0.01
     - _InkYFlip: 1
     - _LipHeight: 0.014
@@ -79,7 +79,7 @@ Material:
     - _SeamShadowStrength: 0.48
     - _ShadeSoftness: 0.1
     - _ShadeThreshold: 0.52
-    - _ShadowFloor: 0.55
+    - _ShadowFloor: 0.36
     - _ToneStrength: 1
     - _WetGloss: 0.88
     - _WetnessFactor: 1
@@ -91,7 +91,7 @@ Material:
     - _InkMapOriginXZ: {r: -20, g: -28, b: 40, a: 56}
     - _InkMapSize: {r: 40, g: 56, b: 0, a: 0}
     - _InkTexelSize: {r: 0.0002441406, g: 0.0002441406, b: 4096, a: 4096}
-    - _ShadowTint: {r: 0.14731899, g: 0.21404114, b: 0.3931232, a: 1}
+    - _ShadowTint: {r: 0.16264722, g: 0.19599415, b: 0.34239164, a: 1}
     - _TeamAColor: {r: 1, g: 0.43999997, b: 0.059999965, a: 1}
     - _TeamBColor: {r: 0.14999998, g: 0.41999996, b: 1, a: 1}
   m_BuildTextureStacks: []

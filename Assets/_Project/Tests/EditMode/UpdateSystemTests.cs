@@ -380,5 +380,24 @@ namespace P1.Tests
             Assert.AreEqual("暂无更新说明", UpdateNotesMarkdown.ToTmp(null, 22f));
             Assert.AreEqual("暂无更新说明", UpdateNotesMarkdown.ToTmp("   \n\n ", 22f));
         }
+
+        [Test]
+        public void ReleaseNotesMarkdown_DropsChecksumLine()
+        {
+            const string md = "### 调整\n- 优化移动端触控手感\n\n**SHA-256**: `9f2c0a1b`\n";
+
+            string tmp = UpdateNotesMarkdown.ToTmp(md, 22f);
+
+            StringAssert.Contains("优化移动端触控手感", tmp);
+            StringAssert.DoesNotContain("SHA-256", tmp);
+            StringAssert.DoesNotContain("9f2c0a1b", tmp);
+        }
+
+        [Test]
+        public void ReleaseNotesMarkdown_ChecksumOnlyFallsBackSafely()
+        {
+            // 整篇只剩校验码时必须回落到「暂无更新说明」，不能渲染出一个空的绿色面板
+            Assert.AreEqual("暂无更新说明", UpdateNotesMarkdown.ToTmp("**SHA-256**: `9f2c0a1b`", 22f));
+        }
     }
 }

@@ -29,14 +29,14 @@ Material:
     - _GlowStrength: 0.25
     - _PulseSpeed: 1.6
     - _ShadeSoftness: 0.1
-    - _ShadowFloor: 0.44
+    - _ShadowFloor: 0.4
     - _TeamTintBlend: 0.8
     m_Colors:
     - _BaseColor: {r: 0.21404114, g: 0.23302203, b: 0.26327342, a: 1}
     - _ChevronColor: {r: 0.91140765, g: 0.49190512, b: 0.010022826, a: 1}
     - _PlatformColor: {r: 0.23302203, g: 0.2428668, b: 0.2428668, a: 1}
     - _RingColor: {r: 0.827571, g: 0.86889946, b: 0.95510465, a: 1}
-    - _ShadowTint: {r: 0.09462964, g: 0.14731899, b: 0.34239164, a: 1}
+    - _ShadowTint: {r: 0.16264722, g: 0.19599415, b: 0.34239164, a: 1}
     - _TeamColor: {r: 1, g: 0.19599415, b: 0.0071944073, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

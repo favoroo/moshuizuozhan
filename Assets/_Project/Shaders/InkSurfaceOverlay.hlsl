@@ -465,8 +465,8 @@ bool P1EvaluateTopInk(
     float wet = saturate(wetSheen.x * _GlobalWetnessFactor);
     float sheen = saturate(wetSheen.y * _GlobalWetnessFactor);
 
-    // 单斑色调微差 + 厚度剖面
-    half3 inkColor = teamCol * (0.93 + 0.13 * tone);
+    // 单斑色调微差（±12%，与地面同一套「一团一团」语言）+ 厚度剖面
+    half3 inkColor = teamCol * (1.0 + (tone - 0.5) * 0.24);
     float s = saturate((amt - 0.5) * 1.7);
     float hs = 1.0 - (1.0 - s) * (1.0 - s);
     inkColor = lerp(inkColor, inkColor * 1.16 + teamCol * 0.05, (1.0 - hs) * 0.35);
@@ -480,8 +480,9 @@ bool P1EvaluateTopInk(
     float NdotL = saturate(dot(perturbedNormalWS, L));
     float NdotV = saturate(dot(perturbedNormalWS, V));
     half inkBand = P1ToonTriBand(NdotL, 0.48, 0.08);
-    half inkShadow = P1ToonShadowTerm(shadowAtten, 0.55, 0.08);
-    float diffuseLight = lerp(0.40, 1.0, inkBand * inkShadow);
+    // 阴影下限与地面同步（0.55 → 0.48，diffuse 下限 0.40 → 0.36），避免顶面墨比地面墨更平
+    half inkShadow = P1ToonShadowTerm(shadowAtten, 0.48, 0.08);
+    float diffuseLight = lerp(0.36, 1.0, inkBand * inkShadow);
 
     // 粗糙度与清漆镜面高光
     float rough = P1InkRoughness(wet, sheen, wetRough, dryRough);
@@ -516,6 +517,11 @@ bool P1EvaluateTopInk(
     half3 envTint = lerp(half3(1.0, 1.0, 1.0), saturate(teamCol * 2.2), 0.80);
     half3 finalClearcoat = (directTerm + envSpec * envTint) * (half)clearcoatStrength;
 
+    // 墨层厚度：背光侧边缘压暗（与地面同一套 away 语言，详见 InkGround.shader）
+    float edgeFade = 1.0 - smoothstep(0.52, 0.95, amt);
+    float awayFromSun = saturate((shadowBias - 0.25) * 0.9091);
+    inkColor *= 1.0 - 0.28 * edgeFade * awayFromSun;
+
     // 阴影中保饱和（与地面同一套 INK_SHADE 语言）：亮度守恒地提升色度
     inkColor = P1InkShadowChroma(inkColor, _P1InkShadowChroma * (1.0 - diffuseLight));
 
@@ -523,6 +529,9 @@ bool P1EvaluateTopInk(
     float effectiveGlow = (inkGlow > 0.0) ? inkGlow : _GlobalInkGlow;
     half3 litInkColor = inkColor * diffuseLight + finalClearcoat;
     litInkColor += inkColor * effectiveGlow * (0.75 + 0.35 * hs) * (1.0 - NdotL * 0.5);
+
+    // 与地面一致的亮度余量（保色相软肩）
+    litInkColor = P1InkHeadroom(litInkColor);
 
     outInkMask = inkMask;
     outLitInkColor = litInkColor;

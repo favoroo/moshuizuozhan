@@ -288,4 +288,20 @@ half3 P1InkShadowChroma(half3 color, float amount)
     return boosted * (lum / boostedLum);
 }
 
+// ----------------------------------------------------------------------------
+// 高光余量（对齐 INKWAVE "ink never clips"）：max 通道超过 knee 后，按比例把整条
+// RGB 收回来（保色相），而不是让 R 通道先撞 1、再由 tonemap 把明暗压成一片。
+// 0.90 以下恒等；软肩宽 0.35，1.35 处约收 15%，2.0 处约收 37%。
+// ----------------------------------------------------------------------------
+half3 P1InkHeadroom(half3 color)
+{
+    const half knee = 0.90h;
+    const half soft = 0.35h;
+    half m = max(color.r, max(color.g, color.b));
+    half over = max(0.0h, m - knee);
+    if (over <= 0.0h) return color;
+    half scale = (knee + soft * (1.0h - exp(-over / soft))) / max(m, 1e-4h);
+    return color * scale;
+}
+
 #endif // P1_INK_WET_SHADING_INCLUDED

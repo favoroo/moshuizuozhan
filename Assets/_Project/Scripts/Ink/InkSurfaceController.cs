@@ -57,6 +57,13 @@ namespace P1.Ink
         private Texture2D _inkTexture;
         private Texture2D _scoreMaskTexture;
         private byte[] _scoreMaskScratch;
+
+        // 掩体接触遮蔽场（从不可涂格烘的软遮蔽，PC/移动端共用；见 RebuildGroundContactMask）
+        private Texture2D _groundContactTexture;
+        private byte[] _groundContactScratch;
+        private byte[] _groundContactPixels;
+        private float[] _groundContactField;
+        private float[] _groundContactTemp;
         private InkSplatAtlas _atlas;
         private readonly List<Material> _inkSurfaceMaterials = new List<Material>(4);
         private float _nextMinimapFlushTime;
@@ -105,6 +112,11 @@ namespace P1.Ink
         private static readonly int GlobalWetnessFactorProp = Shader.PropertyToID("_GlobalWetnessFactor");
         private static readonly int GlobalInkGlowProp = Shader.PropertyToID("_GlobalInkGlow");
         private static readonly int GlobalInkPlayableRectProp = Shader.PropertyToID("_GlobalInkPlayableRect");
+        // 掩体接触遮蔽场（见 RebuildGroundContactMask）
+        private static readonly int GlobalInkGroundContactTexProp = Shader.PropertyToID("_GlobalInkGroundContactTex");
+        private static readonly int GlobalInkGroundContactTexelProp = Shader.PropertyToID("_GlobalInkGroundContactTexel");
+        private static readonly int GlobalInkGroundContactStrengthProp =
+            Shader.PropertyToID("_GlobalInkGroundContactStrength");
         // 计分掩码：不可涂格（道具/掩体占位、窄缝补偿）在顶面墨迹着色器里直接裁掉。
         private static readonly int GlobalInkScoreMaskTexProp = Shader.PropertyToID("_GlobalInkScoreMaskTex");
         private static readonly int GlobalInkScoreMaskEnabledProp = Shader.PropertyToID("_GlobalInkScoreMaskEnabled");
@@ -193,6 +205,14 @@ namespace P1.Ink
                 if (Application.isPlaying) Destroy(_scoreMaskTexture);
                 else DestroyImmediate(_scoreMaskTexture);
                 _scoreMaskTexture = null;
+            }
+
+            Shader.SetGlobalFloat(GlobalInkGroundContactStrengthProp, 0f);
+            if (_groundContactTexture != null)
+            {
+                if (Application.isPlaying) Destroy(_groundContactTexture);
+                else DestroyImmediate(_groundContactTexture);
+                _groundContactTexture = null;
             }
         }
 
@@ -357,6 +377,10 @@ namespace P1.Ink
                 _grid.SetBlockedWorldRect(new Vector2(rect.x, rect.y), new Vector2(rect.z, rect.w), true);
             }
 
+            // 接触遮蔽场必须在窄缝补偿**之前**烘：SealNarrowSlits 会把封闭死缝也标成不可涂，
+            // 那些细缝不是掩体落地处，烘进去会在地面上出现莫名的暗线。
+            RebuildGroundContactMask();
+
             // P16-D 窄缝自动剔除：封闭两面受夹且净宽 ≤ 0.9m 的不可行/不可涂死缝
             _grid.SealNarrowSlits(0.9f);
 
@@ -405,6 +429,142 @@ namespace P1.Ink
             _grid.CopyBlockedMaskTo(_scoreMaskScratch);
             _scoreMaskTexture.SetPixelData(_scoreMaskScratch, 0);
             _scoreMaskTexture.Apply(false, false);
+        }
+
+        /// <summary>
+        /// 烘一张「掩体落地接触遮蔽」场：不可涂格（道具/边界墙/地形禁区）先做两遍可分离盒式模糊，
+        /// 得到从掩体足迹向外约 <see cref="InkGridConfigSO.groundContactAORadiusMeters"/> 米渐隐的软场，
+        /// 由 InkGround 乘到地面基底色上（墨迹不乘，墨面已经有 shadowmap 的阴影）。
+        /// 为什么要它：实时阴影只覆盖 shadowDistance(48m) 内、SSAO 只有屏幕空间 0.6m 半径，
+        /// 远景箱底/墙脚是干净的，整片堆场读作「浮在干净地面上」。
+        /// 与计分掩码同一套 XZ 映射；分辨率跟随网格（400²/200²），R8 约 160KB，只在场景初始化时算一次。
+        /// </summary>
+        private void RebuildGroundContactMask()
+        {
+            if (_grid == null)
+                return;
+
+            float strength = config != null ? Mathf.Clamp01(config.groundContactAOStrength) : 0f;
+            if (strength <= 0.001f)
+            {
+                Shader.SetGlobalFloat(GlobalInkGroundContactStrengthProp, 0f);
+                return;
+            }
+
+            int width = _grid.Width;
+            int height = _grid.Height;
+            int total = width * height;
+
+            float radiusMeters = config != null ? Mathf.Max(0.15f, config.groundContactAORadiusMeters) : 1.2f;
+            float cellMeters = Mathf.Max(0.01f, 0.5f * (_grid.CellWidth + _grid.CellHeight));
+            int radius = Mathf.Clamp(Mathf.RoundToInt(radiusMeters / cellMeters), 1,
+                Mathf.Max(1, Mathf.Min(width, height) / 4));
+
+            if (_groundContactScratch == null || _groundContactScratch.Length != total)
+                _groundContactScratch = new byte[total];
+            if (_groundContactField == null || _groundContactField.Length != total)
+                _groundContactField = new float[total];
+            if (_groundContactTemp == null || _groundContactTemp.Length != total)
+                _groundContactTemp = new float[total];
+
+            _grid.CopyBlockedMaskTo(_groundContactScratch);
+            for (int i = 0; i < total; i++)
+                _groundContactField[i] = _groundContactScratch[i] > 0 ? 1f : 0f;
+
+            // 两遍「水平+垂直」盒式模糊 ≈ 三角核，边缘连续、没有逐格台阶。
+            BoxBlurSeparable(_groundContactField, _groundContactTemp, width, height, radius);
+            BoxBlurSeparable(_groundContactField, _groundContactTemp, width, height, radius);
+
+            // 四周各留 1 texel 白边（0 = 不遮蔽）：场地外的 74×84m 码头基座也用同一套 UV，
+            // 不留边会被 Clamp 把边界墙的暗带整条拉到场外。
+            int padW = width + 2;
+            int padH = height + 2;
+            int padTotal = padW * padH;
+
+            if (_groundContactTexture == null ||
+                _groundContactTexture.width != padW ||
+                _groundContactTexture.height != padH)
+            {
+                if (_groundContactTexture != null)
+                {
+                    if (Application.isPlaying) Destroy(_groundContactTexture);
+                    else DestroyImmediate(_groundContactTexture);
+                }
+
+                _groundContactTexture = new Texture2D(padW, padH, TextureFormat.R8, false, true)
+                {
+                    name = "RuntimeInkGroundContact",
+                    wrapMode = TextureWrapMode.Clamp,
+                    filterMode = FilterMode.Bilinear
+                };
+            }
+
+            if (_groundContactPixels == null || _groundContactPixels.Length != padTotal)
+            {
+                _groundContactPixels = new byte[padTotal];
+            }
+            else
+            {
+                System.Array.Clear(_groundContactPixels, 0, padTotal); // 白边保持 0
+            }
+
+            // 盒式模糊后掩体内约 1、边缘约 0.5：×1.9 让「贴着一圈」吃满强度，按半径外渐隐。
+            for (int y = 0; y < height; y++)
+            {
+                int srcRow = y * width;
+                int dstRow = (y + 1) * padW + 1;
+                for (int x = 0; x < width; x++)
+                {
+                    float contact = Mathf.Clamp01(_groundContactField[srcRow + x] * 1.9f);
+                    _groundContactPixels[dstRow + x] = (byte)Mathf.RoundToInt(contact * 255f);
+                }
+            }
+
+            _groundContactTexture.SetPixelData(_groundContactPixels, 0);
+            _groundContactTexture.Apply(false, false);
+
+            Shader.SetGlobalTexture(GlobalInkGroundContactTexProp, _groundContactTexture);
+            Shader.SetGlobalVector(GlobalInkGroundContactTexelProp,
+                new Vector4(1f / padW, 1f / padH, padW, padH));
+            Shader.SetGlobalFloat(GlobalInkGroundContactStrengthProp, strength);
+        }
+
+        /// <summary>可分离盒式模糊（src 原地写出，temp 为同长临时缓冲）。边界按复制延拓。</summary>
+        private static void BoxBlurSeparable(float[] src, float[] temp, int width, int height, int radius)
+        {
+            int window = radius * 2 + 1;
+            float inv = 1f / window;
+
+            for (int y = 0; y < height; y++)
+            {
+                int row = y * width;
+                float sum = 0f;
+                for (int k = -radius; k <= radius; k++)
+                    sum += src[row + Mathf.Clamp(k, 0, width - 1)];
+
+                for (int x = 0; x < width; x++)
+                {
+                    temp[row + x] = sum * inv;
+                    int add = Mathf.Clamp(x + radius + 1, 0, width - 1);
+                    int sub = Mathf.Clamp(x - radius, 0, width - 1);
+                    sum += src[row + add] - src[row + sub];
+                }
+            }
+
+            for (int x = 0; x < width; x++)
+            {
+                float sum = 0f;
+                for (int k = -radius; k <= radius; k++)
+                    sum += temp[Mathf.Clamp(k, 0, height - 1) * width + x];
+
+                for (int y = 0; y < height; y++)
+                {
+                    src[y * width + x] = sum * inv;
+                    int add = Mathf.Clamp(y + radius + 1, 0, height - 1);
+                    int sub = Mathf.Clamp(y - radius, 0, height - 1);
+                    sum += temp[add * width + x] - temp[sub * width + x];
+                }
+            }
         }
 
         public void ResetSurface()

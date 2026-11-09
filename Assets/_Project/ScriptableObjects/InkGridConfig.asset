@@ -26,9 +26,11 @@ MonoBehaviour:
   splatToneStrength: 1
   splatDirectionalStretch: 1
   maxSplatsPerFrame: 192
-  atlasMipmaps: 0
-  atlasMipIntervalSeconds: 0.5
+  atlasMipmaps: 1
+  atlasMipIntervalSeconds: 0.2
   atlasVisualMargin: 1.5
+  groundContactAOStrength: 0.45
+  groundContactAORadiusMeters: 1.2
   minimapRefreshHz: 12
   rippleSyncHz: 30
   wallFlushHz: 30

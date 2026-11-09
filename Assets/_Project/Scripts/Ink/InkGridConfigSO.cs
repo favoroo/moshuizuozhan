@@ -74,22 +74,33 @@ namespace P1.Ink
         [Range(32, 384)]
         public int maxSplatsPerFrame = 192;
 
-        [Tooltip("图集是否生成 mipmap。默认关闭：mip 链受 atlasMipIntervalSeconds 节流（0.5s），" +
-                 "而第三人称斜视地面时落点附近的采样 LOD 已经在 1~3，新墨只写进 mip0 —— " +
-                 "子弹落地后要等下一次 mip 重建（最多 0.5s）才完全显墨，读作「涂地有延迟」。" +
-                 "关闭后地面直接采 mip0（墨色不再被平均成灰白），代价是远景墨迹可能轻微闪烁；" +
-                 "如果远景闪烁不可接受，改回 true 并把 atlasMipIntervalSeconds 降到 ~0.15s（会有重建尖刺）")]
-        public bool atlasMipmaps = false;
+        [Tooltip("图集是否生成 mipmap。开启后远景墨迹不再摩尔纹/闪烁（4096² 图集铺 40×56m，" +
+                 "一个纹素约 1.4cm，缩到远处严重 undersample）；mip 链受 atlasMipIntervalSeconds 节流，" +
+                 "第三人称斜视地面时落点附近采样 LOD 在 1~3，新墨只写进 mip0，重建前最多延迟一个间隔。" +
+                 "0.20s 是闪烁与「涂地延迟」的折中；想更跟手可降到 0.15s（重建尖刺更频繁）。")]
+        public bool atlasMipmaps = true;
 
         [Tooltip("墨迹图集 mip 重建最小间隔（秒）：只在有新落墨时重建，间隔越大越省 GPU 尖刺。" +
                  "仅在 atlasMipmaps=true 时生效")]
         [Range(0.1f, 2f)]
-        public float atlasMipIntervalSeconds = 0.5f;
+        public float atlasMipIntervalSeconds = 0.2f;
 
         [Tooltip("墨迹图集向场地四周外扩的边距（米）：避免场地边界处的双线性过滤/写入被图集边缘截断。" +
                  "可见受墨范围仍是 40x56 计分场 —— 场外表面（场外码头、边界墙顶）不再显墨。0 = 默认 1.5m；计分网格本身不变")]
         [Range(0f, 4f)]
         public float atlasVisualMargin = 1.5f;
+
+        [Header("掩体接触遮蔽（地面软化）")]
+        [Tooltip("箱底/墙脚的软遮蔽强度：加载时用不可涂格烘一张 R8 遮蔽场（PC/移动端共用），" +
+                 "只压地面基底、不压实时阴影与墨迹（墨面本来就有 shadowmap）。" +
+                 "补的是实时阴影（shadowDistance 48m 外）和 SSAO（屏幕空间 0.6m）都覆盖不到的远景落地感。0 = 关闭")]
+        [Range(0f, 1f)]
+        public float groundContactAOStrength = 0.45f;
+
+        [Tooltip("软遮蔽从掩体足迹向外扩散的半径（米）：越大越像环境遮蔽，越小越像接触线。" +
+                 "按 0.1~1.5m 取，超过 2.5m 会读作大片阴天污渍")]
+        [Range(0.15f, 4f)]
+        public float groundContactAORadiusMeters = 1.2f;
 
         [Tooltip("小地图贴图刷新频率（Hz）；0 = 每帧刷新")]
         [Range(0f, 30f)]

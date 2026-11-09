@@ -58,7 +58,7 @@ Material:
     - _RimStrength: 0.18
     - _ShadeSoftness: 0.1
     - _ShadeThreshold: 0.5
-    - _ShadowFloor: 0.5
+    - _ShadowFloor: 0.4
     - _Smoothness: 0.38
     - _SpecSoftness: 0.04
     - _SpecStrength: 0.5
@@ -73,7 +73,7 @@ Material:
     - _EdgeLineColor: {r: 0.0173891, g: 0.013411746, b: 0.027211785, a: 1}
     - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
     - _RimColor: {r: 0.5225216, g: 0.71056664, b: 1, a: 1}
-    - _ShadowTint: {r: 0.19599415, g: 0.21404114, b: 0.3672465, a: 1}
+    - _ShadowTint: {r: 0.16264722, g: 0.19599415, b: 0.34239164, a: 1}
     - _TrimColor: {r: 0.16107447, g: 0.0695802, b: 0.061464958, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

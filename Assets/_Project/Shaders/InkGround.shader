@@ -97,7 +97,10 @@ Shader "P1/InkGround"
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #pragma multi_compile_fog
-            #pragma multi_compile _ P1_INK_HIGH
+            // P1_INK_HIGH = 桌面全量（地面法线/AO、亚纹素墨缘、碎墨、程序化胶质…）；
+            // P1_INK_GROUNDMAPS = 移动端「只补地面法线/AO」档：两张贴图材质里早就挂好了，
+            // 不再为了省两次采样把整块地面的明暗细节一起丢掉（见 RenderEnvGlobals.EnsureTier）。
+            #pragma multi_compile _ P1_INK_HIGH P1_INK_GROUNDMAPS
             // DOTS_INSTANCING_ON 需要 SM 4.5；缺 target 会让 GRD 变体编译失败并回退洋红错误 shader
             // P12-D：InkGround 使用 4096² 图集 + 全局 uniform，DOTS/GRD 路径下贴图绑定不稳定（实测洋红），
 // 这里只保留传统 GPU instancing（移动端 SRP Batcher 关闭时生效）；PC 端 GRD 不接管墨面。
@@ -134,6 +137,14 @@ Shader "P1/InkGround"
             float4 _GlobalInkTexelSize;
             // 计分场地矩形 (minX, minZ, sizeX, sizeZ)：地面盒体侧面/场外片元落在场地外时不显墨。
             float4 _GlobalInkPlayableRect;
+
+            // 掩体/墙体落地的接触遮蔽场（InkSurfaceController 在场景初始化时从不可涂格烘一张 R8）：
+            // 实时阴影只覆盖 shadowDistance(48m) 内、SSAO 只在屏幕空间 0.6m 半径内生效，
+            // 远处箱底/墙脚会读作「浮在一片干净地面上」。x/y = 1/(W+2)、1/(H+2)，z/w = W+2、H+2
+            // （纹理四周留了 1 texel 白边，场外不会被 Clamp 拉伸）。
+            TEXTURE2D(_GlobalInkGroundContactTex);
+            float4 _GlobalInkGroundContactTexel;
+            float  _GlobalInkGroundContactStrength;
 
             // 队伍色改为吃全局：InkSurfaceController 每帧推送的 _GlobalTeamA/BColor 已做过
             // sRGB→Linear 转换（见 UpdateDynamicMaterialProperties 注释）。材质里的 _TeamAColor
@@ -486,8 +497,9 @@ Shader "P1/InkGround"
                 half3 cliffCol = lerp(_CliffColor.rgb, elevatedGroundCol * 0.62, 0.55);
                 half3 baseSurfaceCol = lerp(cliffCol, elevatedGroundCol, upness);
 
-                // 地面基底 PBR（P1_INK_HIGH）：法线与 AO 贴图
-                #if defined(P1_INK_HIGH)
+                // 地面基底 PBR（P1_INK_HIGH 桌面全量 / P1_INK_GROUNDMAPS 移动端只补这两张）：
+                // 法线与 AO 贴图。移动端原先整块关掉 → 地面只剩颜色细节没有明暗细节。
+                #if defined(P1_INK_HIGH) || defined(P1_INK_GROUNDMAPS)
                 float4 groundNormSample = SAMPLE_TEXTURE2D(_GroundTexN, sampler_GroundTexN, inkUV);
                 float3 groundTn = UnpackNormal(groundNormSample);
                 float4 groundRMO = SAMPLE_TEXTURE2D(_GroundTexRMO, sampler_GroundTexRMO, inkUV);
@@ -501,6 +513,16 @@ Shader "P1/InkGround"
                 #endif
 
                 baseSurfaceCol *= groundAO;
+
+                // 掩体/墙体落地的接触遮蔽（两张图都吃，见 _GlobalInkGroundContactTex 注释）。
+                // 用计分场地矩形映射而不是图集矩形：遮蔽场是按 InkGrid 的格子烘的，
+                // 图集四周还多 1.5m 可视边距，用 inkUV 会整体外扩失准。
+                float2 playUV = (input.positionWS.xz - _GlobalInkPlayableRect.xy)
+                    / max(_GlobalInkPlayableRect.zw, float2(0.001, 0.001));
+                float2 contactUV = (playUV * (_GlobalInkGroundContactTexel.zw - 2.0) + 1.0)
+                    * _GlobalInkGroundContactTexel.xy;
+                half groundContact = SAMPLE_TEXTURE2D(_GlobalInkGroundContactTex, sampler_LinearClamp, contactUV).r;
+                baseSurfaceCol *= 1.0 - saturate(_GlobalInkGroundContactStrength) * groundContact;
 
                 // -------------------------------------------------------------
                 // 1. 边缘接触软阴影 (Contact Shadow)
@@ -702,13 +724,13 @@ Shader "P1/InkGround"
                 // 整片老墨被恒定天空反射抬亮（P31 回归：地面队色读作粉橘色）。
                 envSpec *= (half)(1.0 + 0.85 * wet + 0.55 * sheen);
 
-                // 漫反射光照（三渲二色阶，重定标下限 0.40）
+                // 漫反射光照（三渲二色阶，重定标下限 0.36：0.40 会把背光墨抬成一片平涂）
                 half inkBand = P1ToonTriBand(NdotL, _InkShadeThreshold, _InkShadeSoftness);
                 half inkShadow = P1ToonShadowTerm(shadowAtten, _InkShadowFloor, _InkShadeSoftness);
-                float diffuseLight = lerp(0.40, 1.0, inkBand * inkShadow);
+                float diffuseLight = lerp(0.36, 1.0, inkBand * inkShadow);
 
-                // 墨水颜色：队伍色 × 单斑色调微差 × 低频色相起伏
-                half3 inkColor = teamCol * (0.93 + 0.13 * tone * _ToneStrength);
+                // 墨水颜色：队伍色 × 单斑色调微差（±12%，读得出是一团一团泼上去的）× 低频色相起伏
+                half3 inkColor = teamCol * (1.0 + (tone - 0.5) * 0.24 * _ToneStrength);
                 inkColor *= 1.0 + 0.06 * (vnoise(input.positionWS.xz * 0.55 + 11.3) - 0.5) * _ToneStrength;
 
                 // 薄缘半透明略亮更鲜活，厚体略深
@@ -732,6 +754,14 @@ Shader "P1/InkGround"
                 }
                 #endif
 
+                // 墨层厚度：背光侧边缘压暗（对齐 INKWAVE ground halo 的 away 项）。
+                // 现在只有明暗渐变提供体积感，把靠近墨缘、背对太阳的一侧压暗一档，
+                // 墨面才会读作「有厚度的一层」而不是贴在地上的色块。amtEff 0.52~0.95
+                // 是墨缘内侧的过渡带，inkMask 保证不会把地面基底一起压黑。
+                float edgeFade = 1.0 - smoothstep(0.52, 0.95, amtEff);
+                float awayFromSun = saturate((shadowBias - 0.25) * 0.9091);
+                inkColor *= 1.0 - 0.30 * edgeFade * awayFromSun * inkMask;
+
                 // 阴影中保饱和（对齐 INKWAVE INK_SHADE）：漫反射越弱（背光/阴影/暗部色阶），
                 // 亮度守恒地提升色度——暗部墨保持「墨」的鲜艳，而不是塌成灰漆
                 inkColor = P1InkShadowChroma(inkColor, _P1InkShadowChroma * (1.0 - diffuseLight));
@@ -749,6 +779,10 @@ Shader "P1/InkGround"
 
                 // 胶质内发光 (Subsurface Gel Glow) 保证在背光暗部也鲜艳通透
                 litInkColor += inkColor * _InkGlow * (0.75 + 0.35 * hs) * (1.0 - NdotL * 0.5);
+
+                // 高光余量：清漆叠加后 max 通道若已越 1，按比例整体回收（保色相），
+                // 避免队色先撞白、明暗层次被 tonemap 洗平（对齐 INKWAVE "ink never clips"）
+                litInkColor = P1InkHeadroom(litInkColor);
 
                 // 最终混合地面石板基底与果冻立体墨水
                 half groundBand = P1ToonTriBand(dot(groundNormalWS, L), _ShadeThreshold, _ShadeSoftness);

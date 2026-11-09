@@ -22,6 +22,13 @@ namespace P1.Core
         /// <summary>高画质档关键词：桌面端启用墨面颗粒/环境反射全量，移动端走降级分支。</summary>
         public const string InkHighKeyword = "P1_INK_HIGH";
 
+        /// <summary>
+        /// 移动端「只补地面法线/AO」关键词：与 <see cref="InkHighKeyword"/> 同属一个
+        /// multi_compile 组（互斥）。移动端整档高画质太重，但地面法线/AO 这两张贴图
+        /// 已经在材质里、只多两次采样，丢了会让整块地面失去明暗细节 —— 单独补回来。
+        /// </summary>
+        public const string InkGroundMapsKeyword = "P1_INK_GROUNDMAPS";
+
         private static readonly int SkyTopId = Shader.PropertyToID("_P1EnvSkyTop");
         private static readonly int SkyHorizonId = Shader.PropertyToID("_P1EnvSkyHorizon");
         private static readonly int SkyGroundId = Shader.PropertyToID("_P1EnvSkyGround");
@@ -197,10 +204,13 @@ namespace P1.Core
             if (Application.isMobilePlatform || SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
             {
                 Shader.DisableKeyword(InkHighKeyword);
+                // 移动端只保留地面法线/AO（两张已挂好的贴图 + 一次切线扰动），其余高画质分支照旧关。
+                Shader.EnableKeyword(InkGroundMapsKeyword);
             }
             else
             {
                 Shader.EnableKeyword(InkHighKeyword);
+                Shader.DisableKeyword(InkGroundMapsKeyword);
             }
         }
 

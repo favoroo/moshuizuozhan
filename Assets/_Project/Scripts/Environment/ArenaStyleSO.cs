@@ -116,6 +116,10 @@ namespace P1.Environment
         [Range(0.5f, 2f)] public float bloomThreshold = 1.05f;
         [Range(-100f, 100f)] public float colorSaturation = 14f;
         [Range(-100f, 100f)] public float colorContrast = 16f;
+        [Tooltip("低饱和区额外的饱和度提升（0 = 关闭）。写进 ColorCurves.satVsSat：\n" +
+                 "中性/低彩度表面（混凝土、集装箱漆面）更饱满，已经高饱和的队色墨几乎不动 ——\n" +
+                 "对齐 INKWAVE grade 的 vibrance 分档，避免对墨色继续乘饱和度造成溢出。")]
+        [Range(0f, 1f)] public float colorVibrance = 0.25f;
         [Range(0f, 1f)] public float vignetteIntensity = 0.12f;
         [Range(-2f, 2f)] public float postExposure = 0.12f;
         [Range(0f, 1f)] public float ssaoIntensity = 0.9f;

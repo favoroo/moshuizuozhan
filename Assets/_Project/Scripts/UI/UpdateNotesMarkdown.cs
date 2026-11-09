@@ -14,7 +14,8 @@ namespace P1.UI
     /// 约定：
     /// - 只生成 TMP 认识的标签（b/i/s/u/color/size/noparse），不引入第三方 Markdown 库；
     /// - 原文里的 `&lt;` 必须转义成 noparse，否则玩家/作者写的尖括号会被当成富文本标签吞掉；
-    /// - 空行折叠为一个，避免 Release 里的多行空行把弹窗撑爆。
+        /// - 空行折叠为一个，避免 Release 里的多行空行把弹窗撑爆；
+        /// - 校验码行（发布脚本早先追加的 `**SHA-256**: …`）整行丢弃，玩家看不懂。
     /// </summary>
     public static class UpdateNotesMarkdown
     {
@@ -28,6 +29,7 @@ namespace P1.UI
         private const string RuleColor = "#B4B4B4";
 
         private static readonly Regex HtmlCommentRx = new Regex(@"<!--.*?-->", RegexOptions.Compiled | RegexOptions.Singleline);
+        private static readonly Regex ChecksumRx = new Regex(@"^\**\s*sha-?256\s*\**\s*[:：]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex HeadingRx = new Regex(@"^(#{1,6})\s+(.+?)\s*#*\s*$", RegexOptions.Compiled);
         private static readonly Regex BulletRx = new Regex(@"^(\s*)[-*+]\s+(.+)$", RegexOptions.Compiled);
         private static readonly Regex OrderedRx = new Regex(@"^(\s*)(\d{1,3})[.)、]\s+(.+)$", RegexOptions.Compiled);
@@ -94,6 +96,13 @@ namespace P1.UI
                 if (trimmed.Length == 0)
                 {
                     // 空行不立刻写：交给下一个块按需补一个空行，连续空行自动折叠
+                    previous = BlockKind.None;
+                    continue;
+                }
+
+                // 校验码行（`**SHA-256**: xxx`）只有开发者看得懂，弹窗里整行丢弃
+                if (ChecksumRx.IsMatch(trimmed))
+                {
                     previous = BlockKind.None;
                     continue;
                 }

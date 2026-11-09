@@ -133,7 +133,7 @@ Material:
     - _ScreenSpaceReflectionsContributeTransparent: 1
     - _ShadeSoftness: 0.03
     - _ShadeThreshold: 0.5
-    - _ShadowFloor: 0.55
+    - _ShadowFloor: 0.46
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecSoftness: 0.04
@@ -153,7 +153,7 @@ Material:
     - _InkPartOffset: {r: 0, g: 0, b: 0, a: 0}
     - _InkPartScale: {r: 1, g: 1, b: 1, a: 0}
     - _RimColor: {r: 1, g: 1, b: 1, a: 1}
-    - _ShadowTint: {r: 0.19599415, g: 0.21404114, b: 0.3672465, a: 1}
+    - _ShadowTint: {r: 0.16264722, g: 0.19599415, b: 0.34239164, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

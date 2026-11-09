@@ -278,7 +278,11 @@ namespace P1.Editor
             EditorUtility.SetDirty(mat);
         }
 
-        private static void ApplyPostProcess(ArenaStyleSO style)
+        /// <summary>
+        /// 只重写后处理 Volume（调色/曝光/曲线），不动日光/雾/天空/水面。
+        /// 供画风菜单与质感调优工具在不完整重跑整档时复用。
+        /// </summary>
+        public static void ApplyPostProcess(ArenaStyleSO style)
         {
             VolumeProfile profile = EnsurePostProfile();
             if (profile == null) return;
@@ -337,6 +341,18 @@ namespace P1.Editor
                 master.preWrapMode = WrapMode.Clamp;
                 master.postWrapMode = WrapMode.Clamp;
                 c.master.Override(new TextureCurve(master, 0f, false, new Vector2(0f, 1f)));
+
+                // INKWAVE 式 vibrance：只抬低饱和区的色度，已经饱和的队色墨几乎不动。
+                // URP 的 LUT 构建里 satVsSat 结果 ×2（0.5 = 1x），所以曲线值是「倍率的一半」。
+                float vib = Mathf.Clamp01(style.colorVibrance);
+                var satVsSat = new AnimationCurve(
+                    new Keyframe(0f, 0.5f + 0.42f * vib),
+                    new Keyframe(0.5f, 0.5f + 0.10f * vib),
+                    new Keyframe(0.8f, 0.5f - 0.01f * vib),
+                    new Keyframe(1f, 0.5f - 0.04f * vib));
+                satVsSat.preWrapMode = WrapMode.Clamp;
+                satVsSat.postWrapMode = WrapMode.Clamp;
+                c.satVsSat.Override(new TextureCurve(satVsSat, 0.5f, false, new Vector2(0f, 1f)));
             });
 
             EditorUtility.SetDirty(profile);

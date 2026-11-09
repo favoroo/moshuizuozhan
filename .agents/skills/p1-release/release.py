@@ -682,7 +682,7 @@ def cmd_build(args) -> None:
 def validate_notes(notes: str) -> None:
     raw_lines = [ln.strip() for ln in notes.splitlines() if ln.strip()]
 
-    # 脚本会自动追加 **SHA-256** 行；它和 markdown 水平分割线都不算发布条目
+    # 历史说明文件里可能残留 **SHA-256** 行；它和 markdown 水平分割线都不算发布条目
     lines = [
         ln for ln in raw_lines
         if not re.match(r'^\*\*SHA-256', ln, re.I) and not re.fullmatch(r'-{3,}', ln)
@@ -1178,10 +1178,8 @@ def cmd_publish(args) -> None:
     if not args.skip_notes_check:
         validate_notes(notes)
 
-    # 附加上 SHA-256
+    # Release 说明只面向玩家，不再追加 SHA-256 行（校验值仍留在 build/release-meta.json）
     digest = meta['sha256']
-    if 'SHA-256' not in notes:
-        notes += f'\n\n**SHA-256**: `{digest}`'
 
     preflight(tag, tokens)
 

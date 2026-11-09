@@ -153,13 +153,13 @@ Material:
     - _GroundAOStrength: 0.45
     - _GroundNormalStrength: 0.55
     - _GroundTexStrength: 1
-    - _InkGlow: 0.1
+    - _InkGlow: 0.04
     - _InkGrainScale: 1.6
     - _InkGrainStrength: 0.35
     - _InkRoughVarStrength: 0.5
     - _InkShadeSoftness: 0.1
     - _InkShadeThreshold: 0.48
-    - _InkShadowFloor: 0.55
+    - _InkShadowFloor: 0.5
     - _InkTexelMeters: 0.01
     - _InkYFlip: 1
     - _LipHeight: 0.018
@@ -178,7 +178,7 @@ Material:
     - _SeamShadowStrength: 0.48
     - _ShadeSoftness: 0.1
     - _ShadeThreshold: 0.5
-    - _ShadowFloor: 0.46
+    - _ShadowFloor: 0.36
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1

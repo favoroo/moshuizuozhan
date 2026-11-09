@@ -40303,7 +40303,7 @@ MonoBehaviour:
   - {fileID: 1661406782}
   blockedWorldRects: []
   wetnessFactor: 1
-  inkGlow: 0.2
+  inkGlow: 0.06
 --- !u!4 &364536300
 Transform:
   m_ObjectHideFlags: 0
@@ -47705,6 +47705,7 @@ MonoBehaviour:
   cornerRadius: 28
   borderWidth: 7
   borderColor: {r: 0.082, g: 0.071, b: 0.11, a: 1}
+  edgeFeather: 0
   innerRimAlpha: 0.1
   innerRimWidth: 2
   drawGloss: 1

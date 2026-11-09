@@ -38,6 +38,8 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _BaseMapWorldScale: 0.5
+    - _BaseMapWorldSpace: 0
     - _CorrugationDepth: 0.28
     - _CorrugationScale: 2.5
     - _DetailNoiseStrength: 0.04
@@ -55,7 +57,7 @@ Material:
     - _RimStrength: 0.08
     - _ShadeSoftness: 0.1
     - _ShadeThreshold: 0.5
-    - _ShadowFloor: 0.44
+    - _ShadowFloor: 0.4
     - _Smoothness: 0.38
     - _SpecSoftness: 0.07
     - _SpecStrength: 0.22
@@ -70,7 +72,7 @@ Material:
     - _EdgeLineColor: {r: 0.0173891, g: 0.013411746, b: 0.027211785, a: 1}
     - _FocusPos: {r: 0, g: 0, b: 0, a: 0}
     - _RimColor: {r: 0.50707865, g: 0.71056664, b: 1, a: 1}
-    - _ShadowTint: {r: 0.09462964, g: 0.14731899, b: 0.34239164, a: 1}
+    - _ShadowTint: {r: 0.16264722, g: 0.19599415, b: 0.34239164, a: 1}
     - _TrimColor: {r: 0.010816382, g: 0.09752997, b: 0.08898153, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

@@ -167,6 +167,63 @@ Shader "P1/CharacterToonOutlined"
             #include "Assets/_Project/Shaders/CharacterToonCommon.hlsl"
             ENDHLSL
         }
+
+        // ------------------------------------------------------------------
+        // DepthNormals: SSAO 的邻域法线来源（与 CharacterToon 同构，
+        // HLSLINCLUDE 里的 CHARACTER_TOON_OUTLINE 保证 CBUFFER 布局与其它 Pass 一致）
+        // ------------------------------------------------------------------
+        Pass
+        {
+            Name "DepthNormals"
+            Tags { "LightMode" = "DepthNormals" }
+
+            Cull [_Cull]
+            ZWrite On
+            ZTest LEqual
+
+            HLSLPROGRAM
+            #pragma vertex DepthNormalsVertex
+            #pragma fragment DepthNormalsFragment
+
+            #pragma target 3.0
+            #if !UNITY_WEBGL
+            #pragma multi_compile_instancing
+            #endif
+
+            #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/_Project/Shaders/CharacterToonCommon.hlsl"
+
+            struct DepthNormalsVaryings
+            {
+                float4 positionCS : SV_POSITION;
+                float3 normalWS   : TEXCOORD0;
+            };
+
+            DepthNormalsVaryings DepthNormalsVertex(Attributes input)
+            {
+                DepthNormalsVaryings output;
+                UNITY_SETUP_INSTANCE_ID(input);
+                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                output.normalWS   = TransformObjectToWorldNormal(input.normalOS);
+                return output;
+            }
+
+            half4 DepthNormalsFragment(DepthNormalsVaryings input) : SV_Target
+            {
+                float3 normalWS = normalize(input.normalWS);
+            #if defined(_GBUFFER_NORMALS_OCT)
+                float2 octNormalWS = PackNormalOctQuadEncode(normalWS);
+                float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5);
+                half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);
+                return half4(packedNormalWS, 0.0);
+            #else
+                return half4(normalWS, 0.0);
+            #endif
+            }
+            ENDHLSL
+        }
     }
 
     FallBack "Universal Render Pipeline/Lit"

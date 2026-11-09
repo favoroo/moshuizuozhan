@@ -186,6 +186,13 @@ namespace P1.UI
         /// <summary>旧场景没有工厂横条时的兜底组根节点（只承载生命条）。</summary>
         private RectTransform _fallbackCardsRoot;
 
+        /// <summary>
+        /// Awake 是否已跑完（安全区容器 + 工厂横条组已就位）。
+        /// MobileTouchUI.Awake 可能抢在 HudController.Awake 之前调 ApplyMobileLayout，
+        /// 那时不能建兜底横条组：工厂随后会再建一套，两套叠在一起（旧版血条因此全黑）。
+        /// </summary>
+        private bool _hudInitialized;
+
         // ── Legacy Text → TMP 升级（P19 波次2a：消灭 Arial/LegacyRuntime 烘焙文字） ──
         // 场景里烘焙的 Text 用的是 LiberationSans、无 SDF 描边、字号 13~16。
         // 运行时在原物体下补一个同尺寸 TMP 子物体，拷对齐/颜色/字号后关掉旧组件；
@@ -234,6 +241,9 @@ namespace P1.UI
                 EnsureFpsBadge();
             ApplyFpsBadgeVisibility();
             ApplyMinimapVisibility();
+
+            // 初始化完成标记：此前的外部调用（MobileTouchUI.Awake）不得再建兜底横条组
+            _hudInitialized = true;
         }
 
         /// <summary>运行时 HUD 内容根：SafeArea 容器，桌面/编辑器下等价于全屏。</summary>
@@ -435,6 +445,8 @@ namespace P1.UI
             _gaugeRoot = cluster.Root;
             _specialCard = cluster.SpecialCard;
 
+            // 早期兜底组（若被抢跑的外部调用建过）退场，否则会叠在正式横条组下层/上层各露一半
+            DiscardFallbackCardsRoot();
         }
 
         /// <summary>
@@ -453,6 +465,8 @@ namespace P1.UI
 
             _gaugeRoot = cardsRoot;
             _specialCard = specialRoot as RectTransform;
+
+            DiscardFallbackCardsRoot();
         }
 
         /// <summary>P4-C 显式写入主题与仪表样式（场景生成器 / 编辑器工具调用，不重建视图）。</summary>
@@ -968,8 +982,10 @@ namespace P1.UI
 
             // 横条组：正常路径用工厂生成的根节点；旧场景自带视图时用兜底根节点。
             // 编辑器非 Play 的预览工具（Awake 不执行、没有视图）不建横条，避免只在预览里冒出一条孤零零的血条。
+            // _hudInitialized 守卫：MobileTouchUI.Awake 会抢在 HudController.Awake 之前调 ApplyMobileLayout，
+            // 那时工厂横条组还不存在；若在这里建兜底组，随后工厂再建一套，两套重叠会盖出「全黑血条」。
             RectTransform cardsRoot = _gaugeRoot;
-            if (cardsRoot == null && (Application.isPlaying || _specialCard != null))
+            if (cardsRoot == null && _hudInitialized && (Application.isPlaying || _specialCard != null))
             {
                 cardsRoot = EnsureFallbackCardsRoot();
             }
@@ -1025,6 +1041,25 @@ namespace P1.UI
         }
 
         /// <summary>
+        /// 正式横条组就位后丢弃早期兜底组（<see cref="EnsureFallbackCardsRoot"/>）。
+        /// 陷阱：<c>Destroy</c> 延迟到帧末才生效，若只销毁节点不清缓存，下一帧
+        /// <see cref="EnsureHealthCard"/> 会看到「还没销毁的旧 _hpFill/_hpBadgePill」非空，
+        /// 直接跳过填充与徽章的创建 —— 正式横条就只剩黑轨道（用户截图里的「血条全黑」）。
+        /// </summary>
+        private void DiscardFallbackCardsRoot()
+        {
+            RectTransform fallback = _fallbackCardsRoot;
+            if (fallback == null || fallback == _gaugeRoot) return;
+
+            if (_hpFill != null && _hpFill.transform.IsChildOf(fallback)) _hpFill = null;
+            if (_hpBadgePill != null && _hpBadgePill.transform.IsChildOf(fallback)) _hpBadgePill = null;
+            if (_hpRowMotion != null && _hpRowMotion.transform.IsChildOf(fallback)) _hpRowMotion = null;
+
+            Destroy(fallback.gameObject);
+            _fallbackCardsRoot = null;
+        }
+
+        /// <summary>
         /// 生命横条（整行 344×34，移动端 379×38）：左端绿底墨十字徽章 + 墨黑胶囊轨道（色签硬影）
         /// + 轨道内缩 3px 的绿色胶囊填充，右端不留任何附加小件。
         /// 低血（&lt;30%）/ 踩敌墨：填充与徽章翻红、填充红↔纸白交替闪；掉血时整行一次 Punch。
@@ -1076,8 +1111,12 @@ namespace P1.UI
                 HudSpecialGaugeFactory.BarBadgeSizeDesktop);
             badge.anchoredPosition = new Vector2(HudSpecialGaugeFactory.BarBadgeSizeDesktop * 0.5f, 0f);
 
-            if (_hpBadgePill == null) _hpBadgePill = badge.GetComponent<UIInkShapeGraphic>();
-            if (_hpBadgePill == null) _hpBadgePill = badge.gameObject.AddComponent<UIInkShapeGraphic>();
+            // 缓存必须校验「是不是当前这张卡的徽章」：早期兜底组留下的引用会让正式卡少画一个徽章底圆
+            UIInkShapeGraphic badgeGraphic = badge.GetComponent<UIInkShapeGraphic>();
+            if (_hpBadgePill == null || _hpBadgePill.gameObject != badge.gameObject)
+            {
+                _hpBadgePill = badgeGraphic != null ? badgeGraphic : badge.gameObject.AddComponent<UIInkShapeGraphic>();
+            }
             _hpBadgePill.raycastTarget = false;
             _hpBadgePill.Shape = UIInkShape.Pill; // 方形 rect = 正圆
             _hpBadgePill.SpeechTail = false;
@@ -1165,8 +1204,14 @@ namespace P1.UI
             trackGraphic.color = ComicStyle.Ink;
             themeResolved.ApplyHardShadow(trackGraphic, UIHardShadowLevel.Tag);
 
-            if (_hpFill == null) _hpFill = track.Find(HudSpecialGaugeFactory.BarFillName)?.GetComponent<UIPillImage>();
-            if (_hpFill == null) _hpFill = HudSpecialGaugeFactory.CreateBarFill(track, ComicStyle.Green);
+            // 同上：缓存指向旧兜底卡的填充时，正式轨道会一条填充都建不出来（只剩黑底 → 「血条全黑」）
+            UIPillImage existingFill = track.Find(HudSpecialGaugeFactory.BarFillName)?.GetComponent<UIPillImage>();
+            if (_hpFill == null || _hpFill.transform.parent != track)
+            {
+                _hpFill = existingFill != null
+                    ? existingFill
+                    : HudSpecialGaugeFactory.CreateBarFill(track, ComicStyle.Green);
+            }
             _hpFill.color = ComicStyle.Green;
         }
 
@@ -1240,8 +1285,10 @@ namespace P1.UI
         /// <summary>生命条整行动效入口：掉血时 Punch（一次性缩放反馈），常态零开销。</summary>
         private void EnsureHealthRowMotion(RectTransform card)
         {
-            if (_hpRowMotion == null) _hpRowMotion = card.GetComponent<UISpringMotion>();
-            if (_hpRowMotion == null) _hpRowMotion = card.gameObject.AddComponent<UISpringMotion>();
+            // 按当前卡重新解析（同一张卡重复调用只是拿缓存），避免保留旧兜底卡的动效组件
+            UISpringMotion motion = card.GetComponent<UISpringMotion>();
+            if (motion == null) motion = card.gameObject.AddComponent<UISpringMotion>();
+            _hpRowMotion = motion;
             _hpRowMotion.SetTheme(UIThemeSO.Resolve(uiTheme));
         }
 

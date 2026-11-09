@@ -465,5 +465,53 @@ namespace P1.Tests
             Object.Destroy(root);
             yield return null;
         }
+
+        /// <summary>
+        /// MobileTouchUI.Awake 会抢在 HudController.Awake 之前调 ApplyMobileLayout（真机上两组件在不同物体，
+        /// Awake 顺序不保证）。旧版会先建一个兜底 StatusCardsRoot，正式横条组随后复用兜底缓存的
+        /// _hpFill/_hpBadgePill，跳过填充与徽章创建 —— 顶层只剩黑轨道盖住下层完整血条（表现为「血条全黑」）。
+        /// 本用例在未激活物体上先调 ApplyMobileLayout，再激活 HUD，锁死「只允许一个横条组且生命条画全」。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator HudController_EarlyMobileLayoutBeforeAwake_KeepsHealthBarComplete()
+        {
+            GameObject root = CreateCanvas();
+            root.SetActive(false);
+
+            var hud = root.AddComponent<HudController>();
+            hud.ApplyMobileLayout(); // 模拟 MobileTouchUI.Awake 的抢跑调用（此时 HudController.Awake 还没跑）
+
+            root.SetActive(true);
+            yield return null;
+            yield return null;
+
+            hud.ApplyMobileLayout();
+            yield return null;
+
+            int roots = 0;
+            var children = root.GetComponentsInChildren<RectTransform>(true);
+            for (int i = 0; i < children.Length; i++)
+            {
+                if (children[i].name == "StatusCardsRoot") roots++;
+            }
+
+            Assert.AreEqual(1, roots, "早调 ApplyMobileLayout 不得留下第二个兜底横条组");
+
+            Assert.IsNotNull(hud.GaugeRoot, "横条组应有独立根节点");
+            Transform healthCard = hud.GaugeRoot.Find("HealthCard");
+            Assert.IsNotNull(healthCard, "横条组应包含生命条");
+
+            var fill = healthCard.Find(HudSpecialGaugeFactory.BarTrackName + "/" + HudSpecialGaugeFactory.BarFillName)
+                ?.GetComponent<UIPillImage>();
+            Assert.IsNotNull(fill, "生命条必须有胶囊填充；缺填充 = 只剩黑轨道（血条全黑）");
+            Assert.AreEqual(Image.Type.Filled, fill.type, "填充必须是 Filled 才能驱动 fillAmount");
+
+            var badge = healthCard.Find(HudSpecialGaugeFactory.BarBadgeName)?.GetComponent<UIInkShapeGraphic>();
+            Assert.IsNotNull(badge, "生命条徽章必须有底圆 Graphic（绿底墨十字）");
+            Assert.Greater(badge.color.g, badge.color.r, "生命徽章常态应为绿色");
+
+            Object.Destroy(root);
+            yield return null;
+        }
     }
 }

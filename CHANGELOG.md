@@ -6,6 +6,9 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-09 #02
+Fixed: 移动端底部生命值条全黑——`MobileTouchUI.Awake` 抢在 `HudController.Awake` 之前调 `ApplyMobileLayout()`，先建了一套兜底 `StatusCardsRoot` 并缓存 `_hpFill/_hpBadgePill`；正式工厂横条组随后复用该缓存，跳过填充与徽章底圆创建，只剩黑轨道叠在完整血条上。修法：`_hudInitialized` 守卫兜底组建在 Awake 之后、正式组就位时 `DiscardFallbackCardsRoot()` 先清引用再销毁、生命条填充/徽章按当前卡校验；新增 PlayMode 回归用例 `HudController_EarlyMobileLayoutBeforeAwake_KeepsHealthBarComplete`。文件：`Scripts/UI/HudController.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`。
+
 ## 2026-11-09 #01
 Fixed: Android 发布包构建报 `CS0103: _debugPreviewUntil does not exist`——`SubmergedInkView` / `LowHealthVignetteView` 的字段在 `#if UNITY_EDITOR || DEVELOPMENT_BUILD` 内、`DebugPreview()` 方法却留在外面，编辑器（含测试）能编译、只有 Player 构建才炸；按 `KillFlashView` / `LensInkView` 的既有写法给方法补同一层编译守卫。陷阱：`run_tests.sh fast` 全绿不等于能出包，改完 `#if` 一定要跑一次 Release 构建。文件：`Scripts/UI/{SubmergedInkView,LowHealthVignetteView}.cs`。
 

@@ -951,7 +951,7 @@ namespace P1.Core
 
         /// <summary>
         /// P30-A3：卫星墨珠落地补涂。全局每帧最多 3 枚（超出直接丢弃，不再排队），
-        /// 只有接近水平的落点才写地面图集（墙面/立面走不到 PaintSpeckVisualOnly 的 2D 图集）；
+        /// 只有接近水平的落点才写地面图集（墙面/立面走不到 XZ 平面图集）；
         /// 半径 ≥ 0.09m 的大颗珠额外补一条轻微涟漪。
         /// </summary>
         private void HandleDropletLanding(Vector3 point, Vector3 normal, Team team, float baseScale)
@@ -959,7 +959,7 @@ namespace P1.Core
             if (team == Team.Neutral)
                 return;
 
-            // 只有落在地面/顶面才补涂：PaintSpeckVisualOnly 是 XZ 平面图集，打在墙面上会画错位置
+            // 只有落在地面/顶面才补涂：XZ 平面图集打在墙面上会画错位置
             if (normal.y < 0.55f)
                 return;
 
@@ -980,7 +980,7 @@ namespace P1.Core
             _speckPaintedThisFrame++;
 
             float radius = Mathf.Clamp(baseScale * 1.35f, 0.06f, 0.12f);
-            InkSurfaceController.Instance.PaintSpeckVisualOnly(point, radius, team, true);
+            InkSurfaceController.Instance.PaintSpeck(point, radius, team, true);
 
             if (radius >= LargeSpeckRippleRadius)
             {

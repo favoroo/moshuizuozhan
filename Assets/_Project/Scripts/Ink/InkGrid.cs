@@ -382,6 +382,25 @@ namespace P1.Ink
             return _blocked[y * Width + x];
         }
 
+        /// <summary>
+        /// 把不可涂掩码复制成 0/255 的单通道图（行序 = Z 轴，列序 = X 轴）。
+        /// 供 <see cref="InkSurfaceController"/> 上传给顶面墨迹着色器：俯视投影下道具顶面
+        /// 与脚下地面共用同一个 XZ 格，网格把这些格判为不可涂（不计分），
+        /// 3D 顶面也必须同步不显墨，否则会出现「涂了但不计分」的假反馈。
+        /// </summary>
+        public void CopyBlockedMaskTo(byte[] destination)
+        {
+            if (destination == null)
+                throw new ArgumentNullException(nameof(destination));
+            if (destination.Length < _blocked.Length)
+                throw new ArgumentException("destination 长度不足", nameof(destination));
+
+            for (int i = 0; i < _blocked.Length; i++)
+            {
+                destination[i] = _blocked[i] ? (byte)255 : (byte)0;
+            }
+        }
+
         public int GetTeamCount(Team team)
         {
             return team switch

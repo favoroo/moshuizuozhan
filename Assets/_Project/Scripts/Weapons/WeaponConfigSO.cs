@@ -412,7 +412,7 @@ namespace P1.Weapons
         public float muzzleFlashScale = 0f;
         [Tooltip("弹丸视觉尺寸倍率（不改变碰撞与射程）。0 = 使用武器类别默认值")]
         public float projectileVisualScale = 0f;
-        [Tooltip("弹丸沿途滴墨 / 落点涂地的视觉尺寸倍率。0 = 使用武器类别默认值")]
+        [Tooltip("弹丸沿途滴墨 / 落点涂地的视觉半径倍率（相对计分网格半径）。1 = 视觉与计分同半径；0 = 使用武器类别默认值")]
         public float trailVisualScale = 0f;
         [Tooltip("撞击地面/墙面时的涟漪强度倍率。0 = 使用武器类别默认值")]
         public float impactRippleScale = 0f;

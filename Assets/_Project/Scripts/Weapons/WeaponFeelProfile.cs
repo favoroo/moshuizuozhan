@@ -188,34 +188,34 @@ namespace P1.Weapons
                 case WeaponKind.Roller:
                     // 挥击是单次大动作：武器模型明显下沉，镜头推一下。
                     // 一次挥击会甩出 9 颗墨滴，拖尾雾间距拉大 + 卫星珠概率压低，避免扇面糊成一团。
-                    return Trail(new WeaponFeelParams(0.075f, 5.6f, 0.050f, 0.30f, 0.90f, 1.15f, 1.15f, 1.10f, 1.25f, 21f, 8.0f),
+                    return Trail(new WeaponFeelParams(0.075f, 5.6f, 0.050f, 0.30f, 0.90f, 1.15f, 1.15f, 1.00f, 1.25f, 21f, 8.0f),
                         3.2f, 0.12f, 0.26f, 0.85f);
 
                 case WeaponKind.Charger:
                     // 一枪定生死：最重的镜头冲击 + 最长枪口火光（实际幅度按蓄力刻度缩放）。
                     // 单发重墨：拖尾最稀疏但每团最大、卫星珠概率最高，读作「一道粗墨柱」。
-                    return Trail(new WeaponFeelParams(0.105f, 8.5f, 0.090f, 0.55f, 1.60f, 1.45f, 1.20f, 1.15f, 1.35f, 19f, 6.5f),
+                    return Trail(new WeaponFeelParams(0.105f, 8.5f, 0.090f, 0.55f, 1.60f, 1.45f, 1.20f, 1.00f, 1.35f, 19f, 6.5f),
                         3.4f, 0.50f, 0.40f, 1.35f);
 
                 case WeaponKind.Dualies:
                     // 12~15 发/秒：单发冲击小、弹簧频率高，连发读作「震」而不是「漂」。
                     // 高射速下拖尾雾间距略拉大，避免同屏弹丸叠出一串雾球。
-                    return Trail(new WeaponFeelParams(0.032f, 3.0f, 0.025f, 0.12f, 0.40f, 0.85f, 0.90f, 0.90f, 0.90f, 39f, 9.0f),
+                    return Trail(new WeaponFeelParams(0.032f, 3.0f, 0.025f, 0.12f, 0.40f, 0.85f, 0.90f, 1.00f, 0.90f, 39f, 9.0f),
                         3.0f, 0.18f, 0.26f, 0.85f);
 
                 case WeaponKind.Slosher:
-                    return Trail(new WeaponFeelParams(0.060f, 5.0f, 0.040f, 0.22f, 0.70f, 1.10f, 1.25f, 1.15f, 1.15f, 28f, 7.5f),
+                    return Trail(new WeaponFeelParams(0.060f, 5.0f, 0.040f, 0.22f, 0.70f, 1.10f, 1.25f, 1.00f, 1.15f, 28f, 7.5f),
                         2.8f, 0.20f, 0.28f, 0.90f);
 
                 case WeaponKind.Blaster:
                     // 慢速重弹：后坐与镜头冲击最接近「炮」，拖尾雾也最浓。
-                    return Trail(new WeaponFeelParams(0.095f, 7.5f, 0.085f, 0.50f, 1.50f, 1.40f, 1.35f, 1.20f, 1.40f, 20f, 7.0f),
+                    return Trail(new WeaponFeelParams(0.095f, 7.5f, 0.085f, 0.50f, 1.50f, 1.40f, 1.35f, 1.00f, 1.40f, 20f, 7.0f),
                         2.2f, 0.35f, 0.35f, 1.20f);
 
                 case WeaponKind.Splatling:
                     // 15 发/秒弹雨：单发幅度仍然低，但弹簧够快 + 镜头热积累，读作「持续压制」。
                     // 弹雨太密，拖尾雾压到最稀最小，只保留一层薄薄的墨雾感。
-                    return Trail(new WeaponFeelParams(0.022f, 2.2f, 0.018f, 0.07f, 0.22f, 0.80f, 0.85f, 0.95f, 0.75f, 40f, 9.0f),
+                    return Trail(new WeaponFeelParams(0.022f, 2.2f, 0.018f, 0.07f, 0.22f, 0.80f, 0.85f, 1.00f, 0.75f, 40f, 9.0f),
                         3.0f, 0.15f, 0.24f, 0.80f);
 
                 default:

@@ -6,6 +6,9 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-09 #03
+Fixed: 俯视投影涂地「涂了不计分」——道具/集装箱顶面与脚下地面共用同一个 XZ 格，`InkGrid` 把道具占位格判为不可涂（不计分），但顶面墨迹仍由图集直接渲染，玩家看到箱顶有墨、比分不涨。新增计分掩码 `_GlobalInkScoreMaskTex`（R8，`InkSurfaceController.RebuildScoreMask` 在窄缝补偿后烘焙），由 `InkSurfaceOverlay.hlsl` 的 `P1EvaluateTopInk` 裁掉不可涂格，保证「看得到的顶面墨迹 = 会计分的墨迹」；`WeaponFeelProfile` 的 `TrailVisualScale` 全部归一到 1.0（视觉半径=计分半径），飞溅墨珠 `PaintSpeck` 改为同时写网格与图集。陷阱：掩码必须在 `SealNarrowSlits` 之后重建，否则死缝里仍显墨；`PropLit/ObstacleDitherLit/SpawnPad` 任一消费者编译失败都会让顶面墨迹静默消失，新增 `InkGroundShaderTests.TopInkShaders_HaveNoCompileErrors` 门禁。文件：`Scripts/Ink/{InkGrid,InkSurfaceController}.cs`、`Shaders/InkSurfaceOverlay.hlsl`、`Scripts/Weapons/{WeaponFeelProfile,WeaponConfigSO}.cs`、`Scripts/Core/VfxPool.cs`、`Tests/{EditMode/InkGridTests,EditMode/InkGroundShaderTests,PlayMode/InkAtlasRenderPlayTests}.cs`。
+
 ## 2026-11-09 #02
 Fixed: 移动端底部生命值条全黑——`MobileTouchUI.Awake` 抢在 `HudController.Awake` 之前调 `ApplyMobileLayout()`，先建了一套兜底 `StatusCardsRoot` 并缓存 `_hpFill/_hpBadgePill`；正式工厂横条组随后复用该缓存，跳过填充与徽章底圆创建，只剩黑轨道叠在完整血条上。修法：`_hudInitialized` 守卫兜底组建在 Awake 之后、正式组就位时 `DiscardFallbackCardsRoot()` 先清引用再销毁、生命条填充/徽章按当前卡校验；新增 PlayMode 回归用例 `HudController_EarlyMobileLayoutBeforeAwake_KeepsHealthBarComplete`。文件：`Scripts/UI/HudController.cs`、`Tests/PlayMode/HudSpecialGaugePlayTests.cs`。
 

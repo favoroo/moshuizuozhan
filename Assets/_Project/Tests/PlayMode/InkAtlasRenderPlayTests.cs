@@ -294,5 +294,46 @@ namespace P1.Tests
             float wetFinal = WetnessFromTimestamp(ReadAtlasAt(surface, 0f, 0f), nowAtRead, 6f);
             Assert.Less(wetFinal, 0.55f, "时间戳必须保持落墨时刻：4s 后湿润度应已明显衰减，若仍≈1 说明重绘刷新了时间戳");
         }
+
+        /// <summary>
+        /// 计分掩码必须与 InkGrid 的不可涂格一一对应：俯视投影下道具顶面与脚下地面
+        /// 共用同一个 XZ 格，网格判为不可涂的格子在 3D 顶面也必须不显墨，
+        /// 否则玩家会看到「涂上去了但不计分」的假反馈。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator ScoreMask_MatchesBlockedGridCells()
+        {
+            InkSurfaceController surface = CreateSurface();
+            yield return null;
+
+            surface.Grid.SetBlockedWorldRect(new Vector2(-2f, -2f), new Vector2(2f, 2f), true);
+            surface.BakeBlockedColliders();
+
+            Texture2D mask = surface.ScoreMaskTexture;
+            Assert.IsNotNull(mask, "计分掩码应随掩体烘焙一起生成");
+            Assert.AreEqual(surface.Grid.Width, mask.width);
+            Assert.AreEqual(surface.Grid.Height, mask.height);
+
+            int cx = surface.Grid.Width / 2;
+            int cy = surface.Grid.Height / 2;
+            Assert.Greater(mask.GetPixel(cx, cy).r, 0.5f, "中心阻塞格应为 255");
+            Assert.Less(mask.GetPixel(1, 1).r, 0.5f, "场地角落应保持可涂");
+        }
+
+        /// <summary>
+        /// 飞溅墨珠落地补涂必须同时写计分网格与视觉图集：旧实现只写图集，
+        /// 玩家会看到地上有墨而比分不涨。半径 0.06~0.12m 最多覆盖 1~4 格，不会造成充能膨胀。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator PaintSpeck_WritesScoreGridAndAtlas()
+        {
+            InkSurfaceController surface = CreateSurface();
+            yield return null;
+
+            int changed = surface.PaintSpeck(new Vector3(3f, 0f, 3f), 0.5f, Team.TeamA);
+            Assert.Greater(changed, 0, "装饰墨点也必须真实写网格（视觉=计分）");
+            Assert.AreEqual(Team.TeamA, surface.Grid.InkAt(new Vector2(3f, 3f)));
+            Assert.Greater(surface.SplatAtlas.TotalSplatCount, 0, "同时应写入视觉图集");
+        }
     }
 }

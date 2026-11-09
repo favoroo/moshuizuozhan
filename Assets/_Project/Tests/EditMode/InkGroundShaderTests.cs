@@ -59,5 +59,33 @@ namespace P1.Tests
             }
 #endif
         }
+
+        /// <summary>
+        /// 顶面墨迹统一走 InkSurfaceOverlay.hlsl 的 P1EvaluateTopInk。
+        /// 该文件新增计分掩码采样后，任何一个引用它的着色器编译失败都会让道具/出生台
+        /// 完全失去顶面墨迹（且只在真机渲染时可见），这里把三个消费者都固化成门禁。
+        /// </summary>
+        [TestCase("P1/PropLit")]
+        [TestCase("P1/ObstacleDitherLit")]
+        [TestCase("P1/SpawnPad")]
+        public void TopInkShaders_HaveNoCompileErrors(string shaderName)
+        {
+            var shader = Shader.Find(shaderName);
+            Assert.IsNotNull(shader, $"必须存在着色器 {shaderName}（顶面墨迹消费者）");
+
+#if UNITY_EDITOR
+            var messages = UnityEditor.ShaderUtil.GetShaderMessages(shader);
+            for (int i = 0; i < messages.Length; i++)
+            {
+                var m = messages[i];
+                if (m.severity.ToString() != "Error")
+                    continue;
+
+                Assert.Fail(
+                    $"{shaderName} 编译错误：line {m.line} [{m.platform}] {m.message}\n" +
+                    "InkSurfaceOverlay.hlsl 的顶面墨迹/计分掩码采样必须能编译通过。");
+            }
+#endif
+        }
     }
 }

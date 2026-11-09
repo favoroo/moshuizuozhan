@@ -55,6 +55,8 @@ namespace P1.Ink
 
         private InkGrid _grid;
         private Texture2D _inkTexture;
+        private Texture2D _scoreMaskTexture;
+        private byte[] _scoreMaskScratch;
         private InkSplatAtlas _atlas;
         private readonly List<Material> _inkSurfaceMaterials = new List<Material>(4);
         private float _nextMinimapFlushTime;
@@ -103,6 +105,9 @@ namespace P1.Ink
         private static readonly int GlobalWetnessFactorProp = Shader.PropertyToID("_GlobalWetnessFactor");
         private static readonly int GlobalInkGlowProp = Shader.PropertyToID("_GlobalInkGlow");
         private static readonly int GlobalInkPlayableRectProp = Shader.PropertyToID("_GlobalInkPlayableRect");
+        // 计分掩码：不可涂格（道具/掩体占位、窄缝补偿）在顶面墨迹着色器里直接裁掉。
+        private static readonly int GlobalInkScoreMaskTexProp = Shader.PropertyToID("_GlobalInkScoreMaskTex");
+        private static readonly int GlobalInkScoreMaskEnabledProp = Shader.PropertyToID("_GlobalInkScoreMaskEnabled");
 
         public InkGrid Grid => _grid;
 
@@ -123,6 +128,12 @@ namespace P1.Ink
 
         /// <summary>GPU 墨迹图集（纯视觉层）：地面材质实际采样的贴图。</summary>
         public Texture VisualInkTexture => _atlas != null ? (Texture)_atlas.Atlas : _inkTexture;
+
+        /// <summary>
+        /// 计分掩码（R8，0=可涂 / 255=不可涂）：顶面墨迹着色器据此裁掉不可涂格。
+        /// 供覆盖率审计与自动化测试只读，不应在运行时修改。
+        /// </summary>
+        public Texture2D ScoreMaskTexture => _scoreMaskTexture;
 
         /// <summary>顶面受墨（XZ 投影图集）的渲染器列表，供覆盖率审计工具只读使用。</summary>
         public IReadOnlyList<Renderer> InkableSurfaceRenderers => inkableSurfaceRenderers;
@@ -173,6 +184,15 @@ namespace P1.Ink
             {
                 Destroy(_inkTexture);
                 _inkTexture = null;
+            }
+
+            // 组件销毁后不能再让着色器采样已释放的掩码贴图。
+            Shader.SetGlobalFloat(GlobalInkScoreMaskEnabledProp, 0f);
+            if (_scoreMaskTexture != null)
+            {
+                if (Application.isPlaying) Destroy(_scoreMaskTexture);
+                else DestroyImmediate(_scoreMaskTexture);
+                _scoreMaskTexture = null;
             }
         }
 
@@ -339,6 +359,52 @@ namespace P1.Ink
 
             // P16-D 窄缝自动剔除：封闭两面受夹且净宽 ≤ 0.9m 的不可行/不可涂死缝
             _grid.SealNarrowSlits(0.9f);
+
+            // 掩码必须在窄缝补偿之后重建，否则顶面墨迹会在被剔除的窄缝里继续显墨。
+            RebuildScoreMask();
+        }
+
+        /// <summary>
+        /// 把计分网格的不可涂掩码同步成一张单通道贴图（R8），供顶面墨迹着色器裁剪。
+        /// 俯视投影图集无法区分「道具顶面」和「脚下地面」——两者共用同一个 XZ 格；
+        /// 计分网格把道具占位格判为不可涂，若 3D 顶面仍显示墨迹，玩家就会看到
+        /// 「涂上去了但不计分」的假反馈。这里让可见墨迹严格跟随计分掩码：
+        /// 不可涂格不显墨，**看得到的顶面墨迹 = 会计分的墨迹**。
+        /// 墙面墨迹由 InkWallSurface 独立负责（竖向面本来就不计入涂地），不受影响。
+        /// </summary>
+        private void RebuildScoreMask()
+        {
+            if (_grid == null)
+                return;
+
+            int width = _grid.Width;
+            int height = _grid.Height;
+            int total = width * height;
+
+            if (_scoreMaskTexture == null ||
+                _scoreMaskTexture.width != width ||
+                _scoreMaskTexture.height != height)
+            {
+                if (_scoreMaskTexture != null)
+                {
+                    if (Application.isPlaying) Destroy(_scoreMaskTexture);
+                    else DestroyImmediate(_scoreMaskTexture);
+                }
+
+                _scoreMaskTexture = new Texture2D(width, height, TextureFormat.R8, false, true)
+                {
+                    name = "RuntimeInkScoreMask",
+                    wrapMode = TextureWrapMode.Clamp,
+                    filterMode = FilterMode.Bilinear
+                };
+            }
+
+            if (_scoreMaskScratch == null || _scoreMaskScratch.Length != total)
+                _scoreMaskScratch = new byte[total];
+
+            _grid.CopyBlockedMaskTo(_scoreMaskScratch);
+            _scoreMaskTexture.SetPixelData(_scoreMaskScratch, 0);
+            _scoreMaskTexture.Apply(false, false);
         }
 
         public void ResetSurface()
@@ -470,21 +536,14 @@ namespace P1.Ink
         }
 
         /// <summary>
-        /// 装饰性小墨点：只写高分辨率视觉图集，**不写玩法网格、不计覆盖率、不进统计、不触发涟漪与充能**
-        /// （供「飞溅水珠落地补涂」等纯表现用途；调用方必须自行做每帧节流，避免挤占正式墨斑的图集配额）。
+        /// 装饰性小墨点（飞溅水珠落地补涂）：与普通落墨走同一条「计分网格 + 视觉图集」路径，
+        /// 但**不触发涟漪**（由调用方合并成一条）。调用方必须自行做每帧节流，避免挤占正式墨斑的图集配额。
+        /// 旧实现只写图集、不写玩法网格，玩家会看到地上有墨而比分不涨；按「宁可画面糙，不可比分假」
+        /// 改为真实计分（半径 0.06~0.12m，最多覆盖 1~4 格，不会造成充能膨胀）。
         /// </summary>
-        public void PaintSpeckVisualOnly(Vector3 worldPos, float radius, Team team, bool decorated = false)
+        public int PaintSpeck(Vector3 worldPos, float radius, Team team, bool decorated = false)
         {
-            InitializeIfNeeded();
-            if (_atlas == null || team == Team.Neutral || radius <= 0f)
-            {
-                return;
-            }
-            _atlas.AddSplat(new Vector2(worldPos.x, worldPos.z), radius, team, decorated);
-            if (!Application.isPlaying)
-            {
-                _atlas.FlushImmediate();
-            }
+            return PaintCircle(worldPos, radius, team, false, decorated);
         }
 
         /// <summary>
@@ -806,6 +865,11 @@ namespace P1.Ink
             Vector2 playSize = _grid.MapSize;
             Shader.SetGlobalVector(GlobalInkPlayableRectProp,
                 new Vector4(playOrigin.x, playOrigin.y, playSize.x, playSize.y));
+
+            // 计分掩码与场地矩形同一套 XZ 映射（u = x / sizeX，v = z / sizeZ）。
+            // 未建掩码（编辑器预览 / 裸测试）时禁用，保持旧行为。
+            Shader.SetGlobalTexture(GlobalInkScoreMaskTexProp, _scoreMaskTexture);
+            Shader.SetGlobalFloat(GlobalInkScoreMaskEnabledProp, _scoreMaskTexture != null ? 1f : 0f);
             Shader.SetGlobalColor(TeamAColorProp, colorA);
             Shader.SetGlobalColor(GlobalTeamAColorProp, colorA);
             Shader.SetGlobalColor(TeamBColorProp, colorB);

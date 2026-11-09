@@ -65,6 +65,29 @@ namespace P1.Tests
         }
 
         [Test]
+        public void CopyBlockedMaskTo_WritesRowMajorBinaryMask()
+        {
+            var grid = new InkGrid(10, 10, new Vector2(10f, 10f));
+            grid.SetBlockedWorldRect(new Vector2(-1f, -1f), new Vector2(1f, 1f), true);
+
+            var mask = new byte[grid.Width * grid.Height];
+            grid.CopyBlockedMaskTo(mask);
+
+            // 世界 (0,0) 落在中心格 (5,5)：行主序 idx = y * Width + x
+            Assert.AreEqual(255, mask[5 * grid.Width + 5]);
+            Assert.AreEqual(0, mask[0], "场地角落不应被标记为不可涂");
+            Assert.AreEqual(0, mask[grid.Width * grid.Height - 1]);
+        }
+
+        [Test]
+        public void CopyBlockedMaskTo_RejectsTooSmallDestination()
+        {
+            var grid = new InkGrid(10, 10, new Vector2(10f, 10f));
+            Assert.Throws<System.ArgumentNullException>(() => grid.CopyBlockedMaskTo(null));
+            Assert.Throws<System.ArgumentException>(() => grid.CopyBlockedMaskTo(new byte[10]));
+        }
+
+        [Test]
         public void ResetPaintOnly_ClearsInkButKeepsBlockedCells()
         {
             var grid = new InkGrid(100, 100, new Vector2(20f, 20f));

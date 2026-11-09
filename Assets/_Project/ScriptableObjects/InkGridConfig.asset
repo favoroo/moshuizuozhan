@@ -29,8 +29,8 @@ MonoBehaviour:
   atlasMipmaps: 1
   atlasMipIntervalSeconds: 0.2
   atlasVisualMargin: 1.5
-  groundContactAOStrength: 0.45
-  groundContactAORadiusMeters: 1.2
+  groundContactAOStrength: 0.2
+  groundContactAORadiusMeters: 0.5
   minimapRefreshHz: 12
   rippleSyncHz: 30
   wallFlushHz: 30

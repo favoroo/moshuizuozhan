@@ -51,7 +51,7 @@ Material:
     m_Floats:
     - _ClearcoatStrength: 1.4
     - _CoffeeRingStrength: 0.45
-    - _ContactShadowStrength: 0.6
+    - _ContactShadowStrength: 0.3
     - _DitherAlpha: 1
     - _DryGloss: 0.52
     - _EdgeSoftness: 0.9

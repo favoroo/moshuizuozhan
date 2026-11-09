@@ -313,7 +313,8 @@ Shader "P1/InkGround"
                 float2 texelUV = _GlobalInkTexelSize.xy > 0.000001
                     ? _GlobalInkTexelSize.xy
                     : float2(1.0 / 4096.0, 1.0 / 4096.0);
-                float4 inkSample = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, inkUV);
+                float4 inkSample = P1SampleInkAtlasGrad(_GlobalInkAtlasTex, sampler_LinearClamp,
+                    inkUV, texelUV, input.positionWS);
                 if (!inkInPlayableMap)
                     inkSample = float4(0.0, 0.0, 0.0, 0.0);
 
@@ -327,8 +328,11 @@ Shader "P1/InkGround"
                 if (bicu > 0.001)
                 {
                     float4 cubicGradX, cubicGradY;
-                    float2 gradClipX = clamp(ddx(inkUV), -8.0 * texelUV, 8.0 * texelUV);
-                    float2 gradClipY = clamp(ddy(inkUV), -8.0 * texelUV, 8.0 * texelUV);
+                    // 导数上限按相机距离自适应（近景 2 / 远景 8 纹元）：原来固定 ±8 会让
+                    // 6~10m 处的墨缘也吃到 mip3（11cm）的降采样，墨缘与贴地阴影一起糊。
+                    float2 maxTexelsUV = P1InkAtlasTexelBudget(input.positionWS) * texelUV;
+                    float2 gradClipX = clamp(ddx(inkUV), -maxTexelsUV, maxTexelsUV);
+                    float2 gradClipY = clamp(ddy(inkUV), -maxTexelsUV, maxTexelsUV);
                     float4 cubicSample = P1SampleInkAtlasCubicGrad(_GlobalInkAtlasTex, sampler_LinearClamp,
                         inkUV, texelUV, gradClipX, gradClipY, cubicGradX, cubicGradY);
                     // 场外强制无墨：B 样条 tap 会钳到边界纹素，必须在混合前清零
@@ -515,7 +519,10 @@ Shader "P1/InkGround"
                 // -------------------------------------------------------------
                 // 1. 边缘接触软阴影 (Contact Shadow)
                 // -------------------------------------------------------------
-                float contactHalo = smoothstep(0.04, 0.48, amtEff) * (1.0 - inkMask);
+                // 边缘接触阴影带宽度：0.04~0.48 的覆盖率区间在 1.37cm/纹素下横跨约 4~6 个纹素，
+                // 再经 B 样条重建摊平成 5cm 宽的一圈灰褐色脏边；收窄到 0.14~0.36 后只在墨缘
+                // 留一条贴着边的细暗线，既有厚度感又不糊。
+                float contactHalo = smoothstep(0.14, 0.36, amtEff) * (1.0 - inkMask);
                 float2 outN = -gradAmt / max(length(gradAmt), 0.001);
                 float2 sunDirXZ = normalize(mainLight.direction.xz + float2(0.001, 0.001));
                 float shadowBias = clamp(0.65 - 0.75 * dot(outN, sunDirXZ), 0.25, 1.35);

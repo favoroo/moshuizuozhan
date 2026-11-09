@@ -6,6 +6,13 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-09 #13
+【地面「糊/脏」】根因：移动端 SSAO 用 `Source=Depth`（法线从深度重建）+ `Downsample=1` + **2 采样** + 低档模糊，噪声被模糊成一片片灰云铺在白水泥与墨面上 —— 同机位 A/B 关掉即干净。`Mobile_Renderer` 的 SSAO `m_Active` 置 0（本场景全是自定义 Toon shader、无 PBR，AO 只剩发脏，顺带省一次深度拷贝 + AO pass）；PC 端 `DepthNormals` 源保留。
+次因：`InkGridConfig.atlasMipmaps` 在 v0.1.31 由 0 改 1 消远景摩尔纹，但图集（2985×4096 铺 40×56m）走内联 `sampler_LinearClamp`（aniso 恒 1），地面掠射角下硬件选到 mip 3~4，墨缘与墨缘接触阴影被降采样成 6~10px 渐变；改 `P1SampleInkAtlasGrad` 用显式梯度按相机距离把 mip 钳在 2~8 纹素（近景保硬边、远景仍压摩尔纹），并把 `contactHalo` 带宽 0.04~0.48 → 0.14~0.36、地面 `_ContactShadowStrength` 0.6→0.3、掩体接触遮蔽场 0.45/1.2m → 0.2/0.5m、移动端阴影 1 级级联/50m → 2 级/35m。
+陷阱：Active Build Target = Android 时 `QualitySettings` 只剩 `Mobile` 一档，编辑器 Play 加载的就是 `Mobile_RPAsset`——`PC_RPAsset`（4096/3 级级联）在编辑器里根本不会被验证，两端画质判断必须按移动端口径做；另外改 `.hlsl` 后正在跑的 PlayMode 仍在用**旧编译变体**，那几秒的画面不能当验收依据。文件：`Settings/{Mobile_Renderer,Mobile_RPAsset}.asset`、`Shaders/{InkWetShading.hlsl,InkGround.shader,InkSurfaceOverlay.hlsl}`、`Materials/Mat_*InkGround.mat`、`ScriptableObjects/InkGridConfig.asset`。
+
+【发布 v0.1.33】含 2026-11-09 `#13`；APK `moshuizuozhan-v0.1.33-arm64-v8a.apk`。坑：`release.py bump --write` 走编辑器同步 `PlayerSettings` 时会「报成功但没落盘」（内存 0.1.32、磁盘也是 0.1.32），须 `script.eval` 显式改 `bundleVersion` + `Android.bundleVersionCode` 再 `AssetDatabase.SaveAssets()` + `File/Save Project`，并 grep `ProjectSettings.asset` 复核。
+
 ## 2026-11-09 #12
 新增局外奖励 v1「等级解锁 + 外观衣柜」：34 件外观（服装配色 8 / 触手发型 6 / 头饰 4 / 武器涂装 6 / 称号 10）按等级与成就解锁，衣柜浮层含实时 3D 预览与拖拽旋转，首页卡阵扩为 2×3 并常驻「下一级解锁：XXX」钩子，结算页在升级页签旁播「解锁 · XXX」。外观目录是静态内容表（同 `AchievementCatalog`，不走 SO），解锁状态**不落盘**、全部由「等级 + 已达成成就」推导，只持久化 5 个装备槽 → 老存档零迁移、坏档自动回退槽位默认件。
 陷阱：`CharacterVisualController` 挂在 Player 的**子节点** `VisualRoot`，任何地方取它都必须 `GetComponentInChildren`（用 `GetComponent` 会静默取不到，衣柜预览表现为一张墨色空底图）；材质定位只能「材质名前缀 + 作用域」——烘焙材质名带颜色后缀（`Mat_CharacterShirt_F0EDE3`），且武器件与眼睛/袜子共用 `Mat_AccentsWhite`、鞋壳与衣领共用 `Mat_DarkPlastic`，只能靠 `WeaponRoot` / `Ankle` 限定范围才不误伤；头饰必须在 `MergeBodyRuntime` 之后创建，否则被扫进 `MergedStatic_*`；戴帽子要把发束压细压短，否则发束直接从帽壳穿出（远看是一颗橙色脑袋）。

@@ -372,8 +372,12 @@ bool P1EvaluateTopInk(
     float2 mapOrigin = _GlobalInkMapOriginXZ.xy;
     float2 mapSize = max(float2(0.001, 0.001), _GlobalInkMapOriginXZ.zw);
     float2 inkUV = saturate((positionWS.xz - mapOrigin) / mapSize);
+    float2 inkTexelUV = _GlobalInkTexelSize.xy > 1e-6
+        ? _GlobalInkTexelSize.xy
+        : float2(1.0 / 4096.0, 1.0 / 4096.0);
 
-    float4 inkSample = SAMPLE_TEXTURE2D(_GlobalInkAtlasTex, sampler_LinearClamp, inkUV);
+    float4 inkSample = P1SampleInkAtlasGrad(_GlobalInkAtlasTex, sampler_LinearClamp,
+        inkUV, inkTexelUV, positionWS);
 
     // 三次 B 样条重建（与 InkGround ForwardLit 同款）：C1 连续场 + 解析梯度，
     // 顶面墨缘观感与地面一致；_P1InkBicubicStrength = 0 时逐位回到双线性旧行为。
@@ -381,12 +385,13 @@ bool P1EvaluateTopInk(
     float2 gradAmtCubicTexel = float2(0.0, 0.0);
     if (bicu > 0.001)
     {
-        float2 texelUVs = _GlobalInkTexelSize.xy > 1e-6 ? _GlobalInkTexelSize.xy : float2(1.0 / 4096.0, 1.0 / 4096.0);
         float4 cubicGradX, cubicGradY;
+        // 导数上限按相机距离自适应（近景 2 / 远景 8 纹元），见 P1InkAtlasTexelBudget。
+        float2 maxTexelsUV = P1InkAtlasTexelBudget(positionWS) * inkTexelUV;
         float4 cubicSample = P1SampleInkAtlasCubicGrad(_GlobalInkAtlasTex, sampler_LinearClamp,
-            inkUV, texelUVs,
-            clamp(ddx(inkUV), -8.0 * texelUVs, 8.0 * texelUVs),
-            clamp(ddy(inkUV), -8.0 * texelUVs, 8.0 * texelUVs),
+            inkUV, inkTexelUV,
+            clamp(ddx(inkUV), -maxTexelsUV, maxTexelsUV),
+            clamp(ddy(inkUV), -maxTexelsUV, maxTexelsUV),
             cubicGradX, cubicGradY);
         gradAmtCubicTexel = float2(cubicGradX.a, cubicGradY.a);
         inkSample = lerp(inkSample, cubicSample, bicu);
@@ -406,8 +411,9 @@ bool P1EvaluateTopInk(
     float maskEdge = clamp(fw * 1.2, 0.01, 0.06);
     float inkMask = smoothstep(0.55 - maskEdge, 0.72 + maskEdge, amt) * upness;
 
-    // 墨缘接触阴影 halo：smoothstep(0.03,0.55,amt) * (1-inkMask)，按太阳 XZ 方向给 shaded 压暗
-    float halo = smoothstep(0.03, 0.55, amt) * (1.0 - inkMask) * upness;
+    // 墨缘接触阴影 halo：smoothstep(0.12,0.36,amt) * (1-inkMask)，按太阳 XZ 方向给 shaded 压暗。
+    // 带宽与 InkGround 对齐（原来 0.03~0.55 横跨 4~6 纹素，读作一圈灰褐色脏边）。
+    float halo = smoothstep(0.12, 0.36, amt) * (1.0 - inkMask) * upness;
     if (inkMask <= 0.005 && halo <= 0.005)
         return false;
 

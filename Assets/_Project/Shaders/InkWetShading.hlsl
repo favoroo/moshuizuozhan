@@ -206,8 +206,8 @@ float3 P1InkApplyTangentPerturb(float3 tn, float3 N, float3 T1, float3 T2, half 
 //
 // 采样 16 tap（4×4 整数纹元），每 tap 解析一阶导数权重，梯度按「每纹元」返回，
 // 由调用方按需换算成每米 / 每双纹元量纲。mip 安全：所有 tap 用
-// SAMPLE_TEXTURE2D_GRAD，屏幕空间导数钳到 ±8 纹元（INKWAVE textureGrad 同款钳制，
-// 远观防闪；图集默认无 mip 时该钳制无副作用）。
+// SAMPLE_TEXTURE2D_GRAD，屏幕空间导数由调用方按 P1InkAtlasTexelBudget 钳制
+// （近景 2 / 远景 8 纹元）；函数内部再钳 ±8 纹元只是兜底，正常不会触发。
 // ----------------------------------------------------------------------------
 
 // 三次 B 样条核：输入连续纹元坐标 x，输出 4 个整数纹元（floor(x)-1 .. floor(x)+2）
@@ -227,6 +227,35 @@ void P1CubicBSplineWeights(float x, out float4 w, out float4 dw)
                 -2.0 * f + 1.5 * f2,
                 2.0 * g - 1.5 * g2,
                 f2 * 0.5);
+}
+
+// ----------------------------------------------------------------------------
+// 墨迹图集 mip 上限（按相机距离自适应）
+//
+// 图集是「硬边覆盖率场 + 墨缘接触阴影 halo」：2985×4096 铺 40×56m ≈ 1.37cm/纹素。
+// 地面是掠射角观察，硬件按屏幕导数会选到 mip 3~4（单纹素 11~22cm），墨缘和贴地阴影
+// 被降采样糊成一片 —— 实测同一机位关 mip 时墨缘是 1px 硬边，开 mip 后变成 6~10px 渐变。
+// 调用方用的是内联 sampler_LinearClamp（aniso 恒 1，RenderTexture.anisoLevel 不生效），
+// 所以这里改成显式梯度：近景把 mip 封在 ~mip1（2×2 纹素 ≈2.7cm）保住硬边，
+// 远景放宽到 8 纹素（mip3）继续压摩尔纹。
+// ----------------------------------------------------------------------------
+float2 P1InkAtlasTexelBudget(float3 positionWS)
+{
+    float camDist = distance(positionWS, _WorldSpaceCameraPos);
+    // 12m 内 2 纹素、40m 外 8 纹素，中间线性过渡
+    float maxTexels = lerp(2.0, 8.0, saturate((camDist - 12.0) * (1.0 / 28.0)));
+    return float2(maxTexels, maxTexels);
+}
+
+// 图集主采样：显式梯度版 SAMPLE_TEXTURE2D，mip 上限见上。
+float4 P1SampleInkAtlasGrad(
+    TEXTURE2D_PARAM(tex, samp),
+    float2 uv, float2 texelUV, float3 positionWS)
+{
+    float2 maxTexelsUV = P1InkAtlasTexelBudget(positionWS) * texelUV;
+    float2 dx = clamp(ddx(uv), -maxTexelsUV, maxTexelsUV);
+    float2 dy = clamp(ddy(uv), -maxTexelsUV, maxTexelsUV);
+    return SAMPLE_TEXTURE2D_GRAD(tex, samp, uv, dx, dy);
 }
 
 // 重建预乘 RGBA 并返回每纹元梯度（gradX/gradY = d/d(texelX), d/d(texelY)）。

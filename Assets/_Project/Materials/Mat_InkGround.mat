@@ -129,7 +129,7 @@ Material:
     - _ClearCoatSmoothness: 0
     - _ClearcoatStrength: 1.4
     - _CoffeeRingStrength: 0.55
-    - _ContactShadowStrength: 0.6
+    - _ContactShadowStrength: 0.3
     - _Cull: 2
     - _Cutoff: 0.5
     - _DetailAlbedoMapScale: 1

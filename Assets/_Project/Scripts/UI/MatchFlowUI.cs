@@ -114,6 +114,11 @@ namespace P1.UI
         private TextMeshProUGUI _homeSettingsInfo;
         private TextMeshProUGUI _homeRecordInfo;
         private TextMeshProUGUI _homeMapInfo;
+        // 衣柜卡（下一级解锁文案）与成就卡（已解锁数）的读数行，回首页时随等级/成就刷新。
+        private TextMeshProUGUI _homeLockerInfo;
+        private TextMeshProUGUI _homeAchieveInfo;
+        // 衣柜卡右上角「NEW」角标：只有「上次打开衣柜之后又解锁了新外观」时才亮。
+        private RectTransform _homeLockerPip;
 
         // 首页 Hero 卡头部的 Bot 难度四档段选（新手/轻松/普通/硬核），选择结果持久化到 GameSettingsService。
         private readonly UIInkShapeGraphic[] _difficultyShapes =
@@ -198,6 +203,19 @@ namespace P1.UI
         private RectTransform _levelUpBadgeRoot;
         private TextMeshProUGUI _levelUpText;
         private UISpringMotion _levelUpMotion;
+
+        // 结算「解锁」页签：与升级页签同款胶囊（奖励金），骑在卡片右上边框上。
+        // 本局新解锁的外观在结算构建时算一次存进 _unlockCosmetics，动画阶段只负责显示，
+        // 避免每帧遍历外观目录。
+        private RectTransform _unlockBadgeRoot;
+        private TextMeshProUGUI _unlockText;
+        private UISpringMotion _unlockMotion;
+        private readonly List<CosmeticDef> _unlockCosmetics = new List<CosmeticDef>(4);
+        private bool _unlockBadgeShown;
+        // 页签的设计宽与「不与左侧升级页签相撞」的可用上限：文案变长时只放大到上限。
+        private float _unlockBadgeBaseWidth;
+        private float _unlockBadgeMaxWidth;
+
         private ProfileMatchResult _profileResult;
         private bool _profileSettled;
         private int _lastLevelUpStep;
@@ -358,7 +376,7 @@ namespace P1.UI
         /// 2. 左侧 Hero 大卡（主行动黄实底）：4px 墨框 + Hero 硬影 (6,-7)、左上「PLAY」黑底白字角签、
         ///    120 号 display 粗体中文标题、`·` 分隔的密集信息行、桌面版深色规则板、
         ///    底部「开始游戏 》》」墨底金字大 CTA（按钮硬影 + UIJellyButton 按压物理）；
-        /// 3. 右侧 2×2 次级卡：纸白底 + 3px 墨框 + 面板硬影 (4,-5) + 顶部 5px 身份色带
+        /// 3. 右侧 2×3 次级卡：纸白底 + 3px 墨框 + 面板硬影 (4,-5) + 顶部 5px 身份色带
         ///    + 左上角签 + 一行 `·` 密集信息 + `》` 行进箭头（只有可点卡才放箭头）；
         /// 4. 左下 / 右下黑底角签（社区位 / 版本号）落在卡片区之外，不抢主角；
         /// 5. 内容全部放进 SafeArea，入场按 0.05s/张错峰 pop-in（0.22s Back-Out）。
@@ -411,7 +429,7 @@ namespace P1.UI
             ReparentInto(checkUpdateButton != null ? checkUpdateButton.transform : null, safeRect);
             RetireLegacyTopLayoutButton();
 
-            // 4) 卡片：Hero → 2×2 → 角签（入场顺序 = 构建顺序）
+            // 4) 卡片：Hero → 2×3 → 角签（入场顺序 = 构建顺序）
             BuildHomeHero(theme, m, mobile);
             BuildHomeTiles(theme, m, mobile);
             BuildHomeCornerTags(theme, m, mobile);
@@ -495,6 +513,7 @@ namespace P1.UI
 
             // 首页重建会销毁并重建整棵卡片树：先收掉详情浮层，避免它挂在旧几何上。
             HomeInfoOverlay.CloseIfOpen();
+            LockerOverlay.CloseIfOpen();
 
             // 场景遗留按钮（开赛 / 检查更新）是 readyPanel 的持久节点，
             // 重建时必须先搬回 readyPanel 再销毁旧安全区，否则会跟着 MenuSafeArea 一起被 Destroy：
@@ -927,9 +946,14 @@ namespace P1.UI
             StyleStartButtonGeometric(theme, UITypography.FontSnapped(m.CtaFont), mobile);
         }
 
-        /// <summary>右侧 2×2 次级卡：战绩（信息）/ 系统设置（可点）/ 地图选择（可点）/ 修改按钮位置（可点）。</summary>
+        /// <summary>右侧 2×3 次级卡：战绩 / 衣柜 / 成就 / 地图选择 / 系统设置 / 修改按钮位置。</summary>
         private void BuildHomeTiles(UIThemeSO theme, HomeMenuMetrics m, bool mobile)
         {
+            // 每次重建都是新节点，旧的 pip 引用随旧树一起销毁，必须先置空再按需点亮。
+            _homeLockerPip = null;
+            // 首次进首页时给「已看过水位」落基线（否则新玩家一开局就挂 NEW）。
+            EnsureLockerSeenBaseline();
+
             BuildHomeTile(new HomeTileSpec
             {
                 Index = 0,
@@ -941,22 +965,35 @@ namespace P1.UI
                 ClickAction = () => ShowHomeInfo(HomeInfoTab.Record),
             }, theme, m, mobile, out _homeRecordInfo, out _);
 
+            // 衣柜：黄色 = 奖励语义（与主行动黄同源），信息行直接回答「再升一级给什么」。
             BuildHomeTile(new HomeTileSpec
             {
                 Index = 1,
-                Tag = "SETTINGS",
-                Title = "系统设置",
-                Info = BuildSettingsInfo(),
-                Accent = theme.teamAColor,
+                Tag = "LOOK",
+                Title = "衣柜",
+                Info = BuildLockerInfo(),
+                Accent = ComicStyle.Yellow,
                 Interactive = true,
-                ClickAction = OpenHomeSettings,
-            }, theme, m, mobile, out _homeSettingsInfo, out _);
+                ShowNewPip = true,
+                ClickAction = OpenLockerFromHome,
+            }, theme, m, mobile, out _homeLockerInfo, out _);
+
+            BuildHomeTile(new HomeTileSpec
+            {
+                Index = 2,
+                Tag = "ACHIEVE",
+                Title = "成就",
+                Info = BuildAchievementInfo(),
+                Accent = ComicStyle.Green,
+                Interactive = true,
+                ClickAction = () => ShowHomeInfo(HomeInfoTab.Achievements),
+            }, theme, m, mobile, out _homeAchieveInfo, out _);
 
             MapDefinition currentMap = MapCatalogService.Selected;
             MapDefinition otherMap = MapCatalogService.OtherThan(currentMap);
             BuildHomeTile(new HomeTileSpec
             {
-                Index = 2,
+                Index = 3,
                 Tag = "MAP",
                 Title = currentMap.DisplayName,
                 Info = BuildMapInfo(currentMap, otherMap),
@@ -968,7 +1005,18 @@ namespace P1.UI
 
             BuildHomeTile(new HomeTileSpec
             {
-                Index = 3,
+                Index = 4,
+                Tag = "SETTINGS",
+                Title = "系统设置",
+                Info = BuildSettingsInfo(),
+                Accent = theme.teamAColor,
+                Interactive = true,
+                ClickAction = OpenHomeSettings,
+            }, theme, m, mobile, out _homeSettingsInfo, out _);
+
+            BuildHomeTile(new HomeTileSpec
+            {
+                Index = 5,
                 Tag = "LAYOUT",
                 // 标题只放 4 个字：移动端字号 ×1.28 后 6 个字的标题会顶进 `》` 走廊（可用宽 254px）
                 Title = "按键位置",
@@ -977,6 +1025,48 @@ namespace P1.UI
                 Interactive = true,
                 ClickAction = OpenLayoutCustomizerFromHome,
             }, theme, m, mobile, out _, out _);
+        }
+
+        /// <summary>
+        /// 衣柜卡信息行：「下一级解锁：薄荷汽水」/「外观已全部解锁」。
+        /// 判定是纯函数（CosmeticUnlockMath），这里只负责兜异常，装饰失败不能拖垮首页。
+        /// </summary>
+        private static string BuildLockerInfo()
+        {
+            try
+            {
+                PlayerProfile profile = PlayerProfile.Current;
+                // 档案为空时 NextUnlockText 会误报「外观已全部解锁」，这里先拦一道给中性文案。
+                if (profile == null) return "外观 · 点击查看衣柜";
+                return CosmeticUnlockMath.NextUnlockText(profile);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[MatchFlowUI] 衣柜卡读取外观解锁失败：" + ex.Message);
+            }
+            return "外观 · 点击查看衣柜";
+        }
+
+        /// <summary>成就卡信息行：已解锁成就数 / 总数（移动端省掉尾注，避免挤爆信息行）。</summary>
+        private static string BuildAchievementInfo()
+        {
+            try
+            {
+                PlayerProfile profile = PlayerProfile.Current;
+                if (profile != null)
+                {
+                    int unlocked = profile.UnlockedAchievements.Count;
+                    int total = AchievementCatalog.TotalCount;
+                    return UITypography.IsMobileLike
+                        ? $"成就 {unlocked}/{total}"
+                        : $"已解锁成就 {unlocked}/{total} · 点击查看";
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[MatchFlowUI] 成就卡读取档案失败：" + ex.Message);
+            }
+            return "已解锁成就 0/0";
         }
 
         private static string BuildMapInfo(MapDefinition current, MapDefinition other)
@@ -1026,6 +1116,11 @@ namespace P1.UI
             public bool Interactive;
             public MapDefinition MapPreview;
             public System.Action ClickAction;
+            /// <summary>
+            /// 该卡是否预留右上角「NEW」小角标槽位（当前只有衣柜卡）。节点常驻、显隐由
+            /// 「已看过水位」决定，这样结算解锁后回首页只切显隐、不必重建整棵卡片树。
+            /// </summary>
+            public bool ShowNewPip;
         }
 
         /// <summary>一张次级卡的运行时引用（复用已有按钮 / 刷新读数时用）。</summary>
@@ -1107,28 +1202,69 @@ namespace P1.UI
             float contentHeight = tileSize.y - m.TileBorderWidth * 2f;
             float rowWidth = contentWidth - m.TilePadding.x * 2f;
 
+            float titleSize = UITypography.FontSnapped(m.TileTitleFont);
+            float infoSize = UITypography.FontSnapped(m.TileInfoFont);
+            float infoHeight = infoSize * 1.7f;
+
+            // 2×3 后卡片明显变矮（参考桌面 396→256，20:9 真机仅 ≈197）。竖向预算按
+            // 「上下内边距 + 角签 + 呼吸位 + 标题 + 信息行 + 4px 行间缝」分配，超支时依次让位：
+            // 先收内边距（24/22 → 最低 12），再收角签与标题之间的呼吸位（20/18 → 最低 8），
+            // 最后才降标题字号（且不低于 20）。标题是卡片的主读数，内边距只是留白，先牺牲留白。
+            float padY = m.TilePadding.y;
+            float titleGap = mobile ? 20f : 18f;
+            float titleHeight = titleSize * 1.25f;
+            const float titleInfoGap = 4f; // 标题行与信息行的最小缝：贴着排会读成一坨
+
+            float fixedOther = m.TileTagSize.y + infoHeight + titleInfoGap;
+            float budget = contentHeight - fixedOther;
+            if (padY * 2f + titleGap + titleHeight > budget)
+            {
+                // 先收内边距（最多收到 12），把省下的空间还给标题。
+                float overflow = padY * 2f + titleGap + titleHeight - budget;
+                float padFloor = 12f;
+                float padCut = Mathf.Min(overflow, Mathf.Max(0f, padY - padFloor) * 2f);
+                padY -= padCut * 0.5f;
+                overflow -= padCut;
+                if (overflow > 0f)
+                {
+                    // 再收呼吸位（最低 8）。
+                    float gapCut = Mathf.Min(overflow, Mathf.Max(0f, titleGap - 8f));
+                    titleGap -= gapCut;
+                    overflow -= gapCut;
+                }
+                if (overflow > 0f)
+                {
+                    // 最后降标题字号：只降不升，版面表的值是上限；底线 20（正文可读下限）。
+                    float maxTitle = Mathf.Floor((budget - padY * 2f - titleGap) / 1.25f);
+                    float fitted = Mathf.Max(20f, Mathf.Floor(maxTitle * 0.5f) * 2f);
+                    if (fitted < titleSize) titleSize = fitted;
+                    titleHeight = titleSize * 1.25f;
+                }
+            }
+
             // 角签宽度按标签文本自然宽度自适应（SETTINGS 比 RECORD 宽得多，固定 140px 会画出黑底）。
             CreateStageTag(content, "TileTag", spec.Tag, m.TileTagSize, m.TileTagFont, theme,
-                ComicStyle.Ink, ComicStyle.Paper, m.TilePadding, TextAlignmentOptions.Center, rowWidth);
-
-            float titleSize = UITypography.FontSnapped(m.TileTitleFont);
-            float titleTop = m.TilePadding.y + m.TileTagSize.y + (mobile ? 20f : 18f);
-            float titleHeight = titleSize * 1.25f;
+                ComicStyle.Ink, ComicStyle.Paper, new Vector2(m.TilePadding.x, padY),
+                TextAlignmentOptions.Center, rowWidth);
 
             // `》` 独占标题行右侧走廊：双书名号实际约 2em 宽（旧值按 1.2em 预留），
             // 且不能再和信息行共行——移动端字号 ×1.28 后短信息也会顶到箭头下面。
-            float arrowSize = UITypography.FontSnapped(m.TileArrowFont);
+            // 标题字号被压小时箭头跟着收，否则箭头会比标题行还高、下沿伸进信息行。
+            float arrowSize = Mathf.Min(UITypography.FontSnapped(m.TileArrowFont), titleSize);
             float arrowHeight = arrowSize * 1.1f;
             float arrowGutter = spec.Interactive ? arrowSize * 2.1f + 12f : 0f;
+
+            float infoTop = contentHeight - padY - infoHeight;
+            float titleTop = padY + m.TileTagSize.y + titleGap;
+
+            // 兜底：预算再紧也不许标题压进信息行（降字号失败时的最后一道闸，只压位置不截字）。
+            float maxTitleTop = infoTop - titleInfoGap - titleHeight;
+            if (titleTop > maxTitleTop) titleTop = Mathf.Max(padY + m.TileTagSize.y, maxTitleTop);
 
             titleText = CreateBoardText(content, "TileTitle", spec.Title, titleSize, true, ComicStyle.Ink,
                 new Vector2(m.TilePadding.x, titleTop),
                 new Vector2(rowWidth - arrowGutter, titleHeight),
                 TextAlignmentOptions.MidlineLeft, -2f, FontStyles.Bold);
-
-            float infoSize = UITypography.FontSnapped(m.TileInfoFont);
-            float infoHeight = infoSize * 1.7f;
-            float infoTop = contentHeight - m.TilePadding.y - infoHeight;
 
             infoText = CreateBoardText(content, "TileInfo", spec.Info, infoSize, false,
                 ComicStyle.WithAlpha(ComicStyle.Ink, 0.72f),
@@ -1136,27 +1272,41 @@ namespace P1.UI
                 new Vector2(rowWidth, infoHeight),
                 TextAlignmentOptions.MidlineLeft, 0.5f, FontStyles.Bold);
 
-            // 地图卡的小预览：占用标题与信息行之间的空白，右对齐，不压任何文字。
+            // 地图卡的小预览：2×3 后行高只剩约 190~260（20:9 真机 ≈197），标题与信息行之间
+            // 通常只剩 40px 左右（旧 2×2 有 100+）。所以先试中间那条空白带，放不下就退回
+            // 「角签行右侧」——宁可画成小缩略图，也不让预览在真机上凭空消失。
             if (spec.MapPreview != null)
             {
-                float previewTop = titleTop + titleHeight + (mobile ? 6f : 10f);
-                float previewAvailable = infoTop - previewTop - (mobile ? 4f : 8f);
-                if (previewAvailable >= 60f)
+                float previewTop = titleTop + titleHeight + (mobile ? 4f : 8f);
+                float band = infoTop - previewTop - (mobile ? 2f : 4f);
+                float previewHeight;
+                float previewY;
+                if (band >= 40f)
                 {
-                    float previewHeight = previewAvailable;
-                    float previewWidth = previewHeight * 40f / 56f;
-                    float maxPreviewWidth = rowWidth * 0.46f;
-                    if (previewWidth > maxPreviewWidth)
-                    {
-                        previewWidth = maxPreviewWidth;
-                        previewHeight = previewWidth * 56f / 40f;
-                    }
+                    previewHeight = band;
+                    previewY = previewTop;
+                }
+                else
+                {
+                    previewHeight = m.TileTagSize.y;
+                    previewY = padY;
+                }
 
+                float previewWidth = previewHeight * 40f / 56f;
+                float maxPreviewWidth = rowWidth * 0.3f;
+                if (previewWidth > maxPreviewWidth && maxPreviewWidth > 0f)
+                {
+                    previewWidth = maxPreviewWidth;
+                    previewHeight = previewWidth * 56f / 40f;
+                }
+
+                if (previewHeight >= 32f && previewWidth >= 24f)
+                {
                     RectTransform preview = MapPreviewBuilder.BuildPreview(
                         content, spec.MapPreview, new Vector2(previewWidth, previewHeight), theme, "TileMapPreview");
                     preview.anchorMin = preview.anchorMax = new Vector2(1f, 1f);
                     preview.pivot = new Vector2(1f, 1f);
-                    preview.anchoredPosition = new Vector2(-m.TilePadding.x, -previewTop);
+                    preview.anchoredPosition = new Vector2(-m.TilePadding.x, -previewY);
                 }
             }
 
@@ -1169,6 +1319,30 @@ namespace P1.UI
                     TextAlignmentOptions.MidlineRight, 0f, FontStyles.Bold);
 
                 AttachTileInteraction(go, shape, content, spec.ClickAction);
+            }
+
+            // 右上角「NEW」角标：与左上角签同一行（不占标题/信息行），
+            // 复用 CreateStageTag 的胶囊 + Tag 硬影，建好后改成右上锚点。
+            // 节点常驻、显隐由「已看过水位」决定——结算解锁后回首页只刷新显隐，
+            // 不重建整棵树也能让角标亮起来。
+            if (spec.ShowNewPip)
+            {
+                // 宽度按「NEW」三个字符的自然宽 + 20px 内缩给足：角签只放大不缩小，
+                // 固定半宽（59/70）在移动端 26 号字下会溢字。
+                float pipWidth = Mathf.Ceil(UITypography.FontSnapped(m.TileTagFont) * 2.1f) + 20f;
+                TextMeshProUGUI pip = CreateStageTag(content, "TileNewPip", "NEW",
+                    new Vector2(pipWidth, m.TileTagSize.y), m.TileTagFont, theme,
+                    ComicStyle.Yellow, ComicStyle.Ink, m.TilePadding, TextAlignmentOptions.Center, rowWidth);
+                if (pip != null)
+                {
+                    var pipRect = (RectTransform)pip.transform.parent;
+                    pipRect.anchorMin = new Vector2(1f, 1f);
+                    pipRect.anchorMax = new Vector2(1f, 1f);
+                    pipRect.pivot = new Vector2(1f, 1f);
+                    pipRect.anchoredPosition = new Vector2(-m.TilePadding.x, -padY);
+                    pipRect.gameObject.SetActive(HasUnseenCosmetics());
+                    _homeLockerPip = pipRect;
+                }
             }
 
             // 规范禁止 Truncate：宽度只能靠版面表兜住，超宽在开发期就报出来。
@@ -1231,7 +1405,7 @@ namespace P1.UI
         }
 
         /// <summary>
-        /// 首页顶部右侧「自定义按键」小按钮已下线：入口与 2×2 卡阵的「按键位置」卡完全重复，
+        /// 首页顶部右侧「自定义按键」小按钮已下线：入口与 2×3 卡阵的「按键位置」卡完全重复，
         /// 同一屏出现两颗一模一样的入口只会让人犹豫点哪个。旧场景/旧截图里遗留的节点一律关掉，
         /// 不再摆位、不再换肤（重开它请改回 <c>BuildHomeTiles</c> 的调用与度量）。
         /// </summary>
@@ -1582,6 +1756,77 @@ namespace P1.UI
             return "LV.1 · 胜场 0/0 · 涂地 0㎡";
         }
 
+        /// <summary>
+        /// 首页「衣柜」卡：打开外观衣柜浮层（独立 Overlay Canvas，层级 65，压过 HUD 与武器抽屉）。
+        /// 打开即记下「当前已解锁件数」，下次回首页时 NEW 角标只在又有新解锁时才亮。
+        /// </summary>
+        private void OpenLockerFromHome()
+        {
+            if (readyPanel == null) return;
+
+            // 先落「已看过」水位再开窗：即使衣柜构建失败，也不会每次回首页都亮角标。
+            MarkCosmeticsSeen();
+            // 角标立刻灭掉：玩家已经在看衣柜了，再挂一个 NEW 只会显得没响应。
+            if (_homeLockerPip != null) _homeLockerPip.gameObject.SetActive(false);
+
+            try
+            {
+                LockerOverlay.Show(readyPanel.transform as RectTransform, UIThemeSO.Resolve(uiTheme), 65);
+            }
+            catch (System.Exception ex)
+            {
+                // 装饰性入口失败不该让首页卡死（也避免 PlayMode 的 log-error 门禁）。
+                Debug.LogWarning("[MatchFlowUI] 打开衣柜失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>衣柜「已看过」水位键：只存件数，不碰 PlayerProfile（并行改动面隔离）。</summary>
+        private const string LockerSeenCountKey = "P1.Locker.SeenUnlockedCount";
+
+        /// <summary>当前档案下已解锁的外观件数（异常时按 0 处理，只影响角标不影响衣柜本身）。</summary>
+        private static int CurrentUnlockedCosmeticCount()
+        {
+            try
+            {
+                return CosmeticUnlockMath.UnlockedCount(PlayerProfile.Current);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[MatchFlowUI] 读取外观解锁数失败：" + ex.Message);
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 衣柜卡是否该亮 NEW 角标：当前解锁件数 &gt; 上次打开衣柜时的水位。
+        /// 用 PlayerPrefs 而不是 PlayerProfile，避免和并行修改的存档类冲突。
+        /// </summary>
+        private static bool HasUnseenCosmetics()
+        {
+            int seen = PlayerPrefs.GetInt(LockerSeenCountKey, -1);
+            return seen >= 0 && CurrentUnlockedCosmeticCount() > seen;
+        }
+
+        /// <summary>
+        /// 首次构建首页时给「已看过水位」落一个基线：不落的话默认值 0 会让新玩家一开局
+        /// 就挂一个 NEW（指向的其实是他本来就有的默认外观）。只在键不存在时写一次。
+        /// </summary>
+        private static void EnsureLockerSeenBaseline()
+        {
+            if (PlayerPrefs.HasKey(LockerSeenCountKey)) return;
+            PlayerPrefs.SetInt(LockerSeenCountKey, CurrentUnlockedCosmeticCount());
+            PlayerPrefs.Save();
+        }
+
+        /// <summary>把「已看过」水位抬到当前解锁件数（只升不降：降级不会让玩家再看一遍旧解锁）。</summary>
+        private static void MarkCosmeticsSeen()
+        {
+            int current = CurrentUnlockedCosmeticCount();
+            if (current <= PlayerPrefs.GetInt(LockerSeenCountKey, -1)) return;
+            PlayerPrefs.SetInt(LockerSeenCountKey, current);
+            PlayerPrefs.Save();
+        }
+
         /// <summary>首页读数（战绩 / 设置 / 当前地图）刷新：回到主菜单或设置项变化时数值会变。</summary>
         private void RefreshHomeInfo()
         {
@@ -1602,6 +1847,25 @@ namespace P1.UI
                 MapDefinition currentMap = MapCatalogService.Selected;
                 _homeMapInfo.text = BuildMapInfo(currentMap, MapCatalogService.OtherThan(currentMap));
                 FitTileInfoText(_homeMapInfo);
+            }
+
+            // 衣柜「下一级解锁」与成就计数都会随结算变化（升级 / 解锁成就），回首页必须重算。
+            if (_homeLockerInfo != null)
+            {
+                _homeLockerInfo.text = BuildLockerInfo();
+                FitTileInfoText(_homeLockerInfo);
+            }
+
+            if (_homeAchieveInfo != null)
+            {
+                _homeAchieveInfo.text = BuildAchievementInfo();
+                FitTileInfoText(_homeAchieveInfo);
+            }
+
+            // 角标也按当前水位重算：本局结算解锁了新外观时，回首页立刻亮起来。
+            if (_homeLockerPip != null)
+            {
+                _homeLockerPip.gameObject.SetActive(HasUnseenCosmetics());
             }
         }
 
@@ -2678,6 +2942,53 @@ namespace P1.UI
             _levelUpText.overflowMode = TextOverflowModes.Overflow;
 
             _levelUpBadgeRoot.gameObject.SetActive(false);
+
+            // 解锁页签：与升级页签同款胶囊，骑在卡片右上边框上（同一行左右各一枚，不叠）。
+            // 文案在结算构建时按「本局新解锁的外观」写好，动画阶段只负责弹出。
+            var unlockGo = new GameObject("UnlockBadge", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(UIInkShapeGraphic), typeof(UISpringMotion));
+            unlockGo.transform.SetParent(frameGo.transform, false);
+            _unlockBadgeRoot = (RectTransform)unlockGo.transform;
+            _unlockBadgeRoot.anchorMin = new Vector2(1f, 1f);
+            _unlockBadgeRoot.anchorMax = new Vector2(1f, 1f);
+            _unlockBadgeRoot.pivot = new Vector2(1f, 1f);
+            _unlockBadgeRoot.anchoredPosition = new Vector2(-inset, 16f);
+            _unlockBadgeRoot.sizeDelta = new Vector2(mobile ? 300f : 264f, mobile ? 34f : 30f);
+            _unlockBadgeBaseWidth = _unlockBadgeRoot.sizeDelta.x;
+            // 同一行左边还有升级页签（左内缩 + 自身宽），中间留 16px 缝：文案撑宽时不许撞上去。
+            float levelBadgeWidth = mobile ? 240f : 216f;
+            _unlockBadgeMaxWidth = Mathf.Max(_unlockBadgeBaseWidth, frameW - inset * 2f - levelBadgeWidth - 16f);
+
+            var unlockShape = unlockGo.GetComponent<UIInkShapeGraphic>();
+            unlockShape.Shape = UIInkShape.Pill; // 圆角化：与升级页签同款胶囊
+            unlockShape.BorderWidth = ComicStyle.BorderThin;
+            unlockShape.BorderColor = ComicStyle.Ink;
+            unlockShape.color = ComicStyle.Yellow; // 金 = 奖励（与主行动黄同源）
+            unlockShape.HardShadow = false;
+            unlockShape.raycastTarget = false;
+
+            _unlockMotion = unlockGo.GetComponent<UISpringMotion>();
+            _unlockMotion.SetTheme(resolved);
+
+            var unlockTxtGo = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(TextMeshProUGUI));
+            unlockTxtGo.transform.SetParent(_unlockBadgeRoot, false);
+            Stretch(unlockTxtGo.GetComponent<RectTransform>());
+
+            _unlockText = unlockTxtGo.GetComponent<TextMeshProUGUI>();
+            _unlockText.text = "解锁";
+            _unlockText.font = resolved.ResolveFont(true, "解锁");
+            // 18（移动端 → 24）：规范禁止 13~16px 的可读文字。左侧升级页签历史值是 16，
+            // 已在交付说明里标注为既有偏差，这里不跟着复刻。
+            _unlockText.fontSize = UITypography.FontSnapped(18f);
+            _unlockText.fontStyle = FontStyles.Bold;
+            _unlockText.alignment = TextAlignmentOptions.Center;
+            _unlockText.color = ComicStyle.Ink;
+            _unlockText.raycastTarget = false;
+            _unlockText.textWrappingMode = TextWrappingModes.NoWrap;
+            _unlockText.overflowMode = TextOverflowModes.Overflow;
+
+            _unlockBadgeRoot.gameObject.SetActive(false);
             _reportPanelRoot.gameObject.SetActive(false);
         }
 
@@ -2918,6 +3229,7 @@ namespace P1.UI
         {
             if (HomeInfoOverlay.IsOpen) return false;
             if (MapSelectOverlay.IsOpen) return false;
+            if (LockerOverlay.IsOpen) return false;
             if (MobileLayoutCustomizer.IsEditingAny) return false;
             return true;
         }
@@ -2974,7 +3286,7 @@ namespace P1.UI
         private void Update()
         {
             // 首页几何守护：Android 启动/旋转瞬间安全区与画布可能尚未 settle，
-            // EnsureReadyVisuals 只在 Awake 构建一次，首帧脏几何会把 2×2 卡阵永久推出屏幕
+            // EnsureReadyVisuals 只在 Awake 构建一次，首帧脏几何会把 2×3 卡阵永久推出屏幕
             // （真机 20:9 实测：右列整体出屏、下排与 CTA 被裁）。几何稳定一帧后即用真实值重建。
             if (_homeGeometryKeyValid && readyPanel != null && readyPanel.activeInHierarchy)
             {
@@ -2996,10 +3308,10 @@ namespace P1.UI
             var match = MatchManager.Instance;
             if (match == null) return;
 
-            // 快捷键开赛与重开：首页信息浮层 / 移动端按键布局编辑打开时让路，
+            // 快捷键开赛与重开：首页信息浮层 / 衣柜 / 移动端按键布局编辑打开时让路，
             // 否则 Space/Enter 会隔着遮罩直接把比赛开了（布局编辑把 timeScale 置 0，倒计时会冻住）。
             if (!Application.isMobilePlatform && !MobileTouchUI.IsTouchSimulationActive &&
-                !HomeInfoOverlay.IsOpen && !MobileLayoutCustomizer.IsEditingAny &&
+                !HomeInfoOverlay.IsOpen && !LockerOverlay.IsOpen && !MobileLayoutCustomizer.IsEditingAny &&
                 (match.CurrentPhase == MatchManager.Phase.Ready || match.CurrentPhase == MatchManager.Phase.Result))
             {
                 var kb = UnityEngine.InputSystem.Keyboard.current;
@@ -3054,7 +3366,11 @@ namespace P1.UI
 
             // 任何离开首页的阶段切换都必须收掉详情浮层：readyPanel 会被关掉，
             // 静态 IsOpen 若不复位会一直挡住开赛快捷键。
-            if (phase != MatchManager.Phase.Ready) HomeInfoOverlay.CloseIfOpen();
+            if (phase != MatchManager.Phase.Ready)
+            {
+                HomeInfoOverlay.CloseIfOpen();
+                LockerOverlay.CloseIfOpen();
+            }
 
             if (phase == MatchManager.Phase.Ready)
             {
@@ -3136,6 +3452,10 @@ namespace P1.UI
         {
             if (_reportPanelRoot != null) _reportPanelRoot.gameObject.SetActive(false);
             if (_levelUpBadgeRoot != null) _levelUpBadgeRoot.gameObject.SetActive(false);
+            // 解锁页签挂在战报卡上：收起战报卡时必须一起复位，否则第二局会残留上一局的「解锁 · X」。
+            if (_unlockBadgeRoot != null) _unlockBadgeRoot.gameObject.SetActive(false);
+            _unlockBadgeShown = false;
+            _unlockCosmetics.Clear();
             if (_winMarkA != null) _winMarkA.gameObject.SetActive(false);
             if (_winMarkB != null) _winMarkB.gameObject.SetActive(false);
             _winnerEmphasisApplied = false;
@@ -3540,6 +3860,11 @@ namespace P1.UI
                         TriggerLevelUpBadge(curLvl);
                     }
                 }
+
+                // 2. 解锁页签：经验条走完后再顺延 0.15s 弹出（不打断成长数字的节奏）。
+                //    这里只比较时间轴，不重算外观列表——列表已在 PopulateReportCard 里算过一次。
+                float unlockAt = 0.25f + animDuration + 0.15f;
+                if (postRoll >= unlockAt) ShowUnlockBadge();
             }
         }
 
@@ -3585,6 +3910,79 @@ namespace P1.UI
                     int req = _profileResult.XpRequiredForNextLevel;
                     _xpBarFill.fillAmount = req > 0 ? Mathf.Clamp01((float)_profileResult.OldXp / req) : 0f;
                 }
+            }
+
+            // 本局新解锁外观：结算构建时算一次存字段（等级跨过的 + 本局新成就绑定的），
+            // 动画阶段只读这个列表决定要不要弹「解锁」页签，绝不每帧遍历外观目录。
+            RefreshUnlockBadgeContent();
+        }
+
+        /// <summary>
+        /// 计算并写入「解锁」页签文案（纯数据，构建/入场时调用一次）。
+        /// 无新解锁时把页签收起，避免上一局的文案残留到这一局。
+        /// </summary>
+        private void RefreshUnlockBadgeContent()
+        {
+            _unlockCosmetics.Clear();
+            _unlockBadgeShown = false;
+            if (_unlockBadgeRoot != null) _unlockBadgeRoot.gameObject.SetActive(false);
+
+            if (!_profileSettled) return;
+
+            try
+            {
+                List<CosmeticDef> unlocked = CosmeticUnlockMath.CollectNewlyUnlocked(
+                    _profileResult.OldLevel, _profileResult.NewLevel,
+                    _achievementOutcome != null ? _achievementOutcome.NewlyUnlocked : null);
+                if (unlocked == null || unlocked.Count == 0) return;
+                _unlockCosmetics.AddRange(unlocked);
+            }
+            catch (System.Exception ex)
+            {
+                // 装饰性提示失败不影响战报卡与经验条。
+                Debug.LogWarning("[MatchFlowUI] 结算外观解锁计算失败：" + ex.Message);
+                return;
+            }
+
+            if (_unlockText == null) return;
+
+            // 一件：解锁 · 薄荷汽水；多件：解锁 · 薄荷汽水 等 N 件（不列全名，页签只有一行）。
+            string first = _unlockCosmetics[0].DisplayName;
+            _unlockText.text = _unlockCosmetics.Count > 1
+                ? $"解锁 · {first} 等 {_unlockCosmetics.Count} 件"
+                : $"解锁 · {first}";
+        }
+
+        /// <summary>
+        /// 页签宽度按文案自然宽度撑开（只放大不缩小，与 CreateStageTag 同一口径）：
+        /// 外观名长短差别很大（「薄荷汽水」4 字 vs 更长的称号），固定宽必然溢出胶囊。
+        /// 必须在页签**激活后**测量——TMP 在非激活层级上算 preferredWidth 不可靠（可能得 0）。
+        /// 上限由构建时算好的「不与左侧升级页签相撞」的可用宽兜住。
+        /// </summary>
+        private void FitUnlockBadgeWidth()
+        {
+            if (_unlockBadgeRoot == null || _unlockText == null || _unlockBadgeBaseWidth <= 0f) return;
+
+            float needed = Mathf.Ceil(_unlockText.GetPreferredValues(_unlockText.text).x) + 28f;
+            float maxWidth = Mathf.Max(_unlockBadgeBaseWidth, _unlockBadgeMaxWidth);
+            float width = Mathf.Clamp(needed, _unlockBadgeBaseWidth, maxWidth);
+            _unlockBadgeRoot.sizeDelta = new Vector2(width, _unlockBadgeRoot.sizeDelta.y);
+        }
+
+        /// <summary>
+        /// 弹出「解锁」页签：经验条走完（或升级徽章弹出）之后 0.15s 顺延，
+        /// 不打断经验条动画——它是奖励补充，不该和成长数字抢节奏。
+        /// </summary>
+        private void ShowUnlockBadge()
+        {
+            if (_unlockBadgeShown || _unlockBadgeRoot == null || _unlockCosmetics.Count == 0) return;
+            _unlockBadgeShown = true;
+            _unlockBadgeRoot.gameObject.SetActive(true);
+            FitUnlockBadgeWidth(); // 激活后再量文案宽（非激活层级上 TMP 量不出真实宽度）
+            if (_unlockMotion != null)
+            {
+                _unlockMotion.SnapHome();
+                _unlockMotion.PlayIn(0.05f);
             }
         }
 

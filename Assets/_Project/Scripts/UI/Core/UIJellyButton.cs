@@ -98,7 +98,20 @@ namespace P1.UI
         private void OnDisable()
         {
             _releasing = false;
-            if (background != null && _captured) background.ShadowOffset = _homeShadowOffset;
+
+            // 触屏「按下就隐藏」的按钮（首页整备卡点开即 SetActive(false)）永远收不到 PointerExit，
+            // 悬停/按压态会跨隐藏残留：重新显示时卡片带着悬停硬影与 1.05 缩放回来。
+            // 隐藏即交互结束，这里连同 UISpringMotion 一起复位（缩放由它在 OnDisable 里处理）。
+            _hovered = false;
+            _pressed = false;
+
+            if (background != null && _captured)
+            {
+                background.ShadowOffset = _homeShadowOffset;
+                background.HalftoneAlpha = _homeHalftoneAlpha;
+                if (tintOnHover) background.color = _homeColor;
+            }
+
             RestoreContentInstant();
         }
 

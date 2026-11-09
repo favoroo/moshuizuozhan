@@ -948,6 +948,43 @@ namespace P1.Player
                     health.ApplyMergedBodyRenderers(bodyMerge.Sources, bodyMerge.Merged);
                 }
             }
+
+            // 局外外观：放在 Start 末尾（合并之后）—— 合并会把 Head 下的静态件扫进 MergedStatic_*，
+            // 头饰必须等合并跑完再建；换材质则同时覆盖合并组与已禁用的源件（两者同源材质名，扫描天然兼容）。
+            ApplyLocalPlayerCosmetics();
+        }
+
+        /// <summary>
+        /// 把当前档案装备的外观刷到自己身上。<b>只有本地玩家</b>会命中（Bot 没有 PlayerController），
+        /// 因此 7 个 Bot 保持统一出厂造型，不会出现"整队穿同款"。
+        /// 用 <see cref="PlayerController"/> 的存在性判断而不是 PlayerController.LocalPlayer：
+        /// 后者在 Awake 里赋值，跨对象 Awake 顺序不可靠，而这里要能在任意时机安全调用。
+        /// </summary>
+        public void ApplyLocalPlayerCosmetics()
+        {
+            if (GetComponentInParent<PlayerController>() == null) return;
+
+            ApplyCosmetics(CosmeticUnlockMath.ResolveSet(PlayerProfile.Current));
+        }
+
+        /// <summary>按给定外观刷新（衣柜预览台/外部调用用，避免直读存档）。</summary>
+        public void ApplyCosmetics(in CosmeticSet set)
+        {
+            if (GetComponentInParent<PlayerController>() == null) return;
+
+            CharacterCosmetics.Apply(
+                kidRoot != null ? kidRoot.transform : null,
+                squidRoot != null ? squidRoot.transform : null,
+                weaponRoot != null ? weaponRoot.transform : null,
+                set, _team);
+
+            // 换发型会重算 6 束发根的基准旋转；弹簧链的静止姿态是缓存值，
+            // 不重绑会让头发一直朝旧姿态回弹（看起来像"头发在抖"）。
+            if (kidHairRootPivots != null && kidHairRootPivots.Length > 0)
+            {
+                BindKidRig(spineTransform, neckTransform, headTransform, faceTransform,
+                    kidHairRootPivots, kidHairMidPivots);
+            }
         }
 
         /// <summary>

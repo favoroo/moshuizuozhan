@@ -1214,6 +1214,128 @@ namespace P1.Player
 
         #endregion
 
+        #region Cosmetic Hair & Headgear（局外外观系统）
+
+        // 发型网格缓存：同一样式的同一段只建一次。键 = 样条数组实例哈希 + 段号 + 粗细档（×100）。
+        // 用数组实例身份而不是样式的 Id 字符串，是因为 HairStyleDef 是纯值类型载荷、不带 Id，
+        // 而每个样式在 CosmeticCatalog 静态表里各自持有一份独立数组。
+        private static readonly Dictionary<long, Mesh> _hairStyleMeshCache = new Dictionary<long, Mesh>();
+
+        /// <summary>
+        /// 按 <see cref="HairStyleDef"/> 构建一段触手网格。<paramref name="segment"/>：0 = 根段，1 = 梢段。
+        /// <paramref name="radiusScale"/> 是该束的粗细倍率（发型内部用来做"马尾只有后脑一束粗"这类造型）。
+        /// 参数非法时回退到出厂网格，绝不让角色掉头发。
+        /// </summary>
+        public static Mesh BuildHairStyleMesh(in HairStyleDef style, int segment, float radiusScale)
+        {
+            HairSegmentSpec spec = segment <= 0 ? style.Root : style.Tip;
+            if (spec.Points == null || spec.Points.Length < 7)
+            {
+                return segment <= 0 ? CreateHairSegment1Mesh() : CreateHairSegment2Mesh();
+            }
+
+            float rs = Mathf.Clamp(radiusScale, 0.05f, 3f);
+            int bucket = Mathf.RoundToInt(rs * 100f);
+            long key = ((long)System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(spec.Points) << 21)
+                       ^ ((long)(segment & 0x1) << 20)
+                       ^ (long)(bucket & 0xFFFFF);
+            if (_hairStyleMeshCache.TryGetValue(key, out Mesh cached) && cached != null)
+            {
+                return cached;
+            }
+
+            Mesh mesh = BuildHairTubeMesh(
+                "HairStyle" + segment + "_" + bucket,
+                spec.Points[0], spec.Points[1], spec.Points[2], spec.Points[3],
+                spec.Points[4], spec.Points[5], spec.Points[6],
+                Mathf.Max(0.001f, spec.BaseRadius * rs),
+                Mathf.Max(0.0006f, spec.TipRadius * rs),
+                Mathf.Clamp(spec.FlattenZ, 0.1f, 1f),
+                Mathf.Clamp01(spec.TaperStart));
+            _hairStyleMeshCache[key] = mesh;
+            return mesh;
+        }
+
+        /// <summary>清掉外观网格缓存（仅测试/热重载用）。</summary>
+        public static void ClearCosmeticMeshCache()
+        {
+            _hairStyleMeshCache.Clear();
+        }
+
+        /// <summary>
+        /// 在头骨下构建一件程序化头饰（帽/毛线帽/护目镜）。<b>必须在角色合并（MergeBodyRuntime）之后调用</b>：
+        /// 合并会把 Head 下的静态件扫进 MergedStatic_* 组，运行时新建的物体不参与合并，正好绕开跳过名单。
+        /// 头骨局部空间里馒头头是原点为中心、半径约 (0.143, 0.142, 0.133) 的椭球，
+        /// 所以所有尺寸都以"能盖住这颗头"为基准，帽子整体压在发根之上。
+        /// </summary>
+        public static GameObject BuildHeadgear(Transform head, in HeadgearDef def)
+        {
+            if (head == null || def.Kind == HeadgearKind.None) return null;
+
+            Material main = CreateCharacterMat(
+                "Mat_HeadgearMain_" + ColorUtility.ToHtmlStringRGBA(def.Main),
+                def.Main, 0.32f, 0.22f, outlined: false, emission: null, shadeSoftness: 0.12f);
+            Material accent = CreateCharacterMat(
+                "Mat_HeadgearAccent_" + ColorUtility.ToHtmlStringRGBA(def.Accent),
+                def.Accent, 0.42f, 0.30f, outlined: false, emission: null, shadeSoftness: 0.10f);
+
+            var root = new GameObject("CosmeticHeadgear");
+            root.transform.SetParent(head, false);
+            Transform t = root.transform;
+
+            switch (def.Kind)
+            {
+                case HeadgearKind.Cap:
+                {
+                    // 帽冠：压扁球盖住头顶。半径比馒头头（0.143）大 ~12%、边沿压到 y≈-0.04，
+                    // 才罩得住种在头皮面上的发根；只大 5% 时发束会从帽壳侧面穿出来。
+                    CreateSphere(t, "CapCrown", new Vector3(0f, 0.058f, -0.004f),
+                        new Vector3(0.320f, 0.200f, 0.310f), main);
+                    // 帽顶扣：小圆点，远看是"有做工"的信号
+                    CreateSphere(t, "CapButton", new Vector3(0f, 0.166f, -0.004f),
+                        new Vector3(0.030f, 0.024f, 0.030f), accent);
+                    // 前檐：略微下压 10°，与帽冠接缝藏在冠体内部
+                    CreatePart(t, "CapBrim", PrimitiveType.Cube,
+                        new Vector3(0f, 0.028f, 0.142f), new Vector3(0.258f, 0.020f, 0.132f),
+                        Quaternion.Euler(-10f, 0f, 0f), accent);
+                    break;
+                }
+                case HeadgearKind.Beanie:
+                {
+                    // 高一点的圆顶 + 折边 + 毛球，三件就能读出"毛线帽"
+                    CreateSphere(t, "BeanieCrown", new Vector3(0f, 0.076f, -0.004f),
+                        new Vector3(0.326f, 0.262f, 0.316f), main);
+                    CreateCylinder(t, "BeanieFold", new Vector3(0f, 0.006f, -0.004f),
+                        new Vector3(0.330f, 0.058f, 0.320f), accent);
+                    CreateSphere(t, "BeaniePom", new Vector3(0f, 0.228f, -0.004f),
+                        new Vector3(0.076f, 0.070f, 0.076f), accent);
+                    break;
+                }
+                case HeadgearKind.Goggles:
+                {
+                    // 环带：细圆柱横穿头部，只有露在头外的外缘可见 —— 廉价但读作一条带子
+                    CreateCylinder(t, "GoggleStrap", new Vector3(0f, 0.040f, -0.006f),
+                        new Vector3(0.300f, 0.028f, 0.290f), main);
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        CreatePart(t, side < 0 ? "GoggleFrame_L" : "GoggleFrame_R", PrimitiveType.Cylinder,
+                            new Vector3(side * 0.066f, 0.052f, 0.116f), new Vector3(0.086f, 0.020f, 0.086f),
+                            Quaternion.Euler(90f, 0f, 0f), main);
+                        CreatePart(t, side < 0 ? "GoggleLens_L" : "GoggleLens_R", PrimitiveType.Cylinder,
+                            new Vector3(side * 0.066f, 0.052f, 0.128f), new Vector3(0.070f, 0.012f, 0.070f),
+                            Quaternion.Euler(90f, 0f, 0f), accent);
+                    }
+                    CreateBox(t, "GoggleBridge", new Vector3(0f, 0.052f, 0.126f),
+                        new Vector3(0.042f, 0.018f, 0.014f), main);
+                    break;
+                }
+            }
+
+            return root;
+        }
+
+        #endregion
+
         #region Kid Form Assembly
 
         private static void BuildKidHierarchy(

@@ -754,6 +754,9 @@ namespace P1.UI.WeaponSelect
 
             _toggleMotion = btnGo.GetComponent<UISpringMotion>();
             _toggleMotion.SetTheme(theme);
+            // 整备卡铺满 Hero 卡内宽（与难度/时长行同宽同右缘），悬停再放大就必然顶出内边距：
+            // 1.05 会把右缘推到 Hero 卡边框上、下缘压住难度行。悬停反馈留给硬影/按压缩小。
+            _toggleMotion.SetHoverScale(1f);
 
             _toggleButton = btnGo.GetComponent<Button>();
             _toggleButton.targetGraphic = _toggleButtonBg;
@@ -1019,6 +1022,10 @@ namespace P1.UI.WeaponSelect
                 HomeBox slot = ResolveHeroWeaponSlot();
                 _toggleButtonRoot.anchoredPosition = slot.AnchoredPosition;
                 _toggleButtonRoot.sizeDelta = ResolveLoadoutSize(slot);
+
+                // 卡片是被「点开抽屉」隐藏的，触摸抬手时它已经失活 → 那次 PointerExit 永远送不到。
+                // 重新显示时显式复位，杜绝上一次的悬停/按压缩放跟着卡片回到首页。
+                _toggleMotion?.SnapHome();
             }
         }
 
@@ -1200,6 +1207,14 @@ namespace P1.UI.WeaponSelect
             }
             if (MapSelectOverlay.MenuInputConsumedThisFrame) return;
 
+            // 衣柜浮层打开时同理：Esc 归它自己关，抽屉的 1~7 / 方向键 / Enter 一并让路，
+            // 否则在衣柜里按数字键会"隔着浮层把武器换了"。
+            if (LockerOverlay.IsOpen)
+            {
+                HandleMenuEsc();
+                return;
+            }
+
             if (keyboard.digit1Key.wasPressedThisFrame || keyboard.numpad1Key.wasPressedThisFrame) SelectWeapon(0);
             else if (keyboard.digit2Key.wasPressedThisFrame || keyboard.numpad2Key.wasPressedThisFrame) SelectWeapon(1);
             else if (keyboard.digit3Key.wasPressedThisFrame || keyboard.numpad3Key.wasPressedThisFrame) SelectWeapon(2);
@@ -1243,7 +1258,8 @@ namespace P1.UI.WeaponSelect
                 layoutEditing: MobileLayoutCustomizer.IsEditingAny,
                 pauseExpanded: PauseMenuOverlay.IsAnyMenuExpanded,
                 drawerExpanded: _isDrawerOpen,
-                mapSelectOpen: MapSelectOverlay.IsOpen);
+                mapSelectOpen: MapSelectOverlay.IsOpen,
+                lockerOpen: LockerOverlay.IsOpen);
 
             if (!MenuInputRouter.CanLayerHandle(MenuEscLayer.WeaponDrawer, owner)) return;
             if (!MenuInputRouter.TryConsumeEsc(MenuEscLayer.WeaponDrawer)) return;
@@ -1258,6 +1274,9 @@ namespace P1.UI.WeaponSelect
                     return;
                 case MenuEscAction.CloseMapSelect:
                     MapSelectOverlay.TryCloseFromMenuInput();
+                    return;
+                case MenuEscAction.CloseLocker:
+                    LockerOverlay.TryCloseFromMenuInput();
                     return;
                 case MenuEscAction.CloseDrawer:
                     SetDrawerOpen(false);

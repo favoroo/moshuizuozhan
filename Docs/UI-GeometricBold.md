@@ -241,11 +241,11 @@
 
 ### 版式（t-1 新野兽派 · 波次3a）
 
-深色舞台 + **左侧 Hero 大卡 + 右侧 2×2 次级卡**，卡片区横向 ≥85% 屏宽，禁止中部空场。
+深色舞台 + **左侧 Hero 大卡 + 右侧 2×3 次级卡**，卡片区横向 ≥85% 屏宽，禁止中部空场。
 所有盒子来自 `MenuLayoutMath.Home()` 的 `HeroCard / Tile(i) / HeroCta / FooterTag / VersionTag`，
 `MenuLayoutMathTests` 断言"不出画布 / 互不重叠 / 横向铺满"。
 
-- **宽屏分配**：安全区比「Hero + ColumnGap + 2×2」设计总宽更宽时，整块版面水平居中，
+- **宽屏分配**：安全区比「Hero + ColumnGap + 2×3」设计总宽更宽时，整块版面水平居中，
   `ColumnGap` 恒为版面表值，多余宽度均分到左右外边距；**禁止**把多余宽度灌进 Hero 与卡阵之间
   （20:9 真机曾因此形成 146px 中部空场）。Hero 左缘以 `HomeRuntimeBoard.HeroX` 为准，不再固定 `Margin`。
 
@@ -255,7 +255,7 @@
 | Hero 大卡 | 728 宽 | 940 宽 | 主行动黄实底 + 4px 墨框 + **Hero 硬影 (6,-7)**，左上「PLAY」黑底白字角签 |
 | Hero 标题 | 120 | 120（UITypography ×1.28 → 154） | 用 MiSans-**Heavy**（`boldStyle = 0`，不再叠加膨胀）；若真机 154px 下「墨」这类密笔字糊，退回 MiSans-Semibold + `FontStyles.Bold`（0.25 轻加粗） |
 | 开赛 CTA | 640×148 | 860×200 | Hero 卡底部满宽（墨底 + 金黄字 + 按钮硬影），`UIJellyButton` 按压物理 |
-| 次级卡（2×2） | 504×396 | 438×342 | 纸白 + 3px 墨框 + **面板硬影 (4,-5)** + 顶部 5px 身份色带 + 角签 + `》`；四张 = 战绩 / 系统设置 / 操作指南（键位说明）/ 按键位置 |
+| 次级卡（2×3） | 504×256 | 438×235（20:9 真机 ≈197） | 纸白 + 3px 墨框 + **面板硬影 (4,-5)** + 顶部 5px 身份色带 + 角签 + `》`；六张 = 战绩 / 衣柜（下一级解锁，带 NEW 角标）/ 成就 / 地图 / 系统设置 / 按键位置。行高 = `(卡片区高 - 2×TileGap) / 3`；矮卡里标题字号可降（下限 20），但**禁止 Truncate** |
 | Bot 难度段选 | 4×68×44，间距 8 | 4×112×64，间距 8 | Hero 卡头部右侧、与 PLAY 同排：新手 / 轻松 / 普通 / 硬核；纸白实底 + 3px 墨框，选中=墨黑实底 + 金黄字；窄窗先收窄段宽（下限 44/72），仍放不下则隐藏模式微标，绝不压住 PLAY |
 | 角签（右下） | 300×36 | 360×44 | 左下角签已下线（原「游戏共创 · 单机 4V4」只读角签：不可点、不承载信息，却占掉一屏最显眼位置的 320×36 黑底条；模式/时长/难度都在 Hero 卡里）→ `FooterTag` 槽两平台置空；右下 = **可点「检查更新」小标签**（托 `VersionTag` 盒）：黄底墨字 + 2px 墨框 + Button 硬影 + `UIJellyButton` 按压，文案随状态切「检查更新 / 检查更新中… / 新版 vX! / 已是最新版 / 检查失败」 |
 
@@ -273,13 +273,13 @@
   下限为版面表设计宽（桌面 118 / 移动 140），上限为卡片内容行宽。移动端 26 号字的 `SETTINGS`
   自然宽约 193px，固定 140px 会画出黑底；**禁止**让角签文字溢出实底。
 - **整卡可点**：次级卡把按钮铺满整张卡（透明 Image 只负责射线），按下阴影归零 + 内容位移。
-- **入口去重：首页不再有顶部「自定义按键」小按钮**：改按键只走 2×2 卡阵的「按键位置」卡
+- **入口去重：首页不再有顶部「自定义按键」小按钮**：改按键只走 2×3 卡阵的「按键位置」卡
   （局内走暂停菜单），同一屏不再出现两颗同义入口；移动端版面也不再为它预留顶部空间。
   度量上 `HomeMenuMetrics.ShowTopButton` 恒为 `false`（仅为兼容保留），**平台判断一律用 `HomeMenuMetrics.Mobile`**
   ——它此前被当作「是否移动端」的替身传给 `LoadoutCard()` / `ResolveHeroFlow()`，直接把 `ShowTopButton` 置 false
   会让移动端 Hero 卡排版退回桌面尺寸。
-- **检查更新 = 右下角小标签（t-1 做法）**：首页不再有「检查更新」大卡（第 4 张卡改「按键位置」，
-  打开触屏布局自定义器）。检查更新收成右下角一颗可点小标签，`MatchFlowUI.AttachMenuButtonToUpdateTag`
+- **检查更新 = 右下角小标签（t-1 做法）**：首页不再有「检查更新」大卡（「按键位置」卡负责打开触屏布局自定义器）。
+  检查更新收成右下角一颗可点小标签，`MatchFlowUI.AttachMenuButtonToUpdateTag`
   复用 `CheckUpdateButton` 节点（透明 Image 只负责射线，背景走 `CreateChildBackground`——节点上已有 Image，
   直接 `AddComponent<UIInkShapeGraphic>` 会被 `DisallowMultipleComponent` 静默拒掉）。
   点一下标签文案依次切「检查更新中… / 新版 vX! / 已是最新版 / 检查失败」，无结果类状态 2.5 秒后自己变回；
@@ -302,10 +302,11 @@
 - `MatchFlowUI` 的 `uiTheme` 在场景里可能是空引用 → 首页字体落到 TMP 全局 fallback。
   `EnsureTheme()`（运行时资源库 → 编辑器 AssetDatabase）必须跑在 `EnsureReadyVisuals` 之前。
 
-### 信息浮层（战绩 / 键位说明）
+### 信息浮层（战绩 / 键位说明 / 成就）与衣柜
 
-「战绩」「键位说明 / 操作指南」两张次级卡是可点卡（带 `》`），点击打开详情浮层
-（`Scripts/UI/HomeInfoOverlay.cs`，度量在 `HomeInfoLayoutMath`，内容在 `HomeInfoContent`）：
+「战绩」「成就」两张次级卡是可点卡（带 `》`），点击打开详情浮层
+（`Scripts/UI/HomeInfoOverlay.cs`，度量在 `HomeInfoLayoutMath`，内容在 `HomeInfoContent`）；
+「衣柜」卡打开 `Scripts/UI/LockerOverlay.cs`（独立 Overlay Canvas，sortingOrder **65**，压过地图选择 60 与详情浮层 50）。
 
 | 元素 | 桌面 | 移动端 | 规则 |
 |---|---|---|---|
@@ -314,6 +315,12 @@
 | 关闭键 | 72×72 | 88×88 | 墨底纸白「×」+ 色签硬影；桌面 Esc / 手柄 Start 同样关闭 |
 | 键位行 | 高 64、键帽宽 150 | 高 82、键帽宽 230 | 左右两栏（移动 / 战斗）+ 底部规则速记 2×2 |
 | 战绩布局 | 左身份卡（LV/段位/XP 条）+ 右 2×3 数据格 | 同左 | 数据全部来自 `PlayerProfile` 聚合字段，不扩展存档 |
+
+- 衣柜卡信息行 = `CosmeticUnlockMath.NextUnlockText(profile)`（「下一级解锁：薄荷汽水」/「外观已全部解锁」）；
+  右上角 `NEW` 胶囊角标只在「当前解锁件数 > 上次打开衣柜时的水位」时亮，
+  水位存 PlayerPrefs `P1.Locker.SeenUnlockedCount`（**不进 `PlayerProfile`**，避免与存档类并行改动冲突）。
+- 结算页在经验条走完后 0.15s 弹一枚「解锁 · XXX」黄色胶囊页签（与升级页签同款，骑在战报卡上边框右侧），
+  数据来自 `CosmeticUnlockMath.CollectNewlyUnlocked(OldLevel, NewLevel, 本局新成就)`，构建时算一次、动画只读结果。
 
 - 浮层跑在**独立 Overlay Canvas（sortingOrder 50）**上：必须高于武器抽屉（15）与 HUD（10），
   否则左下「武器整备」卡会浮在遮罩之上还能被点开。

@@ -172,13 +172,6 @@ Shader "P1/ObstacleDitherLit"
                 float _BaseMapWorldScale;
             CBUFFER_END
 
-            static const float4x4 _BayerMatrix4x4 = float4x4(
-                 0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
-                12.0/16.0,  4.0/16.0, 14.0/16.0,  6.0/16.0,
-                 3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
-                15.0/16.0,  7.0/16.0, 13.0/16.0,  5.0/16.0
-            );
-
             Varyings vert(Attributes input)
             {
                 Varyings output;
@@ -207,15 +200,9 @@ Shader "P1/ObstacleDitherLit"
                     effectiveAlpha = lerp(_FocusMinAlpha, _DitherAlpha, focusFade);
                 }
 
-                if (effectiveAlpha < 0.999)
+                if (P1ScreenDoorDiscard(input.positionCS.xy, effectiveAlpha))
                 {
-                    float2 screenPixel = input.positionCS.xy;
-                    int bx = int(fmod(screenPixel.x, 4.0));
-                    int by = int(fmod(screenPixel.y, 4.0));
-                    if (_BayerMatrix4x4[by][bx] >= effectiveAlpha)
-                    {
-                        discard;
-                    }
+                    discard;
                 }
 
                 // 2. 集装箱条纹瓦楞造型 (Container Corrugation Ribs)
@@ -462,13 +449,6 @@ Shader "P1/ObstacleDitherLit"
                 float _BaseMapWorldScale;
             CBUFFER_END
 
-            static const float4x4 _BayerMatrix4x4 = float4x4(
-                 0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
-                12.0/16.0,  4.0/16.0, 14.0/16.0,  6.0/16.0,
-                 3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
-                15.0/16.0,  7.0/16.0, 13.0/16.0,  5.0/16.0
-            );
-
             float3 _LightDirection;
 
             Varyings ShadowPassVertex(Attributes input)
@@ -575,13 +555,6 @@ Shader "P1/ObstacleDitherLit"
                 float _BaseMapWorldSpace;
                 float _BaseMapWorldScale;
             CBUFFER_END
-
-            static const float4x4 _BayerMatrix4x4 = float4x4(
-                 0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
-                12.0/16.0,  4.0/16.0, 14.0/16.0,  6.0/16.0,
-                 3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
-                15.0/16.0,  7.0/16.0, 13.0/16.0,  5.0/16.0
-            );
 
             DepthNormalsVaryings DepthNormalsVertex(DepthNormalsAttributes input)
             {

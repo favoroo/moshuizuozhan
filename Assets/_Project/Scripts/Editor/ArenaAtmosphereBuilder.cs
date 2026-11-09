@@ -100,7 +100,9 @@ namespace P1.Editor
                 data.renderShadows = true;
                 if (Application.isMobilePlatform)
                 {
-                    data.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
+                    // 与 TopDownCameraFollow 运行时保持一致：移动端 MSAA 关闭 + RenderScale 0.8，
+                    // FXAA(Low) 会把几何轮廓抹成方块，改用 SMAA(Low) 重建边缘。
+                    data.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
                     data.antialiasingQuality = AntialiasingQuality.Low;
                 }
                 else

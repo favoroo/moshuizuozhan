@@ -48,8 +48,8 @@ namespace P1.Tests
                 HomeBox cta = m.HeroCta;
 
                 Assert.IsTrue(hero.FitsIn(canvas), tag + " Hero 卡不应超出参考画布");
-                Assert.IsTrue(grid.FitsIn(canvas), tag + " 2×2 卡阵不应超出参考画布");
-                Assert.IsFalse(hero.Overlaps(grid), tag + " Hero 卡与 2×2 卡阵不应重叠");
+                Assert.IsTrue(grid.FitsIn(canvas), tag + " 2×3 卡阵不应超出参考画布");
+                Assert.IsFalse(hero.Overlaps(grid), tag + " Hero 卡与 2×3 卡阵不应重叠");
                 Assert.IsTrue(cta.FitsIn(canvas), tag + " CTA 不应超出参考画布");
                 Assert.IsTrue(hero.Contains(cta.X + cta.Width * 0.5f, cta.Y + cta.Height * 0.5f),
                     tag + " CTA 必须落在 Hero 卡内");
@@ -59,14 +59,17 @@ namespace P1.Tests
                 Assert.GreaterOrEqual(occupied, MenuLayoutMath.RefWidth * 0.85f,
                     tag + " 横向内容总宽应 ≥85% 屏宽");
 
-                // 2×2 四张卡互不重叠，且都在卡阵内
-                for (int i = 0; i < 4; i++)
+                // 2×3 六张卡互不重叠，且都在卡阵内
+                for (int i = 0; i < 6; i++)
                 {
                     HomeBox tile = m.Tile(i);
                     Assert.IsTrue(tile.FitsIn(canvas), tag + " 卡片 " + i + " 超出画布");
                     Assert.IsTrue(grid.Contains(tile.X + tile.Width * 0.5f, tile.Y + tile.Height * 0.5f),
                         tag + " 卡片 " + i + " 应在卡阵内");
-                    for (int j = i + 1; j < 4; j++)
+                    // 行高变矮后仍必须是可读可点的盒子：两平台设计值都 ≥200
+                    // （桌面 256 / 移动端 235），矮到这个值以下角签 + 标题 + 信息行就排不下。
+                    Assert.GreaterOrEqual(tile.Height, 200f, tag + " 卡片 " + i + " 行高不应矮于 200");
+                    for (int j = i + 1; j < 6; j++)
                     {
                         Assert.IsFalse(tile.Overlaps(m.Tile(j)), tag + " 卡片 " + i + " 与 " + j + " 重叠");
                     }
@@ -324,13 +327,13 @@ namespace P1.Tests
         {
             // 真机 20:9 复现值：启动首帧 safeArea 与 Screen 短暂不在同一像素空间，
             // 读出的安全区（2533×1199）比画布（2146×966）还大。
-            // 未钳制时 GridX=1605 → 2×2 卡阵右列整列出屏；卡阵高 823 → CTA/下排被推出屏幕底。
+            // 未钳制时 GridX=1605 → 2×3 卡阵右列整列出屏；卡阵高 823 → CTA/下排被推出屏幕底。
             HomeMenuMetrics mobile = MenuLayoutMath.Home(true);
             Vector2 canvas = new Vector2(2146f, 966f);
             HomeRuntimeBoard board = MenuLayoutMath.ResolveHomeBoard(mobile, 2533f, 1199f, canvas);
 
             Assert.LessOrEqual(board.GridX + mobile.GridWidth, canvas.x + 0.01f,
-                "钳制后 2×2 卡阵右缘不得超出画布（右列必须可见）");
+                "钳制后 2×3 卡阵右缘不得超出画布（右列必须可见）");
             Assert.LessOrEqual(board.Top + board.Height, canvas.y + 0.01f,
                 "钳制后卡片区底缘不得超出画布（CTA / 下排卡必须可见）");
             Assert.AreEqual((mobile.CardTop + mobile.CardBottom) * 0.5f, board.Top, 0.5f,
@@ -345,14 +348,14 @@ namespace P1.Tests
         public void ResolveHomeBoard_WideSafeAreaKeepsColumnGapAndCentersBoard()
         {
             // 20:9 真机（2146 宽安全区）比「Hero 940 + 列距 20 + 卡阵 896」宽 290：
-            // 旧实现把多出来的宽度全部灌进列间，Hero 与 2×2 之间形成 146px 中部空场。
+            // 旧实现把多出来的宽度全部灌进列间，Hero 与 2×3 之间形成 146px 中部空场。
             HomeMenuMetrics mobile = MenuLayoutMath.Home(true);
             Vector2 canvas = new Vector2(2146f, 966f);
             HomeRuntimeBoard board = MenuLayoutMath.ResolveHomeBoard(mobile, canvas.x, canvas.y, canvas);
 
             float gap = board.GridX - (board.HeroX + board.HeroWidth);
             Assert.AreEqual(mobile.ColumnGap, gap, 0.5f,
-                "Hero 与 2×2 卡阵的列间距必须等于版面表 ColumnGap，不能随屏幕变宽而膨胀");
+                "Hero 与 2×3 卡阵的列间距必须等于版面表 ColumnGap，不能随屏幕变宽而膨胀");
 
             float leftMargin = board.HeroX;
             float rightMargin = canvas.x - (board.GridX + mobile.GridWidth);
@@ -374,7 +377,8 @@ namespace P1.Tests
             Assert.AreEqual(desktop.BoardHeight, board.Height, 0.5f);
             Assert.AreEqual(desktop.HeroBox.x, board.HeroWidth, 0.5f);
             Assert.AreEqual((desktop.GridWidth - desktop.TileGap) * 0.5f, board.TileWidth, 0.5f);
-            Assert.AreEqual((board.Height - desktop.TileGap) * 0.5f, board.TileHeight, 0.5f);
+            // 2×3：三行夹两条 TileGap
+            Assert.AreEqual((board.Height - desktop.TileGap * 2f) / 3f, board.TileHeight, 0.5f);
 
             // 垂直居中：上下留白均分（历史版面压顶，底部积压 200px 空白）
             Assert.AreEqual((desktop.CardTop + desktop.CardBottom) * 0.5f, board.Top, 0.5f,

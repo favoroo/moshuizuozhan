@@ -151,21 +151,9 @@ Shader "P1/InkWall"
             {
                 // 俯视角网点半透明遮挡剔除
                 float effectiveAlpha = min(_DitherAlpha, _Tint.a);
-                if (effectiveAlpha < 0.999)
+                if (P1ScreenDoorDiscard(input.positionCS.xy, effectiveAlpha))
                 {
-                    static const float4x4 _BayerMatrix4x4 = float4x4(
-                         0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
-                        12.0/16.0,  4.0/16.0, 14.0/16.0,  6.0/16.0,
-                         3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
-                        15.0/16.0,  7.0/16.0, 13.0/16.0,  5.0/16.0
-                    );
-                    float2 screenPixel = input.positionCS.xy;
-                    int bx = int(fmod(screenPixel.x, 4.0));
-                    int by = int(fmod(screenPixel.y, 4.0));
-                    if (_BayerMatrix4x4[by][bx] >= effectiveAlpha)
-                    {
-                        discard;
-                    }
+                    discard;
                 }
 
                 float2 sampleUV = input.uv;

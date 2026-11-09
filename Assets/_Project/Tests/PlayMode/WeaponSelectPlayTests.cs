@@ -334,10 +334,13 @@ namespace P1.Tests
             Assert.AreEqual(home.CtaSize.y, startRect.sizeDelta.y, 0.5f, "开始按钮高度应来自版面表");
             Assert.GreaterOrEqual(startRect.sizeDelta.y, 140f, "开赛按钮必须是超大触控目标");
 
-            // Hero 大卡与 2×2 卡阵必须存在（t-1 深色舞台版式）
+            // Hero 大卡与 2×3 卡阵必须存在（t-1 深色舞台版式）
             var hero = safe.Find("HomeHeroCard");
             Assert.IsNotNull(hero, "首页必须有左侧 Hero 大卡");
             Assert.IsNotNull(safe.Find("HomeTile_RECORD"), "首页必须有战绩卡");
+            Assert.IsNotNull(safe.Find("HomeTile_LOOK"), "首页必须有衣柜卡");
+            Assert.IsNotNull(safe.Find("HomeTile_ACHIEVE"), "首页必须有成就卡");
+            Assert.IsNotNull(safe.Find("HomeTile_MAP"), "首页必须有地图卡");
             Assert.IsNotNull(safe.Find("HomeTile_SETTINGS"), "首页必须有系统设置卡");
             Assert.IsNotNull(safe.Find("HomeTile_LAYOUT"), "首页必须有修改按钮位置卡");
 
@@ -350,7 +353,7 @@ namespace P1.Tests
             Assert.AreEqual(heroRect.anchoredPosition.x + home.HeroPadding.x, startRect.anchoredPosition.x, 0.5f,
                 "CTA 左缘必须跟随 Hero 卡实际左缘（宽屏 Hero 居中后仍贴合内边距）");
 
-            // Hero 与右侧 2×2 的列间距必须恒为版面表 ColumnGap（宽屏多余宽度均分到左右外边距）。
+            // Hero 与右侧 2×3 的列间距必须恒为版面表 ColumnGap（宽屏多余宽度均分到左右外边距）。
             // 用 RectTransform 布局坐标（anchoredPosition / sizeDelta）而不是世界角点：
             // 入场 UISpringMotion 只改 localScale，世界角点会把「入场缩放进行到一半」的 Hero 卡
             // 误算进间距（曾因此误报 24 vs 32）；布局坐标不受缩放动画影响。
@@ -359,7 +362,7 @@ namespace P1.Tests
             float heroRight = heroRect.anchoredPosition.x + heroRect.sizeDelta.x;
             float columnGap = firstTile.anchoredPosition.x - heroRight;
             Assert.AreEqual(home.ColumnGap, columnGap, 0.5f,
-                "Hero 与 2×2 卡阵之间的列间距应恒等于 ColumnGap（实际 " + columnGap.ToString("0.0") + "）");
+                "Hero 与 2×3 卡阵之间的列间距应恒等于 ColumnGap（实际 " + columnGap.ToString("0.0") + "）");
 
             ScreenCapture.CaptureScreenshot(System.IO.Path.GetFullPath("Logs/menu_redesign_screenshot.png"));
             yield return new WaitForSeconds(0.5f);
@@ -378,7 +381,7 @@ namespace P1.Tests
 
             // 旧实现把 `》`（双书名号 ≈2em 宽）按 1.2em 预留、还放在信息行上，
             // 移动端字号 ×1.28 后必然压字叠字 —— 现在箭头独占标题行右侧走廊。
-            var tileNames = new[] { "HomeTile_RECORD", "HomeTile_SETTINGS", "HomeTile_LAYOUT" };
+            var tileNames = new[] { "HomeTile_RECORD", "HomeTile_LOOK", "HomeTile_ACHIEVE", "HomeTile_SETTINGS", "HomeTile_LAYOUT" };
             Transform content = null;
             RectTransform arrow = null;
             TextMeshProUGUI info = null;
@@ -460,7 +463,7 @@ namespace P1.Tests
 
             var hero = safeAfter.Find("HomeHeroCard");
             Assert.IsNotNull(hero, "重建后首页卡片树应完整重建");
-            Assert.IsNotNull(safeAfter.Find("HomeTile_LAYOUT"), "重建后 2×2 卡阵应完整重建");
+            Assert.IsNotNull(safeAfter.Find("HomeTile_LAYOUT"), "重建后 2×3 卡阵应完整重建");
         }
 
         [UnityTest]

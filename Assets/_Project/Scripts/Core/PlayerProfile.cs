@@ -48,6 +48,14 @@ namespace P1.Core
     public const string KeyMvpCount = KeyPrefix + "MvpCount";
     public const string KeyAchievements = KeyPrefix + "Achievements";
 
+        // 外观：只持久化「当前穿了什么」，解锁状态由等级 + 成就推导（见 CosmeticUnlockMath），
+        // 所以老存档无需迁移，也不会因为解锁记录丢失而让角色裸奔。空串 = 用槽位默认件。
+        public const string KeyEquipOutfit = KeyPrefix + "Equip.Outfit";
+        public const string KeyEquipHair = KeyPrefix + "Equip.Hair";
+        public const string KeyEquipHeadgear = KeyPrefix + "Equip.Headgear";
+        public const string KeyEquipWeaponSkin = KeyPrefix + "Equip.WeaponSkin";
+        public const string KeyEquipTitle = KeyPrefix + "Equip.Title";
+
     public const string DefaultName = "INKLING";
     public const int DefaultLevel = 1;
     public const int DefaultXp = 0;
@@ -93,6 +101,13 @@ namespace P1.Core
         [SerializeField] private float bestTeamCoverage = DefaultBestTeamCoverage;
         [SerializeField] private float bestMatchTurf = DefaultBestMatchTurf;
         [SerializeField] private int mvpCount = DefaultMvpCount;
+
+        // 外观装备槽（空串 = 槽位默认件；读取时统一经 CosmeticUnlockMath 校验）
+        [SerializeField] private string equipOutfit = string.Empty;
+        [SerializeField] private string equipHair = string.Empty;
+        [SerializeField] private string equipHeadgear = string.Empty;
+        [SerializeField] private string equipWeaponSkin = string.Empty;
+        [SerializeField] private string equipTitle = string.Empty;
 
         private HashSet<string> _unlockedAchievements;
 
@@ -187,6 +202,48 @@ namespace P1.Core
         {
             get => mvpCount;
             set => mvpCount = Mathf.Max(0, value);
+        }
+
+        /// <summary>
+        /// 读取某外观槽位装备的 id（可能为空串 = 未设置）。<b>不做合法性/解锁校验</b>：
+        /// 调用方要用 <see cref="CosmeticUnlockMath.ResolveEquipped"/> 拿实际生效的 id。
+        /// </summary>
+        public string GetEquippedId(CosmeticSlot slot)
+        {
+            switch (slot)
+            {
+                case CosmeticSlot.Outfit: return equipOutfit ?? string.Empty;
+                case CosmeticSlot.Hair: return equipHair ?? string.Empty;
+                case CosmeticSlot.Headgear: return equipHeadgear ?? string.Empty;
+                case CosmeticSlot.WeaponSkin: return equipWeaponSkin ?? string.Empty;
+                case CosmeticSlot.Title: return equipTitle ?? string.Empty;
+                default: return string.Empty;
+            }
+        }
+
+        /// <summary>写入某外观槽位的装备 id。不写盘：调用方在合适时机统一 <see cref="Save"/>。</summary>
+        public void SetEquippedId(CosmeticSlot slot, string id)
+        {
+            string v = id ?? string.Empty;
+            switch (slot)
+            {
+                case CosmeticSlot.Outfit: equipOutfit = v; break;
+                case CosmeticSlot.Hair: equipHair = v; break;
+                case CosmeticSlot.Headgear: equipHeadgear = v; break;
+                case CosmeticSlot.WeaponSkin: equipWeaponSkin = v; break;
+                case CosmeticSlot.Title: equipTitle = v; break;
+            }
+        }
+
+        /// <summary>装备整套外观并写盘（衣柜「穿上」用；一次 Save，不逐槽刷盘）。</summary>
+        public void SetEquippedSet(in CosmeticSet set)
+        {
+            SetEquippedId(CosmeticSlot.Outfit, set.Outfit.Id);
+            SetEquippedId(CosmeticSlot.Hair, set.Hair.Id);
+            SetEquippedId(CosmeticSlot.Headgear, set.Headgear.Id);
+            SetEquippedId(CosmeticSlot.WeaponSkin, set.WeaponSkin.Id);
+            SetEquippedId(CosmeticSlot.Title, set.Title.Id);
+            Save();
         }
 
         public int RankTier => GetRankTierIndex(level);
@@ -394,6 +451,22 @@ namespace P1.Core
         }
 
         /// <summary>
+        /// 读一个外观 id 键：任何异常/空值都退化成空串（= 槽位默认件），绝不抛错。
+        /// </summary>
+        private static string SafeReadId(string key)
+        {
+            try
+            {
+                string v = PlayerPrefs.GetString(key, string.Empty);
+                return string.IsNullOrWhiteSpace(v) ? string.Empty : v.Trim();
+            }
+            catch (Exception)
+            {
+                return string.Empty;
+            }
+        }
+
+        /// <summary>
         /// 从 PlayerPrefs 加载数据。若数据损坏或缺失则安全回退默认值。
         /// </summary>
         public static PlayerProfile Load()
@@ -428,6 +501,13 @@ namespace P1.Core
                 profile.bestMatchStreak = Mathf.Max(0, PlayerPrefs.GetInt(KeyBestMatchStreak, DefaultBestMatchStreak));
                 profile.bestMatchLifeKills = Mathf.Max(0, PlayerPrefs.GetInt(KeyBestMatchLifeKills, DefaultBestMatchLifeKills));
                 profile.mvpCount = Mathf.Max(0, PlayerPrefs.GetInt(KeyMvpCount, DefaultMvpCount));
+
+                // 外观装备槽：老存档必然没有这几个键，读回空串即可（空串 = 槽位默认件）
+                profile.equipOutfit = SafeReadId(KeyEquipOutfit);
+                profile.equipHair = SafeReadId(KeyEquipHair);
+                profile.equipHeadgear = SafeReadId(KeyEquipHeadgear);
+                profile.equipWeaponSkin = SafeReadId(KeyEquipWeaponSkin);
+                profile.equipTitle = SafeReadId(KeyEquipTitle);
 
                 float savedCoverage = PlayerPrefs.GetFloat(KeyBestTeamCoverage, DefaultBestTeamCoverage);
                 profile.bestTeamCoverage = float.IsNaN(savedCoverage) || float.IsInfinity(savedCoverage)
@@ -473,6 +553,11 @@ namespace P1.Core
                 PlayerPrefs.SetFloat(KeyBestTeamCoverage, Mathf.Clamp(bestTeamCoverage, 0f, 100f));
                 PlayerPrefs.SetFloat(KeyBestMatchTurf, Mathf.Max(0f, bestMatchTurf));
                 PlayerPrefs.SetInt(KeyMvpCount, Mathf.Max(0, mvpCount));
+                PlayerPrefs.SetString(KeyEquipOutfit, equipOutfit ?? string.Empty);
+                PlayerPrefs.SetString(KeyEquipHair, equipHair ?? string.Empty);
+                PlayerPrefs.SetString(KeyEquipHeadgear, equipHeadgear ?? string.Empty);
+                PlayerPrefs.SetString(KeyEquipWeaponSkin, equipWeaponSkin ?? string.Empty);
+                PlayerPrefs.SetString(KeyEquipTitle, equipTitle ?? string.Empty);
                 PlayerPrefs.SetString(KeyAchievements, SerializeAchievements());
                 PlayerPrefs.Save();
             }
@@ -505,6 +590,11 @@ namespace P1.Core
                 PlayerPrefs.DeleteKey(KeyBestMatchTurf);
                 PlayerPrefs.DeleteKey(KeyMvpCount);
                 PlayerPrefs.DeleteKey(KeyAchievements);
+                PlayerPrefs.DeleteKey(KeyEquipOutfit);
+                PlayerPrefs.DeleteKey(KeyEquipHair);
+                PlayerPrefs.DeleteKey(KeyEquipHeadgear);
+                PlayerPrefs.DeleteKey(KeyEquipWeaponSkin);
+                PlayerPrefs.DeleteKey(KeyEquipTitle);
                 PlayerPrefs.Save();
             }
             catch (Exception ex)
@@ -542,6 +632,11 @@ namespace P1.Core
             bestTeamCoverage = DefaultBestTeamCoverage;
             bestMatchTurf = DefaultBestMatchTurf;
             mvpCount = DefaultMvpCount;
+            equipOutfit = string.Empty;
+            equipHair = string.Empty;
+            equipHeadgear = string.Empty;
+            equipWeaponSkin = string.Empty;
+            equipTitle = string.Empty;
             if (_unlockedAchievements != null) _unlockedAchievements.Clear();
         }
 

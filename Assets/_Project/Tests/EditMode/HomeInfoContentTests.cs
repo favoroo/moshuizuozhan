@@ -227,5 +227,94 @@ namespace P1.Tests
             Vector2 desktopPanel = HomeInfoLayoutMath.ResolvePanelSize(false, 1920f, 1080f);
             Assert.Greater(mobilePanel.x, desktopPanel.x, "移动端面板应吃满安全区宽度，而不是沿用桌面弹窗尺寸");
         }
+
+        /// <summary>
+        /// 战绩数据格：格子够高时保持「标签在上 / 大数字在下」，放不下时改「标签左 / 数值右」。
+        /// 两种模式下标签盒与数值盒都必须落在格子里且互不相交——这是首页战绩页叠字的回归锁。
+        /// </summary>
+        [Test]
+        public void Layout_StatTileNeverOverlapsAtAnyTileHeight()
+        {
+            HomeInfoMetrics desktop = HomeInfoLayoutMath.Metrics(false);
+            float[] labelFonts = { 20f, 30f, 36f };   // 桌面 / 移动端渲染字号（UITypography ×1.28 之后）
+            float[] valueFonts = { 48f, 62f, 76f };
+
+            foreach (float labelFont in labelFonts)
+            {
+                foreach (float valueFont in valueFonts)
+                {
+                    for (float tileHeight = 40f; tileHeight <= 260f; tileHeight += 2f)
+                    {
+                        HomeInfoStatTileLayout slot =
+                            HomeInfoLayoutMath.ResolveStatTileLayout(tileHeight, labelFont, valueFont);
+                        float available = tileHeight - slot.Pad * 2f;
+
+                        Assert.LessOrEqual(slot.LabelFont, labelFont + 0.01f, "字号只能收敛不能放大");
+                        Assert.LessOrEqual(slot.ValueFont, valueFont + 0.01f, "字号只能收敛不能放大");
+
+                        if (slot.Horizontal)
+                        {
+                            // 一行式：标签盒与数值盒都要落在格子内（两者竖中同高，靠左右走廊分开）
+                            Assert.LessOrEqual(slot.LabelFont * 1.4f, available + 0.01f,
+                                $"标签盒超高：h={tileHeight} label={labelFont} value={valueFont}");
+                            Assert.LessOrEqual(slot.ValueFont * 1.15f, available + 0.01f,
+                                $"数值盒超高：h={tileHeight} label={labelFont} value={valueFont}");
+                        }
+                        else
+                        {
+                            // 两段式：标签字形带与数值字形带之间至少留 6px 空档
+                            Assert.GreaterOrEqual(available, slot.LabelFont + slot.ValueFont + 6f - 0.01f,
+                                $"两段式放不下却仍走了两段：h={tileHeight} label={labelFont} value={valueFont}");
+                        }
+                    }
+                }
+            }
+
+            // 桌面 1920×1080 的 2×4 格阵必须保持两段式（大数字才是设计主体）。
+            float desktopTile = (514f - desktop.StatGap * 3f) / 4f;
+            Assert.IsFalse(
+                HomeInfoLayoutMath.ResolveStatTileLayout(desktopTile,
+                    UITypography.FontSnapped(desktop.StatLabelFont),
+                    UITypography.FontSnapped(desktop.StatValueFont)).Horizontal,
+                "桌面数据格应保持「标签在上 / 大数字在下」");
+        }
+
+        /// <summary>
+        /// 身份卡：五段自然高装不下时必须等比收敛，且收敛后一定装得下（否则段位会压进 XP 文字）。
+        /// </summary>
+        [Test]
+        public void Layout_IdentityBlockFitsInShortContentBox()
+        {
+            HomeInfoMetrics desktop = HomeInfoLayoutMath.Metrics(false);
+            float desktopNatural = HomeInfoLayoutMath.IdentityContentHeight(desktop,
+                UITypography.FontSnapped(desktop.IdentityLevelFont),
+                UITypography.FontSnapped(desktop.IdentityRankFont),
+                UITypography.FontSnapped(desktop.IdentityLabelFont));
+            Assert.AreEqual(1f, HomeInfoLayoutMath.FitScale(514f - 48f, desktopNatural), 0.0001f,
+                "桌面内容区（514）放得下身份卡五段，不应收敛");
+
+            // 手机横屏 20:9：内容区只有 437，且移动端度量还要再过一遍 UITypography ×1.28。
+            // 旧版固定像素在这里算出「段位 281..340 / XP 文字 214..263」，两段直接叠死。
+            HomeInfoMetrics mobile = HomeInfoLayoutMath.Metrics(true);
+            const float phoneContentHeight = 437f;
+            const float boost = 1.28f;
+            float phoneBox = phoneContentHeight - mobile.Padding * 0.6f * 2f;
+            float phoneNatural = HomeInfoLayoutMath.IdentityContentHeight(mobile,
+                mobile.IdentityLevelFont * boost, mobile.IdentityRankFont * boost,
+                mobile.IdentityLabelFont * boost);
+            float fit = HomeInfoLayoutMath.FitScale(phoneBox, phoneNatural);
+
+            Assert.Less(fit, 1f, "手机横屏内容区放不下五段原尺寸，必须收敛");
+            Assert.GreaterOrEqual(fit, 0.7f, "收敛不能到读不清的程度");
+            Assert.LessOrEqual(phoneNatural * fit, phoneBox + 0.01f, "收敛后必须装得下，否则段位会压进 XP 文字");
+        }
+
+        [Test]
+        public void Layout_FitScaleNeverEnlarges()
+        {
+            Assert.AreEqual(1f, HomeInfoLayoutMath.FitScale(500f, 400f), 0.0001f, "装得下时不放大");
+            Assert.AreEqual(0.75f, HomeInfoLayoutMath.FitScale(300f, 400f), 0.0001f, "装不下时等比收敛");
+            Assert.AreEqual(1f, HomeInfoLayoutMath.FitScale(0f, 0f), 0.0001f, "退化输入不得除零");
+        }
     }
 }

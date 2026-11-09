@@ -864,8 +864,13 @@ namespace P1.Player
                 if (Application.isMobilePlatform)
                 {
                     // 移动端抗锯齿跟随「新渲染路径」总开关：两档都不开时完全对齐 v0.1.7（无 AA）。
+                    //
+                    // FXAA(Low) → SMAA(Low)：移动端 RPAsset 是 m_MSAA=1（关）+ RenderScale 0.8，
+                    // 几何边缘原本没有任何抗锯齿。FXAA 是纯后处理边缘模糊，在 0.8 倍分辨率上
+                    // 把掩体/箱体轮廓抹成一段段方块，读作「马赛克」。SMAA 走形态学边缘检测 +
+                    // 图案化混合，能在低倍率下重建接近直线的边缘；Low 档（1x 时序）成本仍可控。
                     data.antialiasing = MobilePostProcessingEnabled
-                        ? AntialiasingMode.FastApproximateAntialiasing
+                        ? AntialiasingMode.SubpixelMorphologicalAntiAliasing
                         : AntialiasingMode.None;
                     data.antialiasingQuality = AntialiasingQuality.Low;
                 }

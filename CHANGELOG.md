@@ -6,6 +6,24 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+## 2026-11-09 #12
+新增局外奖励 v1「等级解锁 + 外观衣柜」：34 件外观（服装配色 8 / 触手发型 6 / 头饰 4 / 武器涂装 6 / 称号 10）按等级与成就解锁，衣柜浮层含实时 3D 预览与拖拽旋转，首页卡阵扩为 2×3 并常驻「下一级解锁：XXX」钩子，结算页在升级页签旁播「解锁 · XXX」。外观目录是静态内容表（同 `AchievementCatalog`，不走 SO），解锁状态**不落盘**、全部由「等级 + 已达成成就」推导，只持久化 5 个装备槽 → 老存档零迁移、坏档自动回退槽位默认件。
+陷阱：`CharacterVisualController` 挂在 Player 的**子节点** `VisualRoot`，任何地方取它都必须 `GetComponentInChildren`（用 `GetComponent` 会静默取不到，衣柜预览表现为一张墨色空底图）；材质定位只能「材质名前缀 + 作用域」——烘焙材质名带颜色后缀（`Mat_CharacterShirt_F0EDE3`），且武器件与眼睛/袜子共用 `Mat_AccentsWhite`、鞋壳与衣领共用 `Mat_DarkPlastic`，只能靠 `WeaponRoot` / `Ankle` 限定范围才不误伤；头饰必须在 `MergeBodyRuntime` 之后创建，否则被扫进 `MergedStatic_*`；戴帽子要把发束压细压短，否则发束直接从帽壳穿出（远看是一颗橙色脑袋）。
+文件：`Scripts/Core/{Cosmetics,CosmeticUnlockMath,PlayerProfile}.cs`、`Scripts/Player/{CharacterCosmetics,CharacterVisualController,CharacterVisualAssembler}.cs`、`Scripts/UI/{LockerOverlay,LockerPreviewStage,MatchFlowUI,MenuLayoutMath}.cs`、`Scripts/UI/Core/MenuInputRouter.cs`、`tools/font_charset.txt`。
+
+## 2026-11-09 #11
+Fixed: 移动端首页「武器整备」卡贴到「开始游戏」卡右缘、压住难度行——卡片被永久卡在悬停放大态（实测 860×150 的卡渲染成 903×157.5 = hoverScale 1.05，同一排 2分/3分药丸尺寸分毫不差，故与布局表无关）。根因：点整备卡开抽屉会立刻 `SetActive(false)`，触摸抬手的 `PointerExit` 已无接收者，`UISpringMotion._hovered` 跨隐藏存活；抽屉一关卡片重新激活，把中断的 0.95→1.05 补间跑完并永久停在 1.05，轴心在左上角 → 只向右下涨，正好吃掉 40px 右内边距。
+修法：`UISpringMotion.OnDisable` / `UIJellyButton.OnDisable` 清交互态并把变换复位常态；整备卡这类铺满内宽的卡片改用新增的 `SetHoverScale(1f)` 关掉悬停放大（硬影/按压反馈保留），重新显示时再 `SnapHome()` 兜底。文件：`Scripts/UI/Core/{UISpringMotion,UIJellyButton}.cs`、`Scripts/UI/WeaponSelect/WeaponSelectView.cs`、`Tests/PlayMode/UIMotionInteractionPlayTests.cs`。
+
+## 2026-11-09 #10
+【画面马赛克三源治理】实测放大 3 倍逐像素扫描墨边与墙边：**墨迹边缘是 2px 步进的光滑斜线，本身没问题**，方块感来自三处叠加 —— ① 遮挡淡化用 4×4 Bayer 屏幕网点，alpha 被量化成 16 级固定屏幕格（0.35 时每 4×4 挖掉 10 孔），经移动端 `renderScale 0.8` 双线性放大后每个孔变成 5×5 屏幕像素；② `P1ToonShadowTerm` 的 smoothstep 窗口（角色硬编码 softness=0.02 → ±0.08）比 URP 9-tap tent 滤波的渐变跨度还窄，把 PCF 连续过渡重新压成阴影贴图纹素台阶；③ 移动端 MSAA 关闭 + `renderScale 0.8`，几何轮廓（掩体/箱体棱边）原本只靠 FXAA(Low) 后处理模糊，低倍率下读作方块。
+修法：新增 `P1IgnDither`/`P1ScreenDoorDiscard`（交错梯度噪声，无格子结构、对负坐标安全）替换三处 Bayer 矩阵；`P1ToonShadowTerm` 过渡带加下限 0.12；移动端主光阴影贴图 1024→2048、AA 由 FXAA(Low) 改 SMAA(Low)（运行时 `TopDownCameraFollow` 与场景生成 `ArenaAtmosphereBuilder` 两条路径同改，否则重建场景被覆盖回去）。陷阱：旧抖动里 `int(fmod(screenPixel.x, 4.0))` 对负屏幕坐标返回 -1，矩阵越界读，部分 GPU 上网点会闪。文件：`Shaders/{ToonLighting.hlsl,InkGround.shader,InkWall.shader,ObstacleDitherLit.shader}`、`Scripts/Player/TopDownCameraFollow.cs`、`Scripts/Editor/ArenaAtmosphereBuilder.cs`、`Settings/Mobile_RPAsset.asset`。
+
+## 2026-11-09 #09
+Fixed: 首页「战绩」浮层在手机横屏（20:9）满屏叠字——`HomeInfoLayoutMath.Metrics(true)` 的字号本身已是「移动端渲染字号」，`BuildIdentityBlock`/`BuildStatTile` 又经 `UITypography.FontSnapped` 乘了一遍 ×1.28（数据数值 60→76、等级 132→168）；内容区只剩 437px 时两段式数据格算出的数值框是 `y=-13`（大数字顶出卡片压住标签），身份卡的段位 281~340 与 XP 文字 214~263 正面相撞。
+改为按盒子高度自适应：`ResolveStatTileLayout` 装不下「标签上 / 数值下」时退成「标签左 / 数值右」一行式并按格高收敛数值字号；`IdentityContentHeight` + `FitScale` 让身份卡五段（LV / 等级 / 段位 / XP 条 / ID）的字号与行距整体等比收敛。桌面 1920×1080 仍走原两段式，像素不变。
+陷阱：往 `HomeInfoLayoutMath` 移动端度量里再填「看着够大」的字号会被 `UITypography` 二次放大——度量表只放基数，移动端放大统一交给 `UITypography`。文件：`Scripts/UI/{HomeInfoOverlay,HomeInfoLayoutMath}.cs`、`Tests/EditMode/HomeInfoContentTests.cs`。
+
 ## 2026-11-09 #08
 【移动端地面细节 + 全距离落地感】移动端原先被 `P1_INK_HIGH` 整档关掉，`ArenaGround_N/RMO`（板缝凹槽、气泡坑、油污 AO、粗糙度）三张材质里明明挂着却从不采样——拆出 `P1_INK_GROUNDMAPS` 与 `P1_INK_HIGH` 同组互斥（`#pragma multi_compile _ P1_INK_HIGH P1_INK_GROUNDMAPS`），`RenderEnvGlobals.EnsureTier` 在移动端只开这一档；亚纹素墨缘、碎墨、B 样条仍只留给桌面。
 新增「掩体落地接触遮蔽」：`InkSurfaceController.RebuildGroundContactMask` 在 `SealNarrowSlits` **之前**取不可涂格（否则死缝会在地面留下莫名暗线），两遍可分离盒式模糊（半径 `groundContactAORadiusMeters`）烘成 R8 遮蔽场，InkGround 按**计分场地矩形**乘到地面基底色——不能用 `inkUV`（图集比计分场四周多 1.5m 边距，会整体外扩失准）；纹理四周留 1 texel 白边，否则场外 74×84m 码头基座会被 Clamp 拉出一条暗带。
@@ -37,6 +55,8 @@ Fixed: 移动端底部生命值条全黑——`MobileTouchUI.Awake` 抢在 `HudC
 Fixed: Android 发布包构建报 `CS0103: _debugPreviewUntil does not exist`——`SubmergedInkView` / `LowHealthVignetteView` 的字段在 `#if UNITY_EDITOR || DEVELOPMENT_BUILD` 内、`DebugPreview()` 方法却留在外面，编辑器（含测试）能编译、只有 Player 构建才炸；按 `KillFlashView` / `LensInkView` 的既有写法给方法补同一层编译守卫。陷阱：`run_tests.sh fast` 全绿不等于能出包，改完 `#if` 一定要跑一次 Release 构建。文件：`Scripts/UI/{SubmergedInkView,LowHealthVignetteView}.cs`。
 
 【发布 v0.1.31】含 2026-11-09 `#02`~`#08`；APK `moshuizuozhan-v0.1.31-arm64-v8a.apk`。
+
+【发布 v0.1.32】含 2026-11-09 `#09`~`#12`；APK `moshuizuozhan-v0.1.32-arm64-v8a.apk`。
 
 ## 2026-11-08 #36
 Fixed: 喷墙不再留墨、子弹穿过箱体/地面——`InkProjectilePool.TryCheckImpact` 的「贴脸重叠补判」改造把球扫的世界命中 `found` 丢掉了（只返回 `OverlapCheckDue && TryResolveOverlappedCombatant`），非爆破弹丸因此只认角色命中，墙/地一律穿透，只剩沿途滴墨的 XZ 投影涂到箱顶与地面。恢复「`found` 即按世界命中结算」，重叠补判只作为球扫落空时的补充；`WallInkPlayboxTests` 7/7 通过（含此前判红的 `ProjectileHit_PaintsWallFace`）。文件：`Scripts/Weapons/InkProjectilePool.cs`。

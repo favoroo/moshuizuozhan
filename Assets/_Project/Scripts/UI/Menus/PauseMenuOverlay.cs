@@ -2005,7 +2005,8 @@ namespace P1.UI.Menus
                     layoutEditing: MobileLayoutCustomizer.IsEditingAny,
                     pauseExpanded: IsMenuExpanded,
                     drawerExpanded: WeaponSelectView.Instance != null && WeaponSelectView.Instance.IsDrawerOpen,
-                    mapSelectOpen: MapSelectOverlay.IsOpen);
+                    mapSelectOpen: MapSelectOverlay.IsOpen,
+                    lockerOpen: LockerOverlay.IsOpen);
 
                 if (!MenuInputRouter.CanLayerHandle(MenuEscLayer.PauseMenu, owner))
                 {
@@ -2027,6 +2028,9 @@ namespace P1.UI.Menus
                         return;
                     case MenuEscAction.CloseMapSelect:
                         MapSelectOverlay.TryCloseFromMenuInput();
+                        return;
+                    case MenuEscAction.CloseLocker:
+                        LockerOverlay.TryCloseFromMenuInput();
                         return;
                     case MenuEscAction.CloseDrawer:
                         // 归属为抽屉时由这里执行收起（与 WeaponSelectView 共用同一动作映射，

@@ -35,6 +35,10 @@ namespace P1.UI
         [Tooltip("悬停时的放大倍率（hover:scale-105）")]
         [SerializeField, Range(1f, 1.3f)] private float hoverScale = 1.05f;
 
+        [Tooltip("运行时覆盖悬停倍率（0 = 跟随主题）。满宽卡片必须设 1：卡片已铺满容器内宽，" +
+                 "再放大 1.05 会顶出内边距、压住相邻元素")]
+        [SerializeField, Range(0f, 1.3f)] private float hoverScaleOverride = 0f;
+
         [Tooltip("按下时的压缩倍率（active:scale-95）")]
         [SerializeField, Range(0.7f, 1f)] private float pressScale = 0.95f;
 
@@ -115,6 +119,36 @@ namespace P1.UI
         private void OnDisable()
         {
             _running = false;
+
+            // 隐藏期间的指针事件送不到（触屏点开抽屉会把整备卡 SetActive(false)，抬手时
+            // PointerExit 已没有接收者），悬停/按压态会跟着对象跨隐藏存活：重新显示时上一次
+            // 被中断的补间继续跑完，满宽卡片就永久停在 hoverScale（1.05），向右下顶出容器内边距。
+            // 隐藏即视为交互结束 —— 清掉交互态并把变换复位到常态。
+            _hovered = false;
+            _pressed = false;
+            _releasedFromPress = false;
+            _punch = 0f;
+            if (!_built) return;
+
+            _currentScale = _homeScale;
+            _scaleFrom = _homeScale;
+            _scaleTo = _homeScale;
+            _scaleT = 1f;
+            _tiltCurrent = 0f;
+            _tiltFrom = 0f;
+            _tiltTo = 0f;
+            _tiltT = 1f;
+            transform.localScale = _homeScale;
+            transform.localRotation = _homeRotation;
+        }
+
+        /// <summary>
+        /// 覆盖悬停放大倍率（1 = 悬停不放大，仍保留硬影/按下反馈）。
+        /// 满宽卡片必须用它：卡片本身已铺满容器内宽，1.05 的悬停放大必然顶出内边距。
+        /// </summary>
+        public void SetHoverScale(float scale)
+        {
+            hoverScaleOverride = Mathf.Max(0f, scale);
         }
 
         public void SetTheme(UIThemeSO themeAsset)
@@ -314,7 +348,9 @@ namespace P1.UI
         private Vector3 CurrentInteractionTarget()
         {
             UIThemeSO settings = CurrentSettings();
-            float useHoverScale = useThemeInteraction ? settings.hoverScale : hoverScale;
+            float useHoverScale = hoverScaleOverride > 0f
+                ? hoverScaleOverride
+                : (useThemeInteraction ? settings.hoverScale : hoverScale);
             float usePressScale = useThemeInteraction ? settings.pressScale : pressScale;
 
             if (_leaving) return _homeScale * 0.9f;

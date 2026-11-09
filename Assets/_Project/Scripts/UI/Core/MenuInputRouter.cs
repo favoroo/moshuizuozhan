@@ -12,7 +12,10 @@ namespace P1.UI
         PauseMenu = 2,
         LayoutEditor = 3,
         HomeInfo = 4,
-        MapSelect = 5
+        MapSelect = 5,
+
+        /// <summary>衣柜（外观）：最后打开的菜单层，Esc 归属优先级最高。</summary>
+        Locker = 6
     }
 
     /// <summary>归属层对应的唯一动作，两个消费者（暂停菜单 / 武器抽屉）共用同一份映射。</summary>
@@ -23,7 +26,10 @@ namespace P1.UI
         CloseLayoutEditor,
         TogglePause,
         CloseDrawer,
-        CloseMapSelect
+        CloseMapSelect,
+
+        /// <summary>关闭衣柜浮层。</summary>
+        CloseLocker
     }
 
     /// <summary>
@@ -39,7 +45,7 @@ namespace P1.UI
     ///    这是「顺序无关」的关键——旧接线里暂停菜单在归属为抽屉时先 consume 再 return，
     ///    抽屉随后 TryConsumeEsc 失败，若暂停菜单先 Update，一个 Esc 在抽屉上完全没反应；
     /// 3. <see cref="TryConsumeEsc(MenuEscLayer)"/> 帧级消费位：同一帧只有归属层能执行一次动作；
-    /// 4. 优先级：首页详情浮层 &gt; 布局编辑 &gt; 暂停/设置 &gt; 武器抽屉；
+    /// 4. 优先级：衣柜 &gt; 地图选择 &gt; 首页详情浮层 &gt; 布局编辑 &gt; 暂停/设置 &gt; 武器抽屉；
     ///    都没展开时 Esc = 暂停菜单（桌面端暂停唯一入口），因此抽屉只在「已展开」时抢 Esc。
     /// 两个消费者（<c>PauseMenuOverlay</c> / <c>WeaponSelectView</c>）都按
     /// <c>ResolveEscOwner → CanLayerHandle → TryConsumeEsc → ActionForOwner</c> 四步走，
@@ -59,10 +65,13 @@ namespace P1.UI
         /// <summary>
         /// 纯逻辑：按展开状态解析本帧 Esc 的归属层。
         /// 展开态互斥（界面自身保证不会同时展开多个），因此结果唯一且与调用顺序无关。
+        /// 新层的可选参数一律追加在末尾并给默认值：既有调用点零改动。
         /// </summary>
         public static MenuEscLayer ResolveEscOwner(bool homeInfoOpen, bool layoutEditing, bool pauseExpanded, bool drawerExpanded,
-            bool mapSelectOpen = false)
+            bool mapSelectOpen = false, bool lockerOpen = false)
         {
+            // 更晚打开的层在上：衣柜从地图选择 / 首页浮层之上打开，所以它最先拿走 Esc。
+            if (lockerOpen) return MenuEscLayer.Locker;
             if (mapSelectOpen) return MenuEscLayer.MapSelect;
             if (homeInfoOpen) return MenuEscLayer.HomeInfo;
             if (layoutEditing) return MenuEscLayer.LayoutEditor;
@@ -73,20 +82,21 @@ namespace P1.UI
 
         /// <summary>按当前帧号解析归属（运行时代码用这个）。</summary>
         public static MenuEscLayer ResolveEscOwnerThisFrame(bool homeInfoOpen, bool layoutEditing, bool pauseExpanded, bool drawerExpanded,
-            bool mapSelectOpen = false)
+            bool mapSelectOpen = false, bool lockerOpen = false)
         {
-            return ResolveEscOwner(homeInfoOpen, layoutEditing, pauseExpanded, drawerExpanded, mapSelectOpen);
+            return ResolveEscOwner(homeInfoOpen, layoutEditing, pauseExpanded, drawerExpanded, mapSelectOpen, lockerOpen);
         }
 
         /// <summary>
         /// 纯逻辑：<paramref name="layer"/> 是否有权处理归属为 <paramref name="owner"/> 的本帧 Esc。
-        /// - 归属为首页详情浮层 / 布局编辑：任何消费者都可代劳（谁先 Update 谁关，动作完全一致）；
+        /// - 归属为首页详情浮层 / 布局编辑 / 地图选择 / 衣柜：任何消费者都可代劳（谁先 Update 谁关，动作完全一致）；
         /// - 归属为暂停/设置或武器抽屉：**只有自己**能处理，非归属层必须直接 return 且不得占用帧位，
         ///   否则归属层会因消费位被抢而彻底收不到这个 Esc（顺序相关的历史 bug）。
         /// </summary>
         public static bool CanLayerHandle(MenuEscLayer layer, MenuEscLayer owner)
         {
-            if (owner == MenuEscLayer.HomeInfo || owner == MenuEscLayer.LayoutEditor || owner == MenuEscLayer.MapSelect) return true;
+            if (owner == MenuEscLayer.HomeInfo || owner == MenuEscLayer.LayoutEditor ||
+                owner == MenuEscLayer.MapSelect || owner == MenuEscLayer.Locker) return true;
             return layer == owner;
         }
 
@@ -98,6 +108,7 @@ namespace P1.UI
                 case MenuEscLayer.HomeInfo: return MenuEscAction.CloseHomeInfo;
                 case MenuEscLayer.LayoutEditor: return MenuEscAction.CloseLayoutEditor;
                 case MenuEscLayer.MapSelect: return MenuEscAction.CloseMapSelect;
+                case MenuEscLayer.Locker: return MenuEscAction.CloseLocker;
                 case MenuEscLayer.WeaponDrawer: return MenuEscAction.CloseDrawer;
                 default: return MenuEscAction.TogglePause;
             }

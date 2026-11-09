@@ -54,8 +54,76 @@ namespace P1.UI
         public float NoteFont;
     }
 
+    /// <summary>
+    /// 单个战绩数据格的内部排版结果（由 <see cref="HomeInfoLayoutMath.ResolveStatTileLayout"/> 给出）。
+    /// </summary>
+    public struct HomeInfoStatTileLayout
+    {
+        /// <summary>true = 标签在左 / 数值在右的一行式；false = 标签在上 / 数值在下的两段式。</summary>
+        public bool Horizontal;
+        public float Pad;
+        public float LabelFont;
+        public float ValueFont;
+    }
+
     public static class HomeInfoLayoutMath
     {
+        /// <summary>
+        /// 内容自然高度超过盒子高度时，字号与行距统一的等比收敛系数（≤ 1，永不放大）。
+        /// 先整体等比缩、而不是只缩间距：间距先归零会变成「贴在一起但没叠」，观感更糟。
+        /// 无下限——宁可变小也绝不叠字；盒高有面板最小高度兜底，实际不会缩到读不了。
+        /// </summary>
+        public static float FitScale(float boxHeight, float naturalHeight)
+        {
+            if (naturalHeight <= 1f || boxHeight <= 0f) return 1f;
+            return Mathf.Min(1f, boxHeight / naturalHeight);
+        }
+
+        /// <summary>
+        /// 身份卡纵向五段（LV 角签 / 等级 / 段位 / XP 条 / ID 标签）的自然总高（不含上下内缩）。
+        /// 行距常量与 HomeInfoOverlay.BuildIdentityBlock 共用同一组：6+10+4+8+8+8+14 = 58。
+        /// </summary>
+        public static float IdentityContentHeight(HomeInfoMetrics m, float levelFont, float rankFont,
+            float labelFont)
+        {
+            return m.IdentityTagSize.y * 2f + 58f
+                   + levelFont * 1.15f + rankFont * 1.35f + labelFont * 2.85f + m.XpBarHeight;
+        }
+
+        /// <summary>
+        /// 战绩数据格排版：格子高得下「标签 + 大数字」两段时保持原样；
+        /// 手机横屏逻辑高只有桌面一半（20:9 时长边换短边），格子会被压到 90px 上下，
+        /// 此时退回「标签在左 / 数值在右」的一行式，并把数值字号收到格高容得下的上限——
+        /// 两种模式都不会让标签与数值叠字（旧版两段式在窄屏会让大数字顶出格子压住标签）。
+        /// </summary>
+        public static HomeInfoStatTileLayout ResolveStatTileLayout(float tileHeight, float labelFont, float valueFont)
+        {
+            float pad = Mathf.Clamp(tileHeight * 0.14f, 10f, 20f);
+            float available = Mathf.Max(1f, tileHeight - pad * 2f);
+
+            // 用「字号」而不是「行盒高」估两段式占用：行盒自带 1.15~1.4 倍行距，
+            // 按行盒判会让桌面也误判成放不下（桌面本来就是紧贴但清晰的两段式）。
+            if (available >= labelFont + valueFont + 6f)
+            {
+                return new HomeInfoStatTileLayout
+                {
+                    Horizontal = false,
+                    Pad = pad,
+                    LabelFont = labelFont,
+                    ValueFont = valueFont,
+                };
+            }
+
+            return new HomeInfoStatTileLayout
+            {
+                Horizontal = true,
+                Pad = pad,
+                // 一行式里标签与数值共用行高：各自都不能超过格子的可用高度。
+                LabelFont = Mathf.Min(labelFont, available / 1.4f),
+                ValueFont = Mathf.Min(valueFont, available / 1.15f),
+            };
+        }
+
         /// <summary>桌面 / 移动端两套浮层度量。</summary>
         public static HomeInfoMetrics Metrics(bool mobile)
         {

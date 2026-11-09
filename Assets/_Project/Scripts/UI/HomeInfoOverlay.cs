@@ -10,7 +10,8 @@ namespace P1.UI
     /// <summary>
     /// 首页「战绩 / 键位说明」详情浮层（运行时装配，不改场景 YAML）：
     /// - 全屏墨色遮罩 + 居中纸白面板（4px 墨框 + Dialog 硬影），点击遮罩 / 关闭键 / Esc 退出；
-    /// - 左侧身份卡 + 右侧 2×3 数据格（战绩），或左右两栏键位 + 底部规则速记（键位说明）；
+    /// - 左侧身份卡 + 右侧 2×4 数据格（战绩，格子压得比「标签 + 大数字」两段还矮时自动改左右一行式），
+    ///   或左右两栏键位 + 底部规则速记（键位说明）；
     /// - 面板尺寸与字号来自 <see cref="HomeInfoLayoutMath"/>，内容来自 <see cref="HomeInfoContent"/>；
     /// - 静态 <see cref="IsOpen"/> / <see cref="MenuInputConsumedThisFrame"/> 给首页开赛快捷键、
     ///   暂停菜单与武器抽屉做同帧输入仲裁（一个 Esc 不能既关浮层又开暂停/抽屉）。
@@ -536,20 +537,35 @@ namespace P1.UI
                 ComicStyle.PaperAlt, ComicStyle.Green, 6f, UIHardShadowLevel.None);
 
             float pad = m.Padding * 0.6f;
-            float tagTop = pad + 6f;
-            CreateTag(block, "LevelTag", "LV.", m.IdentityTagSize,
-                UITypography.FontSnapped(m.IdentityTagFont), ComicStyle.Ink, ComicStyle.Paper,
-                new Vector2(pad, tagTop));
 
             float levelFont = UITypography.FontSnapped(m.IdentityLevelFont);
-            float levelTop = tagTop + m.IdentityTagSize.y + 10f;
+            float rankFont = UITypography.FontSnapped(m.IdentityRankFont);
+            float labelFont = UITypography.FontSnapped(m.IdentityLabelFont);
+
+            // 等级 / 段位 / XP / 进度条 / ID 五段是固定像素排的，手机横屏内容区只有 430px 上下
+            // （20:9 逻辑高仅桌面一半），原来的「5 段自然高 550px」会把段位压进 XP 文字里。
+            // 这里先按度量算一遍自然高，装不下就把字号与行距整体等比收敛，五段结构不变。
+            float flex = HomeInfoLayoutMath.IdentityContentHeight(m, levelFont, rankFont, labelFont);
+            float fit = HomeInfoLayoutMath.FitScale(size.y - pad * 2f, flex);
+
+            float tagHeight = m.IdentityTagSize.y * fit;
+            float barHeight = m.XpBarHeight * fit;
+            levelFont *= fit;
+            rankFont *= fit;
+            labelFont *= fit;
+
+            float tagTop = pad + 6f * fit;
+            CreateTag(block, "LevelTag", "LV.", new Vector2(m.IdentityTagSize.x, tagHeight),
+                UITypography.FontSnapped(m.IdentityTagFont * fit), ComicStyle.Ink, ComicStyle.Paper,
+                new Vector2(pad, tagTop));
+
+            float levelTop = tagTop + tagHeight + 10f * fit;
             CreateText(block, "LevelValue", summary.Level.ToString(), levelFont, true, ComicStyle.Ink,
                 new Vector2(pad, levelTop),
                 new Vector2(size.x - pad * 2f, levelFont * 1.15f),
                 TextAlignmentOptions.MidlineLeft, -2f, FontStyles.Bold);
 
-            float rankFont = UITypography.FontSnapped(m.IdentityRankFont);
-            float rankTop = levelTop + levelFont * 1.15f + 4f;
+            float rankTop = levelTop + levelFont * 1.15f + 4f * fit;
             CreateText(block, "RankName", summary.RankName.ToUpperInvariant(), rankFont, true,
                 ComicStyle.WithAlpha(ComicStyle.Ink, 0.78f),
                 new Vector2(pad, rankTop),
@@ -557,11 +573,10 @@ namespace P1.UI
                 TextAlignmentOptions.MidlineLeft, 1f, FontStyles.Bold);
 
             // 底部从 ID 标签往上排，保证 XP 区永远不压到底边
-            float labelFont = UITypography.FontSnapped(m.IdentityLabelFont);
-            float idTop = size.y - pad - m.IdentityTagSize.y;
-            float subTop = idTop - 14f - labelFont * 1.5f;
-            float barTop = subTop - 8f - m.XpBarHeight;
-            float xpLabelTop = barTop - 8f - labelFont * 1.35f;
+            float idTop = size.y - pad - tagHeight;
+            float subTop = idTop - 14f * fit - labelFont * 1.5f;
+            float barTop = subTop - 8f * fit - barHeight;
+            float xpLabelTop = barTop - 8f * fit - labelFont * 1.35f;
 
             CreateText(block, "XpLabel", $"XP {summary.Xp} / {summary.XpForNextLevel}", labelFont, false,
                 ComicStyle.Ink,
@@ -570,11 +585,11 @@ namespace P1.UI
                 TextAlignmentOptions.MidlineLeft, 0.5f, FontStyles.Bold);
 
             float barWidth = size.x - pad * 2f;
-            CreateSolidRect(block, "XpTrack", new Vector2(pad, barTop), new Vector2(barWidth, m.XpBarHeight),
+            CreateSolidRect(block, "XpTrack", new Vector2(pad, barTop), new Vector2(barWidth, barHeight),
                 ComicStyle.InkSoft, false);
             // 进度条与轨道都取左上 pivot：填充从左侧生长，不靠改 pivot（改 pivot 会带着位置一起位移）。
             CreateSolidRect(block, "XpFill", new Vector2(pad, barTop),
-                new Vector2(barWidth * summary.LevelProgress01, m.XpBarHeight), ComicStyle.Green, false);
+                new Vector2(barWidth * summary.LevelProgress01, barHeight), ComicStyle.Green, false);
 
             CreateText(block, "XpToNext", $"距下一级 {summary.XpToNextLevel} XP", labelFont, false,
                 ComicStyle.WithAlpha(ComicStyle.Ink, 0.62f),
@@ -583,8 +598,8 @@ namespace P1.UI
                 TextAlignmentOptions.MidlineLeft, 0.5f, FontStyles.Bold);
 
             CreateTag(block, "PlayerTag", "ID · " + summary.PlayerName,
-                new Vector2(size.x - pad * 2f, m.IdentityTagSize.y),
-                UITypography.FontSnapped(m.IdentityTagFont), ComicStyle.Ink, ComicStyle.Paper,
+                new Vector2(size.x - pad * 2f, tagHeight),
+                UITypography.FontSnapped(m.IdentityTagFont * fit), ComicStyle.Ink, ComicStyle.Paper,
                 new Vector2(pad, idTop));
         }
 
@@ -635,18 +650,43 @@ namespace P1.UI
             RectTransform tile = CreateBlock(panel, name, topLeft, size,
                 ComicStyle.PaperAlt, ComicStyle.Green, 5f, UIHardShadowLevel.None);
 
-            float pad = 20f;
             float labelFont = UITypography.FontSnapped(m.StatLabelFont);
-            CreateText(tile, "Label", label, labelFont, false,
+            float valueFont = UITypography.FontSnapped(compactValue ? m.StatRankFont : m.StatValueFont);
+            HomeInfoStatTileLayout slot = HomeInfoLayoutMath.ResolveStatTileLayout(size.y, labelFont, valueFont);
+
+            float pad = slot.Pad;
+            float labelFontUsed = slot.LabelFont;
+            float labelBox = labelFontUsed * 1.4f;
+            float valueFontUsed = slot.ValueFont;
+            float valueBox = valueFontUsed * 1.15f;
+
+            if (slot.Horizontal)
+            {
+                // 窄屏一行式：标签竖中靠左、数值竖中靠右。两侧各给一段固定的横向走廊，
+                // 数值再长也只会顶到走廊边界，不会侵入标签（TMP 溢出是向左长）。
+                float labelWidth = size.x * 0.44f;
+                CreateText(tile, "Label", label, labelFontUsed, false,
+                    ComicStyle.WithAlpha(ComicStyle.Ink, 0.62f),
+                    new Vector2(pad, (size.y - labelBox) * 0.5f),
+                    new Vector2(labelWidth - pad, labelBox),
+                    TextAlignmentOptions.MidlineLeft, 0.5f, FontStyles.Bold);
+
+                CreateText(tile, "Value", value, valueFontUsed, true, ComicStyle.Ink,
+                    new Vector2(labelWidth, (size.y - valueBox) * 0.5f),
+                    new Vector2(size.x - labelWidth - pad, valueBox),
+                    TextAlignmentOptions.MidlineRight, compactValue ? 0.5f : -1f, FontStyles.Bold);
+                return;
+            }
+
+            CreateText(tile, "Label", label, labelFontUsed, false,
                 ComicStyle.WithAlpha(ComicStyle.Ink, 0.62f),
                 new Vector2(pad, pad),
-                new Vector2(size.x - pad * 2f, labelFont * 1.4f),
+                new Vector2(size.x - pad * 2f, labelBox),
                 TextAlignmentOptions.MidlineLeft, 0.5f, FontStyles.Bold);
 
-            float valueFont = UITypography.FontSnapped(compactValue ? m.StatRankFont : m.StatValueFont);
-            CreateText(tile, "Value", value, valueFont, true, ComicStyle.Ink,
-                new Vector2(pad, size.y - pad - valueFont * 1.15f),
-                new Vector2(size.x - pad * 2f, valueFont * 1.15f),
+            CreateText(tile, "Value", value, valueFontUsed, true, ComicStyle.Ink,
+                new Vector2(pad, size.y - pad - valueBox),
+                new Vector2(size.x - pad * 2f, valueBox),
                 TextAlignmentOptions.MidlineLeft, compactValue ? 0.5f : -1f, FontStyles.Bold);
         }
 

@@ -95,7 +95,7 @@ namespace P1.UI
         public Vector2 CtaSize;
         public float CtaFont;
 
-        /// <summary>兼容字段：旧版「次级小按钮」尺寸（首页已改为 2×2 卡片，数值保留给旧调用方与测试）。</summary>
+        /// <summary>兼容字段：旧版「次级小按钮」尺寸（首页已改为 2×3 卡片，数值保留给旧调用方与测试）。</summary>
         public Vector2 SecondarySize;
         public float SecondaryFont;
 
@@ -122,13 +122,13 @@ namespace P1.UI
         /// </summary>
         public float CenteredBoardTop => (CardTop + CardBottom) * 0.5f;
 
-        /// <summary>Hero 卡与右侧 2×2 卡阵之间的横向间隔。</summary>
+        /// <summary>Hero 卡与右侧 2×3 卡阵之间的横向间隔。</summary>
         public float ColumnGap;
 
-        /// <summary>右侧 2×2 卡阵总宽度（桌面/移动端两套数）。</summary>
+        /// <summary>右侧 2×3 卡阵总宽度（桌面/移动端两套数）。</summary>
         public float GridWidth;
 
-        /// <summary>2×2 卡片之间的间隔（横竖同值）。</summary>
+        /// <summary>2×3 卡片之间的间隔（横竖同值）。</summary>
         public float TileGap;
 
         /// <summary>卡片顶部身份色带高度（规范：5px，不承载文字）。</summary>
@@ -190,7 +190,7 @@ namespace P1.UI
 
         /// <summary>
         /// 遗留：顶部右侧「自定义按键」小按钮的显隐开关。首页已移除该按钮
-        /// （入口收敛到 2×2 卡阵的「按键位置」卡），字段只为旧调用兼容保留，构造时恒为 false。
+        /// （入口收敛到 2×3 卡阵的「按键位置」卡），字段只为旧调用兼容保留，构造时恒为 false。
         /// 需要判断平台请用 <see cref="Mobile"/>——它此前被当作「是否移动端」的替身传给
         /// <c>LoadoutCard()</c> / <c>ResolveHeroFlow()</c>。
         /// </summary>
@@ -198,7 +198,7 @@ namespace P1.UI
 
         public float BoardHeight => MenuLayoutMath.RefHeight - CardTop - CardBottom;
 
-        /// <summary>卡片区（Hero + 2×2 卡阵）外框。</summary>
+        /// <summary>卡片区（Hero + 2×3 卡阵）外框。</summary>
         public HomeBox Board =>
             new HomeBox(Margin, CardTop, MenuLayoutMath.RefWidth - Margin * 2f, BoardHeight);
 
@@ -207,12 +207,19 @@ namespace P1.UI
 
         public float TileWidth => (GridWidth - TileGap) * 0.5f;
 
-        public float TileHeight => (BoardHeight - TileGap) * 0.5f;
+        /// <summary>
+        /// 2×3 卡阵的行高：三行之间夹两条 TileGap，所以减 <c>TileGap * 2</c> 再除 3。
+        /// 旧版 2×2 是「减一条 gap 再除 2」，直接沿用会把第三行推出卡片区。
+        /// </summary>
+        public float TileHeight => (BoardHeight - TileGap * 2f) / 3f;
 
         public HomeBox Grid =>
             new HomeBox(MenuLayoutMath.RefWidth - Margin - GridWidth, CardTop, GridWidth, BoardHeight);
 
-        /// <summary>2×2 卡阵：0=左上 1=右上 2=左下 3=右下（阅读顺序 = 入场错峰顺序）。</summary>
+        /// <summary>
+        /// 2×3 卡阵：0=左上 1=右上 2=第二行左 3=第二行右 4=第三行左 5=第三行右
+        /// （阅读顺序 = 入场错峰顺序）。<c>index % 2 / index / 2</c> 本身支持任意行数，行高改由 TileHeight 决定。
+        /// </summary>
         public HomeBox Tile(int index)
         {
             int col = index % 2;
@@ -432,7 +439,7 @@ namespace P1.UI
     /// 不再靠人眼看截图猜。
     ///
     /// 波次3a（t-1 新野兽派）：首页从「白底大留白 + 角落按钮」改为「深色舞台 + 左侧 Hero 大卡 +
-    /// 右侧 2×2 次级卡」，盒子由 <see cref="HomeMenuMetrics"/> 的 HeroCard / Tile(i) / HeroCta 等给出。
+    /// 右侧 2×3 次级卡」，盒子由 <see cref="HomeMenuMetrics"/> 的 HeroCard / Tile(i) / HeroCta 等给出。
     /// </summary>
     public static class MenuLayoutMath
     {
@@ -511,7 +518,7 @@ namespace P1.UI
             }
 
             // 移动端：卡片区 1856×704，横向占屏 97%。顶部不再留「自定义按键」小按钮的位置
-            // （入口收敛到 2×2 卡阵的「按键位置」卡），Hero 排版仍按移动端参数走。
+            // （入口收敛到 2×3 卡阵的「按键位置」卡），Hero 排版仍按移动端参数走。
             // CTA 860×160、Hero 940 宽：手机逻辑画布不宽，靠"更大更高的盒子"而不是继续放大字号。
             return new HomeMenuMetrics
             {
@@ -676,7 +683,7 @@ namespace P1.UI
         ///
         /// 防御：Android 启动/旋转瞬间 safeArea 与 Screen 可能短暂不在同一像素空间，
         /// 读出的「安全区」会比画布还大（真机 20:9 实测约大 18% 宽 / 24% 高），
-        /// 直接采用会把 2×2 卡阵整列推出屏幕。画布尺寸有效时一律钳回画布；
+        /// 直接采用会把 2×3 卡阵整列推出屏幕。画布尺寸有效时一律钳回画布；
         /// 画布未排版（0）时保持原值，由调用方的参考分辨率兜底。
         /// </summary>
         public static HomeRuntimeBoard ResolveHomeBoard(HomeMenuMetrics m, float safeWidth, float safeHeight,
@@ -691,7 +698,7 @@ namespace P1.UI
                 m.HeroBox.x * 0.62f,
                 m.HeroBox.x);
 
-            // 列间距恒为 ColumnGap：安全区比「Hero + 2×2」设计总宽更宽时（20:9 手机、超宽窗口），
+            // 列间距恒为 ColumnGap：安全区比「Hero + 2×3」设计总宽更宽时（20:9 手机、超宽窗口），
             // 多余宽度均分到左右外边距，整块版面水平居中；绝不能全部灌进 Hero 与卡阵之间——
             // 真机 2148 宽安全区曾因此得到 146px 的中部空场（设计值 20）。
             float boardWidth = heroWidth + m.ColumnGap + m.GridWidth;
@@ -705,7 +712,8 @@ namespace P1.UI
                 HeroWidth = heroWidth,
                 GridX = heroX + heroWidth + m.ColumnGap,
                 TileWidth = (m.GridWidth - m.TileGap) * 0.5f,
-                TileHeight = Mathf.Max(140f, (height - m.TileGap) * 0.5f),
+                // 2×3：三行夹两条 TileGap；下限 140 保证再矮的窗口里卡片仍放得下角签 + 标题。
+                TileHeight = Mathf.Max(140f, (height - m.TileGap * 2f) / 3f),
             };
         }
 

@@ -140,10 +140,23 @@ namespace P1.UI
         private GameObject _fullscreenUnderlay;
         private float _resultElapsed;
 
+        // 结算 → 首页的退场转场：结算页整页淡出（_resultExitGroup）后再亮出首页，
+        // 替代 ApplyPhase 里「resultPanel 一帧硬切掉」的观感断层。
+        // _resultExitActive 防重入——ApplyPhase 每帧都会跑，没有标记会反复重置 alpha 从 1 重播，
+        // 淡出永远走不完（表现为结算页卡住不消失）。
+        private CanvasGroup _resultExitGroup;
+        private bool _resultExitActive;
+        private float _resultExitElapsed;
+
+        // 结算退场期间，「结算揭示层」（战报卡 / 成长条 / 胜签 / 勋章条…）的收起要延后到淡出收敛时，
+        // 否则它们会在淡出开始前抢先消失，只剩基础页面在淡，观感像半张页面硬切。
+        private bool _hideResultRevealAfterExit;
+
         // 结算列纵向拟合缓存：记录上次拟合时的画布高与位移量，画布尺寸变化时按差量重移。
         private float _resultFitCanvasH = -1f;
         private float _resultFitShift;
         private MatchManager.Phase _lastPhase = (MatchManager.Phase)(-1);
+        private MatchManager.Phase _phaseBeforeTransition = (MatchManager.Phase)(-1);
         private bool _numbersSettled;
 
         [Header("结算个人战报与成长（简化版）")]
@@ -2999,6 +3012,9 @@ namespace P1.UI
             // 阶段切换触发（首帧同步不算"回到首页"，否则会和 Awake 的入场动画重播一次）
             if (match.CurrentPhase != _lastPhase)
             {
+                // 记下切换前的相位：退场转场只认「结算 → 首页」这条真实转换，
+                // 首帧同步（_lastPhase 初值 -1）或场景里 resultPanel 恰好默认激活都不算。
+                _phaseBeforeTransition = _lastPhase;
                 _lastPhase = match.CurrentPhase;
                 bool firstSync = !_firstPhaseSynced;
                 _firstPhaseSynced = true;
@@ -3048,7 +3064,10 @@ namespace P1.UI
                 _profileSettled = false;
                 _lastLevelUpStep = 0;
                 ResetMatchAchievementState();
-                HideResultRevealVisuals();
+                // 若本帧会走「结算页淡出」转场，就把揭示层的收起延后到淡出结束一起做，
+                // 避免战报卡 / 成长条在淡出开始前就先消失（见 _hideResultRevealAfterExit）。
+                if (WillPlayResultExit()) _hideResultRevealAfterExit = true;
+                else HideResultRevealVisuals();
                 RefreshHomeInfo();
                 if (!firstSync) _homeEntrancePending = true;
             }
@@ -3151,8 +3170,27 @@ namespace P1.UI
                 _fullscreenUnderlay.SetActive(showUnderlay);
             }
 
-            if (readyPanel != null) readyPanel.SetActive(phase == MatchManager.Phase.Ready);
-            if (resultPanel != null) resultPanel.SetActive(phase == MatchManager.Phase.Result);
+            // 结算 → 首页：结算页先播一次淡出再切回首页（本文件唯一加退场转场的路径）。
+            // 退场进行中不改两个面板的显隐，收敛后由 TickResultExit 自己完成切换。
+            bool resultExitRunning = false;
+            if (WillPlayResultExit())
+            {
+                if (!_resultExitActive) BeginResultExit();
+                TickResultExit();
+                resultExitRunning = _resultExitActive;
+            }
+            else if (_resultExitActive)
+            {
+                // 退场途中相位被别的路径改走（例如退场时又按空格「再来一局」）：立刻撤销，
+                // 否则 _resultExitActive 会一直挂着，面板显隐被永久跳过。
+                CancelResultExit();
+            }
+
+            if (!resultExitRunning)
+            {
+                if (readyPanel != null) readyPanel.SetActive(phase == MatchManager.Phase.Ready);
+                if (resultPanel != null) resultPanel.SetActive(phase == MatchManager.Phase.Result);
+            }
 
             // 旧 3-2-1 数字倒数已退役：Countdown 阶段只播一次墨幕入场（ScreenInkTransitionView），
             // 这里不再推进任何倒计时数字，也不再回退到旧 Text。
@@ -3173,6 +3211,96 @@ namespace P1.UI
             {
                 UpdateResultNumbers(match);
             }
+        }
+
+        /// <summary>
+        /// 是否处于「结算 → 首页」的退场转场：只有从 Result 真实切过来的那一帧起、且结算页仍在显示时为真。
+        /// 必须在 ApplyPhase 之前（HandlePhaseChanged 里）判断——那时 resultPanel 还没被切掉。
+        /// 用 _phaseBeforeTransition 而不是首帧就为 Ready 的同步，避免场景里 resultPanel 默认激活时开局莫名淡出。
+        /// </summary>
+        private bool WillPlayResultExit()
+        {
+            return _phaseBeforeTransition == MatchManager.Phase.Result &&
+                   resultPanel != null && readyPanel != null && resultPanel.activeSelf;
+        }
+
+        /// <summary>
+        /// 结算页退场起播：给 resultPanel 挂 CanvasGroup 后把整页淡出。
+        /// 幂等由 _resultExitActive 保证（见字段注释）；同时关掉射线，退场途中按钮不可再被点到。
+        /// </summary>
+        private void BeginResultExit()
+        {
+            if (resultPanel == null) return;
+
+            if (_resultExitGroup == null)
+            {
+                _resultExitGroup = resultPanel.GetComponent<CanvasGroup>();
+                if (_resultExitGroup == null) _resultExitGroup = resultPanel.AddComponent<CanvasGroup>();
+            }
+
+            _resultExitGroup.alpha = 1f;
+            _resultExitGroup.blocksRaycasts = false;
+            _resultExitGroup.interactable = false;
+            _resultExitActive = true;
+            _resultExitElapsed = 0f;
+        }
+
+        /// <summary>推进结算页淡出；收敛后隐藏结算页、亮出首页，并复位整页状态。</summary>
+        private void TickResultExit()
+        {
+            if (!_resultExitActive || resultPanel == null) return;
+
+            // 用 unscaledDeltaTime：暂停菜单 / 布局编辑会把 timeScale 置 0，缩放在 0 时也要能推进。
+            UIThemeSO settings = UIThemeSO.Resolve(uiTheme);
+            float duration = settings.ClampEntranceDuration(settings.entranceDuration);
+            _resultExitElapsed += Time.unscaledDeltaTime;
+            float k = Mathf.Clamp01(_resultExitElapsed / duration);
+            if (_resultExitGroup != null) _resultExitGroup.alpha = 1f - k;
+
+            if (k < 1f) return;
+
+            _resultExitActive = false;
+            _resultExitElapsed = 0f;
+            if (_resultExitGroup != null)
+            {
+                _resultExitGroup.alpha = 1f;
+                _resultExitGroup.blocksRaycasts = true;
+                _resultExitGroup.interactable = true;
+            }
+
+            // 揭示层延后收起的一并在此收尾（必须先于 readyPanel 激活，避免首页一帧露出残留）。
+            FlushDeferredResultRevealHide();
+
+            resultPanel.SetActive(false);
+            // 首页入场动画由 Update 的 _homeEntrancePending 分支在 readyPanel 激活后补播，
+            // 顺序上就是「结算先退、首页再进」。
+            if (readyPanel != null) readyPanel.SetActive(true);
+        }
+
+        /// <summary>撤销未完成的结算页退场（相位在退场途中被改走时调用），恢复整页状态。</summary>
+        private void CancelResultExit()
+        {
+            if (!_resultExitActive) return;
+
+            _resultExitActive = false;
+            _resultExitElapsed = 0f;
+            if (_resultExitGroup != null)
+            {
+                _resultExitGroup.alpha = 1f;
+                _resultExitGroup.blocksRaycasts = true;
+                _resultExitGroup.interactable = true;
+            }
+
+            // 退场被打断，延后的揭示层收起也要补上，否则会残留到下一局。
+            FlushDeferredResultRevealHide();
+        }
+
+        /// <summary>执行被延后的结算揭示层收起（幂等；无待处理时为廉价空转）。</summary>
+        private void FlushDeferredResultRevealHide()
+        {
+            if (!_hideResultRevealAfterExit) return;
+            _hideResultRevealAfterExit = false;
+            HideResultRevealVisuals();
         }
 
         private void UpdateResultNumbers(MatchManager match)

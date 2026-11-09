@@ -59,6 +59,18 @@ namespace P1.UI
         private TextMeshProUGUI _readoutText;
 
         private MobileConfigurableItem _selectedItem;
+
+        /// <summary>面板入场注册项：motion + 错峰延迟（规范 0.05s/张）。</summary>
+        private struct PanelEntrance
+        {
+            public UISpringMotion motion;
+            public float delay;
+        }
+
+        // 编辑器的三块面板（顶栏 / 属性舱 / 辅助卡）入场动效：进入编辑时按 0.05s 错峰 pop-in。
+        // 刻意不含背板（LayoutEditBackdrop）：它必须一次性铺满不透明深墨底，
+        // 一旦做 alpha 淡入就会「先透明一帧」露出首页纸白卡片（见规范 163-165 行的层级要求）。
+        private readonly List<PanelEntrance> _panelEntrances = new List<PanelEntrance>();
         private readonly List<MobileConfigurableItem> _items = new List<MobileConfigurableItem>();
         private readonly Dictionary<string, bool> _originalBlocksRaycasts = new Dictionary<string, bool>();
         private MobileLayoutConfig _workingConfig;
@@ -219,6 +231,7 @@ namespace P1.UI
                 new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
                 new Vector2(0f, -TopBarHeight * 0.5f), new Vector2(PanelWidth, TopBarHeight),
                 ComicStyle.Ink, ComicStyle.BorderThin, false);
+            RegisterPanelEntrance(topBar, 0f);
 
             // 左侧黄色装饰标块（8x44 直角纯黄方块）
             CreateCornerMarker(topBar.transform, "DecoYellow", new Vector2(0f, 0.5f), new Vector2(24f, 0f), new Vector2(8f, 44f), ComicStyle.Yellow);
@@ -263,6 +276,7 @@ namespace P1.UI
                 new Vector2(0f, -(TopBarHeight + PanelGap)), new Vector2(PanelWidth, InspectorHeight),
                 ComicStyle.Ink, ComicStyle.BorderThin, false);
             _inspectorCard.pivot = new Vector2(0.5f, 1f);
+            RegisterPanelEntrance(_inspectorCard, 0.05f);
 
             // 黄色小标块
             CreateCornerMarker(_inspectorCard.transform, "InspDeco", new Vector2(0f, 0.5f), new Vector2(16f, 0f), new Vector2(4f, 32f), ComicStyle.Yellow);
@@ -375,6 +389,7 @@ namespace P1.UI
                 new Vector2(0f, -(TopBarHeight + InspectorHeight + PanelGap * 2f)), new Vector2(PanelWidth, AuxCardHeight),
                 ComicStyle.Ink, ComicStyle.BorderThin, false);
             card.pivot = new Vector2(0.5f, 1f);
+            RegisterPanelEntrance(card, 0.10f);
 
             var font = theme.ResolveFont(false, "方案辅助瞄准关弱中强固定摇杆转视角左开火拖动调整位置大小");
             float controlFont = UITypography.FontSnapped(ControlFontBase);
@@ -843,6 +858,9 @@ namespace P1.UI
 
             if (_backdrop != null) _backdrop.SetActive(true);
             gameObject.SetActive(true);
+            // 背板先一次性铺满不透明深墨底，再让面板/工具栏错峰 pop-in：即使面板 alpha 从 0 起，
+            // 底下也是实心背板而不是首页纸白卡片。
+            PlayPanelEntrance();
             RefreshAuxButtons();
 
             // 默认选中射击大键；若它被隐藏则回退到第一个可见项
@@ -1241,6 +1259,43 @@ namespace P1.UI
         {
             _workingConfig = GetCurrentConfig();
             MobileLayoutStorage.Save(_workingConfig);
+        }
+
+        /// <summary>
+        /// 给编辑面板挂 UISpringMotion 并登记错峰延迟（规范 142 行：入场 0.22s Back-Out，
+        /// 多张卡片 0.05s/张）。只挂面板/工具栏；背板不入列，见 _panelEntrances 注释。
+        /// </summary>
+        private void RegisterPanelEntrance(RectTransform panel, float delay)
+        {
+            if (panel == null) return;
+
+            var motion = panel.GetComponent<UISpringMotion>();
+            if (motion == null) motion = panel.gameObject.AddComponent<UISpringMotion>();
+            motion.SetTheme(null); // 布局编辑器统一走默认主题的入场曲线与时长
+
+            _panelEntrances.Add(new PanelEntrance { motion = motion, delay = delay });
+        }
+
+        /// <summary>
+        /// 进入编辑时播放面板入场。PlayIn(delay&gt;0) 在延迟期间不写 alpha/scale，必须先手动
+        /// 压成「缩小 + 透明」，否则靠后的面板会先以正常尺寸闪一帧再重新播入场
+        /// （同 MatchFlowUI.PlayStaggered 的坑）。
+        /// </summary>
+        private void PlayPanelEntrance()
+        {
+            for (int i = 0; i < _panelEntrances.Count; i++)
+            {
+                UISpringMotion motion = _panelEntrances[i].motion;
+                if (motion == null || !motion.gameObject.activeInHierarchy) continue;
+
+                motion.Build();
+                motion.SnapHome();
+                motion.PlayIn(_panelEntrances[i].delay);
+
+                var group = motion.GetComponent<CanvasGroup>();
+                if (group != null) group.alpha = 0f;
+                motion.transform.localScale = Vector3.one * 0.9f;
+            }
         }
 
         private static RectTransform CreateComicPanel(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax,

@@ -214,7 +214,13 @@ namespace P1.Tests
             var overlay = PauseMenuOverlay.CreateInstance();
             yield return null;
 
-            Transform controlsBtn = overlay.transform.Find("ModalRoot/PausePanel/MainView/ControlsBtn");
+            // 按节点名语义查找，不写死层级：PausePanel 外面现在多了一层 PausePanelScale
+            // （响应式缩放容器，与 UISpringMotion 的入场缩放分层，避免互相覆盖）。
+            // 断言的本意是「MainView 暴露这些入口」，不该被中间容器层绑死。
+            Transform mainView = FindByName(overlay.transform, "MainView");
+            Assert.IsNotNull(mainView, "暂停面板必须包含 MainView 容器");
+
+            Transform controlsBtn = FindByName(mainView, "ControlsBtn");
             Assert.IsNotNull(controlsBtn, "暂停面板主视图必须包含 ControlsBtn（操作按钮调整/按键设置入口）");
 
             // 文案随平台切换：移动端唤起触控布局拖拽编辑器，桌面端唤起按键设置
@@ -224,13 +230,27 @@ namespace P1.Tests
                 "ControlsBtn 文案必须按平台切换");
 
             // 原有四颗按钮仍在，避免「加了新入口压掉旧入口」
-            Assert.IsNotNull(overlay.transform.Find("ModalRoot/PausePanel/MainView/ResumeBtn"), "ResumeBtn 丢失");
-            Assert.IsNotNull(overlay.transform.Find("ModalRoot/PausePanel/MainView/SettingsBtn"), "SettingsBtn 丢失");
-            Assert.IsNotNull(overlay.transform.Find("ModalRoot/PausePanel/MainView/RestartBtn"), "RestartBtn 丢失");
-            Assert.IsNotNull(overlay.transform.Find("ModalRoot/PausePanel/MainView/ReturnMenuBtn"), "ReturnMenuBtn 丢失");
+            Assert.IsNotNull(FindByName(mainView, "ResumeBtn"), "ResumeBtn 丢失");
+            Assert.IsNotNull(FindByName(mainView, "SettingsBtn"), "SettingsBtn 丢失");
+            Assert.IsNotNull(FindByName(mainView, "RestartBtn"), "RestartBtn 丢失");
+            Assert.IsNotNull(FindByName(mainView, "ReturnMenuBtn"), "ReturnMenuBtn 丢失");
 
             Object.Destroy(overlay.gameObject);
             yield return null;
+        }
+
+        /// <summary>按名字递归查找子节点（不依赖固定层级深度）。</summary>
+        private static Transform FindByName(Transform root, string name)
+        {
+            if (root == null) return null;
+            for (int i = 0; i < root.childCount; i++)
+            {
+                Transform child = root.GetChild(i);
+                if (child.name == name) return child;
+                Transform found = FindByName(child, name);
+                if (found != null) return found;
+            }
+            return null;
         }
     }
 }

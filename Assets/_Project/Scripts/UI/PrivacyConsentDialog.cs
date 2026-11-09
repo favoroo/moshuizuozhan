@@ -154,6 +154,10 @@ namespace P1.UI
         }
 
         private RectTransform _panelRect;
+        // 面板外层容器：响应式缩放（ApplyResponsiveScale）打到它身上，入场缩放动画
+        // 留给面板自身的 UISpringMotion，避免两者抢同一个 localScale。
+        private RectTransform _panelContainer;
+        private UISpringMotion _panelMotion;
         private GameObject _root;
         private TextMeshProUGUI _checkMark;
         private UIInkShapeGraphic _checkBoxShape;
@@ -198,8 +202,16 @@ namespace P1.UI
             Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;
 
+            bool wasVisible = _root.activeSelf;
             _root.SetActive(true);
             transform.SetAsLastSibling();
+
+            // 打开即播入场（0.22s Back-Out + alpha 淡入）；已在显示中的弹窗再调 Show 不重播，
+            // 避免从设置里再次打开时先闪一下。
+            if (!wasVisible && _panelMotion != null)
+            {
+                _panelMotion.PlayIn();
+            }
         }
 
         private void CloseAndAccept()
@@ -278,8 +290,18 @@ namespace P1.UI
             dim.raycastTarget = true;
 
             // 主面板：纸白直角 + 6px 墨边 + 弹窗硬影；高度在正文实测后回填。
-            var panelGo = new GameObject("MainPanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));
-            panelGo.transform.SetParent(_root.transform, false);
+            // 外面套一层容器承载响应式缩放（ApplyResponsiveScale），面板自身只跑 UISpringMotion 入场。
+            var panelContainerGo = new GameObject("PanelContainer", typeof(RectTransform));
+            panelContainerGo.transform.SetParent(_root.transform, false);
+            _panelContainer = panelContainerGo.GetComponent<RectTransform>();
+            _panelContainer.anchorMin = new Vector2(0.5f, 0.5f);
+            _panelContainer.anchorMax = new Vector2(0.5f, 0.5f);
+            _panelContainer.pivot = new Vector2(0.5f, 0.5f);
+            _panelContainer.anchoredPosition = Vector2.zero;
+            _panelContainer.sizeDelta = new Vector2(1000f, 780f);
+
+            var panelGo = new GameObject("MainPanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(UISpringMotion));
+            panelGo.transform.SetParent(_panelContainer, false);
             _panelRect = panelGo.GetComponent<RectTransform>();
             _panelRect.anchorMin = new Vector2(0.5f, 0.5f);
             _panelRect.anchorMax = new Vector2(0.5f, 0.5f);
@@ -297,6 +319,10 @@ namespace P1.UI
             panelShape.DrawGloss = false;
             panelShape.raycastTarget = true;
             Theme.ApplyHardShadow(panelShape, UIHardShadowLevel.Dialog);
+
+            // 入场动效：弹窗打开时播 0.22s Back-Out + alpha 淡入（之前是静态贴上去的）。
+            _panelMotion = panelGo.GetComponent<UISpringMotion>();
+            _panelMotion.SetTheme(Theme);
 
             // 正文摘要：先按 880 宽度实测总高度，标题条与其余控件自上而下链式排布。
             // 旧版正文框固定 260px 高，实际文案约 370px，TMP 溢出绘制压到下方控件。
@@ -440,12 +466,14 @@ namespace P1.UI
 
         private void ApplyResponsiveScale()
         {
-            if (_panelRect == null) return;
+            // 缩放打到外层容器（不是面板）：面板身上的 UISpringMotion 独占 localScale，
+            // 否则入场动画播完会把这里的响应式缩放覆盖回 1。
+            if (_panelContainer == null || _panelRect == null) return;
             float safeRatio = Screen.height > 0 ? Screen.safeArea.height / Screen.height : 1f;
             float available = 1080f * safeRatio;
             float targetHeight = _panelRect.sizeDelta.y;
             float scale = available < targetHeight ? Mathf.Clamp(available / targetHeight, 0.55f, 1f) : 1f;
-            _panelRect.localScale = new Vector3(scale, scale, 1f);
+            _panelContainer.localScale = new Vector3(scale, scale, 1f);
         }
 
         private TextMeshProUGUI CreateText(string name, Transform parent, string text, float fontSize,

@@ -35,6 +35,14 @@ namespace P1.UI
         private int _lastScreenHeight;
         private Rect _lastSafeArea;
 
+        // 退场转场：面板先播 PlayOut，收敛后再隐藏并销毁根节点。
+        // _panelMotion 是面板自身的动效；_rootGroup 盖住全屏遮罩——面板 PlayOut 只淡面板，
+        // 遮罩不在它的 CanvasGroup 里，所以整层再走一次同节奏淡出，退场才不会「黑底突然消失」。
+        private UISpringMotion _panelMotion;
+        private CanvasGroup _rootGroup;
+        private bool _closing;          // 退场进行中标记（防重入）
+        private float _closingElapsed;  // 退场已耗时（兜底超时用）
+
         public static HomeInfoOverlay Show(RectTransform host, UIThemeSO theme, HomeInfoTab tab, int sortingOrder = 50)
         {
             if (host == null) return null;
@@ -94,12 +102,71 @@ namespace P1.UI
 
         private void Close()
         {
-            if (_instance == this) _instance = null;
+            // 防重入：连点 × / 空白处 / Esc（含同帧多次）只播一次退场，
+            // 否则会叠加两次 PlayOut、重复订阅 OnPlayedOut。
+            // 也保证「一个 Esc 只关浮层」的语义不被破坏（TryCloseFromMenuInput 的同帧消费标记照旧生效）。
+            if (_closing) return;
+            _closing = true;
+            _closingElapsed = 0f;
+
             ClearSelection();
+
+            // 立刻摘掉「打开态」：IsOpen 变 false，输入仲裁视作已关闭（与硬切时的语义完全一致）；
+            // 视觉退场另行播放，逻辑层与展示层解耦。
+            if (_instance == this) _instance = null;
+
+            // 退场期间不再接收点击：遮罩/按钮还在画，但不能被点到（尤其遮罩的「点空白关闭」）。
+            var raycaster = GetComponent<GraphicRaycaster>();
+            if (raycaster != null) raycaster.enabled = false;
+
+            if (_panelMotion != null && gameObject.activeInHierarchy)
+            {
+                _panelMotion.OnPlayedOut -= HandleClosed; // 防重复订阅
+                _panelMotion.OnPlayedOut += HandleClosed;
+                _panelMotion.PlayOut();
+            }
+            else
+            {
+                // 面板 motion 缺失或已失活：退不了场就退回硬切。
+                HandleClosed();
+            }
+        }
+
+        /// <summary>退场收敛：隐藏并销毁浮层根节点（OnPlayedOut 与超时兜底都可能调用，故做幂等）。</summary>
+        private void HandleClosed()
+        {
+            if (!_closing) return;
+
+            if (_panelMotion != null) _panelMotion.OnPlayedOut -= HandleClosed;
+            _closing = false;
+            _closingElapsed = 0f;
+
             if (gameObject != null)
             {
                 gameObject.SetActive(false);
                 Destroy(gameObject);
+            }
+        }
+
+        /// <summary>退场推进：整层淡出（遮罩与面板同节奏），并做兜底超时。</summary>
+        private void TickClosing()
+        {
+            _closingElapsed += Time.unscaledDeltaTime;
+
+            if (_rootGroup != null)
+            {
+                // 与面板自身的 alpha 淡出用同一时长（UISpringMotion 的透明度走 entranceFadeDuration），
+                // 否则遮罩会比面板慢半拍地留在屏幕上。
+                UIThemeSO settings = UIThemeSO.Resolve(_theme);
+                float duration = Mathf.Clamp(settings.entranceFadeDuration, 0.05f, 0.3f);
+                _rootGroup.alpha = 1f - Mathf.Clamp01(_closingElapsed / duration);
+            }
+
+            // 兜底：面板 motion 若被外部 SetActive(false)/禁用（例如 readyPanel 被对局关掉导致浮层失活），
+            // OnPlayedOut 永远不来，_closing 会卡住。超时强制收尾（正常动画 ≤0.3s，这里给 1s 余量）。
+            if (_closingElapsed >= 1f)
+            {
+                HandleClosed();
             }
         }
 
@@ -117,6 +184,14 @@ namespace P1.UI
 
         private void Update()
         {
+            // 退场期间只推进淡出：不再重建，否则屏幕尺寸变化触发的 Rebuild 会把面板连 motion
+            // 一起重建并 PlayIn，正在淡出的浮层会被「复活」一帧。
+            if (_closing)
+            {
+                TickClosing();
+                return;
+            }
+
             if (Screen.width == _lastScreenWidth && Screen.height == _lastScreenHeight &&
                 Screen.safeArea == _lastSafeArea)
             {
@@ -192,6 +267,12 @@ namespace P1.UI
             motion.Build();
             motion.SnapHome();
             motion.PlayIn();
+            _panelMotion = motion;
+
+            // 退场整层淡出的载体（遮罩 + 面板一起淡）；alpha 常态为 1，不影响入场。
+            _rootGroup = GetComponent<CanvasGroup>();
+            if (_rootGroup == null) _rootGroup = gameObject.AddComponent<CanvasGroup>();
+            _rootGroup.alpha = 1f;
 
             bool achievements = _tab == HomeInfoTab.Achievements;
             bool recordLike = _tab == HomeInfoTab.Record || achievements;

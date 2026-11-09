@@ -1,3 +1,4 @@
+using P1.Core;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -41,6 +42,14 @@ namespace P1.UI
 
         [Tooltip("在 Awake/Configure 时自动把主题按钮硬影套到背景上（旧界面保持关闭，由各界面自行开启）")]
         [SerializeField] private bool useThemeHardShadow;
+
+        [Header("音效（P-Audio）")]
+        [Tooltip("点击音效。UI 全部是运行时装配，UISoundBinder 的 AfterSceneLoad 自动绑定挂不到，"
+                 + "因此点击音收口到这里统一播放。关掉可做完全静音的按钮")]
+        [SerializeField] private bool playClickSound = true;
+
+        [Tooltip("点击音效种类：默认 Click；关闭型按钮可设 Back，确认型设 Confirm")]
+        [SerializeField] private UiSoundKind clickSound = UiSoundKind.Click;
 
         private Vector2 _homeShadowOffset;
         private float _homeHalftoneAlpha;
@@ -187,6 +196,13 @@ namespace P1.UI
         /// <summary>Button.onClick 的统一反馈；也供键盘/手柄 Submit 或代码直接调用。</summary>
         public void PlayClickFeedback()
         {
+            // 点击音收口：UI 全是运行时装配，AfterSceneLoad 的自动绑定覆盖不到，
+            // 这里在唯一的 onClick 入口统一发声（AudioManager 自带 30ms 节流，重复绑定不会叠音）。
+            if (playClickSound && AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayUISound(clickSound);
+            }
+
             if (motion != null) motion.Punch(0.05f);
 
             // 一记「印章压下再弹回」：阴影归零 60ms 后按 t-1 曲线回弹
@@ -364,6 +380,13 @@ namespace P1.UI
         {
             tintOnHover = enabled;
             hoverTint = tint;
+        }
+
+        /// <summary>运行时指定点击音效；<paramref name="enabled"/> 为 false 时该按钮完全静音。</summary>
+        public void SetClickSound(UiSoundKind kind, bool enabled = true)
+        {
+            clickSound = kind;
+            playClickSound = enabled;
         }
     }
 }

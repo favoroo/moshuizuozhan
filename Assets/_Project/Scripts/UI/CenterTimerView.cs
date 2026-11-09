@@ -73,6 +73,18 @@ namespace P1.UI
         private float _bannerTimer;
         private bool _isMobileLayout;
 
+        /// <summary>30 秒警戒提示「每局只播一次」（与 _bannerShown 同模式，ResetForMatch 一并复位）。</summary>
+        private bool _finalThirtySoundPlayed;
+
+        /// <summary>最后 10 秒滴答的上一个整数秒档位：只在档位变化时播，避免每帧重复。</summary>
+        private int _lastTickSecond = -1;
+
+        /// <summary>30 秒警戒提示的穿越阈值，与 <see cref="TopRosterMath.GetTimerPhase"/> 的 FinalThirty 边界一致。</summary>
+        private const float FinalThirtyCrossSeconds = 30f;
+
+        /// <summary>最后 10 秒滴答的起始秒（与 SplitTime 的 CeilToInt 显示口径一致：10..1）。</summary>
+        private const int FinalTickStartSeconds = 10;
+
         private static readonly Color BlobNormalColor = new Color(0.082f, 0.071f, 0.110f, 0.95f);
         private static readonly Color BlobLastMinuteColor = new Color(0.227f, 0.102f, 0.310f, 0.98f); // #3a1a4f
         private static readonly Color TextLastMinuteColor = new Color(1f, 0.886f, 0.478f, 1f);        // #ffe27a
@@ -289,6 +301,54 @@ namespace P1.UI
                     timerBlobRoot.localScale = Vector3.one;
                 }
             }
+
+            // 3. 30 秒变红瞬间的提示音：只在真正「穿越 30s」的那一帧播一次。
+            //    不能只判 phase == FinalThirty——match == null 的练习计时从 0 往上数，
+            //    GetTimerPhase(0) 本身就是 FinalThirty，会在开局误响。
+            if (!_finalThirtySoundPlayed &&
+                phase == TimerPhase.FinalThirty &&
+                prev >= FinalThirtyCrossSeconds &&
+                _lastRemainingSeconds < FinalThirtyCrossSeconds &&
+                _lastRemainingSeconds > 0f)
+            {
+                _finalThirtySoundPlayed = true;
+                PlayFinalThirtyCue();
+            }
+
+            // 4. 最后 10 秒滴答：按与 SplitTime 一致的 CeilToInt 整数秒判定，
+            //    每跳一档（10/9/…/1）响一次；<= 0 不响，避免每帧刷音。
+            //    prev > 0 且当前不大于 prev 表示计时确实在往下走——HudController 在
+            //    match == null 时喂的是从 0 往上数的 _elapsedPlayTime，不加方向判断
+            //    会让练习场景开局反向滴答。
+            int tickSecond = Mathf.CeilToInt(_lastRemainingSeconds);
+            bool countingDown = prev > 0f && _lastRemainingSeconds <= prev;
+            if (countingDown &&
+                tickSecond >= 1 &&
+                tickSecond <= FinalTickStartSeconds &&
+                tickSecond != _lastTickSecond)
+            {
+                _lastTickSecond = tickSecond;
+                PlayFinalTick();
+            }
+        }
+
+        /// <summary>
+        /// 30 秒警戒音：Back 的下行听感像「警报拉响」；Confirm 偏奖励感，不适合红色警戒。
+        /// </summary>
+        private void PlayFinalThirtyCue()
+        {
+            if (AudioManager.Instance == null) return;
+            AudioManager.Instance.PlayUISound(UiSoundKind.Back);
+        }
+
+        /// <summary>
+        /// 最后 10 秒逐秒滴答：Slider 是 UI 音里最轻的一档，只做节拍、不抢战斗音效。
+        /// PlayUISound 自带 30ms 全局节流，同一帧被别的 UI 音占掉时这一拍让出即可。
+        /// </summary>
+        private void PlayFinalTick()
+        {
+            if (AudioManager.Instance == null) return;
+            AudioManager.Instance.PlayUISound(UiSoundKind.Slider);
         }
 
         private void ResetBlobColorToNormal()
@@ -327,6 +387,7 @@ namespace P1.UI
         /// <summary>
         /// 新一局开始（Countdown / 计时重新从整局时长开始）时复位每局一次的状态。
         /// 历史 bug——_bannerShown 置 true 后全文件无重置，第二局「最后 1 分钟」横幅再也不弹。
+        /// 同理，30 秒提示音的一次性标志与 10 秒滴答档位也必须在这里复位，否则第二局变哑。
         /// </summary>
         public void ResetForMatch()
         {
@@ -336,6 +397,8 @@ namespace P1.UI
             _lastMinutes = -1;
             _lastSeconds = -1;
             _lastTimerTextReady = false;
+            _finalThirtySoundPlayed = false;
+            _lastTickSecond = -1;
 
             if (finalMinuteBannerRoot != null)
             {

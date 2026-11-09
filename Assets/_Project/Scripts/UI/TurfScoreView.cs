@@ -43,6 +43,15 @@ namespace P1.UI
         private Color _teamColor = ComicStyle.Green;
         private bool _handlerErrorLogged;
 
+        /// <summary>
+        /// 大额飘字轻音的节流间隔：涂地是连续动作，0.4s 聚合窗口只是下限，
+        /// 连续大额涂地时每个窗口都播会把音效糊成噪音，所以再单独限一次 0.26s。
+        /// </summary>
+        private const float PopupSoundIntervalSeconds = 0.26f;
+
+        /// <summary>上一次大额飘字音的时间（unscaled：暂停 / 慢动作下节流节奏不受 timeScale 影响）。</summary>
+        private float _lastPopupSoundTime = -1f;
+
         private void Awake()
         {
             EnsureBuilt();
@@ -226,6 +235,26 @@ namespace P1.UI
             _popupAge[index] = 0f;
 
             RefreshTeamColor();
+
+            // 只有大额飘字出声：小飘字触发太密，全播会让核心正反馈变成噪音。
+            // 音频放在 FlushPopup（Update 里调用）而不是 HandleTurfRegistered（涂地热路径），
+            // 避免音频代码跟着每一笔涂地同步执行。
+            if (big) PlayPopupSound();
+        }
+
+        /// <summary>
+        /// 大额飘字轻音：Toggle 比 Confirm 更轻、更短，不会和击杀确认音抢注意力。
+        /// 双重节流——只在大额 + 距上次 ≥ 0.26s 时播，连续涂地不会叠成噪音。
+        /// </summary>
+        private void PlayPopupSound()
+        {
+            if (AudioManager.Instance == null) return;
+
+            float now = Time.unscaledTime;
+            if (now - _lastPopupSoundTime < PopupSoundIntervalSeconds) return;
+
+            _lastPopupSoundTime = now;
+            AudioManager.Instance.PlayUISound(UiSoundKind.Toggle);
         }
 
         private void TickPopups(float dt)

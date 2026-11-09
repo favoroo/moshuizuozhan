@@ -36,7 +36,10 @@ namespace P1.UI
         private CanvasScaler _scaler;
         private GraphicRaycaster _raycaster;
         private GameObject _dialogRoot;
-        private RectTransform _panelRect;
+        // 面板外层容器：只承载「响应式缩放」（ApplyResponsivePanelScale），
+        // 入场缩放动画留给面板自身的 UISpringMotion，两者不再抢同一个 localScale。
+        private RectTransform _panelContainer;
+        private UISpringMotion _panelMotion;
         private TextMeshProUGUI _verText;
         private TextMeshProUGUI _sizeText;
         private TextMeshProUGUI _notesText;
@@ -256,7 +259,15 @@ namespace P1.UI
                 if (_progressBox != null) _progressBox.SetActive(false);
             }
 
+            // 弹窗原本是「静态贴上去」的：面板上的 UISpringMotion 建了却从没播过（真 bug）。
+            // 这里在真正弹出时补一次入场（0.22s Back-Out + alpha）。已在显示中的弹窗再刷新
+            // （体积补齐等）不重播，否则会二次弹出闪烁。
+            bool wasVisible = _dialogRoot.activeSelf;
             _dialogRoot.SetActive(true);
+            if (!wasVisible && _panelMotion != null)
+            {
+                _panelMotion.PlayIn();
+            }
         }
 
         public void Hide()
@@ -270,7 +281,9 @@ namespace P1.UI
 
         private void ApplyResponsivePanelScale()
         {
-            if (_panelRect == null) return;
+            // 缩放打到外层容器上（不是面板本身）：面板身上的 UISpringMotion 独占 localScale，
+            // 否则入场动画播完会把这里的响应式缩放覆盖掉。
+            if (_panelContainer == null) return;
 
             float canvasHeight = 1080f;
             float safeRatio = Screen.height > 0 ? Screen.safeArea.height / Screen.height : 1f;
@@ -280,11 +293,11 @@ namespace P1.UI
             if (availableHeight < targetHeight && availableHeight > 100f)
             {
                 float s = Mathf.Clamp(availableHeight / targetHeight, 0.5f, 1f);
-                _panelRect.localScale = new Vector3(s, s, 1f);
+                _panelContainer.localScale = new Vector3(s, s, 1f);
             }
             else
             {
-                _panelRect.localScale = Vector3.one;
+                _panelContainer.localScale = Vector3.one;
             }
         }
 
@@ -461,14 +474,25 @@ namespace P1.UI
             overlayImg.raycastTarget = true;
 
             // 2. 居中主面板 (840 × 640，纸白直角面板 + 6px 墨边 + 弹窗硬影 8,-9)
+            //    外面套一层只负责定位/响应式缩放的容器：ApplyResponsivePanelScale 与
+            //    UISpringMotion 都会写 localScale，压在同一个节点上会让入场结束后把矮屏的
+            //    响应式缩放覆盖回 1（面板溢出屏幕）。容器承载缩放，面板只跑入场动画。
+            var panelContainerGo = new GameObject("PanelContainer", typeof(RectTransform));
+            panelContainerGo.transform.SetParent(_dialogRoot.transform, false);
+            _panelContainer = panelContainerGo.GetComponent<RectTransform>();
+            _panelContainer.anchorMin = new Vector2(0.5f, 0.5f);
+            _panelContainer.anchorMax = new Vector2(0.5f, 0.5f);
+            _panelContainer.pivot = new Vector2(0.5f, 0.5f);
+            _panelContainer.anchoredPosition = Vector2.zero;
+            _panelContainer.sizeDelta = new Vector2(840f, 640f);
+
             var panelGo = new GameObject("MainPanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(UISpringMotion));
-            panelGo.transform.SetParent(_dialogRoot.transform, false);
+            panelGo.transform.SetParent(_panelContainer, false);
             var panelRt = panelGo.GetComponent<RectTransform>();
             panelRt.anchorMin = new Vector2(0.5f, 0.5f);
             panelRt.anchorMax = new Vector2(0.5f, 0.5f);
             panelRt.anchoredPosition = Vector2.zero;
             panelRt.sizeDelta = new Vector2(840f, 640f);
-            _panelRect = panelRt;
 
             var panelShape = panelGo.GetComponent<UIInkShapeGraphic>();
             panelShape.Shape = UIInkShape.RoundedRect; // 圆角化：弹窗面板自适应圆角，硬影同形状跟随
@@ -481,8 +505,8 @@ namespace P1.UI
             panelShape.raycastTarget = true;
             Theme.ApplyHardShadow(panelShape, UIHardShadowLevel.Dialog); // t-1 弹窗硬影 (8,-9)
 
-            var panelMotion = panelGo.GetComponent<UISpringMotion>();
-            panelMotion.SetTheme(Theme);
+            _panelMotion = panelGo.GetComponent<UISpringMotion>();
+            _panelMotion.SetTheme(Theme);
 
             // 3. 顶部直角标题块
             var titleBoxGo = new GameObject("TitleBox", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic));

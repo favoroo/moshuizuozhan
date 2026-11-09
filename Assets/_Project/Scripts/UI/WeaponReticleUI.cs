@@ -25,6 +25,8 @@ namespace P1.UI
     /// 刻度静止时收在环带内侧，开火随 Bloom 越过环带外扫，不再与环带重叠糊成一团。
     /// P40 克制化：主环 60→44、圆环不再随散布缩放（同一个信息只画一遍）、墨边 1.5→1.2、
     /// 满蓄改一次性闪光（几何风禁止循环脉冲）、移动端整体 ×1.28 与字号同源。
+    /// P41 亮背景可读性：P40 把墨边压到白芯的一半（4.8:2.4），米黄地面/天空反射下墨边撑不起轮廓；
+    /// 现改为墨边 = 白芯（各环 outlineThickness 提到与 coreThickness 持平），亮地面上环读作一条深色轮廓。
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     public class WeaponReticleUI : MonoBehaviour
@@ -126,8 +128,12 @@ namespace P1.UI
         private Sprite _ringCoreSprite;
         private Sprite _arcSprite;
 
-        /// <summary>白芯刻度条四周的墨边厚度（像素，单侧）：1.2px 是「亮暗地面都读得清」的下限，再厚会糊成黑框。</summary>
-        private const float BarOutline = 1.2f;
+        /// <summary>
+        /// 白芯直条四周的墨边厚度（像素，单侧）。P41 由 1.2 提到 2.4：与圆环同一策略——
+        /// 亮地面（米黄混凝土 / 天空反射）上高对比的墨边才是轮廓主体，1.2px 会被亮背景吃掉，
+        /// 直条只剩发丝白线。2.4 仍小于主体直条的白芯厚度 3.2，直条不会整体发黑糊成一坨。
+        /// </summary>
+        private const float BarOutline = 2.4f;
 
         // 打击标记（Hit Marker, P6-A）
         private RectTransform _hitMarkerRoot;
@@ -426,13 +432,20 @@ namespace P1.UI
             // 2. 圆环 Sprite：参数化生成（P40）。旧实现只有一张 128px 环，缩到 60px 显示后
             //    环带只剩 2.8px、边缘发虚；命中环缩到 30px 更是只剩 1.4px 线（等于看不见）。
             //    现在每种用途按显示尺寸定做，环宽就是设计值。
-            _ringSprite = MakeRingSprite("ReticleRingTex", 128f, 6.4f, 3.2f);
-            _ringDashedSprite = MakeRingSprite("ReticleDashedRingTex", 128f, 6.4f, 3.2f, dashed: true, segments: 18);
-            _ringSlimSprite = MakeRingSprite("ReticleRingSlimTex", ReticleStateMath.ShooterRingDiameter, 2.4f, 1.2f);
+            //
+            //    亮背景可读性（P41）：实测白芯(Color.white) 在米黄混凝土(#B09D78) 上只有 2.62:1、
+            //    墨边(ComicStyle.Ink) 3.72:1，都够不到规范要求的 4.5:1。颜色本身不能动（几何风纯色，
+            //    改色会牵动整套主题），能补的只有「把高对比的墨边画宽」——所以把各环的 outlineThickness
+            //    一律提到与 coreThickness 持平：墨边总宽（两侧 2×outlineHalf）≥ 白芯总宽（2×coreHalf），
+            //    亮地面上读到的是一条完整的深色轮廓，而不是一根发丝白线。coreThickness 保持不变，
+            //    白芯仍在环带内侧、墨边在外侧（判定是 ringDiff<=coreHalf 画白、否则画墨），内外关系不变。
+            _ringSprite = MakeRingSprite("ReticleRingTex", 128f, 6.4f, 6.4f);
+            _ringDashedSprite = MakeRingSprite("ReticleDashedRingTex", 128f, 6.4f, 6.4f, dashed: true, segments: 18);
+            _ringSlimSprite = MakeRingSprite("ReticleRingSlimTex", ReticleStateMath.ShooterRingDiameter, 2.4f, 2.4f);
             _ringSlimDashedSprite = MakeRingSprite("ReticleRingSlimDashedTex",
-                ReticleStateMath.ShooterRingDiameter, 2.4f, 1.2f, dashed: true, segments: 14);
-            _ringTwinSprite = MakeRingSprite("ReticleRingTwinTex", 30f, 2.2f, 1.1f);
-            _ringCoreSprite = MakeRingSprite("ReticleRingCoreTex", 20f, 2.2f, 1.1f);
+                ReticleStateMath.ShooterRingDiameter, 2.4f, 2.4f, dashed: true, segments: 14);
+            _ringTwinSprite = MakeRingSprite("ReticleRingTwinTex", 30f, 2.2f, 2.2f);
+            _ringCoreSprite = MakeRingSprite("ReticleRingCoreTex", 20f, 2.2f, 2.2f);
 
             // 3. 受击方向弧贴图 (256x256)：纯色几何硬边扇面
             _arcSprite = GenerateArcSprite();
@@ -457,6 +470,9 @@ namespace P1.UI
             float coreHalf = Mathf.Max(0.75f, coreThickness);
             float outlineHalf = Mathf.Max(0.5f, outlineThickness);
             // 墨边外缘收在贴图半径内侧 1px，避免圆环被边缘裁成直边。
+            // P41 加粗墨边后这条保护依然成立：本式以内侧 1px 处为准，ringRadius 随厚度自动内收，
+            // 外缘恒等于 center-1（外径不变，只是环带向内变宽）；且 coreHalf+outlineHalf 远小于 center，
+            // 环不会退化成实心圆盘（128 环 12.8<127.5、细环 4.8<43.5、twin/core 4.4<29.5/19.5）。
             float ringRadius = Mathf.Max(coreHalf + outlineHalf, center - coreHalf - outlineHalf - 1f);
             float segmentDegrees = 360f / Mathf.Max(2, segments);
 

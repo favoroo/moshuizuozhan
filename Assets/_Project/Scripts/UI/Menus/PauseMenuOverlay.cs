@@ -113,8 +113,21 @@ namespace P1.UI.Menus
         // 模态弹窗与背景蒙层
         private GameObject _modalRoot;
         private RectTransform _panelRect;
+
+        /// <summary>
+        /// 响应式缩放容器（面板的父级）。缩放写这里而不是面板本身，
+        /// 因为面板上的 UISpringMotion 会独占 localScale 做入场动画。
+        /// </summary>
+        private RectTransform _panelScaleRect;
         private UISpringMotion _panelMotion;
         private UIInkShapeGraphic _panelShape;
+
+        // 退场转场：整层（遮罩 + 面板）淡出后再隐藏 _modalRoot，替代原先的硬切 SetActive(false)。
+        // _modalGroup 盖住全屏遮罩——面板自带 PlayOut 淡出，但遮罩不在它的 CanvasGroup 里，
+        // 只淡面板会让黑底突然消失，所以整层再走一次同节奏的淡出。
+        private CanvasGroup _modalGroup;
+        private bool _closingModal;          // 退场进行中标记
+        private float _closingModalElapsed;  // 退场已耗时（兜底超时用）
 
         // 视图切换容器
         private GameObject _mainViewContainer;
@@ -234,26 +247,32 @@ namespace P1.UI.Menus
         private void OnEnable()
         {
             UpdateSafeArea();
+
+            // 兜底复位：对象若在退场途中被失活又重新启用，_closingModal / 整层 alpha 会停在中间态，
+            // 且此刻 OnPlayedOut 可能已经错过。这里强制收尾，保证下次打开不会撞见半透明的残留弹窗。
+            if (_closingModal) HideModalNow();
         }
 
         private void OnDisable()
         {
+            // 拆除期不做转场：对象马上失活/销毁，PlayOut 的 OnPlayedOut 永远不会来，
+            // 走 immediate 分支直接隐藏，避免留下「alpha 0 却仍激活」的残留。
             if (IsPaused)
             {
-                Resume();
+                Resume(true);
             }
 
-            CloseSettingsFromHome();
+            CloseSettingsFromHome(true);
         }
 
         private void OnDestroy()
         {
             if (IsPaused)
             {
-                Resume();
+                Resume(true);
             }
 
-            CloseSettingsFromHome();
+            CloseSettingsFromHome(true);
 
             if (_matches.Count > 0)
             {
@@ -281,6 +300,13 @@ namespace P1.UI.Menus
             }
 
             CheckScreenResolutionChange();
+
+            // 退场推进：整层淡出 + 兜底超时（面板 motion 异常时强制收尾，避免卡在半透明）。
+            if (_closingModal)
+            {
+                TickModalClosing();
+            }
+
             if (_isListeningForKey)
             {
                 HandleKeyListening();
@@ -456,6 +482,11 @@ namespace P1.UI.Menus
             modalRt.offsetMin = Vector2.zero;
             modalRt.offsetMax = Vector2.zero;
 
+            // 退场整层淡出的载体（遮罩 + 面板一起淡）；alpha 常态为 1，不影响任何入场逻辑。
+            _modalGroup = _modalRoot.GetComponent<CanvasGroup>();
+            if (_modalGroup == null) _modalGroup = _modalRoot.AddComponent<CanvasGroup>();
+            _modalGroup.alpha = 1f;
+
             // 1. 全屏纯色深色遮罩 (墨色 70%，无网点)
             var backdropGo = new GameObject("Backdrop", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
             backdropGo.transform.SetParent(_modalRoot.transform, false);
@@ -474,14 +505,26 @@ namespace P1.UI.Menus
             backdropBtn.transition = Selectable.Transition.None;
             backdropBtn.onClick.AddListener(OnBackdropClicked);
 
-            // 2. 居中直角主面板 (1100x820)：t-1 纸白底 + 3px 墨框 + 弹窗硬影 (8,-9)
+            // 2. 响应式缩放容器：矮屏（20:9 手机横屏）按可用高度整体缩面板。
+            //    必须与面板分开两层——面板身上的 UISpringMotion 独占 localScale（入场从 0.9 收到 1），
+            //    若响应式缩放也写在面板上，入场结束会把矮屏的缩放覆盖回 1，面板溢出屏幕。
+            var panelScaleGo = new GameObject("PausePanelScale", typeof(RectTransform));
+            panelScaleGo.transform.SetParent(_modalRoot.transform, false);
+            _panelScaleRect = panelScaleGo.GetComponent<RectTransform>();
+            _panelScaleRect.anchorMin = new Vector2(0.5f, 0.5f);
+            _panelScaleRect.anchorMax = new Vector2(0.5f, 0.5f);
+            _panelScaleRect.pivot = new Vector2(0.5f, 0.5f);
+            _panelScaleRect.sizeDelta = new Vector2(PausePanelWidth, PausePanelHeight);
+
+            // 居中直角主面板 (1100x820)：t-1 纸白底 + 3px 墨框 + 弹窗硬影 (8,-9)
             var panelGo = new GameObject("PausePanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(UIInkShapeGraphic), typeof(UISpringMotion));
-            panelGo.transform.SetParent(_modalRoot.transform, false);
+            panelGo.transform.SetParent(panelScaleGo.transform, false);
             _panelRect = panelGo.GetComponent<RectTransform>();
-            _panelRect.anchorMin = new Vector2(0.5f, 0.5f);
-            _panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+            _panelRect.anchorMin = Vector2.zero;
+            _panelRect.anchorMax = Vector2.one;
             _panelRect.pivot = new Vector2(0.5f, 0.5f);
-            _panelRect.sizeDelta = new Vector2(PausePanelWidth, PausePanelHeight);
+            _panelRect.offsetMin = Vector2.zero;
+            _panelRect.offsetMax = Vector2.zero;
 
             _panelShape = panelGo.GetComponent<UIInkShapeGraphic>();
             _panelShape.Shape = UIInkShape.RoundedRect; // 圆角化：暂停面板自适应圆角
@@ -585,7 +628,7 @@ namespace P1.UI.Menus
             var resumeBtn = CreateStyledButton("ResumeBtn", parent, "继续游戏", ComicStyle.Yellow, ComicStyle.Ink, buttonSize, _theme, buttonFont, ComicStyle.CornerSharp, ComicStyle.BorderThin);
             var resumeRt = resumeBtn.GetComponent<RectTransform>();
             resumeRt.anchoredPosition = new Vector2(PauseButtonColumnX, 134f);
-            resumeBtn.onClick.AddListener(Resume);
+            resumeBtn.onClick.AddListener(() => Resume());
 
             // 2. 系统设置（白底黑字直角）
             var settingsBtn = CreateStyledButton("SettingsBtn", parent, "系统设置", ComicStyle.Paper, ComicStyle.Ink, buttonSize, _theme, buttonFont, ComicStyle.CornerSharp, ComicStyle.BorderThin);
@@ -2067,6 +2110,7 @@ namespace P1.UI.Menus
             _modalRoot.SetActive(true);
             ShowMainView();
             ApplyResponsivePanelScale();
+            PrepareModalForOpen();
             if (_panelMotion != null)
             {
                 _panelMotion.PlayIn();
@@ -2076,7 +2120,12 @@ namespace P1.UI.Menus
             PauseStateChanged?.Invoke(true);
         }
 
-        public void Resume()
+        /// <summary>
+        /// 恢复对局并收起暂停弹窗。<paramref name="immediate"/> = true 时跳过退场转场直接隐藏
+        /// （拆除期、重开/返菜单、阶段切换等「紧接着换屏」的路径用它，避免转场与目标界面重叠）。
+        /// 默认 false：Esc / 继续游戏这类玩家主动恢复走淡出转场。
+        /// </summary>
+        public void Resume(bool immediate = false)
         {
             if (!IsPaused)
                 return;
@@ -2098,7 +2147,8 @@ namespace P1.UI.Menus
                 PlayerController.LocalPlayer.GameplayInputEnabled = true;
             }
 
-            _modalRoot.SetActive(false);
+            if (immediate) HideModalNow();
+            else CloseModalWithTransition();
             _isSettingsOpen = false;
             _isKeyBindingsOpen = false;
             if (_isListeningForKey) CancelKeyListening();
@@ -2110,7 +2160,8 @@ namespace P1.UI.Menus
 
         public void RestartMatch()
         {
-            Resume();
+            // 紧接着开赛（墨幕入场）：直接隐藏弹窗，不与开赛演出抢画面。
+            Resume(true);
             MatchManager match = _match != null ? _match : MatchManager.Instance;
             if (match != null)
             {
@@ -2121,7 +2172,8 @@ namespace P1.UI.Menus
         /// <summary>关闭弹窗并回到赛前主菜单（Ready 阶段）；找不到比赛或已在主菜单时只关闭弹窗。</summary>
         public void ReturnToMainMenu()
         {
-            Resume();
+            // 紧接着回首页（首页自带入场动画）：直接隐藏弹窗，避免两层动画叠加。
+            Resume(true);
             MatchManager match = _match != null ? _match : MatchManager.Instance;
             if (match != null && match.CurrentPhase != MatchManager.Phase.Ready)
             {
@@ -2197,14 +2249,18 @@ namespace P1.UI.Menus
             ApplyResponsivePanelScale();
             OpenSettings(); // 复位主视图 → 激活设置视图 → 回读 GameSettingsService 刷滑杆
 
+            PrepareModalForOpen();
             if (_panelMotion != null)
             {
                 _panelMotion.PlayIn();
             }
         }
 
-        /// <summary>收起首页设置弹窗（对局暂停语义零副作用；未处于首页模式时为空操作）。</summary>
-        public void CloseSettingsFromHome()
+        /// <summary>
+        /// 收起首页设置弹窗（对局暂停语义零副作用；未处于首页模式时为空操作）。
+        /// <paramref name="immediate"/> = true 用于拆除期（OnDisable/OnDestroy）直接隐藏。
+        /// </summary>
+        public void CloseSettingsFromHome(bool immediate = false)
         {
             if (!_homeSettingsMode)
                 return;
@@ -2216,7 +2272,8 @@ namespace P1.UI.Menus
             if (_keyBindingsViewContainer != null) _keyBindingsViewContainer.SetActive(false);
             // OnDisable/OnDestroy 拆除期调用时容器可能已销毁，做判空
             if (_settingsViewContainer != null) _settingsViewContainer.SetActive(false);
-            if (_modalRoot != null) _modalRoot.SetActive(false);
+            if (immediate) HideModalNow();
+            else CloseModalWithTransition();
         }
 
         private void ShowMainView()
@@ -2241,13 +2298,125 @@ namespace P1.UI.Menus
             }
         }
 
+        // ==================== 退场转场 ====================
+
+        /// <summary>
+        /// 打开弹窗前复位退场状态：清防重入标记、退订退场回调、把整层 alpha / 射线恢复。
+        /// 必须做——否则上一次没跑完的 PlayOut 会在重开时立刻把弹窗又淡下去（残留 0.9 倍 / alpha 0）。
+        /// </summary>
+        private void PrepareModalForOpen()
+        {
+            _closingModal = false;
+            _closingModalElapsed = 0f;
+            if (_modalGroup != null)
+            {
+                _modalGroup.alpha = 1f;
+                _modalGroup.blocksRaycasts = true;
+                _modalGroup.interactable = true;
+            }
+            // 彻底退订，避免 OnPlayedOut 累积多个处理器。
+            if (_panelMotion != null) _panelMotion.OnPlayedOut -= HandleModalClosed;
+        }
+
+        /// <summary>
+        /// 退场：先播面板 PlayOut，收敛后再隐藏 _modalRoot。
+        /// _closingModal 防重入——Resume / 关闭按钮 / Esc / OnDisable 可能在同一帧或连续两帧触发，
+        /// 没有标记就会叠加两次 PlayOut 并重复订阅 OnPlayedOut，甚至把刚打开的弹窗又藏回去。
+        /// </summary>
+        private void CloseModalWithTransition()
+        {
+            if (_modalRoot == null) return;
+            if (_closingModal) return;
+
+            _closingModal = true;
+            _closingModalElapsed = 0f;
+
+            // 退场期间不再接收点击：遮罩与按钮都还在画，但不该再被点到（CanvasGroup 直接挡射线）。
+            if (_modalGroup != null)
+            {
+                _modalGroup.blocksRaycasts = false;
+                _modalGroup.interactable = false;
+            }
+
+            if (_panelMotion != null && _modalRoot.activeInHierarchy)
+            {
+                _panelMotion.OnPlayedOut -= HandleModalClosed; // 防重复订阅
+                _panelMotion.OnPlayedOut += HandleModalClosed;
+                _panelMotion.PlayOut();
+            }
+            else
+            {
+                // 面板 motion 缺失或已失活：退不了场就退回硬切。
+                HandleModalClosed();
+            }
+        }
+
+        /// <summary>退场推进：整层淡出（遮罩与面板同节奏），并做兜底超时。</summary>
+        private void TickModalClosing()
+        {
+            _closingModalElapsed += Time.unscaledDeltaTime;
+
+            if (_modalGroup != null)
+            {
+                // 与面板自身的 alpha 淡出用同一时长（UISpringMotion 的透明度走 entranceFadeDuration），
+                // 否则遮罩会比面板慢半拍地留在屏幕上。
+                UIThemeSO settings = UIThemeSO.Resolve(_theme);
+                float duration = Mathf.Clamp(settings.entranceFadeDuration, 0.05f, 0.3f);
+                _modalGroup.alpha = 1f - Mathf.Clamp01(_closingModalElapsed / duration);
+            }
+
+            // 兜底：面板 motion 若中途被禁用/失活，OnPlayedOut 永远不来，_closingModal 会卡住、
+            // 弹窗以「alpha 0 但还激活」的形态留在屏幕上。超时强制收尾（正常动画 ≤0.3s）。
+            if (_closingModalElapsed >= 1f)
+            {
+                HandleModalClosed();
+            }
+        }
+
+        /// <summary>退场收敛：隐藏弹窗并复位整层状态（可被 OnPlayedOut 与超时兜底重复调用）。</summary>
+        private void HandleModalClosed()
+        {
+            if (!_closingModal) return;
+
+            if (_panelMotion != null) _panelMotion.OnPlayedOut -= HandleModalClosed;
+            _closingModal = false;
+            _closingModalElapsed = 0f;
+
+            if (_modalGroup != null)
+            {
+                _modalGroup.alpha = 1f;
+                _modalGroup.blocksRaycasts = true;
+                _modalGroup.interactable = true;
+            }
+
+            if (_modalRoot != null) _modalRoot.SetActive(false);
+        }
+
+        /// <summary>跳过转场直接隐藏弹窗（拆除期 / 紧接着换屏的路径）。</summary>
+        private void HideModalNow()
+        {
+            if (_panelMotion != null) _panelMotion.OnPlayedOut -= HandleModalClosed;
+            _closingModal = false;
+            _closingModalElapsed = 0f;
+
+            if (_modalGroup != null)
+            {
+                _modalGroup.alpha = 1f;
+                _modalGroup.blocksRaycasts = true;
+                _modalGroup.interactable = true;
+            }
+
+            if (_modalRoot != null) _modalRoot.SetActive(false);
+        }
+
         private void OnMatchPhaseChanged(MatchManager.Phase phase)
         {
             if (phase != MatchManager.Phase.Playing)
             {
                 if (IsPaused)
                 {
-                    Resume();
+                    // 阶段切换紧接着换屏（结算 / 入场）：直接隐藏，不播退场转场。
+                    Resume(true);
                 }
             }
 
@@ -2310,7 +2479,9 @@ namespace P1.UI.Menus
 
         private void ApplyResponsivePanelScale()
         {
-            if (_panelRect == null) return;
+            // 缩放写父级容器：面板自身 localScale 归 UISpringMotion 的入场动画独占，
+            // 两者同层会互相覆盖（入场结束把矮屏缩放冲回 1，面板底部按钮出屏）。
+            if (_panelScaleRect == null) return;
 
             // 画布高度必须取 CanvasScaler 生效后的实际值：20:9 手机横屏下参考 1080 会被压到 ~966，
             // 硬编码 1080 会算出偏大的可用高度，面板底部按钮被挤出屏幕（"点不到返回"的根因）。
@@ -2328,11 +2499,11 @@ namespace P1.UI.Menus
             if (availableHeight < targetHeight && availableHeight > 100f)
             {
                 float s = Mathf.Clamp(availableHeight / targetHeight, 0.5f, 1f);
-                _panelRect.localScale = new Vector3(s, s, 1f);
+                _panelScaleRect.localScale = new Vector3(s, s, 1f);
             }
             else
             {
-                _panelRect.localScale = Vector3.one;
+                _panelScaleRect.localScale = Vector3.one;
             }
         }
 

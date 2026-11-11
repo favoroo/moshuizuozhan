@@ -64,6 +64,75 @@ namespace P1.Tests
             Assert.AreEqual(Team.Neutral, grid.InkAt(Vector2.zero));
         }
 
+        /// <summary>
+        /// 软占位（掩体墙/木箱/集装箱/花坛/售卖亭）：格子仍算占位，但顶面可以从上方打到——
+        /// 从 y ≥ 顶面高度的命中能涂上并计分，地面溅射（y=0）涂不到，避免隔箱蹭分。
+        /// </summary>
+        [Test]
+        public void SoftBlockedRect_OnlyPaintableFromAboveItsTopFace()
+        {
+            var grid = new InkGrid(100, 100, new Vector2(20f, 20f));
+            int initialPaintable = grid.PaintableCount;
+
+            grid.SetBlockedWorldRect(new Vector2(-2f, -2f), new Vector2(2f, 2f), true, 1.2f);
+
+            Assert.AreEqual(initialPaintable, grid.PaintableCount, "软占位的顶面可涂，不能从可涂面积里扣除");
+            Assert.IsTrue(grid.IsBlockedAt(Vector2.zero), "占位判定照旧（小地图/接触遮蔽/窄缝剔除依赖它）");
+            Assert.IsTrue(grid.IsSoftBlockedAt(Vector2.zero));
+
+            // 在箱子旁边泼地：地面 y=0，涂不到箱顶
+            grid.PaintCircle(Vector2.zero, 2.0f, Team.TeamA);
+            Assert.AreEqual(Team.Neutral, grid.InkAt(new Vector2(0.5f, 0.5f)), "地面溅射不能隔着箱子白拿覆盖面积");
+
+            // 打在箱顶（y = 顶面高度）：能涂上，并计入覆盖率
+            int paintedOnTop = grid.PaintCircle(new Vector3(0f, 1.2f, 0f), 3.0f, Team.TeamA);
+            Assert.Greater(paintedOnTop, 0);
+            Assert.AreEqual(Team.TeamA, grid.InkAt(new Vector2(0.5f, 0.5f)), "从上方命中箱顶必须显墨并计分");
+            Assert.Greater(grid.GetCoverage01(Team.TeamA), 0f);
+
+            // 已认领的箱顶：地面墨会视觉上盖到箱顶，网格必须跟着翻色（否则「显示敌墨却算我的」）
+            grid.PaintCircle(Vector2.zero, 2.0f, Team.TeamB);
+            Assert.AreEqual(Team.TeamB, grid.InkAt(new Vector2(0.5f, 0.5f)), "已涂过的箱顶会随地面溅射翻色，视觉与比分保持一致");
+        }
+
+        [Test]
+        public void HardBlockedRect_StaysUnpaintableFromAnyHeight()
+        {
+            var grid = new InkGrid(100, 100, new Vector2(20f, 20f));
+            int initialPaintable = grid.PaintableCount;
+
+            grid.SetBlockedWorldRect(new Vector2(-2f, -2f), new Vector2(2f, 2f), true);
+
+            Assert.Less(grid.PaintableCount, initialPaintable);
+            Assert.IsFalse(grid.IsSoftBlockedAt(Vector2.zero), "地形禁区/死缝是硬不可涂");
+
+            grid.PaintCircle(new Vector3(0f, 1.2f, 0f), 3.0f, Team.TeamA);
+            Assert.AreEqual(Team.Neutral, grid.InkAt(Vector2.zero), "硬不可涂格任何高度都涂不到");
+        }
+
+        /// <summary>
+        /// 计分掩码 = 「仍占位、且还没被涂过」：箱顶没涂过时裁掉图集溅射墨迹（箱子旁边泼一地不会蹭上箱顶），
+        /// 从上方命中箱顶后放开（看得到 = 会计分）；硬占位永远裁掉。
+        /// </summary>
+        [Test]
+        public void CopyUnpaintedBlockedMaskTo_RevealsPaintedTopCells()
+        {
+            var grid = new InkGrid(10, 10, new Vector2(10f, 10f));
+            grid.SetBlockedWorldRect(new Vector2(-2f, -2f), new Vector2(2f, 2f), true, 1.2f);
+
+            var mask = new byte[grid.Width * grid.Height];
+            int center = 5 * grid.Width + 5;
+            grid.CopyUnpaintedBlockedMaskTo(mask);
+            Assert.AreEqual(255, mask[center], "箱顶没被涂过时必须裁掉图集溅射墨迹");
+            Assert.IsFalse(grid.ScoreMaskDirty, "取完掩码应清掉脏标记");
+
+            grid.PaintCircle(new Vector3(0f, 1.2f, 0f), 0.8f, Team.TeamA);
+
+            Assert.IsTrue(grid.ScoreMaskDirty, "箱顶被涂到后掩码需要重传");
+            grid.CopyUnpaintedBlockedMaskTo(mask);
+            Assert.AreEqual(0, mask[center], "箱顶涂到后掩码必须放开（看得到 = 会计分）");
+        }
+
         [Test]
         public void CopyBlockedMaskTo_WritesRowMajorBinaryMask()
         {

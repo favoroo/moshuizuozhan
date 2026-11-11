@@ -36,7 +36,8 @@ namespace P1.Tests
             var surface = InkSurfaceController.Instance;
             Assert.AreEqual(400, surface.Grid.Width, "桌面端墨水网格应为 400x400");
             Assert.Greater(surface.Grid.PaintableCount, 0);
-            Assert.Less(surface.Grid.PaintableCount, 400 * 400, "掩体与出生台应从可涂面积中排除");
+            Assert.Less(surface.Grid.PaintableCount, 400 * 400,
+                "硬不可涂格（死缝/地形禁区）应从可涂面积中排除；掩体/木箱顶面是软占位，仍算可涂");
             Assert.IsNotNull(surface.InkTexture);
 
             var player = PlayerController.LocalPlayer;

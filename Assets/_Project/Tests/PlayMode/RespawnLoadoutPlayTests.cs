@@ -216,7 +216,8 @@ namespace P1.Tests
 
             var texts = viewGo.GetComponentsInChildren<TextMeshProUGUI>(true);
             Assert.IsTrue(Array.Exists(texts, t => t.text.Contains("2.5")), "倒计时必须写进整备条");
-            Assert.IsTrue(Array.Exists(texts, t => t.text.Contains("伤害")), "摘要必须展示武器读数");
+            Assert.IsFalse(Array.Exists(texts, t => t.text.Contains("伤害")), "简化版整备条不再展示武器定位/读数");
+            Assert.IsTrue(Array.Exists(texts, t => t.text.Contains("大招")), "必须保留一行换枪代价提示");
             Assert.IsTrue(Array.Exists(texts, t => t.text == "阵亡整备"), "标题必须是「阵亡整备」");
 
             view.SelectIndex(1);

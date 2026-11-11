@@ -125,12 +125,13 @@ namespace P1.Ink
                     // 1) 立面受墨
                     if (HasSideInk(go))
                     {
-                        // 统一计分口径告警：若顶视图材质可受墨（如 PropLit / ObstacleDitherLit），但已被注册进 blockedColliders 名单
-                        // （例如木箱/花坛实体道具），记录为提示（顶面不计分），不算作违规
+                        // 统一计分口径告警：顶视图材质可受墨（如 PropLit / ObstacleDitherLit）却被硬不可涂
+                        // （地形禁区/死缝）裁掉，等于「看得到顶面却永远喷不上」，记录为提示。
+                        // 实体道具/掩体是软占位（从上方命中即可涂、可计分），不算问题。
                         Renderer top = FindTopInkRenderer(go, registered);
-                        if (top != null && blockedSet.Contains(col))
+                        if (top != null && blockedSet.Contains(col) && !IsTopReachable(surface, col))
                         {
-                            warnings?.Add($"{DescribePath(go)}: 顶视图材质可受墨但已注册进 blockedColliders 名单（实体掩体顶面不计分）");
+                            warnings?.Add($"{DescribePath(go)}: 顶视图材质可受墨但被硬不可涂（地形禁区/死缝）裁掉，箱顶永远喷不上");
                         }
                         continue;
                     }
@@ -139,9 +140,9 @@ namespace P1.Ink
                     Renderer topRenderer = FindTopInkRenderer(go, registered);
                     if (topRenderer != null)
                     {
-                        if (blockedSet.Contains(col))
+                        if (blockedSet.Contains(col) && !IsTopReachable(surface, col))
                         {
-                            warnings?.Add($"{DescribePath(go)}: 顶视图材质可受墨但已注册进 blockedColliders 名单（实体掩体顶面不计分）");
+                            warnings?.Add($"{DescribePath(go)}: 顶视图材质可受墨但被硬不可涂（地形禁区/死缝）裁掉，箱顶永远喷不上");
                             continue;
                         }
 
@@ -175,6 +176,19 @@ namespace P1.Ink
         private static bool HasSideInk(GameObject go)
         {
             return go.GetComponent<InkWallSurface>() != null || go.GetComponentInParent<InkWallSurface>() != null;
+        }
+
+        /// <summary>
+        /// 顶面「从上方命中就能涂到」吗？软占位格（掩体/木箱/集装箱/花坛等实体道具）是——
+        /// 计分网格按命中高度放行，从箱顶打下来显墨也计分；硬占位（地形禁区/死缝）不是。
+        /// </summary>
+        private static bool IsTopReachable(InkSurfaceController surface, Collider col)
+        {
+            if (surface == null || surface.Grid == null || col == null)
+                return true;
+
+            Bounds b = col.bounds;
+            return surface.Grid.IsSoftBlockedAt(new Vector2(b.center.x, b.center.z));
         }
 
         /// <summary>沿自身与祖先链找第一个使用"顶面受墨着色器"的渲染器。</summary>

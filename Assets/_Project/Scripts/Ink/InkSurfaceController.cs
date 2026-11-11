@@ -354,6 +354,9 @@ namespace P1.Ink
             // 否则所有障碍都会被当成原点处 1x1 的方块，导致几乎不产生不可涂区。
             Physics.SyncTransforms();
 
+            Vector2 playMin = _grid.OriginXZ;
+            Vector2 playMax = _grid.OriginXZ + _grid.MapSize;
+
             for (int i = 0; i < blockedColliders.Count; i++)
             {
                 Collider col = blockedColliders[i];
@@ -365,7 +368,14 @@ namespace P1.Ink
                 Bounds b = col.bounds;
                 Vector2 minXZ = new Vector2(b.min.x, b.min.z);
                 Vector2 maxXZ = new Vector2(b.max.x, b.max.z);
-                _grid.SetBlockedWorldRect(minXZ, maxXZ, true);
+
+                // 顶面打得到吗？场内实体（掩体墙/木箱/集装箱/花坛/售卖亭）的顶面用
+                // ObstacleDitherLit / PropLit 采样顶视墨迹图集，从上方命中就「该显墨、该计分」，
+                // 因此标成软占位（带顶面高度）；伸出计分矩形外的实体（边界墙、远景堆场）
+                // 顶面在可涂范围之外，保持硬不可涂。
+                bool topReachable = b.min.x >= playMin.x && b.max.x <= playMax.x
+                                    && b.min.z >= playMin.y && b.max.z <= playMax.y;
+                _grid.SetBlockedWorldRect(minXZ, maxXZ, true, topReachable ? b.max.y : float.NaN);
             }
 
             // 无碰撞体的地形禁区（浅湾水线等）：必须在 SealNarrowSlits 之前写入，
@@ -389,11 +399,12 @@ namespace P1.Ink
         }
 
         /// <summary>
-        /// 把计分网格的不可涂掩码同步成一张单通道贴图（R8），供顶面墨迹着色器裁剪。
+        /// 把「仍占位、且还没被涂过」的格子同步成一张单通道贴图（R8），供顶面墨迹着色器裁剪。
         /// 俯视投影图集无法区分「道具顶面」和「脚下地面」——两者共用同一个 XZ 格；
-        /// 计分网格把道具占位格判为不可涂，若 3D 顶面仍显示墨迹，玩家就会看到
-        /// 「涂上去了但不计分」的假反馈。这里让可见墨迹严格跟随计分掩码：
-        /// 不可涂格不显墨，**看得到的顶面墨迹 = 会计分的墨迹**。
+        /// 没涂过的占位格若显墨，玩家就会看到「箱子旁边泼一地、箱顶也蹭上墨」却不计分的假反馈。
+        /// 这里让可见墨迹严格跟随计分状态：从上方命中箱顶后该格转为已涂（见
+        /// <see cref="InkGrid.PaintCircle(Vector3, float, Core.Team)"/>），掩码随即放开，
+        /// **看得到的顶面墨迹 = 会计分的墨迹**；硬占位格（地形禁区、死缝）永远裁掉。
         /// 墙面墨迹由 InkWallSurface 独立负责（竖向面本来就不计入涂地），不受影响。
         /// </summary>
         private void RebuildScoreMask()
@@ -426,7 +437,7 @@ namespace P1.Ink
             if (_scoreMaskScratch == null || _scoreMaskScratch.Length != total)
                 _scoreMaskScratch = new byte[total];
 
-            _grid.CopyBlockedMaskTo(_scoreMaskScratch);
+            _grid.CopyUnpaintedBlockedMaskTo(_scoreMaskScratch);
             _scoreMaskTexture.SetPixelData(_scoreMaskScratch, 0);
             _scoreMaskTexture.Apply(false, false);
         }
@@ -579,6 +590,8 @@ namespace P1.Ink
             PeakUploadDurationMs = 0f;
             LastUploadDurationMs = 0f;
             FlushTexture();
+            // 清场后所有格回到未涂：箱顶墨迹必须重新被计分掩码裁掉。
+            RebuildScoreMask();
             InkWallSurface.ResetAllPaint();
             InkWallSurface.FlushAllDirty();
         }
@@ -784,6 +797,13 @@ namespace P1.Ink
                 FlushTexture();
                 float hz = config != null ? config.minimapRefreshHz : 12f;
                 _nextMinimapFlushTime = hz > 0.01f ? Time.unscaledTime + 1f / hz : 0f;
+            }
+
+            // 箱顶刚被涂到：计分掩码要放开对应格（只在「软占位格首次被涂 / 清场」的帧重传，
+            // 常规泼地掩码内容不变，不会每帧多传一张 400² R8）。
+            if (_grid != null && _grid.ScoreMaskDirty)
+            {
+                RebuildScoreMask();
             }
 
             // 墨迹图集：仅在有新落墨 / 清屏 / mip 待更新时提交（烘干与生长由片元按时间戳现算）

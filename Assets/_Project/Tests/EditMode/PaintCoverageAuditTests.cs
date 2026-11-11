@@ -87,7 +87,7 @@ namespace P1.Tests.EditMode
         }
 
         [Test]
-        public void SolidDecorProps_WhenBlocked_ExcludedFromScoringAndEmitsAuditWarning()
+        public void SolidDecorProps_WhenBlocked_TopStaysReachableSoNoWarning()
         {
             var propGo = new GameObject("PropCollider_CrateCluster_00");
             var surfaceGo = new GameObject("~TestSurface");
@@ -114,8 +114,14 @@ namespace P1.Tests.EditMode
                 PaintCoverageAudit.Run(new List<Transform> { _arena.transform }, surface, violations, warnings);
 
                 Assert.AreEqual(0, violations.Count, "注册进 blockedColliders 的实体道具顶面不应产生违规");
-                Assert.IsTrue(warnings.Exists(w => w.Contains("PropCollider_CrateCluster_00") && w.Contains("blockedColliders")),
-                    "实体道具顶面注册进 blockedColliders 时应产生明确 warning，提示顶面不计分");
+
+                // 实体道具是「软占位」：占位格仍算占位（小地图/接触遮蔽/窄缝剔除），但顶面
+                // 从上方命中即可涂、可计分，因此不再有「顶面不计分」的告警。
+                var centerXZ = new Vector2(col.bounds.center.x, col.bounds.center.z);
+                Assert.IsTrue(surface.Grid.IsSoftBlockedAt(centerXZ),
+                    "实体道具的占地格必须是软占位（顶面从上方可涂）");
+                Assert.IsFalse(warnings.Exists(w => w.Contains("blockedColliders")),
+                    "软占位的顶面能涂到，不应再提示「箱顶永远喷不上」");
             }
             finally
             {

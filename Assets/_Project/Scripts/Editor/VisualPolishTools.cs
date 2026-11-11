@@ -324,18 +324,19 @@ namespace P1.Editor
                 ("m_PrefilterSSAOInterleaved", true),
             });
 
-            // 移动端：Depth 源（Low）+ 4 采样 + BlueNoise
+            // 移动端：Depth 源 + NormalSamples=High（10 tap 深度重建）+ 8 采样 + InterleavedGradient
+            // 这些是 multi_compile_local，编辑器看不出来；只保留实际用到的档，否则 APK 静默退化成 Low。
             changed += PatchPrefilters(MobileRpAssetPath, new (string, bool)[]
             {
                 ("m_PrefilterSSAODepthNormals", true),
-                ("m_PrefilterSSAOSourceDepthLow", false),
+                ("m_PrefilterSSAOSourceDepthLow", true),
                 ("m_PrefilterSSAOSourceDepthMedium", true),
-                ("m_PrefilterSSAOSourceDepthHigh", true),
-                ("m_PrefilterSSAOSampleCountLow", false),
-                ("m_PrefilterSSAOSampleCountMedium", true),
+                ("m_PrefilterSSAOSourceDepthHigh", false),
+                ("m_PrefilterSSAOSampleCountLow", true),
+                ("m_PrefilterSSAOSampleCountMedium", false),
                 ("m_PrefilterSSAOSampleCountHigh", true),
-                ("m_PrefilterSSAOBlueNoise", false),
-                ("m_PrefilterSSAOInterleaved", true),
+                ("m_PrefilterSSAOBlueNoise", true),
+                ("m_PrefilterSSAOInterleaved", false),
             });
             return changed;
         }

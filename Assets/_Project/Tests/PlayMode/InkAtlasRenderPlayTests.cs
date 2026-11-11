@@ -296,28 +296,29 @@ namespace P1.Tests
         }
 
         /// <summary>
-        /// 计分掩码必须与 InkGrid 的不可涂格一一对应：俯视投影下道具顶面与脚下地面
-        /// 共用同一个 XZ 格，网格判为不可涂的格子在 3D 顶面也必须不显墨，
-        /// 否则玩家会看到「涂上去了但不计分」的假反馈。
+        /// 计分掩码 = 「仍占位、且还没被涂过」：硬不可涂格（地形禁区/死缝）永远裁掉；
+        /// 软占位（掩体/木箱/集装箱顶面）从上方命中后必须放开——否则箱顶「涂上了但不显墨」。
         /// </summary>
         [UnityTest]
-        public IEnumerator ScoreMask_MatchesBlockedGridCells()
+        public IEnumerator ScoreMask_ReopensWhenCrateTopIsPainted()
         {
             InkSurfaceController surface = CreateSurface();
             yield return null;
 
-            surface.Grid.SetBlockedWorldRect(new Vector2(-2f, -2f), new Vector2(2f, 2f), true);
+            surface.Grid.SetBlockedWorldRect(new Vector2(-2f, -2f), new Vector2(2f, 2f), true, 1.5f);
             surface.BakeBlockedColliders();
-
-            Texture2D mask = surface.ScoreMaskTexture;
-            Assert.IsNotNull(mask, "计分掩码应随掩体烘焙一起生成");
-            Assert.AreEqual(surface.Grid.Width, mask.width);
-            Assert.AreEqual(surface.Grid.Height, mask.height);
 
             int cx = surface.Grid.Width / 2;
             int cy = surface.Grid.Height / 2;
-            Assert.Greater(mask.GetPixel(cx, cy).r, 0.5f, "中心阻塞格应为 255");
-            Assert.Less(mask.GetPixel(1, 1).r, 0.5f, "场地角落应保持可涂");
+            Assert.Greater(surface.ScoreMaskTexture.GetPixel(cx, cy).r, 0.5f, "没涂过的箱顶必须被裁掉");
+
+            // 从箱顶上方打下来：该格转为已涂，掩码应在下一帧重传放开
+            surface.PaintCircle(new Vector3(0f, 1.5f, 0f), 3f, Team.TeamA);
+            yield return null;
+            yield return null;
+
+            Assert.Less(surface.ScoreMaskTexture.GetPixel(cx, cy).r, 0.5f,
+                "箱顶涂到后掩码必须放开（看得到的顶面墨迹 = 会计分的墨迹）");
         }
 
         /// <summary>

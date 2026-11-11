@@ -10,7 +10,7 @@ namespace P1.UI.WeaponSelect
     /// - 应用门禁：只有复活那一帧、且仍在进行中时才结算挂起的换枪；
     ///   对局结束/重开时 phase 已离开 Playing，挂起选择必须作废，避免跨局把上一局的选择带进新局；
     /// - 索引清洗：复用 <see cref="WeaponSelectMath.ClampIndex"/>（0..6），UI 与存档只有一套边界；
-    /// - 文案：倒计时与武器摘要全部走 <see cref="WeaponSelectMath"/> 的格式化口径，不另起一套数值。
+    /// - 文案：倒计时与换枪代价提示集中在这里，武器摘要格式化仍保留给战前武器卡口径复用。
     /// 全部为静态纯函数，不依赖 MonoBehaviour，EditMode 可直接覆盖边界。
     /// </summary>
     public static class RespawnLoadoutMath
@@ -53,7 +53,7 @@ namespace P1.UI.WeaponSelect
                 return "复活中…";
             }
 
-            return $"复活倒计时 {seconds:0.0}s";
+            return $"复活 {seconds:0.0}s";
         }
 
         /// <summary>选中武器标题：「喷射小枪 · 均衡连发」。</summary>

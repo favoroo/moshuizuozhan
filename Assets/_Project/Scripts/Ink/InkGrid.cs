@@ -18,7 +18,16 @@ namespace P1.Ink
 
         private readonly byte[] _owners;
         private readonly bool[] _blocked;
+        // 软占位（掩体墙/木箱/集装箱/花坛/售卖亭）：格子被实体占着（小地图占位色、接触遮蔽、窄缝剔除照旧），
+        // 但它们的顶面是能从上方打到的平面 —— 从 y ≥ 顶面高度打下来的墨可以落在这一格并计入覆盖率。
+        // 俯视投影把「道具顶面」和「脚下地面」压在同一个 XZ 格上，只有这条高度判据能区分
+        // 「打在箱顶」（该显墨、该计分）和「在箱子旁边泼地」（不能隔箱蹭分）。
+        private readonly bool[] _softBlocked;
+        private readonly float[] _blockedTopY;
         private readonly Color32[] _pixels;
+
+        /// <summary>软占位格的顶面高度容差：命中点落在顶面上时 y 与 collider.max.y 是同一值，留一点浮点余量。</summary>
+        public const float SoftBlockTopTolerance = 0.05f;
 
         private Color32 _neutralColor;
         private Color32 _teamAColor;
@@ -33,6 +42,9 @@ namespace P1.Ink
         public int TeamACount => _teamACount;
         public int TeamBCount => _teamBCount;
         public bool IsDirty { get; private set; }
+
+        /// <summary>计分掩码需要重传：软占位格被涂到 / 占位重新标记 / 清场时置位。</summary>
+        public bool ScoreMaskDirty { get; private set; }
 
         // 脏矩形：小地图贴图只上传真正变化过的格子，避免 12Hz 全量 400×400 拷贝。
         // 语义与 IsDirty 同步：IsDirty=false 时 max < min（空矩形）。
@@ -70,6 +82,8 @@ namespace P1.Ink
             int total = width * height;
             _owners = new byte[total];
             _blocked = new bool[total];
+            _softBlocked = new bool[total];
+            _blockedTopY = new float[total];
             _pixels = new Color32[total];
 
             _neutralColor = neutralColor ?? new Color32(56, 61, 71, 0);
@@ -104,6 +118,8 @@ namespace P1.Ink
                 _pixels[i] = _blocked[i] ? _blockedColor : _neutralColor;
             }
 
+            // 全部回到未涂：软占位格重新被计分掩码裁掉。
+            ScoreMaskDirty = true;
             MarkDirtyRect(0, 0, Width - 1, Height - 1);
         }
 
@@ -113,14 +129,31 @@ namespace P1.Ink
         public void ClearAll()
         {
             Array.Clear(_blocked, 0, _blocked.Length);
+            Array.Clear(_softBlocked, 0, _softBlocked.Length);
+            Array.Clear(_blockedTopY, 0, _blockedTopY.Length);
             _paintableCount = _owners.Length;
+            ScoreMaskDirty = true;
             ResetPaintOnly();
         }
 
         /// <summary>
         /// 将世界坐标 XZ 矩形区域标记为不可涂（墙体、出生点安全区）。
+        /// 硬不可涂：任何高度都涂不到（地形禁区、死缝、场外实体）。
         /// </summary>
         public void SetBlockedWorldRect(Vector2 minXZ, Vector2 maxXZ, bool blocked = true)
+        {
+            SetBlockedWorldRect(minXZ, maxXZ, blocked, float.NaN);
+        }
+
+        /// <summary>
+        /// 带顶面高度的重载：<paramref name="topY"/> 为有限值时是「软占位」——
+        /// 格子仍按占位处理（小地图占位色、接触遮蔽、窄缝剔除都不变），但
+        /// <see cref="PaintCircle(Vector3, float, Team)"/> 从 topY 及以上打下来（即打在道具顶面上）时可以涂到，
+        /// 并照常计入覆盖率。这样「打在箱顶」会显墨也计分，「在箱子旁边泼地」则涂不到箱顶——
+        /// 既修掉「箱顶喷不上油漆」，又不会隔箱白拿覆盖面积。
+        /// 多层碰撞体叠在同一格时取最高顶面。
+        /// </summary>
+        public void SetBlockedWorldRect(Vector2 minXZ, Vector2 maxXZ, bool blocked, float topY)
         {
             WorldToCellClamped(minXZ, out int minX, out int minY);
             WorldToCellClamped(maxXZ, out int maxX, out int maxY);
@@ -139,34 +172,69 @@ namespace P1.Ink
                     if (cx < minXZ.x || cx > maxXZ.x || cz < minXZ.y || cz > maxXZ.y)
                         continue;
 
-                    SetCellBlocked(idx, blocked);
+                    SetCellBlocked(idx, blocked, topY);
                 }
             }
         }
 
-        private void SetCellBlocked(int idx, bool blocked)
+        private void SetCellBlocked(int idx, bool blocked, float softTopY = float.NaN)
         {
-            if (_blocked[idx] == blocked)
-                return;
-
-            if (blocked)
+            if (!blocked)
             {
-                Team prev = (Team)_owners[idx];
-                if (prev == Team.TeamA) _teamACount--;
-                else if (prev == Team.TeamB) _teamBCount--;
+                if (!_blocked[idx])
+                    return;
 
-                _owners[idx] = (byte)Team.Neutral;
-                _blocked[idx] = true;
-                _paintableCount--;
-                _pixels[idx] = _blockedColor;
-            }
-            else
-            {
+                // 硬占位扣了可涂分母的坑，解除时要补回；软占位本来就没扣。
+                if (!_softBlocked[idx])
+                    _paintableCount++;
+
                 _blocked[idx] = false;
-                _paintableCount++;
-                _pixels[idx] = _neutralColor;
+                _softBlocked[idx] = false;
+                _blockedTopY[idx] = 0f;
+                Team owner = (Team)_owners[idx];
+                _pixels[idx] = owner switch
+                {
+                    Team.TeamA => _teamAColor,
+                    Team.TeamB => _teamBColor,
+                    _ => _neutralColor
+                };
+                ScoreMaskDirty = true;
+                MarkDirtyCell(idx % Width, idx / Width);
+                return;
             }
 
+            bool soft = !float.IsNaN(softTopY);
+            if (_blocked[idx])
+            {
+                // 已占位：多层实体叠在同一格时，只要有一层顶面可打就算软占位，并取最高顶面。
+                if (soft && !_softBlocked[idx])
+                {
+                    _softBlocked[idx] = true;
+                    _blockedTopY[idx] = softTopY;
+                    _paintableCount++;
+                    ScoreMaskDirty = true;
+                }
+                else if (soft && softTopY > _blockedTopY[idx])
+                {
+                    _blockedTopY[idx] = softTopY;
+                }
+
+                return;
+            }
+
+            Team prev = (Team)_owners[idx];
+            if (prev == Team.TeamA) _teamACount--;
+            else if (prev == Team.TeamB) _teamBCount--;
+
+            _owners[idx] = (byte)Team.Neutral;
+            _blocked[idx] = true;
+            _softBlocked[idx] = soft;
+            _blockedTopY[idx] = soft ? softTopY : 0f;
+            if (!soft)
+                _paintableCount--;
+            _pixels[idx] = _blockedColor;
+
+            ScoreMaskDirty = true;
             MarkDirtyCell(idx % Width, idx / Width);
         }
 
@@ -285,8 +353,15 @@ namespace P1.Ink
         /// <summary>
         /// 在世界坐标 XZ 处涂一个半径为 radius 的圆斑。
         /// 返回本次新涂或改写归属的格子数量（可直接用于大招充能）。
+        /// 本重载没有高度信息（按地面 y=0 落墨）：软占位格（道具/木箱/集装箱顶面）涂不到，
+        /// 需要「打在顶面上」的弹道请用 <see cref="PaintCircle(Vector3, float, Team)"/>。
         /// </summary>
         public int PaintCircle(Vector2 centerXZ, float radius, Team team)
+        {
+            return PaintCircleCore(centerXZ, 0f, radius, team);
+        }
+
+        private int PaintCircleCore(Vector2 centerXZ, float paintY, float radius, Team team)
         {
             if (radius <= 0f || team == Team.Neutral)
                 return 0;
@@ -319,7 +394,19 @@ namespace P1.Ink
                 {
                     int idx = rowOffset + x;
                     if (_blocked[idx])
-                        continue;
+                    {
+                        // 软占位（道具/木箱/集装箱顶面）三条规则：
+                        // ① 从顶面及以上打下来的墨一定能落在这一格（直接命中箱顶）；
+                        // ② 没涂过的格不接受地面溅射 —— 否则在箱子旁边泼一地就能隔箱白拿覆盖面积；
+                        // ③ 已经涂过的格接受任意高度：2D 图集里的地面墨会视觉上盖到箱顶，
+                        //    网格必须跟着翻色，否则会出现「箱顶显示敌墨、比分却算我的」。
+                        if (!_softBlocked[idx])
+                            continue;
+
+                        bool fromAbove = paintY >= _blockedTopY[idx] - SoftBlockTopTolerance;
+                        if (!fromAbove && _owners[idx] == (byte)Team.Neutral)
+                            continue;
+                    }
 
                     float cx = OriginXZ.x + (x + 0.5f) * CellWidth;
                     float dx = cx - centerXZ.x;
@@ -341,6 +428,11 @@ namespace P1.Ink
                     // 这里若再做逐格噪声就会在 0.1m 单元格上显出明显的马赛克砖块。
                     _pixels[idx] = baseColor;
                     changed++;
+
+                    // 箱顶第一次被涂到：计分掩码要放开这一格。
+                    // 已是「已涂」态时掩码不变（含敌我翻色），不重复上传。
+                    if (_softBlocked[idx] && prev == (byte)Team.Neutral)
+                        ScoreMaskDirty = true;
                 }
             }
 
@@ -354,7 +446,7 @@ namespace P1.Ink
 
         public int PaintCircle(Vector3 worldPos, float radius, Team team)
         {
-            return PaintCircle(new Vector2(worldPos.x, worldPos.z), radius, team);
+            return PaintCircleCore(new Vector2(worldPos.x, worldPos.z), worldPos.y, radius, team);
         }
 
         public Team InkAt(Vector2 worldXZ)
@@ -362,11 +454,9 @@ namespace P1.Ink
             if (!TryWorldToCell(worldXZ, out int x, out int y))
                 return Team.Neutral;
 
-            int idx = y * Width + x;
-            if (_blocked[idx])
-                return Team.Neutral;
-
-            return (Team)_owners[idx];
+            // 硬占位格永远没被涂过（PaintCircle 直接跳过），读到的就是 Neutral；
+            // 软占位格返回「箱顶上的墨」，站在涂了敌墨的箱顶照常掉血/在己方墨里潜行。
+            return (Team)_owners[y * Width + x];
         }
 
         public Team InkAt(Vector3 worldPos)
@@ -383,10 +473,21 @@ namespace P1.Ink
         }
 
         /// <summary>
+        /// 该格是否为「软占位」（实体道具/掩体，顶面可从上方打到）。
+        /// 供覆盖率审计区分「顶面能涂到」与「顶面在可涂范围外」。
+        /// </summary>
+        public bool IsSoftBlockedAt(Vector2 worldXZ)
+        {
+            if (!TryWorldToCell(worldXZ, out int x, out int y))
+                return false;
+
+            return _softBlocked[y * Width + x];
+        }
+
+        /// <summary>
         /// 把不可涂掩码复制成 0/255 的单通道图（行序 = Z 轴，列序 = X 轴）。
-        /// 供 <see cref="InkSurfaceController"/> 上传给顶面墨迹着色器：俯视投影下道具顶面
-        /// 与脚下地面共用同一个 XZ 格，网格把这些格判为不可涂（不计分），
-        /// 3D 顶面也必须同步不显墨，否则会出现「涂了但不计分」的假反馈。
+        /// 静态占位掩码（软硬都算）：供「掩体落地接触遮蔽」场烘焙用，与是否已被涂过无关。
+        /// 顶面墨迹的计分裁剪请用 <see cref="CopyUnpaintedBlockedMaskTo"/>。
         /// </summary>
         public void CopyBlockedMaskTo(byte[] destination)
         {
@@ -399,6 +500,28 @@ namespace P1.Ink
             {
                 destination[i] = _blocked[i] ? (byte)255 : (byte)0;
             }
+        }
+
+        /// <summary>
+        /// 把「仍占位、且还没被涂过」的格子复制成 0/255 单通道图（行序 = Z 轴，列序 = X 轴）。
+        /// 供 <see cref="InkSurfaceController"/> 上传给顶面墨迹着色器：俯视投影下道具顶面与脚下地面
+        /// 共用同一个 XZ 格，没涂过的占位格必须把图集里的溅射墨迹裁掉（否则「箱子旁边泼一地、
+        /// 箱顶也蹭上墨」却不计分）；从上方命中箱顶后该格转为已涂，掩码随即放开，
+        /// **看得到的顶面墨迹 = 会计分的墨迹**。硬占位格（地形禁区、死缝）永远返回 255。
+        /// </summary>
+        public void CopyUnpaintedBlockedMaskTo(byte[] destination)
+        {
+            if (destination == null)
+                throw new ArgumentNullException(nameof(destination));
+            if (destination.Length < _blocked.Length)
+                throw new ArgumentException("destination 长度不足", nameof(destination));
+
+            for (int i = 0; i < _blocked.Length; i++)
+            {
+                destination[i] = _blocked[i] && _owners[i] == (byte)Team.Neutral ? (byte)255 : (byte)0;
+            }
+
+            ScoreMaskDirty = false;
         }
 
         public int GetTeamCount(Team team)

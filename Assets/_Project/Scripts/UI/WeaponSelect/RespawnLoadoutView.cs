@@ -18,7 +18,8 @@ namespace P1.UI.WeaponSelect
     ///
     /// 视觉沿用 P19 波次 3b 的几何大胆风：纸白面板 + 4px 墨框 + 弹窗硬影，
     /// 选中槽 = 行动黄填充 + 加粗墨框（不靠颜色区分色相，色弱也能读），
-    /// 槽内只放「图标 + 中文名」，属性读数放在底部一行（与战前武器卡同一格式化口径）。
+    /// 槽内只放「图标 + 中文名」；阵亡窗口时间紧，不再展示武器定位/四栏读数，
+    /// 底部只留一行小字代价提示（换枪清空大招充能）。
     ///
     /// 生命周期：由 <see cref="WeaponSelectBootstrap"/> 在 DDOL 画布上创建并驱动；
     /// 视图本身不知道比赛阶段/生命值，只负责「显示 + 选择」，门禁逻辑在
@@ -38,20 +39,20 @@ namespace P1.UI.WeaponSelect
 
         // 桌面 / 移动端两套显式尺寸（移动端整套更大，而不是只放大字号）。
         private const float DesktopPanelMargin = 320f;
-        private const float DesktopPanelHeight = 228f;
+        private const float DesktopPanelHeight = 196f;
         private const float DesktopBottomOffset = 32f;
         private const float DesktopPadding = 24f;
         private const float DesktopSlotGap = 12f;
-        private const float DesktopSlotHeight = 100f;
+        private const float DesktopSlotHeight = 102f;
         private const float DesktopIconSize = 56f;
         private const float DesktopNameFont = 20f;
 
         private const float MobilePanelMargin = 60f;
-        private const float MobilePanelHeight = 268f;
+        private const float MobilePanelHeight = 256f;
         private const float MobileBottomOffset = 24f;
         private const float MobilePadding = 28f;
         private const float MobileSlotGap = 16f;
-        private const float MobileSlotHeight = 122f;
+        private const float MobileSlotHeight = 142f;
         private const float MobileIconSize = 72f;
         private const float MobileNameFont = 24f;
 
@@ -69,7 +70,6 @@ namespace P1.UI.WeaponSelect
         private TextMeshProUGUI _countdownText;
         /// <summary>倒计时文本上一次的 0.1s 档位：先比档位再决定是否构造字符串（每帧调用零 GC）。</summary>
         private int _lastCountdownKey = int.MinValue;
-        private TextMeshProUGUI _summaryText;
         private readonly UIInkShapeGraphic[] _slotBackgrounds = new UIInkShapeGraphic[RespawnLoadoutMath.SlotCount];
         private readonly Image[] _slotIcons = new Image[RespawnLoadoutMath.SlotCount];
         private readonly TextMeshProUGUI[] _slotNames = new TextMeshProUGUI[RespawnLoadoutMath.SlotCount];
@@ -206,7 +206,7 @@ namespace P1.UI.WeaponSelect
             _countdownText.text = RespawnLoadoutMath.FormatCountdown(0f);
 
             // 4. 7 个武器槽：HorizontalLayoutGroup 均分宽度，安全区/分辨率变化自动重排
-            float slotsTop = _mobile ? 70f : 62f;
+            float slotsTop = _mobile ? 68f : 58f;
             var slotsGo = new GameObject("Slots", typeof(RectTransform), typeof(HorizontalLayoutGroup));
             slotsGo.transform.SetParent(panelGo.transform, false);
             var slotsRect = slotsGo.GetComponent<RectTransform>();
@@ -230,33 +230,24 @@ namespace P1.UI.WeaponSelect
                 BuildSlot(slotsGo.transform, i);
             }
 
-            // 5. 底部两行：选中武器摘要 + 换枪代价提示
-            float summaryBottom = _mobile ? 42f : 38f;
-            _summaryText = CreateText(
-                panelGo.transform, "Summary", _theme.ResolveFont(false, "喷射小枪 · 均衡连发"),
-                _mobile ? 26f : 22f, TextAlignmentOptions.Left, ComicStyle.Ink);
-            var summaryRect = _summaryText.rectTransform;
-            summaryRect.anchorMin = new Vector2(0f, 0f);
-            summaryRect.anchorMax = new Vector2(1f, 0f);
-            summaryRect.pivot = new Vector2(0.5f, 0f);
-            summaryRect.anchoredPosition = new Vector2(0f, summaryBottom);
-            summaryRect.sizeDelta = new Vector2(-padding * 2f, _mobile ? 30f : 26f);
-
+            // 5. 底部一行代价提示：整备条只保留武器槽，换枪代价用最小号灰字居中兜底
+            float hintBottom = _mobile ? 10f : 8f;
+            float hintHeight = _mobile ? 28f : 20f;
             var hintText = CreateText(
                 panelGo.transform, "Hint", _theme.ResolveFont(false, RespawnLoadoutMath.SwapCostHint),
-                _mobile ? 22f : 18f, TextAlignmentOptions.Left, ComicStyle.WithAlpha(ComicStyle.Ink, 0.55f));
+                _mobile ? 20f : 18f, TextAlignmentOptions.Center, ComicStyle.WithAlpha(ComicStyle.Ink, 0.5f));
             var hintRect = hintText.rectTransform;
             hintRect.anchorMin = new Vector2(0f, 0f);
             hintRect.anchorMax = new Vector2(1f, 0f);
             hintRect.pivot = new Vector2(0.5f, 0f);
-            hintRect.anchoredPosition = new Vector2(0f, _mobile ? 14f : 12f);
-            hintRect.sizeDelta = new Vector2(-padding * 2f, _mobile ? 24f : 20f);
+            hintRect.anchoredPosition = new Vector2(0f, hintBottom);
+            hintRect.sizeDelta = new Vector2(-padding * 2f, hintHeight);
             hintText.text = RespawnLoadoutMath.SwapCostHint;
 
-            // 槽高 = 面板高 - 标题区 - 摘要区，用锚点撑满而不是写死，移动端只改两套常量
+            // 槽高 = 面板高 - 标题区 - 代价提示，用锚点撑满而不是写死，移动端只改两套常量
             slotsRect.sizeDelta = new Vector2(
                 -padding * 2f,
-                panelHeight - slotsTop - summaryBottom - (_mobile ? 30f : 26f) - 8f);
+                panelHeight - slotsTop - hintBottom - hintHeight - 8f);
         }
 
         private void BuildSlot(Transform parent, int index)
@@ -371,8 +362,6 @@ namespace P1.UI.WeaponSelect
                     _slotIcons[i].enabled = icon != null;
                 }
             }
-
-            RefreshSummary();
         }
 
         private void ApplySelectionVisuals()
@@ -388,19 +377,6 @@ namespace P1.UI.WeaponSelect
                 _slotBackgrounds[i].BorderWidth = selected ? ComicStyle.Border : ComicStyle.BorderThin;
                 _slotBackgrounds[i].BorderColor = ComicStyle.Ink;
             }
-
-            RefreshSummary();
-        }
-
-        private void RefreshSummary()
-        {
-            if (_summaryText == null) return;
-
-            WeaponKind kind = WeaponSelectMath.IndexToKind(_selectedIndex);
-            WeaponConfigSO config = SelectedConfig;
-            // 用普通空格而不是全角空格：全角 U+3000 不在字集账本里会被 TMP 判成缺字。
-            _summaryText.text =
-                $"{RespawnLoadoutMath.FormatWeaponTitle(kind)}  {RespawnLoadoutMath.FormatStats(config, kind)}";
         }
 
         // ==================== 对外状态 ====================

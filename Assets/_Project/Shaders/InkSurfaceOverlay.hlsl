@@ -357,9 +357,10 @@ bool P1EvaluateTopInk(
             return false;
         }
 
-        // 计分掩码：不可涂格（道具/掩体占位、窄缝补偿）不显墨。
-        // 这样玩家看到的每一块顶面墨迹都一定会计入涂地比分；道具侧面墨迹
-        // 仍由 InkWallSurface 显示（竖向面本来就不计入涂地）。
+        // 计分掩码：占位格（道具/掩体/木箱/集装箱/窄缝/地形禁区）里**还没被涂过**的不显墨。
+        // 这样玩家看到的每一块顶面墨迹都一定会计入涂地比分；从上方命中箱顶后该格转为已涂，
+        // 掩码由 InkSurfaceController 重传放开。道具侧面墨迹仍由 InkWallSurface 显示
+        // （竖向面本来就不计入涂地）。
         if (_GlobalInkScoreMaskEnabled > 0.5)
         {
             float2 maskUV = saturate((positionWS.xz - playMin) / playSize);

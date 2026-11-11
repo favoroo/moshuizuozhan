@@ -6,6 +6,29 @@
 > 2026-11-01 之前的条目按 GitHub Release 说明回填，只有版本里程碑。
 > **反复踩的坑**：① 外部工具改完 `.cs` 编辑器可能不触发重编译——先 `AssetDatabase.Refresh(ForceUpdate)` 再核对 `Library/ScriptAssemblies/*.dll` 时间戳，否则测试/出包跑的是旧程序集；② 提交前 `git diff Materials/Characters/Mat_TankGlass_*.mat`（`_SrcBlend` 只要窗口里碰过玻璃材质就可能被写回 5，与 `_ALPHAPREMULTIPLY_ON` 配对会双重乘 alpha）；③ 新增上屏中文先跑 `python3 tools/font_charset.py` 并重跑菜单 `P1/画风/漫画风/0`，否则 `FontCoverageTests` 判红。
 
+【发布 v0.1.34】含 2026-11-10 `#01`~`#04` 与 2026-11-11 `#01`；APK `moshuizuozhan-v0.1.34-arm64-v8a.apk`。
+
+## 2026-11-11 #01
+Fixed: 木箱/集装箱/掩体/花坛「顶面喷不上油漆」——11-09 #03 的计分掩码把**所有**占位格的顶面墨整片裁掉（占全场 10.2%），而俯视投影下箱顶与脚下地面共用同一个 XZ 格，于是箱顶涂了也不显墨（侧面本来就正常，只是 TPS 俯视角瞄箱子打到的多是顶面，读作「整个箱子都喷不上」）。
+改为「软占位」：实体道具占地格记录 collider 顶面高度，`InkGrid.PaintCircle(Vector3)` 只放行 y ≥ 顶面高度的命中——打箱顶显墨且计入比分，地面溅射（y=0）涂不到箱顶，不会隔箱白拿覆盖面积；地形禁区、死缝、伸出计分矩形的边界墙仍是硬不可涂。计分掩码改为「仍占位且未涂过」，箱顶首次被涂时由 `LateUpdate` 重传放开，其余帧不重传。
+陷阱：`CopyBlockedMaskTo`（静态占位）仍供「掩体落地接触遮蔽」场烘焙，别和计分掩码合并；`InkAt` 现在对软占位格返回箱顶墨色（站在涂了敌墨的箱顶照常掉血/在己方墨里潜行）。文件：`Scripts/Ink/{InkGrid,InkSurfaceController,PaintCoverageAudit}.cs`、`Shaders/InkSurfaceOverlay.hlsl`、`Tests/{EditMode/InkGridTests,PlayMode/InkAtlasRenderPlayTests}.cs`。
+
+## 2026-11-10 #04
+【Slam 预警圈贴地】大招落点范围从「一张平面圆盘」换成向下射线采样的贴地网格（`SpecialRangeShadow`，极坐标 16 环×48 段，危险盘/秒杀盘/亮边三子网格共用一次采样），台阶、集装箱顶、坡面上是「阴影状」铺开，不再整片悬空/插进箱体——旧实现只解析圆心一个 Y，5.2m 圈越过出生甲板边沿时与地面完全脱节。
+陷阱：半径每变化 10% 才重建（~670 条 `RaycastNonAlloc`、~1.3ms），中间靠 XZ 缩放连续长大，不要改成每帧采样；采样必须过滤自身/角色胶囊（否则影子糊在自己头顶），射线从落点上方 9m 起算才能覆盖集装箱顶。文件：`Scripts/Weapons/{SpecialRangeShadow,WeaponController}.cs`、`Tests/{EditMode/SpecialRangeShadowTests,PlayMode/SpecialRangeShadowVisualCapturePlayTests}.cs`。
+
+## 2026-11-10 #03
+【阵亡整备条简化】死亡换枪面板去掉武器定位与四栏读数（视图不再调用 `FormatWeaponTitle/FormatStats`，格式化函数保留给战前卡口径与测试），面板高度桌面 228→196 / 移动端 268→256，7 槽只留图标+中文名，底部只保留一行居中的「换枪清空大招充能 · 复活时生效」，倒计时缩写为「复活 2.9s」。
+陷阱：槽高仍按「面板高 − 标题区 − 底部提示」推导（`RespawnLoadoutView.BuildCanvas`），改高度常量时必须同步改公式，否则槽会被提示行压扁。文件：`Scripts/UI/WeaponSelect/{RespawnLoadoutView,RespawnLoadoutMath}.cs`、`Tests/PlayMode/RespawnLoadoutPlayTests.cs`。
+
+## 2026-11-10 #02
+【移动端 SSAO 重新启用】#13 关掉 SSAO 后画面发平，但「脏」的根因不是 SSAO，而是 `Mobile_Renderer` 用了最差档组合：`NormalSamples=Low`（只取当前像素 ddx/ddy 叉积，掠射地面法线是噪的）+ `Samples=Low`（序列化值 `Samples: 2` 是 Low=4 采样，不是 2 个）+ Gaussian 模糊 + BlueNoise 每帧轮换 8 张噪声图，噪点被摊成墙脚/箱底一圈灰。改 `NormalSamples=High`（多 6 次深度 tap，不跑几何 prepass）+ 8 采样 + `BlurQuality=High`（双边）+ `InterleavedGradient`（固定屏幕图案，无 TAA 不逐帧爬噪）+ 半分辨率，`Intensity .9 / Radius .6 / AfterOpaque=1` 不变；同机位 A/B 墙脚 grain 1.58→0.79，箱底只剩柔和接触暗部。
+陷阱：这些是 `multi_compile_local`，`Mobile_RPAsset` 的 `m_PrefilterSSAO*` 原先把 SourceDepthHigh / SampleCountMedium / Interleaved 全剔了，不同步改 `VisualPolishTools.ApplySsaoPrefilters` 会「编辑器正常、APK 静默退化成 Low」；另外自定义 Toon shader 不采样 `_ScreenSpaceOcclusionTexture`，`AfterOpaque=0` 对它们完全无效。文件：`Settings/{Mobile_Renderer,Mobile_RPAsset}.asset`、`Scripts/Editor/VisualPolishTools.cs`。
+
+## 2026-11-10 #01
+【真机启动黑屏排查工具】新增 `UI/BootSelfCheckOverlay`（仅 `P1_BOOT_PROBE` 宏编译，正式包不含）：屏幕最上层实时写出帧号心跳、图形 API/GPU、画布与安全区、首页装配与几何 settle、启动黑遮罩是否还在、当前阶段与最后一次 error 文本，点屏可隐藏——没有 adb 时靠拍照就能判定「启动 logo 后一直黑」断在引擎/渲染层还是首页装配层。
+陷阱：`m_Automatic=1` 会自动重置 `SetGraphicsAPIs` 的顺序（想强制 GLES3 必须同时 `SetUseDefaultGraphicsAPIs(false)`）；`ApplyAndroidPlayerSettings()` 里的 `AssetDatabase.SaveAssets()` 会把未落盘的 `scriptingDefineSymbols` 吞掉，宏要在它之后重设并 `SaveAssets` 再复核，否则出的包里根本没有诊断代码。文件：`Scripts/UI/BootSelfCheckOverlay.cs`。
+
 ## 2026-11-09 #13
 【地面「糊/脏」】根因：移动端 SSAO 用 `Source=Depth`（法线从深度重建）+ `Downsample=1` + **2 采样** + 低档模糊，噪声被模糊成一片片灰云铺在白水泥与墨面上 —— 同机位 A/B 关掉即干净。`Mobile_Renderer` 的 SSAO `m_Active` 置 0（本场景全是自定义 Toon shader、无 PBR，AO 只剩发脏，顺带省一次深度拷贝 + AO pass）；PC 端 `DepthNormals` 源保留。
 次因：`InkGridConfig.atlasMipmaps` 在 v0.1.31 由 0 改 1 消远景摩尔纹，但图集（2985×4096 铺 40×56m）走内联 `sampler_LinearClamp`（aniso 恒 1），地面掠射角下硬件选到 mip 3~4，墨缘与墨缘接触阴影被降采样成 6~10px 渐变；改 `P1SampleInkAtlasGrad` 用显式梯度按相机距离把 mip 钳在 2~8 纹素（近景保硬边、远景仍压摩尔纹），并把 `contactHalo` 带宽 0.04~0.48 → 0.14~0.36、地面 `_ContactShadowStrength` 0.6→0.3、掩体接触遮蔽场 0.45/1.2m → 0.2/0.5m、移动端阴影 1 级级联/50m → 2 级/35m。

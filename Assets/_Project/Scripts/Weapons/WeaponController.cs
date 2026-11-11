@@ -78,18 +78,9 @@ namespace P1.Weapons
         private float _slamHeight;
         private float _specialElapsed;
         private Vector3 _specialGroundCenter;
-        private Transform _specialWarningRing;
-        private MeshRenderer _specialRingRenderer;
-        private Mesh _specialRingMesh;
-        private Material _specialRingMaterial;
-        // P20 预警圈三层：实心危险盘（=伤害半径）+ 内圈秒杀盘 + 外沿亮边
-        private MeshRenderer _specialDiscRenderer;
-        private MeshRenderer _specialInnerRenderer;
-        private Mesh _specialDiscMesh;
-        private Mesh _specialInnerMesh;
-        private Material _specialDiscMaterial;
-        private Material _specialInnerMaterial;
-        private MaterialPropertyBlock _propBlock;
+        // P20 预警圈三层（实心危险盘 = 伤害半径 + 内圈秒杀盘 + 外沿亮边）由 SpecialRangeShadow
+        // 按落点向下射线投射成贴地网格：台阶/箱顶/坡面上是「阴影状」铺开，不再是悬空平面圆。
+        private SpecialRangeShadow _specialRangeShadow;
         private Collider _selfCollider;
 
         // 蓄力狙表现：地面激光指示线 + 释放瞬间的贯穿光柱
@@ -307,7 +298,6 @@ namespace P1.Weapons
             _addSpecialPointsDelegate = AddSpecialPoints;
             _addSpecialPointsFromWallDelegate = AddSpecialPointsFromWall;
             _addSpecialPointsOnlyDelegate = AddSpecialPointsOnly;
-            _propBlock = new MaterialPropertyBlock();
             _beamBlock = new MaterialPropertyBlock();
 
             if (loadout != null && loadout.Length > 0)
@@ -320,7 +310,7 @@ namespace P1.Weapons
             RebuildStrategy();
             _health.OnKilled += HandleKilled;
             _selfCollider = GetComponent<Collider>();
-            BuildSpecialWarningRing();
+            _specialRangeShadow = new SpecialRangeShadow(transform, name);
             WeaponAudioDriver.EnsureDriver(this);
         }
 
@@ -330,23 +320,11 @@ namespace P1.Weapons
             {
                 _health.OnKilled -= HandleKilled;
             }
-            if (_specialWarningRing != null)
+            if (_specialRangeShadow != null)
             {
-                DestroySafe(_specialWarningRing.gameObject);
-                _specialWarningRing = null;
+                _specialRangeShadow.Dispose();
+                _specialRangeShadow = null;
             }
-            DestroySafe(_specialRingMesh);
-            DestroySafe(_specialDiscMesh);
-            DestroySafe(_specialInnerMesh);
-            _specialRingMesh = null;
-            _specialDiscMesh = null;
-            _specialInnerMesh = null;
-            DestroySafe(_specialRingMaterial);
-            DestroySafe(_specialDiscMaterial);
-            DestroySafe(_specialInnerMaterial);
-            _specialRingMaterial = null;
-            _specialDiscMaterial = null;
-            _specialInnerMaterial = null;
             if (_laserSight != null)
             {
                 _laserSight.Dispose();
@@ -1234,51 +1212,26 @@ namespace P1.Weapons
 
         private void ShowSpecialWarningRing(float radius)
         {
-            if (_specialWarningRing == null)
+            if (_specialRangeShadow == null)
                 return;
 
-            _specialWarningRing.position = new Vector3(
-                _specialGroundCenter.x, _specialGroundCenter.y + 0.06f, _specialGroundCenter.z);
-            _specialWarningRing.localScale = new Vector3(radius, 1f, radius);
-
-            // 内圈秒杀盘半径独立于外圈缩放：inner/outer 比例随当前配置（默认 3.2/5.2）
+            // 内圈秒杀盘与危险盘保持配置比例（默认 3.2/5.2），随当前动画半径等比缩放
             float damageRadius = config != null ? config.specialSplatRadius : 5.2f;
             float innerRadius = config != null ? config.specialInnerKillRadius : 3.2f;
             float innerRatio = Mathf.Clamp01(innerRadius / Mathf.Max(0.1f, damageRadius));
-            if (_specialInnerRenderer != null)
-            {
-                _specialInnerRenderer.transform.localScale = new Vector3(innerRatio, 1f, innerRatio);
-            }
-
-            if (_propBlock == null)
-                _propBlock = new MaterialPropertyBlock();
 
             Color c = InkSurfaceController.Instance != null
                 ? InkSurfaceController.Instance.GetTeamColor(_health.Team)
                 : Color.yellow;
-            SetRingColor(_specialDiscRenderer, c, 0.32f);
-            SetRingColor(_specialInnerRenderer, c, 0.55f);
-            SetRingColor(_specialRingRenderer, c, 0.85f);
-            _specialWarningRing.gameObject.SetActive(true);
-        }
-
-        /// <summary>预警圈单层配色：队色 × 层专属透明度（危险盘淡、秒杀区亮、亮边最实）。</summary>
-        private void SetRingColor(MeshRenderer renderer, Color teamColor, float alpha)
-        {
-            if (renderer == null)
-                return;
-            teamColor.a = alpha;
-            _propBlock.SetColor(BaseColorProp, teamColor);
-            _propBlock.SetColor(ColorProp, teamColor);
-            renderer.SetPropertyBlock(_propBlock);
+            _specialRangeShadow.Show(_specialGroundCenter, radius, innerRatio, c);
         }
 
         private void UpdateSpecialWarningRing(float radius)
         {
-            if (_specialWarningRing == null || !_specialWarningRing.gameObject.activeSelf)
+            if (_specialRangeShadow == null)
                 return;
 
-            _specialWarningRing.localScale = new Vector3(radius, 1f, radius);
+            _specialRangeShadow.SetRadius(radius);
         }
 
         /// <summary>
@@ -1314,54 +1267,10 @@ namespace P1.Weapons
             {
                 visualBodyRoot.localPosition = Vector3.zero;
             }
-            if (_specialWarningRing != null)
+            if (_specialRangeShadow != null)
             {
-                _specialWarningRing.gameObject.SetActive(false);
+                _specialRangeShadow.Hide();
             }
-        }
-
-        private void BuildSpecialWarningRing()
-        {
-            var go = new GameObject($"{name}_SpecialWarningRing");
-
-            Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
-            if (sh == null) sh = Shader.Find("Sprites/Default");
-
-            // P20 三层预警读法：实心危险盘（=伤害半径 5.2m，盘内会被砸）+ 内圈秒杀盘（3.2m）高亮 + 外沿亮边。
-            // 旧版只有一条 0.92~1.0 的细环带，且因 ResolveGroundPoint 自命中悬空 1.25m，范围完全读不出来。
-            _specialDiscMesh = VfxPool.BuildRingMesh(48, 0.03f, 1.0f);
-            _specialDiscRenderer = CreateRingLayer(go.transform, "Disc", _specialDiscMesh, sh, 0f);
-
-            _specialInnerMesh = VfxPool.BuildRingMesh(48, 0.03f, 1.0f);
-            _specialInnerRenderer = CreateRingLayer(go.transform, "Inner", _specialInnerMesh, sh, 0.01f);
-
-            _specialRingMesh = VfxPool.BuildRingMesh(40, 0.92f, 1.0f);
-            _specialRingRenderer = CreateRingLayer(go.transform, "Edge", _specialRingMesh, sh, 0.02f);
-            _specialRingMaterial = _specialRingRenderer.sharedMaterial;
-
-            go.SetActive(false);
-            _specialWarningRing = go.transform;
-        }
-
-        /// <summary>预警圈单层：独立 renderer + 透明材质，localY 分层防 z-fight（容器 XZ 缩放统一驱动半径）。</summary>
-        private MeshRenderer CreateRingLayer(Transform parent, string layerName, Mesh mesh, Shader shader, float localY)
-        {
-            var layerGo = new GameObject($"{name}_SpecialRing_{layerName}");
-            layerGo.transform.SetParent(parent, false);
-            layerGo.transform.localPosition = new Vector3(0f, localY, 0f);
-
-            var mf = layerGo.AddComponent<MeshFilter>();
-            mf.sharedMesh = mesh;
-            var renderer = layerGo.AddComponent<MeshRenderer>();
-            var material = new Material(shader);
-            VfxPool.MakeUrpUnlitTransparent(material);
-            renderer.sharedMaterial = material;
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-
-            if (layerName == "Disc") _specialDiscMaterial = material;
-            else if (layerName == "Inner") _specialInnerMaterial = material;
-
-            return renderer;
         }
 
         // ------------------------------------------------------------------ 主武器表现
